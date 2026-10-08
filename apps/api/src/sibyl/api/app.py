@@ -29,6 +29,7 @@ from sibyl.api.errors import (
 )
 from sibyl.api.rate_limit import limiter
 from sibyl.api.routes import (
+    activity_router,
     admin_router,
     ai_settings_router,
     archive_imports_router,
@@ -317,6 +318,7 @@ def create_api_app() -> FastAPI:  # noqa: PLR0915
     app.include_router(logs_router)
     app.include_router(memory_router)
     app.include_router(metrics_router)
+    app.include_router(activity_router)
     app.include_router(settings_router)
     app.include_router(synthesis_router)
     app.include_router(teams_router)

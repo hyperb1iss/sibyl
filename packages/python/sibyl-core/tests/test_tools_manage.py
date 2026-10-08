@@ -542,6 +542,7 @@ class TestTaskActions:
                 4.5,
                 "Discovered a better approach using async iterators",
                 create_episode=False,
+                completed_by=None,
             )
             enqueue_learning_jobs.assert_awaited_once_with(
                 task_data={"id": "task_123", "title": "Complete MCP policy path"},
@@ -762,6 +763,7 @@ class TestTaskActions:
                 None,
                 "",
                 create_episode=False,
+                completed_by=None,
             )
 
     @pytest.mark.asyncio

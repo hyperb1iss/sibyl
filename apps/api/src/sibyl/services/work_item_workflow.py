@@ -29,7 +29,9 @@ from sibyl.persistence.graph_runtime import (
     touch_graph_entity_bookkeeping,
     update_graph_entity,
 )
+from sibyl_core.errors import EntityNotFoundError
 from sibyl_core.models.entities import EntityType
+from sibyl_core.tasks.completion import status_edit_completion_updates
 from sibyl_core.tasks.workflow import TaskWorkflowEngine
 
 log = structlog.get_logger()
@@ -146,6 +148,7 @@ async def _run_task_transition(
     item_id: str,
     payload: dict[str, Any],
     expected_revision: int | None,
+    actor_id: str | None = None,
 ) -> _TransitionOutcome:
     """Apply a task-style transition via the core engine.
 
@@ -199,6 +202,7 @@ async def _run_task_transition(
             payload.get("actual_hours"),
             payload.get("learnings") or "",
             create_episode=False,
+            completed_by=actor_id,
             **revision_kwargs,
         )
         fields = {"learnings": payload.get("learnings")}
@@ -248,6 +252,35 @@ async def _run_epic_transition(
     return _TransitionOutcome("archived", name, {}, {})
 
 
+async def status_edit_completion(
+    entity_manager: Any,
+    task_id: str,
+    next_status: object,
+    *,
+    actor_id: str | None,
+    mirrors_source: bool = False,
+) -> dict[str, Any]:
+    """The completion record a plain status edit writes, read inside the caller's lock.
+
+    Callers hold the task's entity lock, so the status read here is the one
+    the write replaces. ``mirrors_source`` is the migration's mark on its own
+    status write (see ``status_edit_completion_updates``).
+    """
+    try:
+        current = await entity_manager.get(task_id)
+    except (EntityNotFoundError, KeyError):
+        # Gone since the caller's check: the write that follows reports it.
+        return {}
+    metadata = getattr(current, "metadata", None) or {}
+    return status_edit_completion_updates(
+        metadata,
+        metadata.get("status") or getattr(current, "status", None),
+        next_status,
+        actor_id=actor_id,
+        mirrors_source=mirrors_source,
+    )
+
+
 async def _touch_project_activity(group_id: str, entity: Any) -> None:
     """Refresh the parent project's last_activity_at after an epic transition.
 
@@ -284,6 +317,7 @@ async def transition_work_item(
     entity: Any | None = None,
     broadcast: bool = True,
     expected_revision: int | None = None,
+    actor_id: str | None = None,
 ) -> WorkItemTransition:
     """Perform a locked, broadcasting work-item transition.
 
@@ -299,6 +333,9 @@ async def transition_work_item(
         entity: Pre-loaded entity from the caller's access check; reused to
             avoid a redundant read and to source the epic's project_id.
         broadcast: Whether to emit the WebSocket event (default True).
+        actor_id: Authenticated user performing the transition. A completion
+            records it, so the row says who finished the task. It comes from
+            the caller's credentials, never from ``payload``.
 
     Returns:
         The canonical transition result.
@@ -330,6 +367,7 @@ async def transition_work_item(
                 item_id,
                 payload,
                 expected_revision,
+                actor_id,
             )
             entity_type = EntityType.TASK
         else:

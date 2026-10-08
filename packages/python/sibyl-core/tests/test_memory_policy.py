@@ -369,6 +369,43 @@ def test_stamped_metadata_drops_owner_fields_when_no_scope_is_declared() -> None
     assert stamped == {"note": "kept"}
 
 
+def test_stamped_metadata_drops_a_forged_completion_record() -> None:
+    """Team activity credits completed_by at completed_at, so a body can't name either."""
+    stamped = stamp_memory_scope_metadata(
+        {
+            "completed_by": "teammate",
+            "completed_at": "2026-10-01T00:00:00+00:00",
+            "modified_by": "teammate",
+            "note": "kept",
+        },
+        memory_scope="project",
+        scope_key="project_1",
+        principal_id="author",
+    )
+
+    assert {"completed_by", "completed_at", "modified_by"}.isdisjoint(stamped)
+    assert stamped["note"] == "kept"
+
+
+def test_backup_restore_keeps_the_stored_completion_record() -> None:
+    """A restore is the server's own record, so the strip does not erase who finished."""
+    from sibyl_core.tools.admin import _normalized_backup_metadata
+
+    stored = {
+        "status": "done",
+        "completed_by": "finisher",
+        "completed_at": "2026-10-01T00:00:00+00:00",
+        "modified_by": "editor",
+        "memory_scope": "project",
+        "scope_key": "project_1",
+    }
+
+    restored = _normalized_backup_metadata(stored)
+
+    for key in ("completed_by", "completed_at", "modified_by"):
+        assert restored[key] == stored[key], key
+
+
 def test_stamped_metadata_keeps_an_unrecognized_scope_so_reads_deny() -> None:
     """A typo must not read as "no scope", which is the fail-open case."""
     stamped = stamp_memory_scope_metadata(

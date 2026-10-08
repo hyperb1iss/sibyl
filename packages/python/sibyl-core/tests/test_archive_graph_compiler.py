@@ -245,6 +245,25 @@ def test_graph_compiler_pure_preserves_validated_neutral_metadata(tmp_path, meta
     assert len(tx.parameters["archive_graph_candidates"]) == 3
 
 
+def test_graph_import_keeps_the_stored_completion_record(tmp_path):
+    """The archive is the server's record of who finished a task, not a caller's claim."""
+    stored = {
+        "status": "done",
+        "completed_at": "2026-09-30T01:02:03.123456789Z",
+        "completed_by": str(uuid4()),
+        "modified_by": str(uuid4()),
+    }
+    parsed, plan = inputs(tmp_path, metadata=stored)
+    value = prepared(parsed, plan)
+    bodies = [item.body for item in graph_rows(value) if item.row.kind is ArchiveKind.GRAPH_ENTITY]
+    assert bodies
+    for body in bodies:
+        assert body is not None
+        # modified_by is a storage marker the import never carries.
+        for key in ("completed_at", "completed_by"):
+            assert body["metadata"][key] == stored[key], key
+
+
 @pytest.mark.parametrize(
     "field",
     [

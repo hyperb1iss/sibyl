@@ -611,6 +611,32 @@ async def test_workflow_transitions_persist_status_and_branch() -> None:
     assert completed.status == TaskStatus.DONE
     assert completed.learnings == "use cache"
     assert completed.actual_hours == 3.5
+    # No actor was named, so the completion credits nobody.
+    assert entity_manager.task.metadata["completed_by"] is None
+    assert "modified_by" not in entity_manager.task.metadata
+
+
+@pytest.mark.asyncio
+async def test_complete_task_stamps_the_completing_actor() -> None:
+    from sibyl_core.tasks.workflow import TaskWorkflowEngine
+
+    task = Task(
+        id="task-actor",
+        title="Finish the migration",
+        description="",
+        project_id="proj-001",
+        status=TaskStatus.DOING,
+    )
+    entity_manager = _FakeEntityManager(task)
+    engine = TaskWorkflowEngine(
+        entity_manager, _FakeRelationshipManager(), _FakeGraphClient(), organization_id="test-org"
+    )
+
+    await engine.complete_task(task.id, create_episode=False, completed_by="user-42")
+
+    assert entity_manager.task.metadata["completed_by"] == "user-42"
+    assert entity_manager.task.metadata["modified_by"] == "user-42"
+    assert entity_manager.task.metadata["completed_at"] is not None
 
 
 @pytest.mark.asyncio
@@ -870,3 +896,90 @@ async def test_start_task_does_not_duplicate_assignee() -> None:
     started = await engine.start_task(task.id, assignee="alice")
     # Should only have one "alice"
     assert started.assignees.count("alice") == 1
+
+
+def _done_task(task_id: str) -> Task:
+    task = Task(
+        id=task_id,
+        title="Finished by Alice",
+        description="",
+        project_id="proj-001",
+        status=TaskStatus.DONE,
+    )
+    task.metadata = {
+        "status": "done",
+        "completed_by": "alice",
+        "completed_at": "2026-10-01T09:00:00+00:00",
+    }
+    return task
+
+
+@pytest.mark.asyncio
+async def test_completing_a_done_task_again_does_not_take_the_credit() -> None:
+    from sibyl_core.tasks.workflow import TaskWorkflowEngine
+
+    entity_manager = _FakeEntityManager(_done_task("task-recomplete"))
+    engine = TaskWorkflowEngine(
+        entity_manager, _FakeRelationshipManager(), _FakeGraphClient(), organization_id="test-org"
+    )
+
+    await engine.complete_task("task-recomplete", create_episode=False, completed_by="bob")
+
+    assert entity_manager.task.metadata["completed_by"] == "alice"
+    assert entity_manager.task.metadata["completed_at"] == "2026-10-01T09:00:00+00:00"
+
+
+@pytest.mark.asyncio
+async def test_reopening_a_done_task_clears_its_completion() -> None:
+    from sibyl_core.tasks.workflow import TaskWorkflowEngine
+
+    entity_manager = _FakeEntityManager(_done_task("task-reopen"))
+    engine = TaskWorkflowEngine(
+        entity_manager, _FakeRelationshipManager(), _FakeGraphClient(), organization_id="test-org"
+    )
+
+    await engine.start_task("task-reopen", assignee="bob")
+    assert entity_manager.task.metadata.get("completed_by") is None
+    assert entity_manager.task.metadata.get("completed_at") is None
+
+    await engine.complete_task("task-reopen", create_episode=False, completed_by="bob")
+    assert entity_manager.task.metadata["completed_by"] == "bob"
+    assert entity_manager.task.metadata["completed_at"] != "2026-10-01T09:00:00+00:00"
+
+
+class _RevisionRecordingManager:
+    """Reads a stored row at a revision and records the revision each write expects."""
+
+    def __init__(self, task: Task, observed: int) -> None:
+        self.task = task
+        self.task.observed_revision = observed
+        self.expected: list[int | None] = []
+
+    async def get(self, entity_id: str) -> Task:
+        return self.task
+
+    async def update(self, entity_id: str, updates: dict, *, expected_revision=None):
+        self.expected.append(expected_revision)
+        return self.task
+
+    async def write_bookkeeping(self, entity_id: str, fields: dict) -> None:
+        return None
+
+
+@pytest.mark.asyncio
+async def test_transitions_write_only_on_the_revision_they_read() -> None:
+    """A caller without the entity lock gets a conflict, not a decision on a moved status."""
+    from sibyl_core.tasks.workflow import TaskWorkflowEngine
+
+    task = Task(id="task-pin", title="Pinned", description="", status=TaskStatus.DOING)
+    manager = _RevisionRecordingManager(task, observed=6)
+    engine = TaskWorkflowEngine(
+        manager, _FakeRelationshipManager(), _FakeGraphClient(), organization_id="test-org"
+    )
+
+    await engine.complete_task("task-pin", create_episode=False, completed_by="bob")
+    await engine.block_task("task-pin", blocker_description="waiting")
+    # An explicit revision from the caller still wins.
+    await engine.unblock_task("task-pin", expected_revision=9)
+
+    assert manager.expected == [6, 6, 9]

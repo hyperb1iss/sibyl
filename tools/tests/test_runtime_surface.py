@@ -30,7 +30,7 @@ from tools.trust.enterprise_readiness_evidence import SIBYL_HELM_RENDER_ARGS
 
 from sibyl.config import parse_forwarded_allow_ips
 
-EXPECTED_ROUTER_COUNT = 32
+EXPECTED_ROUTER_COUNT = 33
 EXPECTED_HTTP_ROUTE_COUNT = 3
 EXPECTED_WEBSOCKET_ROUTE_COUNT = 1
 EXPECTED_MCP_TOOL_COUNT = 13
@@ -659,6 +659,7 @@ def test_runtime_surface_finds_known_contracts() -> None:
     assert "search_router" in surface.rest_routers
     assert "synthesis_router" in surface.rest_routers
     assert "ai_settings_router" in surface.rest_routers
+    assert "activity_router" in surface.rest_routers
     assert surface.websocket_routes[0].path == "/ws"
     assert {record.name for record in surface.mcp_tools} >= {
         "search",

@@ -981,3 +981,60 @@ class TestUpdateEntityPassageReprojection:
                 entity_type="decision",
                 group_id="org-1",
             )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("stored", "stamped"),
+    [
+        ({"status": "review"}, True),
+        ({"status": "done", "completed_by": "alice"}, False),
+        # A queued edit of a carried task is a real completion (the migration
+        # never queues its mirror writes).
+        ({"status": "review", "migration": {"tool": "sibyl migrate to-team"}}, True),
+    ],
+)
+async def test_queued_status_edit_stamps_the_editor_under_the_lock(
+    stored: dict, stamped: bool
+) -> None:
+    from sibyl.jobs import entities as entity_jobs
+
+    held: list[bool] = []
+
+    @asynccontextmanager
+    async def lock(*_args, **_kwargs):
+        held.append(True)
+        yield "token"
+        held.append(False)
+
+    async def read(_task_id: str):
+        assert held == [True], "the completion must be decided while the lock is held"
+        return SimpleNamespace(metadata=stored)
+
+    entity_manager = SimpleNamespace(
+        get=AsyncMock(side_effect=read),
+        update=AsyncMock(return_value=SimpleNamespace(metadata={}, name="Task", revision=2)),
+    )
+    runtime = SimpleNamespace(entity_manager=entity_manager, relationship_manager=MagicMock())
+    with (
+        patch("sibyl.locks.entity_lock", lock),
+        patch.object(entity_jobs, "get_surreal_graph_runtime", AsyncMock(return_value=runtime)),
+        patch.object(entity_jobs, "_safe_broadcast", AsyncMock()),
+        patch.object(entity_jobs, "_maybe_start_epic_bg", AsyncMock()),
+    ):
+        await entity_jobs.update_task(
+            {},
+            "task-1",
+            {"status": "done", "modified_by": "user-9"},
+            "org-1",
+            new_status="done",
+        )
+
+    written = entity_manager.update.await_args.args[1]
+    assert written["modified_by"] == "user-9"
+    if stamped:
+        assert written["completed_by"] == "user-9"
+        assert written["completed_at"] is not None
+    else:
+        assert "completed_by" not in written
+        assert "completed_at" not in written

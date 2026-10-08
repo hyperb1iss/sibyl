@@ -11,7 +11,10 @@ import json
 from dataclasses import dataclass
 from typing import Any, cast
 
-from sibyl_core.auth.memory_policy import stamp_memory_scope_metadata
+from sibyl_core.auth.memory_policy import (
+    stamp_memory_scope_metadata,
+    work_item_actor_metadata,
+)
 from sibyl_core.memory_pipeline.audit import decode_audit_metadata
 from sibyl_core.migrate.archive_phase_receipts import ArchivePhaseCredential, ArchiveRunBinding
 from sibyl_core.migrate.personal_archive_candidates import (
@@ -141,16 +144,20 @@ def prepare_archive_body(
         body = raw_archive_body(raw_memory_from_record(body))
     if candidate.kind is ArchiveKind.GRAPH_RELATIONSHIP:
         body["metadata"] = edge_archive_metadata(body)
+    archived = (
+        graph_archive_metadata
+        if candidate.kind is ArchiveKind.GRAPH_ENTITY
+        else semantic_archive_metadata
+    )(body.get("metadata", {}))
     metadata = stamp_memory_scope_metadata(
-        (
-            graph_archive_metadata
-            if candidate.kind is ArchiveKind.GRAPH_ENTITY
-            else semantic_archive_metadata
-        )(body.get("metadata", {})),
+        archived,
         memory_scope=candidate.audience.memory_scope,
         scope_key=candidate.audience.scope_key,
         principal_id=actor_id,
     )
+    # The archive is the server's record of who completed or edited a task, not
+    # a caller naming someone, so those survive the owner strip.
+    metadata.update(work_item_actor_metadata(archived))
     metadata.pop("agent_id", None)
     metadata.pop("project_id", None)
     if candidate.audience.memory_scope == "project":

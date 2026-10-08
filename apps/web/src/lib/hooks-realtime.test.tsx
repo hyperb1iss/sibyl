@@ -60,12 +60,32 @@ describe('useRealtimeUpdates', () => {
     await vi.advanceTimersByTimeAsync(INVALIDATION_DEBOUNCE_MS);
 
     expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: queryKeys.rawCaptures.all });
+    expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: queryKeys.activity.all });
     expect(invalidateQueries).toHaveBeenCalledWith({
       queryKey: queryKeys.rawCaptures.detail('raw-a'),
     });
     expect(invalidateQueries).toHaveBeenCalledWith({
       queryKey: queryKeys.rawCaptures.detail('raw-b'),
     });
+  });
+
+  it.each([
+    ['note_created', { task_id: 'task_1', note_id: 'note_1' }],
+    ['permission_changed', { user_id: 'user-1', change_type: 'org_member_added' }],
+  ])('refreshes team activity on %s', async (event, payload) => {
+    const queryClient = createTestQueryClient();
+    const invalidateQueries = vi.spyOn(queryClient, 'invalidateQueries');
+
+    render(<RealtimeHarness />, { queryClient });
+
+    await waitFor(() => {
+      expect(websocket.handlers.has(event)).toBe(true);
+    });
+
+    websocket.handlers.get(event)?.(payload);
+    await vi.advanceTimersByTimeAsync(INVALIDATION_DEBOUNCE_MS);
+
+    expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: queryKeys.activity.all });
   });
 
   it('coalesces a burst of task events into one refetch per query key', async () => {
@@ -90,6 +110,7 @@ describe('useRealtimeUpdates', () => {
     const keys = invalidateQueries.mock.calls.map(([filters]) => JSON.stringify(filters?.queryKey));
     expect(keys.filter(key => key === JSON.stringify(queryKeys.tasks.all))).toHaveLength(1);
     expect(keys.filter(key => key === JSON.stringify(['metrics']))).toHaveLength(1);
+    expect(keys.filter(key => key === JSON.stringify(queryKeys.activity.all))).toHaveLength(1);
     expect(
       keys.filter(key => key === JSON.stringify(queryKeys.tasks.detail('task_1')))
     ).toHaveLength(1);

@@ -7,6 +7,8 @@
  * surface stable without introducing runtime forwarding wrappers.
  */
 
+export type { TeamActivityResult, TeamActivityScope } from './hooks/activity';
+export { useTeamActivity } from './hooks/activity';
 export {
   useAdminAudit,
   useBackupSettings,

@@ -33,7 +33,11 @@ from sibyl.auth.dependencies import (
 from sibyl.jobs.entities import serialize_memory_policy_context
 from sibyl.locks import entity_lock
 from sibyl.persistence.auth_runtime import list_accessible_project_graph_ids
-from sibyl.services.work_item_workflow import WorkItemAction, transition_work_item
+from sibyl.services.work_item_workflow import (
+    WorkItemAction,
+    status_edit_completion,
+    transition_work_item,
+)
 from sibyl_core.auth import AuthOrganization, AuthUser, OrganizationRole, ProjectRole
 from sibyl_core.auth.memory_policy import (
     memory_metadata_read_allowed,
@@ -206,6 +210,14 @@ class UpdateTaskRequest(BaseModel):
     add_depends_on: list[str] = []
     remove_depends_on: list[str] = []
     expected_revision: int | None = Field(default=None, ge=1)
+    mirrors_source_status: bool = Field(
+        default=False,
+        description=(
+            "Set by `sibyl migrate to-team` alone: this status write mirrors the "
+            "source task's status, so it records no completion. Honoured only on a "
+            "task the migration carried, and only with sync=true."
+        ),
+    )
 
 
 class CreateTaskRequest(BaseModel):
@@ -393,6 +405,16 @@ async def _write_task_update(
 
     if request.epic_id:
         await _verify_epic_exists(runtime.entity_manager, request.epic_id)
+    if "status" in update_data:
+        update_data.update(
+            await status_edit_completion(
+                runtime.entity_manager,
+                task_id,
+                update_data["status"],
+                actor_id=update_data.get("modified_by"),
+                mirrors_source=request.mirrors_source_status,
+            )
+        )
     if request.expected_revision is None:
         updated = await runtime.entity_manager.update(task_id, update_data)
     else:
@@ -750,7 +772,8 @@ async def complete_task(
     learnings = request.learnings if request else None
 
     transition_kwargs: dict[str, Any] = {
-        "payload": {"actual_hours": actual_hours, "learnings": learnings}
+        "payload": {"actual_hours": actual_hours, "learnings": learnings},
+        "actor_id": auth.user_id,
     }
     if request and request.expected_revision is not None:
         transition_kwargs["expected_revision"] = request.expected_revision
@@ -898,10 +921,18 @@ async def update_task(
     await _verify_task_access(task_id, org, auth)
 
     group_id = str(org.id)
+    # A status change's completion record is decided under the entity lock,
+    # from the status read there: in _write_task_update for a sync write and in
+    # the update_task job for a queued one.
     update_data = _build_update_data(request, str(user.id))
     idempotency_path = f"/tasks/{task_id}"
+    # The mirror flag joins the replay hash only when it is set, so a status
+    # write whose receipt was stored before the flag existed still replays.
+    body = request.model_dump(mode="json")
+    if not request.mirrors_source_status:
+        body.pop("mirrors_source_status", None)
     idempotency_payload = {
-        "body": request.model_dump(mode="json"),
+        "body": body,
         "sync": sync,
         **({"replay_interrupted": False} if replay_interrupted is False else {}),
     }
@@ -918,6 +949,11 @@ async def update_task(
     )
     if replayed is not None:
         return replayed
+
+    if request.mirrors_source_status and not sync:
+        # The mirror marks one write, decided under the lock that write holds;
+        # a queued update would decide it later, against another status.
+        raise HTTPException(status_code=422, detail="mirrors_source_status requires sync=true")
 
     has_dep_changes = bool(request.add_depends_on or request.remove_depends_on)
     if len(update_data) <= 1 and not has_dep_changes:  # only modified_by

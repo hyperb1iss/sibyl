@@ -63,6 +63,7 @@ from sibyl_core.projection import (
     restamp_entity_passages,
     retire_entity_passages,
 )
+from sibyl_core.tasks.completion import completion_updates
 
 log = structlog.get_logger()
 
@@ -604,6 +605,17 @@ async def update_entity(
                         if key not in SERVER_OWNED_METADATA_KEYS
                     },
                 }
+                if existing.entity_type == EntityType.TASK and "status" in update.metadata:
+                    # The row was read under this lock, so its status decides
+                    # the completion record the way the complete transition
+                    # does: stamped into done, kept on done, cleared on reopen.
+                    update_data["metadata"].update(
+                        completion_updates(
+                            existing_meta.get("status") or getattr(existing, "status", None),
+                            update.metadata.get("status"),
+                            actor_id=str(ctx.user.id) if ctx.user is not None else None,
+                        )
+                    )
 
             structure_metadata_changed = (
                 update.spans is not None or update.atomic is not None or update.content is not None

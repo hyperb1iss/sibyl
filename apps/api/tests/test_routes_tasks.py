@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import UUID
@@ -26,6 +27,7 @@ from sibyl.persistence.content_common import ApiIdempotencyRecord
 from sibyl.services.work_item_workflow import WorkItemAction, WorkItemTransition
 from sibyl_core.auth import MemoryPolicyContext, OrganizationRole, ProjectRole
 from sibyl_core.models.entities import EntityType
+from sibyl_core.models.tasks import TaskStatus
 
 
 def _request(*, idempotency_key: str | None = None) -> MagicMock:
@@ -331,6 +333,69 @@ async def test_create_task_rejects_idempotency_key_payload_mismatch() -> None:
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("mirrors_source_status", [False, True])
+async def test_task_update_receipts_stored_before_the_mirror_flag_still_replay(
+    mirrors_source_status: bool,
+) -> None:
+    """A receipt hashed before mirrors_source_status existed matches an unflagged write."""
+    org = SimpleNamespace(id=UUID("00000000-0000-0000-0000-000000000111"))
+    user = SimpleNamespace(id=UUID("00000000-0000-0000-0000-000000000222"))
+    pre_flag_body = {
+        key: value
+        for key, value in UpdateTaskRequest(status=TaskStatus.DONE, expected_revision=3)
+        .model_dump(mode="json")
+        .items()
+        if key != "mirrors_source_status"
+    }
+    record = ApiIdempotencyRecord(
+        organization_id=org.id,
+        principal_id=str(user.id),
+        idempotency_key="idem-update",
+        method="PATCH",
+        path="/tasks/task_saved",
+        request_hash=idempotency_request_hash({"body": pre_flag_body, "sync": True}),
+        response_status_code=200,
+        response_body={
+            "success": True,
+            "action": "update",
+            "task_id": "task_saved",
+            "message": "Task updated",
+        },
+    )
+    request = UpdateTaskRequest(
+        status=TaskStatus.DONE,
+        expected_revision=3,
+        mirrors_source_status=mirrors_source_status,
+    )
+
+    with (
+        patch("sibyl.api.routes.tasks._verify_task_access", AsyncMock()),
+        patch(
+            "sibyl.api.idempotency.content_runtime.reserve_api_idempotency_record",
+            AsyncMock(return_value=(record, False)),
+        ),
+    ):
+        call = update_task(
+            task_id="task_saved",
+            request=request,
+            http_request=_request(idempotency_key="idem-update"),
+            sync=True,
+            replay_interrupted=True,
+            org=org,
+            user=user,
+            auth=SimpleNamespace(),
+        )
+        if mirrors_source_status:
+            # A flagged write is a different request from the one stored.
+            with pytest.raises(HTTPException) as exc:
+                await call
+            assert exc.value.status_code == 409
+        else:
+            replayed = await call
+            assert replayed.task_id == "task_saved"
+
+
+@pytest.mark.asyncio
 async def test_idempotency_replay_marks_mutation_receipt() -> None:
     org_id = UUID("00000000-0000-0000-0000-000000000111")
     payload = {"body": {"expected_revision": 1}}
@@ -411,6 +476,111 @@ async def test_update_task_sync_allows_title_description_with_actor_attribution(
             "description": "Updated body",
         },
     )
+
+
+@pytest.mark.asyncio
+async def test_queued_status_edit_leaves_the_completion_to_the_locked_job() -> None:
+    """The request reads nothing to decide a completion: the job does, under the lock."""
+    org = SimpleNamespace(id=UUID("00000000-0000-0000-0000-000000000111"))
+    user = SimpleNamespace(id=UUID("00000000-0000-0000-0000-000000000222"))
+    enqueue = AsyncMock(return_value="job-123")
+
+    with (
+        patch("sibyl.api.routes.tasks._verify_task_access", AsyncMock()),
+        patch("sibyl.jobs.queue.enqueue_update_task", enqueue),
+    ):
+        await update_task(
+            task_id="task-123",
+            request=UpdateTaskRequest(status=TaskStatus.DONE),
+            sync=False,
+            org=org,
+            user=user,
+            auth=SimpleNamespace(),
+        )
+
+    update_data = enqueue.await_args.args[1]
+    assert update_data == {"modified_by": str(user.id), "status": TaskStatus.DONE}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("stored", "mirrors", "outcome"),
+    [
+        ({"status": "doing"}, False, "stamped"),
+        ({"status": "done", "completed_by": "alice"}, False, "untouched"),
+        # A CLI `sibyl task update --status done` on a carried task credits the editor.
+        ({"status": "doing", "migration": {"tool": "sibyl migrate to-team"}}, False, "stamped"),
+        # The migration's own mirror write credits nobody.
+        ({"status": "doing", "migration": {"tool": "sibyl migrate to-team"}}, True, "cleared"),
+        # The mark is ignored on a task the migration never carried.
+        ({"status": "doing"}, True, "stamped"),
+    ],
+)
+async def test_sync_status_edit_decides_the_completion_under_the_lock(
+    stored: dict, mirrors: bool, outcome: str
+) -> None:
+    org = SimpleNamespace(id=UUID("00000000-0000-0000-0000-000000000111"))
+    user = SimpleNamespace(id=UUID("00000000-0000-0000-0000-000000000222"))
+    held: list[bool] = []
+    entity_manager = SimpleNamespace(
+        get=AsyncMock(return_value=SimpleNamespace(metadata=stored)),
+        update=AsyncMock(return_value=SimpleNamespace(name="Task", metadata={}, revision=2)),
+    )
+    runtime = SimpleNamespace(entity_manager=entity_manager, relationship_manager=None)
+
+    @asynccontextmanager
+    async def lock(*_args, **_kwargs):
+        held.append(True)
+        yield "token"
+        held.append(False)
+
+    async def read_inside_lock(task_id: str):
+        assert held == [True], "the completion must be decided while the lock is held"
+        return SimpleNamespace(metadata=stored)
+
+    entity_manager.get.side_effect = read_inside_lock
+    with (
+        patch("sibyl.api.routes.tasks._verify_task_access", AsyncMock()),
+        patch("sibyl.api.routes.tasks.entity_lock", lock),
+        patch("sibyl.api.routes.tasks.get_task_graph_runtime", AsyncMock(return_value=runtime)),
+        patch("sibyl.api.routes.tasks.broadcast_event", AsyncMock()),
+    ):
+        await update_task(
+            task_id="task-123",
+            request=UpdateTaskRequest(status=TaskStatus.DONE, mirrors_source_status=mirrors),
+            sync=True,
+            org=org,
+            user=user,
+            auth=SimpleNamespace(),
+        )
+
+    written = entity_manager.update.await_args.args[1]
+    if outcome == "stamped":
+        assert written["completed_by"] == str(user.id)
+        assert written["completed_at"] is not None
+    elif outcome == "cleared":
+        assert written["completed_by"] is None
+        assert written["completed_at"] is None
+    else:
+        assert "completed_by" not in written
+        assert "completed_at" not in written
+
+
+@pytest.mark.asyncio
+async def test_the_mirror_mark_is_refused_on_a_queued_update() -> None:
+    with (
+        patch("sibyl.api.routes.tasks._verify_task_access", AsyncMock()),
+        pytest.raises(HTTPException) as refused,
+    ):
+        await update_task(
+            task_id="task-123",
+            request=UpdateTaskRequest(status=TaskStatus.DONE, mirrors_source_status=True),
+            sync=False,
+            org=SimpleNamespace(id=UUID("00000000-0000-0000-0000-000000000111")),
+            user=SimpleNamespace(id=UUID("00000000-0000-0000-0000-000000000222")),
+            auth=SimpleNamespace(),
+        )
+    assert refused.value.status_code == 422
 
 
 @pytest.mark.asyncio
@@ -557,6 +727,7 @@ class TestCompleteTaskRoute:
             "task-123",
             WorkItemAction.COMPLETE_TASK,
             payload={"actual_hours": 2.5, "learnings": "Capture the pattern"},
+            actor_id="user-1",
             expected_revision=1,
         )
         auth.to_memory_policy_context.assert_called_once_with(

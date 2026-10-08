@@ -10,6 +10,7 @@ import structlog
 from sibyl_core.errors import EntityNotFoundError, InvalidTransitionError
 from sibyl_core.models.entities import EntityType, Relationship, RelationshipType
 from sibyl_core.models.tasks import EpicStatus, Task, TaskStatus
+from sibyl_core.tasks.completion import completion_updates
 from sibyl_core.tasks.distillation import build_learning_episode, build_learning_procedure
 
 log = structlog.get_logger()
@@ -75,6 +76,11 @@ def get_allowed_transitions(status: TaskStatus) -> set[TaskStatus]:
     return ALL_STATUSES | {TaskStatus.ARCHIVED}
 
 
+def _observed_revision(entity: object) -> int | None:
+    revision = getattr(entity, "observed_revision", None)
+    return revision if type(revision) is int and revision >= 1 else None
+
+
 class TaskWorkflowEngine:
     """Handles task status transitions and automations.
 
@@ -104,7 +110,23 @@ class TaskWorkflowEngine:
         task_id: str,
         updates: dict[str, Any],
         expected_revision: int | None,
+        *,
+        current_status: object = None,
+        actor_id: str | None = None,
+        observed_revision: int | None = None,
     ) -> Any:
+        if expected_revision is None and observed_revision is not None:
+            # The status this write decides from was read at that revision, so
+            # the write lands only there: a caller without the entity lock gets
+            # a conflict instead of acting on a status that has since moved.
+            expected_revision = observed_revision
+        if current_status is not None and "status" in updates:
+            # The status read with this write decides whether the completion
+            # record is stamped, kept, or cleared (see tasks.completion).
+            updates = {
+                **updates,
+                **completion_updates(current_status, updates["status"], actor_id=actor_id),
+            }
         if expected_revision is None:
             return await self._entity_manager.update(task_id, updates)
         return await self._entity_manager.update(
@@ -194,6 +216,8 @@ class TaskWorkflowEngine:
                 task_id,
                 all_updates,
                 expected_revision,
+                current_status=task.status,
+                observed_revision=_observed_revision(entity),
             )
             task = self._entity_to_task(updated_entity)
 
@@ -254,6 +278,8 @@ class TaskWorkflowEngine:
             task_id,
             updates,
             expected_revision,
+            current_status=task.status,
+            observed_revision=_observed_revision(entity),
         )
         updated_task = self._entity_to_task(updated_entity)
 
@@ -310,6 +336,8 @@ class TaskWorkflowEngine:
             task_id,
             updates,
             expected_revision,
+            current_status=task.status,
+            observed_revision=_observed_revision(entity),
         )
         updated_task = self._entity_to_task(updated_entity)
 
@@ -333,6 +361,7 @@ class TaskWorkflowEngine:
         *,
         create_episode: bool = True,
         expected_revision: int | None = None,
+        completed_by: str | None = None,
     ) -> Task:
         """Mark task as done and capture learnings.
 
@@ -342,6 +371,9 @@ class TaskWorkflowEngine:
             learnings: What was learned completing this task
             create_episode: Whether to create learning episode synchronously.
                 Set to False when using async job queue for episode creation.
+            completed_by: Authenticated user completing the task. Stamped as
+                ``completed_by`` and ``modified_by`` so the completion has an
+                actor; nothing else in the row records who moved it to done.
 
         Returns:
             Updated task
@@ -357,10 +389,11 @@ class TaskWorkflowEngine:
         self._validate_transition(task.status, TaskStatus.DONE)
 
         # Build updates
-        updates: dict = {
-            "status": TaskStatus.DONE,
-            "completed_at": datetime.now(UTC),
-        }
+        # completed_at and completed_by come from the completion record rules:
+        # stamped on the move into done, left alone when the task already was.
+        updates: dict = {"status": TaskStatus.DONE}
+        if completed_by:
+            updates["modified_by"] = completed_by
 
         if actual_hours is not None:
             updates["actual_hours"] = actual_hours
@@ -373,6 +406,9 @@ class TaskWorkflowEngine:
             task_id,
             updates,
             expected_revision,
+            current_status=task.status,
+            observed_revision=_observed_revision(entity),
+            actor_id=completed_by,
         )
         updated_task = self._entity_to_task(updated_entity)
 
@@ -432,6 +468,8 @@ class TaskWorkflowEngine:
             task_id,
             updates,
             expected_revision,
+            current_status=task.status,
+            observed_revision=_observed_revision(entity),
         )
         updated_task = self._entity_to_task(updated_entity)
 
@@ -479,6 +517,8 @@ class TaskWorkflowEngine:
             task_id,
             updates,
             expected_revision,
+            current_status=task.status,
+            observed_revision=_observed_revision(entity),
         )
         updated_task = self._entity_to_task(updated_entity)
 
@@ -525,6 +565,8 @@ class TaskWorkflowEngine:
             task_id,
             updates,
             expected_revision,
+            current_status=task.status,
+            observed_revision=_observed_revision(entity),
         )
         updated_task = self._entity_to_task(updated_entity)
 

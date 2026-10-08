@@ -33,6 +33,7 @@ const API_KEYS = [
   'metrics',
   'setup',
   'settings',
+  'activity',
 ] as const;
 
 const HOOK_EXPORTS = [
@@ -122,6 +123,7 @@ const HOOK_EXPORTS = [
   'useTaskNotes',
   'useTasks',
   'useTaskUpdateStatus',
+  'useTeamActivity',
   'useTelemetrySummary',
   'useTestLLMSurface',
   'useUpdateBackupSettings',

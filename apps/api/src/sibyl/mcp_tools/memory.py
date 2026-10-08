@@ -21,6 +21,7 @@ from sibyl.api.idempotency import (
 )
 from sibyl.mcp_tools import serialization
 from sibyl.mcp_tools.contracts import DeclaredRelatedTo, MemoryKind
+from sibyl.persistence import content_runtime
 from sibyl.persistence.auth_runtime import create_project_record, resolve_accessible_team_scope_keys
 from sibyl.persistence.content_common import ApiIdempotencyRecord
 from sibyl_core.auth.memory_policy import server_provenance_metadata, stamp_memory_scope_metadata
@@ -261,7 +262,26 @@ async def _remember_mcp_memory(
             atomic=request.atomic,
             probes=list(request.probes) if request.probes is not None else None,
         )
-        return serialization.to_dict(result)
+        payload = serialization.to_dict(result)
+        raw_memory_id = server_provenance_metadata(graph_metadata).get("raw_memory_id")
+        entity_id = payload.get("id") if isinstance(payload, Mapping) else None
+        if (
+            isinstance(payload, Mapping)
+            and payload.get("success")
+            and entity_id
+            and raw_memory_id
+            and principal_id
+        ):
+            # Links the raw memory to the row it became, as the REST path does
+            # through its sidecar, so the pair is one act, not two.
+            await content_runtime.mark_raw_memory_projected_entity(
+                None,
+                organization_id=UUID(ctx.org_id),
+                raw_capture_id=str(raw_memory_id),
+                entity_id=str(entity_id),
+                principal_id=principal_id,
+            )
+        return payload
 
     capture_result = await MemoryCaptureService(
         remember_raw_memory=remember_raw,
