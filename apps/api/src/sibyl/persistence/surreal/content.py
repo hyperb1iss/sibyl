@@ -1839,6 +1839,66 @@ async def list_raw_captures(
     return captures[:limit], len(captures) > limit
 
 
+# Every column the reader policy and the lifecycle verdict consult, and nothing
+# heavier: the body and the vector stay on the server.
+_RAW_ACTIVITY_FIELDS = (
+    "uuid, organization_id, source_id, principal_id, memory_scope, scope_key, agent_id, "
+    "project_id, review_state, entity_id, title, entity_type, metadata, provenance, "
+    "capture_surface, created_by_user_id, revision, captured_at, created_at, deleted_at"
+)
+
+# The planner prefers the bare organization index for an organization equality
+# and would walk every capture the organization holds, so the statement names
+# the (organization_id, created_at, uuid) index and ranges on created_at.
+# Only standalone raw memories qualify: a sidecar row (entity_type is the graph
+# type) and a raw memory carrying projected_capture_id both mirror a graph row
+# the activity view counts on its own.
+RAW_ACTIVITY_STATEMENT = (
+    f"SELECT {_RAW_ACTIVITY_FIELDS} FROM raw_captures "  # noqa: S608
+    "WITH INDEX idx_raw_captures_org_created "
+    "WHERE organization_id = $organization_id "
+    "AND created_at >= $since AND created_at < $until "
+    "AND deleted_at = NONE "
+    "AND entity_type = 'raw_memory' "
+    "AND metadata.projected_capture_id = NONE"
+)
+# Narrows the scan to rows the reader policy could allow. The policy still runs
+# on every row returned; a private row without a stamped principal is left to it.
+_RAW_ACTIVITY_OWN_PRIVATE_ONLY = (
+    " AND NOT (memory_scope = 'private' AND principal_id != '' AND principal_id != $private_owner)"
+)
+_RAW_ACTIVITY_NO_PRIVATE = " AND memory_scope != 'private'"
+
+
+async def list_raw_memories_created_between(
+    _session: object,
+    *,
+    organization_id: UUID,
+    since: datetime,
+    until: datetime,
+    private_owner: str | None,
+) -> list[RawCaptureRecord]:
+    """Standalone raw memories the organization captured in ``[since, until)``.
+
+    ``private_owner`` keeps that principal's private rows and drops everyone
+    else's; ``None`` drops private rows entirely. Callers still apply the reader
+    policy and the lifecycle verdict to each record.
+    """
+    params: dict[str, object] = {
+        "organization_id": str(organization_id),
+        "since": since,
+        "until": until,
+    }
+    if private_owner:
+        statement = RAW_ACTIVITY_STATEMENT + _RAW_ACTIVITY_OWN_PRIVATE_ONLY
+        params["private_owner"] = private_owner
+    else:
+        statement = RAW_ACTIVITY_STATEMENT + _RAW_ACTIVITY_NO_PRIVATE
+    async with surreal_content_client() as client:
+        rows = await _select_many(client, statement + ";", **params)
+    return [_raw_capture_from_record(row) for row in rows]
+
+
 async def mark_raw_capture_projected(
     _session: object,
     *,

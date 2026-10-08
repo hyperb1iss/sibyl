@@ -7,6 +7,13 @@ This package re-exports the full schema surface so existing
 organized into per-domain submodules; shared literals live in :mod:`.common`.
 """
 
+from .activity import (
+    ActivityCounts,
+    ActivityWindow,
+    TeamActivityItem,
+    TeamActivityPerson,
+    TeamActivityResponse,
+)
 from .admin import (
     AdminAuditEventResponse,
     AdminAuditListResponse,
@@ -210,6 +217,8 @@ from .traverse import (
 )
 
 __all__ = [
+    "ActivityCounts",
+    "ActivityWindow",
     "AdminAuditEventResponse",
     "AdminAuditListResponse",
     "AssigneeStats",
@@ -368,6 +377,9 @@ __all__ = [
     "SynthesisVerificationResponse",
     "TaskPriorityDistribution",
     "TaskStatusDistribution",
+    "TeamActivityItem",
+    "TeamActivityPerson",
+    "TeamActivityResponse",
     "TelemetryDurationSummary",
     "TelemetryEventResponse",
     "TelemetryMetricResponse",
