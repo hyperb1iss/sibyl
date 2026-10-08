@@ -313,7 +313,9 @@ export function EmptyState({
   return (
     <div className="text-center py-16 animate-fade-in">
       {displayIcon && (
-        <div className={`text-6xl mb-4 opacity-80 ${defaults.floatingClass}`}>{displayIcon}</div>
+        <div className={`mb-4 flex justify-center text-6xl opacity-80 ${defaults.floatingClass}`}>
+          {displayIcon}
+        </div>
       )}
       <p className="text-sc-fg-muted text-lg font-medium">{title}</p>
       {description && (
@@ -359,7 +361,9 @@ export function ErrorState({ title, message, action, variant = 'error' }: ErrorS
 
   return (
     <div className="text-center py-12 animate-fade-in">
-      <div className={`text-4xl mb-4 ${variantConfig.iconClass}`}>{variantConfig.icon}</div>
+      <div className={`mb-4 flex justify-center text-4xl ${variantConfig.iconClass}`}>
+        {variantConfig.icon}
+      </div>
       <p className={`text-lg font-medium ${variantConfig.color}`}>{displayTitle}</p>
       <p className="text-sc-fg-muted text-sm mt-1 max-w-md mx-auto">{message}</p>
       {action && <div className="mt-4 animate-slide-up">{action}</div>}
