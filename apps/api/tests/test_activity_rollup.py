@@ -246,13 +246,15 @@ def test_mirrors_system_rows_and_strangers_credit_nobody(record: RawCaptureRecor
     assert rollup.capture_event(record, window=WEEK, members=MEMBERS) is None
 
 
-def event(kind: str, actor: str, hours: float, ident: str = "") -> rollup.ActivityEvent:
+def event(
+    kind: str, actor: str, hours: float, ident: str = "", project: str | None = None
+) -> rollup.ActivityEvent:
     return rollup.ActivityEvent(
         kind=kind,  # type: ignore[arg-type]
         id=ident or uuid4().hex,
         title=kind,
         entity_type=None,
-        project_id=None,
+        project_id=project,
         actor_id=actor,
         at=NOW - timedelta(hours=hours),
         href="/x",
@@ -274,7 +276,6 @@ def test_summary_lists_every_member_busiest_first() -> None:
         ],
         members=members,
         window=WEEK,
-        project_id=None,
     )
     assert [person.name for person in summary.people] == ["Bob", "Alice", "carol"]
     bob = summary.people[0]
@@ -290,17 +291,61 @@ def test_summary_lists_every_member_busiest_first() -> None:
     assert [item.actor_id for item in summary.recent] == [BOB, BOB, ALICE]
     assert summary.truncated is False
     assert summary.window.label == "7d"
+    assert (summary.project_id, summary.project_ids, summary.actor_id) == (None, None, None)
 
 
 def test_recent_keeps_the_newest_hundred_and_says_so() -> None:
     feed = [event("capture", ALICE, hour / 10) for hour in range(rollup.RECENT_LIMIT + 5)]
-    summary = rollup.summarize(feed, members=MEMBERS, window=WEEK, project_id="p1")
+    summary = rollup.summarize(feed, members=MEMBERS, window=WEEK, project_ids=["p1"])
     assert len(summary.recent) == rollup.RECENT_LIMIT
     assert summary.truncated is True
     assert summary.recent[0].at == NOW
     assert summary.project_id == "p1"
+    assert summary.project_ids == ["p1"]
     # Counts cover every event, not only the listed ones.
     assert summary.people[0].counts.captures == rollup.RECENT_LIMIT + 5
+
+
+def test_feed_items_name_their_actor_and_only_readable_projects() -> None:
+    summary = rollup.summarize(
+        [event("decision", BOB, 1, project="p1"), event("note", ALICE, 2, project="p2")],
+        members=MEMBERS,
+        window=WEEK,
+        project_ids=["p1", "p2"],
+        project_names={"p1": "Shared Board"},
+    )
+    bob_item, alice_item = summary.recent
+    assert (bob_item.actor_name, bob_item.actor_avatar_url) == ("Bob", "https://avatars.test/bob")
+    assert bob_item.project_name == "Shared Board"
+    assert (alice_item.actor_name, alice_item.actor_avatar_url) == ("Alice", None)
+    # p2 is absent from the readable names, so its name never appears.
+    assert alice_item.project_name is None
+    # Several projects requested: no single project_id, every id echoed.
+    assert (summary.project_id, summary.project_ids) == (None, ["p1", "p2"])
+
+
+def test_actor_filter_narrows_recent_but_not_the_counts() -> None:
+    feed = [event("capture", ALICE, hour) for hour in range(3)]
+    feed += [event("decision", BOB, hour + 0.5) for hour in range(rollup.RECENT_LIMIT + 1)]
+    summary = rollup.summarize(feed, members=MEMBERS, window=WEEK, actor_filter=ALICE.upper())
+    assert {item.actor_id for item in summary.recent} == {ALICE}
+    assert len(summary.recent) == 3
+    assert summary.truncated is False
+    assert summary.actor_id == ALICE.upper()
+    counts = {person.user_id: person.counts for person in summary.people}
+    assert counts[BOB].decisions == rollup.RECENT_LIMIT + 1
+    assert counts[ALICE].captures == 3
+    nobody = rollup.summarize(feed, members=MEMBERS, window=WEEK, actor_filter="not-a-member")
+    assert nobody.recent == []
+    assert nobody.truncated is False
+    flood = rollup.summarize(feed, members=MEMBERS, window=WEEK, actor_filter=BOB)
+    assert len(flood.recent) == rollup.RECENT_LIMIT
+    assert flood.truncated is True
+
+
+def test_other_is_documented_as_the_entity_kind() -> None:
+    description = rollup.ActivityCounts.model_json_schema()["properties"]["other"]["description"]
+    assert "`entity`" in description
 
 
 def test_members_read_from_the_member_listing() -> None:

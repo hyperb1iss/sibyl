@@ -35,7 +35,13 @@ class ActivityCounts(BaseModel):
     decisions: int = 0
     notes: int = 0
     procedures: int = 0
-    other: int = 0
+    other: int = Field(
+        default=0,
+        description=(
+            "Items of kind `entity`: authored rows that are not tasks, decisions, "
+            "notes or procedures (error patterns, epics, artifacts, plans, ...)."
+        ),
+    )
 
 
 class TeamActivityPerson(BaseModel):
@@ -59,6 +65,13 @@ class TeamActivityItem(BaseModel):
     entity_type: str | None = None
     project_id: str | None = None
     actor_id: str
+    actor_name: str | None = Field(
+        default=None, description="The member's display name, as the member list shows it"
+    )
+    actor_avatar_url: str | None = None
+    project_name: str | None = Field(
+        default=None, description="Set when project_id names a project the caller can read"
+    )
     at: datetime
     href: str
 
@@ -67,7 +80,15 @@ class TeamActivityResponse(BaseModel):
     """Per-member activity for the caller's current organization."""
 
     window: ActivityWindow
-    project_id: str | None = None
+    project_id: str | None = Field(
+        default=None, description="The project filter when exactly one project was requested"
+    )
+    project_ids: list[str] | None = Field(
+        default=None, description="Every requested project; activity in any of them counts"
+    )
+    actor_id: str | None = Field(
+        default=None, description="When set, `recent` holds only this member's events"
+    )
     people: list[TeamActivityPerson]
     recent: list[TeamActivityItem]
-    truncated: bool = False
+    truncated: bool = Field(default=False, description="More events existed than `recent` holds")

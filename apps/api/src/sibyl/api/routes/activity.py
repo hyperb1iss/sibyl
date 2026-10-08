@@ -22,6 +22,7 @@ from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from functools import partial
+from typing import Annotated
 from uuid import UUID
 
 import structlog
@@ -94,6 +95,13 @@ COMPLETED_IN_WINDOW = (
     "AND updated_at >= $since"
 )
 
+# Project names for the feed. An organization holds tens of projects, and the
+# type index serves the equality; names reach the response only for projects
+# the caller can open.
+PROJECT_NAMES = (
+    "SELECT uuid, name FROM entity WHERE group_id = $group_id AND entity_type = 'project'"
+)
+
 
 @dataclass(frozen=True, slots=True)
 class ReaderScope:
@@ -114,7 +122,7 @@ class ReaderScope:
     memory_grants: set[str] | None
     accessible_teams: set[str]
     accessible_delegations: set[str]
-    project_filter: str | None
+    project_filter: frozenset[str] | None
 
     @property
     def private_granted(self) -> bool:
@@ -123,14 +131,19 @@ class ReaderScope:
         )
 
 
-async def resolve_reader_scope(ctx: AuthContext, project_id: str | None) -> ReaderScope:
+async def resolve_reader_scope(
+    ctx: AuthContext, requested_projects: list[str] | None
+) -> ReaderScope:
+    """Snapshot the caller's grants, refusing any requested project they lack.
+
+    Each requested project passes the entity list's access check and must be
+    in the capture list's accessible set; one refusal refuses the request.
+    """
     (project_ids, real_project_ids, has_unassigned), accessible = await asyncio.gather(
-        policy.resolve_entity_list_project_filter(
-            ctx=ctx, project_ids=[project_id] if project_id else None
-        ),
+        policy.resolve_entity_list_project_filter(ctx=ctx, project_ids=requested_projects),
         policy.accessible_project_ids_for_read(ctx),
     )
-    if project_id is not None and project_id not in accessible:
+    if requested_projects and not set(requested_projects) <= accessible:
         # The capture list's answer to a project outside the caller's grants.
         raise HTTPException(status_code=403, detail="project_scope_denied")
     return ReaderScope(
@@ -143,7 +156,7 @@ async def resolve_reader_scope(ctx: AuthContext, project_id: str | None) -> Read
         memory_grants=policy.reader_memory_grants(ctx),
         accessible_teams=set(ctx.accessible_teams),
         accessible_delegations=set(ctx.accessible_delegations),
-        project_filter=project_id,
+        project_filter=frozenset(requested_projects) if requested_projects else None,
     )
 
 
@@ -167,7 +180,8 @@ def graph_activity_statement(scope: ReaderScope) -> tuple[str, dict[str, object]
     private, params = private_row_clause(scope)
     statement = (
         f"RETURN {{ created: ({CREATED_IN_WINDOW}{private}), "
-        f"completed: ({COMPLETED_IN_WINDOW}{private}) }};"
+        f"completed: ({COMPLETED_IN_WINDOW}{private}), "
+        f"projects: ({PROJECT_NAMES}) }};"
     )
     return statement, {**params, "derived_types": sorted(DERIVED_ENTITY_TYPES)}
 
@@ -183,13 +197,19 @@ def _payload_rows(payload: object, key: str) -> list[Mapping[str, object]]:
 
 async def load_graph_rows(
     group_id: str, scope: ReaderScope, window: Window
-) -> list[Mapping[str, object]]:
+) -> tuple[list[Mapping[str, object]], dict[str, str]]:
+    """Window rows to judge, and the names of the projects the caller can open."""
     statement, params = graph_activity_statement(scope)
     result = await execute_surreal_graph_query(
         group_id, statement, since=window.since, until=window.until, **params
     )
     payload = result[0] if result else {}
-    return [*_payload_rows(payload, "created"), *_payload_rows(payload, "completed")]
+    names = {
+        str(row["uuid"]): str(row["name"])
+        for row in _payload_rows(payload, "projects")
+        if row.get("uuid") in scope.accessible_projects and row.get("name")
+    }
+    return [*_payload_rows(payload, "created"), *_payload_rows(payload, "completed")], names
 
 
 def readable_entities(
@@ -243,8 +263,8 @@ def readable_captures(
     for capture in captures:
         if not standalone_capture(capture):
             continue
-        if scope.project_filter is not None and capture_project_id(capture) != (
-            scope.project_filter
+        if scope.project_filter is not None and (
+            capture_project_id(capture) not in scope.project_filter
         ):
             continue
         lifecycle = _CaptureLifecycle(
@@ -294,16 +314,17 @@ async def build_team_activity(
     org: AuthOrganization,
     ctx: AuthContext,
     window_label: str,
-    project_id: str | None,
+    project_ids: list[str] | None,
+    actor_id: str | None = None,
     now: datetime | None = None,
 ) -> TeamActivityResponse:
-    scope = await resolve_reader_scope(ctx, project_id)
+    scope = await resolve_reader_scope(ctx, project_ids)
     window = resolve_window(window_label, now=now or datetime.now(UTC))
     group_id = str(org.id)
-    actor_id = UUID(str(ctx.user.id))
+    caller_id = UUID(str(ctx.user.id))
 
-    member_rows, graph_rows, raw_rows = await asyncio.gather(
-        organization_runtime.list_org_members(slug=org.slug, actor_id=actor_id),
+    member_rows, (graph_rows, project_names), raw_rows = await asyncio.gather(
+        organization_runtime.list_org_members(slug=org.slug, actor_id=caller_id),
         load_graph_rows(group_id, scope, window),
         content_runtime.list_raw_memories_created_between(
             None,
@@ -343,7 +364,14 @@ async def build_team_activity(
         raw_rows=len(raw_rows),
         events=len(events),
     )
-    return summarize(events, members=members, window=window, project_id=project_id)
+    return summarize(
+        events,
+        members=members,
+        window=window,
+        project_ids=project_ids,
+        project_names=project_names,
+        actor_filter=actor_id,
+    )
 
 
 @router.get("/team", response_model=TeamActivityResponse)
@@ -353,21 +381,36 @@ async def get_team_activity(
     window: ActivityWindowLabel = Query(
         default=DEFAULT_WINDOW, description="How far back to look: 24h, 7d or 30d"
     ),
-    project_id: str | None = Query(
-        default=None, min_length=1, description="Only count activity in this project"
+    project_id: Annotated[
+        list[str] | None,
+        Query(
+            description=(
+                "Only count activity in these projects; repeat the parameter for "
+                "several. Each must be a project the caller can read."
+            ),
+        ),
+    ] = None,
+    actor_id: str | None = Query(
+        default=None, min_length=1, description="Limit `recent` to this member's events"
     ),
 ) -> TeamActivityResponse:
     """What each member of the current organization did in the window.
 
     Counts and recent events cover only rows the caller can already read.
     """
-    return await build_team_activity(org=org, ctx=ctx, window_label=window, project_id=project_id)
+    requested = list(dict.fromkeys(project_id)) if project_id else None
+    if requested is not None and not all(value.strip() for value in requested):
+        raise HTTPException(status_code=422, detail="project_id must not be empty")
+    return await build_team_activity(
+        org=org, ctx=ctx, window_label=window, project_ids=requested, actor_id=actor_id
+    )
 
 
 __all__ = [
     "COMPLETED_IN_WINDOW",
     "CREATED_IN_WINDOW",
     "DERIVED_ENTITY_TYPES",
+    "PROJECT_NAMES",
     "ReaderScope",
     "build_team_activity",
     "graph_activity_statement",

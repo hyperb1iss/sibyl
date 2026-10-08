@@ -9,7 +9,7 @@ web app shows it.
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Mapping
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any, Final, cast
@@ -369,10 +369,17 @@ def summarize(
     *,
     members: Mapping[str, Member],
     window: Window,
-    project_id: str | None,
+    project_ids: Sequence[str] | None = None,
+    project_names: Mapping[str, str] | None = None,
+    actor_filter: str | None = None,
     recent_limit: int = RECENT_LIMIT,
 ) -> TeamActivityResponse:
-    """Every member with their counts, and the newest events across everyone."""
+    """Every member with their counts, and the newest events across everyone.
+
+    ``actor_filter`` narrows ``recent`` to one member without touching the
+    counts. ``project_names`` must hold only projects the caller can read; an
+    event in any other project carries no name.
+    """
     counts: dict[str, dict[str, int]] = {user_id: {} for user_id in members}
     last_active: dict[str, datetime] = {}
     ordered: list[ActivityEvent] = []
@@ -405,10 +412,17 @@ def summarize(
             person.user_id,
         )
     )
+    actor_key = member_key(actor_filter) if actor_filter is not None else None
+    if actor_filter is not None:
+        ordered = [item for item in ordered if item.actor_id == actor_key]
     ordered.sort(key=lambda item: (item.at, item.kind, item.id), reverse=True)
+    names = project_names or {}
+    requested = list(project_ids) if project_ids else None
     return TeamActivityResponse(
         window=ActivityWindow(since=window.since, until=window.until, label=window.label),
-        project_id=project_id,
+        project_id=requested[0] if requested and len(requested) == 1 else None,
+        project_ids=requested,
+        actor_id=actor_filter,
         people=people,
         recent=[
             TeamActivityItem(
@@ -418,6 +432,9 @@ def summarize(
                 entity_type=item.entity_type,
                 project_id=item.project_id,
                 actor_id=item.actor_id,
+                actor_name=members[item.actor_id].name,
+                actor_avatar_url=members[item.actor_id].avatar_url,
+                project_name=names.get(item.project_id) if item.project_id else None,
                 at=item.at,
                 href=item.href,
             )

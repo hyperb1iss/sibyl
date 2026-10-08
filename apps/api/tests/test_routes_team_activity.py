@@ -193,7 +193,7 @@ def token_for(team: SimpleNamespace, user: str, org: str | None = None) -> str:
 
 
 async def read_activity(
-    team: SimpleNamespace, user: str, *, org: str | None = None, **params: str
+    team: SimpleNamespace, user: str, *, org: str | None = None, **params: str | list[str]
 ) -> httpx.Response:
     transport = httpx.ASGITransport(app=team.app)
     async with httpx.AsyncClient(transport=transport, base_url="http://activity.test") as client:
@@ -215,6 +215,7 @@ def entity(
     metadata: dict[str, object] | None = None,
     modified_by: str | None = None,
     touched: timedelta | None = None,
+    entity_id: str | None = None,
 ) -> Entity:
     bag: dict[str, object] = dict(metadata or {})
     if project:
@@ -225,7 +226,7 @@ def entity(
         bag.update(memory_scope="project", scope_key=project, principal_id=author)
     created = NOW - age
     return Entity(
-        id=_id(entity_type.value),
+        id=entity_id or _id(entity_type.value),
         entity_type=entity_type,
         name=name,
         description=name,
@@ -391,8 +392,20 @@ async def seeded(team: SimpleNamespace) -> SimpleNamespace:
             scope="project",
         ),
     }
+    # The projects themselves, created long before the window and by nobody,
+    # so they only lend their names to the feed.
+    projects = [
+        entity(
+            EntityType.PROJECT,
+            name,
+            author=None,
+            age=timedelta(days=90),
+            entity_id=project_id,
+        )
+        for project_id, name in ((team.shared, "Shared Board"), (team.secret, "Secret Lab"))
+    ]
     graph = await get_surreal_graph_runtime(team.org)
-    await graph.entity_manager.create_direct_bulk(list(rows.values()))
+    await graph.entity_manager.create_direct_bulk([*projects, *rows.values()])
 
     captures = {
         "alice_private": capture(
@@ -612,6 +625,8 @@ async def test_window_bounds_the_counts(seeded) -> None:
 async def test_unknown_window_is_rejected(seeded) -> None:
     response = await read_activity(seeded, seeded.bob, window="1y")
     assert response.status_code == 422
+    blank = await read_activity(seeded, seeded.bob, project_id=[seeded.shared, " "])
+    assert blank.status_code == 422
 
 
 async def test_project_filter_keeps_one_readable_project(seeded) -> None:
@@ -620,6 +635,7 @@ async def test_project_filter_keeps_one_readable_project(seeded) -> None:
     assert response.status_code == 200, response.text
     payload = response.json()
     assert payload["project_id"] == team.shared
+    assert payload["project_ids"] == [team.shared]
     assert {item["project_id"] for item in payload["recent"]} == {team.shared}
     text = json.dumps(payload)
     assert team.rows["secret_task"].id not in text
@@ -636,6 +652,61 @@ async def test_project_filter_cannot_open_a_project_the_caller_lacks(seeded) -> 
     assert str(team.captures["alice_secret"].id) not in response.text
     missing = await read_activity(team, team.bob, project_id=_id("project"))
     assert missing.status_code == 403
+
+
+async def test_several_projects_count_activity_in_any_of_them(seeded) -> None:
+    team = seeded
+    response = await read_activity(team, team.alice, project_id=[team.shared, team.secret])
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["project_id"] is None
+    assert payload["project_ids"] == [team.shared, team.secret]
+    ids = listed(payload)
+    assert ("task_created", team.rows["secret_task"].id) in ids
+    assert ("decision", team.rows["shared_decision"].id) in ids
+    assert ("capture", str(team.captures["alice_secret"].id)) in ids
+    assert {item["project_id"] for item in payload["recent"]} == {team.shared, team.secret}
+    text = json.dumps(payload)
+    assert team.rows["private_decision"].id not in text
+    assert str(team.captures["alice_private"].id) not in text
+
+
+async def test_several_projects_are_refused_when_any_is_unreadable(seeded) -> None:
+    team = seeded
+    response = await read_activity(team, team.bob, project_id=[team.shared, team.secret])
+    assert response.status_code == 403
+    assert team.rows["secret_task"].id not in response.text
+    assert "Secret Lab" not in response.text
+
+
+async def test_feed_names_actors_and_only_readable_projects(seeded) -> None:
+    team = seeded
+    bob_view = (await read_activity(team, team.bob)).json()
+    items = {(item["kind"], item["id"]): item for item in bob_view["recent"]}
+    decision = items[("decision", team.rows["shared_decision"].id)]
+    assert (decision["actor_name"], decision["project_name"]) == ("Alice", "Shared Board")
+    assert decision["actor_avatar_url"] is None
+    assert items[("capture", str(team.captures["bob_shared"].id))]["actor_name"] == "Bob"
+    assert "Secret Lab" not in json.dumps(bob_view)
+
+    alice_view = (await read_activity(team, team.alice)).json()
+    items = {(item["kind"], item["id"]): item for item in alice_view["recent"]}
+    assert items[("task_created", team.rows["secret_task"].id)]["project_name"] == "Secret Lab"
+    # A private memory belongs to no project, so it names none.
+    assert items[("decision", team.rows["private_decision"].id)]["project_name"] is None
+
+
+async def test_actor_filter_narrows_recent_but_not_people(seeded) -> None:
+    team = seeded
+    everyone = (await read_activity(team, team.bob)).json()
+    alice_only = (await read_activity(team, team.bob, actor_id=team.alice)).json()
+    assert alice_only["actor_id"] == team.alice
+    assert alice_only["people"] == everyone["people"]
+    assert {item["actor_id"] for item in alice_only["recent"]} == {team.alice}
+    assert listed(alice_only) == {("decision", team.rows["shared_decision"].id)}
+    stranger = (await read_activity(team, team.bob, actor_id=str(uuid4()))).json()
+    assert stranger["recent"] == []
+    assert stranger["people"] == everyone["people"]
 
 
 async def test_projection_of_a_deleted_capture_is_not_counted(seeded) -> None:
@@ -730,7 +801,7 @@ async def test_window_reads_walk_their_indexes(plan_clients) -> None:
             {
                 "uuid": f"plan-{index:03d}",
                 "name": f"row {index}",
-                "entity_type": ["task", "decision", "passage"][index % 3],
+                "entity_type": ["task", "decision", "passage", "project"][index % 4],
                 "group_id": org,
                 "status": "done" if index % 2 else "todo",
                 "created_at": NOW - timedelta(days=index % 40),
@@ -779,6 +850,8 @@ async def test_window_reads_walk_their_indexes(plan_clients) -> None:
     checks = (
         (graph, activity.CREATED_IN_WINDOW + private, "idx_entity_updated"),
         (graph, activity.COMPLETED_IN_WINDOW + private, "idx_entity_type_status_updated"),
+        # Any index led by entity_type serves the project-name equality.
+        (graph, activity.PROJECT_NAMES, "idx_entity_type"),
         (
             content,
             surreal_content.RAW_ACTIVITY_STATEMENT + surreal_content._RAW_ACTIVITY_OWN_PRIVATE_ONLY,
