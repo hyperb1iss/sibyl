@@ -1,7 +1,7 @@
 'use client';
 
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
-import { useCallback, useMemo } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { TeamActivityView } from '@/components/team';
 import type { TeamActivityWindow } from '@/lib/api/activity';
 import { DEFAULT_TEAM_ACTIVITY_WINDOW, isTeamActivityWindow } from '@/lib/constants/activity';
@@ -25,9 +25,12 @@ export function TeamContent() {
 
   const { selectProject, clearProjects, scopeReady } = useProjectContext();
   const projectFilters = useProjectFilters();
+  // A selected person narrows the feed on the server, so it reaches past the
+  // team-wide latest 100.
+  const [personId, setPersonId] = useState<string | null>(null);
   // An unresolved scope would read every project; wait for the selection.
   const activity = useTeamActivity(
-    { window: activityWindow, projectIds: projectFilters },
+    { window: activityWindow, projectIds: projectFilters, actorId: personId ?? undefined },
     { enabled: scopeReady }
   );
 
@@ -64,6 +67,8 @@ export function TeamContent() {
       onSelectAllProjects={clearProjects}
       onSelectProject={selectProject}
       activity={activity}
+      personId={personId}
+      onPersonChange={setPersonId}
       currentUserId={me?.user.id}
     />
   );

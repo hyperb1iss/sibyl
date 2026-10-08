@@ -18,15 +18,20 @@ import { PersonAvatar } from './person-avatar';
 interface ActivityFeedProps {
   /** Items to show, newest first, already narrowed to `person` when set. */
   items: TeamActivityItem[];
-  /** How many items the response carried before the person filter. */
-  totalItems: number;
+  /** Fallback names and avatars for items that arrive without them. */
   people: Map<string, TeamActivityPerson>;
+  /** Fallback names for items that arrive without a project name. */
   projectNames: Record<string, string>;
   /** The page is scoped to this one project, so its badge would repeat. */
   scopedProjectId?: string;
   truncated: boolean;
   windowPhrase: string;
   person?: TeamActivityPerson;
+  /**
+   * The items are the server's answer for `person`, not the team feed
+   * narrowed in the browser while that answer loads.
+   */
+  personScoped: boolean;
   onClearPerson: () => void;
   now?: number;
 }
@@ -71,7 +76,9 @@ function FeedRow({
 }) {
   const config = teamActivityKindConfig(item.kind);
   const Icon = config.icon;
-  const actorName = actor?.name ?? 'Unknown member';
+  // The item names its actor; the people list covers older answers.
+  const actorName = item.actor_name ?? actor?.name ?? 'Unknown member';
+  const actorAvatar = item.actor_avatar_url ?? actor?.avatar_url;
 
   return (
     <li className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-start gap-3 px-4 py-3 transition-colors hover:bg-sc-bg-highlight/40">
@@ -94,12 +101,7 @@ function FeedRow({
             ·
           </span>
           <span className="inline-flex min-w-0 items-center gap-1.5">
-            <PersonAvatar
-              size="xs"
-              name={actorName}
-              seed={item.actor_id}
-              avatarUrl={actor?.avatar_url}
-            />
+            <PersonAvatar size="xs" name={actorName} seed={item.actor_id} avatarUrl={actorAvatar} />
             <span className="truncate">{actorName}</span>
           </span>
           {projectName && (
@@ -124,16 +126,19 @@ function FeedRow({
 /** The team's recent work, newest first, one block per day. */
 export function ActivityFeed({
   items,
-  totalItems,
   people,
   projectNames,
   scopedProjectId,
   truncated,
   windowPhrase,
   person,
+  personScoped,
   onClearPerson,
   now,
 }: ActivityFeedProps) {
+  const lookFurther = scopedProjectId
+    ? ''
+    : ' Pick one project to look further back in its history.';
   const groups = useMemo(() => groupByDay(items, now), [items, now]);
 
   return (
@@ -153,7 +158,7 @@ export function ActivityFeed({
             Activity
           </h2>
           <span className="rounded-full bg-sc-bg-highlight px-2 py-0.5 text-[11px] font-medium text-sc-fg-muted tabular-nums">
-            {person ? `${items.length} of ${totalItems}` : items.length}
+            {items.length}
           </span>
         </div>
         {person && (
@@ -177,17 +182,21 @@ export function ActivityFeed({
 
       {items.length === 0 ? (
         person ? (
-          <EnhancedEmptyState
-            icon={<Users width={40} height={40} className="text-sc-yellow" />}
-            title={`Nothing from ${person.name} in ${windowPhrase}`}
-            description={
-              truncated
-                ? `The feed holds the latest ${TEAM_ACTIVITY_RECENT_LIMIT} team updates, and none of them are theirs.${scopedProjectId ? '' : ' Pick one project to look further back.'}`
-                : 'Their captures, tasks, decisions, and notes land here as they happen.'
-            }
-            variant="filtered"
-            actions={[{ label: 'Show everyone', onClick: onClearPerson, variant: 'secondary' }]}
-          />
+          personScoped ? (
+            <EnhancedEmptyState
+              icon={<Users width={40} height={40} className="text-sc-yellow" />}
+              title={`Nothing from ${person.name} in ${windowPhrase}`}
+              description="Their captures, tasks, decisions, and notes land here as they happen."
+              variant="filtered"
+              actions={[{ label: 'Show everyone', onClick: onClearPerson, variant: 'secondary' }]}
+            />
+          ) : (
+            <EnhancedEmptyState
+              icon={<Users width={40} height={40} className="text-sc-cyan" />}
+              title={`Looking for ${person.name}'s work`}
+              description={`Checking ${windowPhrase} past the team's latest ${TEAM_ACTIVITY_RECENT_LIMIT} updates.`}
+            />
+          )
         ) : (
           <EnhancedEmptyState
             icon={<Activity width={40} height={40} className="text-sc-fg-subtle" />}
@@ -211,7 +220,7 @@ export function ActivityFeed({
                     actor={people.get(item.actor_id)}
                     projectName={
                       item.project_id && item.project_id !== scopedProjectId
-                        ? projectNames[item.project_id]
+                        ? (item.project_name ?? projectNames[item.project_id])
                         : undefined
                     }
                     now={now}
@@ -223,7 +232,7 @@ export function ActivityFeed({
         </div>
       )}
 
-      {truncated && (items.length > 0 || !person) && (
+      {truncated && (!person || (personScoped && items.length > 0)) && (
         <p className="flex items-start gap-2 border-t border-sc-fg-subtle/10 px-4 py-3 text-xs text-sc-fg-muted">
           <InfoCircle
             width={14}
@@ -232,9 +241,10 @@ export function ActivityFeed({
             className="mt-px shrink-0 text-sc-cyan"
           />
           <span>
-            Showing the latest {TEAM_ACTIVITY_RECENT_LIMIT} team updates.
-            {person ? ` Earlier work from ${person.name} may sit past that cut.` : ''}
-            {scopedProjectId ? '' : ' Pick one project to look further back in its history.'}
+            {person
+              ? `Showing the latest ${TEAM_ACTIVITY_RECENT_LIMIT} updates from ${person.name}.`
+              : `Showing the latest ${TEAM_ACTIVITY_RECENT_LIMIT} team updates.`}
+            {lookFurther}
           </span>
         </p>
       )}

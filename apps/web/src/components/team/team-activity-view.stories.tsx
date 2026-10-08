@@ -26,13 +26,22 @@ interface PlaygroundProps {
 function TeamActivityPlayground({ scenario, theme }: PlaygroundProps) {
   const [activityWindow, setActivityWindow] = useState<TeamActivityWindow>('7d');
   const [selected, setSelected] = useState<string[]>([]);
+  const [personId, setPersonId] = useState<string | null>(null);
 
   useLayoutEffect(() => {
     document.documentElement.dataset.theme = theme;
     document.documentElement.style.colorScheme = theme === 'dawn' ? 'light' : 'dark';
   }, [theme]);
 
-  const data: TeamActivityResponse | undefined = responseFor(scenario, activityWindow);
+  const team = responseFor(scenario, activityWindow);
+  const data: TeamActivityResponse | undefined =
+    team && personId
+      ? {
+          ...team,
+          actor_id: personId,
+          recent: team.recent.filter(item => item.actor_id === personId),
+        }
+      : team;
 
   return (
     <div className="min-h-screen bg-sc-bg-dark p-3 font-sans sm:p-4 md:p-6">
@@ -52,6 +61,8 @@ function TeamActivityPlayground({ scenario, theme }: PlaygroundProps) {
           isError: scenario === 'error',
           refetch: () => undefined,
         }}
+        personId={personId}
+        onPersonChange={setPersonId}
         currentUserId="user_grace"
         now={NOW}
       />

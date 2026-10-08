@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useMemo } from 'react';
 import { TeamFeedSkeleton, TeamPeopleSkeleton } from '@/components/suspense-boundary';
 import { Button } from '@/components/ui/button';
 import { ErrorState } from '@/components/ui/empty-state';
@@ -39,6 +39,9 @@ export interface TeamActivityViewProps {
     TeamActivityResult,
     'data' | 'isLoading' | 'isFetching' | 'isPlaceholderData' | 'isError' | 'refetch'
   >;
+  /** The member the feed is narrowed to, if any. */
+  personId: string | null;
+  onPersonChange: (userId: string | null) => void;
   currentUserId?: string;
   /** Pins relative times, for stories and tests. */
   now?: number;
@@ -73,11 +76,12 @@ export function TeamActivityView({
   onSelectAllProjects,
   onSelectProject,
   activity,
+  personId,
+  onPersonChange,
   currentUserId,
   now,
 }: TeamActivityViewProps) {
   const { data, isLoading, isFetching, isPlaceholderData, isError, refetch } = activity;
-  const [personId, setPersonId] = useState<string | null>(null);
 
   // Describe the window the data on screen covers, which trails the switcher
   // while a new window loads.
@@ -99,14 +103,24 @@ export function TeamActivityView({
   );
 
   const person = personId ? peopleById.get(personId) : undefined;
+  // Until the server answers for this person, narrow the team feed already on
+  // screen, so the click lands instantly.
+  const personScoped = person !== undefined && data?.actor_id === person.user_id;
   const recent = data?.recent ?? [];
   const feedItems = useMemo(
     () => (person ? recent.filter(item => item.actor_id === person.user_id) : recent),
     [person, recent]
   );
 
-  const togglePerson = (userId: string) =>
-    setPersonId(current => (current === userId ? null : userId));
+  // The people grid only goes stale when the window or projects change; a
+  // person switch reloads the feed alone.
+  const shownProjects = data?.project_ids ?? (data?.project_id ? [data.project_id] : []);
+  const peopleStale =
+    isPlaceholderData &&
+    (shownWindow !== activityWindow ||
+      [...shownProjects].sort().join(',') !== [...selectedProjectIds].sort().join(','));
+
+  const togglePerson = (userId: string) => onPersonChange(personId === userId ? null : userId);
 
   const summary = data
     ? `${activeCount} of ${people.length} ${people.length === 1 ? 'person' : 'people'} active in ${windowPhrase}`
@@ -211,13 +225,12 @@ export function TeamActivityView({
           <TeamFeedSkeleton />
         </output>
       ) : (
-        <div
-          aria-busy={isPlaceholderData || undefined}
-          className={`space-y-4 transition-opacity duration-200 sm:space-y-6 ${
-            isPlaceholderData ? 'opacity-60' : ''
-          }`}
-        >
-          <section aria-labelledby="team-people-heading">
+        <div className="space-y-4 sm:space-y-6">
+          <section
+            aria-labelledby="team-people-heading"
+            aria-busy={peopleStale || undefined}
+            className={`transition-opacity duration-200 ${peopleStale ? 'opacity-60' : ''}`}
+          >
             <div className="mb-3 flex items-baseline justify-between gap-3">
               <h2
                 id="team-people-heading"
@@ -250,18 +263,23 @@ export function TeamActivityView({
             </div>
           </section>
 
-          <ActivityFeed
-            items={feedItems}
-            totalItems={recent.length}
-            people={peopleById}
-            projectNames={projectNames}
-            scopedProjectId={selectedProjectIds.length === 1 ? selectedProjectIds[0] : undefined}
-            truncated={data.truncated}
-            windowPhrase={windowPhrase}
-            person={person}
-            onClearPerson={() => setPersonId(null)}
-            now={now}
-          />
+          <div
+            aria-busy={isPlaceholderData || undefined}
+            className={`transition-opacity duration-200 ${isPlaceholderData ? 'opacity-60' : ''}`}
+          >
+            <ActivityFeed
+              items={feedItems}
+              people={peopleById}
+              projectNames={projectNames}
+              scopedProjectId={selectedProjectIds.length === 1 ? selectedProjectIds[0] : undefined}
+              truncated={data.truncated}
+              windowPhrase={windowPhrase}
+              person={person}
+              personScoped={personScoped}
+              onClearPerson={() => onPersonChange(null)}
+              now={now}
+            />
+          </div>
         </div>
       )}
     </div>

@@ -94,8 +94,17 @@ function lastActivityRequest(): URL | undefined {
   return activityRequests().at(-1);
 }
 
+/** Answer like the API: an actor_id request gets only that member's feed. */
 function serve(response: TeamActivityResponse) {
-  activityResponse = () => json(response);
+  activityResponse = url => {
+    const actor = url.searchParams.get('actor_id');
+    if (!actor) return json(response);
+    return json({
+      ...response,
+      actor_id: actor,
+      recent: response.recent.filter(item => item.actor_id === actor),
+    });
+  };
 }
 
 function renderTeam(search = 'projects=all') {
@@ -215,7 +224,7 @@ describe('TeamContent', () => {
 
     await waitFor(() => expect(lastActivityRequest()?.searchParams.get('window')).toBe('24h'));
     const people = screen.getByRole('region', { name: /^People/ });
-    expect(people.parentElement).toHaveAttribute('aria-busy', 'true');
+    expect(people).toHaveAttribute('aria-busy', 'true');
     expect(screen.getByText('Updating')).toBeVisible();
     expect(screen.queryByLabelText('Loading team activity')).not.toBeInTheDocument();
     // The summary still describes the data on screen, not the pending window.
@@ -268,7 +277,7 @@ describe('TeamContent', () => {
     await waitFor(() => expect(lastActivityRequest()?.searchParams.has('project_id')).toBe(false));
   });
 
-  it('narrows the feed to one person and back', async () => {
+  it('narrows the feed to one person on the server and back', async () => {
     const { user } = renderTeam();
     await screen.findByRole('region', { name: /^People/ });
     expect(within(feed()).getAllByRole('link')).toHaveLength(14);
@@ -277,16 +286,44 @@ describe('TeamContent', () => {
     await user.click(alan);
 
     expect(alan).toHaveAttribute('aria-pressed', 'true');
-    const links = within(feed()).getAllByRole('link');
-    expect(links.map(link => link.textContent)).toEqual([
+    await waitFor(() =>
+      expect(lastActivityRequest()?.searchParams.get('actor_id')).toBe('user_alan')
+    );
+    expect(lastActivityRequest()?.searchParams.get('window')).toBe('7d');
+    await waitFor(() => expect(feed().parentElement).not.toHaveAttribute('aria-busy'));
+    expect(
+      within(feed())
+        .getAllByRole('link')
+        .map(link => link.textContent)
+    ).toEqual([
       'Reranker weights drift after a passage rebuild',
       'Context packs lose agent diaries without a null project',
     ]);
-    expect(within(feed()).getByText('2 of 14')).toBeVisible();
 
     await user.click(alan);
     expect(alan).toHaveAttribute('aria-pressed', 'false');
-    expect(within(feed()).getAllByRole('link')).toHaveLength(14);
+    await waitFor(() => expect(within(feed()).getAllByRole('link')).toHaveLength(14));
+    expect(lastActivityRequest()?.searchParams.has('actor_id')).toBe(false);
+  });
+
+  it('narrows the feed at once while the person request loads', async () => {
+    const { user } = renderTeam();
+    await screen.findByRole('region', { name: /^People/ });
+
+    // The member's answer never arrives: the page must not wait on it.
+    activityResponse = url =>
+      url.searchParams.has('actor_id')
+        ? new Promise<Response>(() => undefined)
+        : json(fixtureTeamActivity(NOW));
+    await user.click(screen.getByRole('button', { name: 'Alan Turing' }));
+
+    expect(within(feed()).getAllByRole('link')).toHaveLength(2);
+    await waitFor(() =>
+      expect(lastActivityRequest()?.searchParams.get('actor_id')).toBe('user_alan')
+    );
+    // Only the feed is waiting; the people grid is current.
+    expect(feed().parentElement).toHaveAttribute('aria-busy', 'true');
+    expect(screen.getByRole('region', { name: /^People/ })).not.toHaveAttribute('aria-busy');
   });
 
   it('tells a person filter with nothing to show apart from an empty team', async () => {
@@ -300,6 +337,58 @@ describe('TeamContent', () => {
     ).toBeVisible();
     await user.click(within(feed()).getByRole('button', { name: 'Show everyone' }));
     expect(within(feed()).getAllByRole('link')).toHaveLength(14);
+  });
+
+  it('names actors and projects from the item, with fallbacks', async () => {
+    const base = fixtureTeamActivity(NOW);
+    const [first, second, third] = base.recent;
+    serve({
+      ...base,
+      recent: [
+        // Not in the people list, but the item carries its own names.
+        {
+          ...first,
+          actor_id: 'user_former',
+          actor_name: 'Former Teammate',
+          actor_avatar_url: null,
+          project_id: 'project_gone',
+          project_name: 'Retired Project',
+        },
+        // No names on the item: fall back to the people list and project lookup.
+        { ...second, actor_name: null, project_name: null },
+        // Nothing anywhere names this actor.
+        { ...third, actor_id: 'user_ghost', actor_name: null },
+      ],
+    });
+    renderTeam();
+    await screen.findByRole('region', { name: /^People/ });
+
+    const rows = within(feed()).getAllByRole('listitem');
+    expect(within(rows[0]).getByText('Former Teammate')).toBeVisible();
+    expect(within(rows[0]).getByText('Retired Project')).toBeVisible();
+    expect(within(rows[1]).getByText('Grace Hopper')).toBeVisible();
+    expect(within(rows[1]).getByText('Sibyl Web')).toBeVisible();
+    expect(within(rows[2]).getByText('Unknown member')).toBeVisible();
+    expect(within(feed()).getAllByText('Unknown member')).toHaveLength(1);
+  });
+
+  it('badges viewers', async () => {
+    renderTeam();
+    const people = await screen.findByRole('region', { name: /^People/ });
+
+    const dennis = within(people)
+      .getByRole('button', { name: 'Dennis Ritchie' })
+      .closest('article');
+    expect(within(dennis as HTMLElement).getByText('Viewer')).toBeVisible();
+  });
+
+  it('asks for several selected projects in one request', async () => {
+    renderTeam('projects=project_web,project_core');
+
+    await screen.findByRole('region', { name: /^People/ });
+    const requests = activityRequests();
+    expect(requests).toHaveLength(1);
+    expect(requests[0].searchParams.getAll('project_id')).toEqual(['project_core', 'project_web']);
   });
 
   it('says when the feed is cut at the latest 100', async () => {
