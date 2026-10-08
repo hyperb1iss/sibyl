@@ -1,3 +1,4 @@
+import type { TeamActivityParams } from '../api/activity';
 import type { AIModelKind, adminApi, jobsApi, telemetryApi } from '../api/admin';
 import type { entitiesApi } from '../api/graph';
 import type { memoryApi, rawCapturesApi, sessionApi } from '../api/memory';
@@ -143,6 +144,10 @@ export const queryKeys = {
     list: ['backups', 'list'] as const,
     detail: (id: string) => ['backups', 'detail', id] as const,
     jobStatus: (jobId: string) => ['backups', 'job', jobId] as const,
+  },
+  activity: {
+    all: ['activity'] as const,
+    team: (params: TeamActivityParams) => ['activity', 'team', params] as const,
   },
   jobs: {
     all: ['jobs'] as const,

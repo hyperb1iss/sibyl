@@ -54,6 +54,10 @@ describe('navigation sections', () => {
       'explore',
       'system',
     ]);
+    expect(NAVIGATION_SECTIONS.find(s => s.id === 'overview')?.items.map(i => i.href)).toEqual([
+      '/',
+      '/team',
+    ]);
     expect(NAVIGATION_SECTIONS.find(s => s.id === 'work')?.items.map(i => i.href)).toEqual([
       '/projects',
       '/epics',

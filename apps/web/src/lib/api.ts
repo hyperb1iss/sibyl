@@ -6,6 +6,17 @@
  */
 
 export type {
+  TeamActivityCounts,
+  TeamActivityItem,
+  TeamActivityKind,
+  TeamActivityParams,
+  TeamActivityPerson,
+  TeamActivityRange,
+  TeamActivityResponse,
+  TeamActivityRole,
+  TeamActivityWindow,
+} from './api/activity';
+export type {
   AdminAuditEvent,
   AdminAuditExportFormat,
   AdminAuditListResponse,

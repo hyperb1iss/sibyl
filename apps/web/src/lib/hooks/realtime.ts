@@ -222,6 +222,7 @@ export function useRealtimeUpdates(isAuthenticated?: boolean) {
 
     const unsubRawCaptureChanged = wsClient.on('raw_capture_changed', data => {
       invalidate(queryKeys.rawCaptures.all);
+      invalidate(queryKeys.activity.all);
       for (const rawMemoryId of data.raw_memory_ids) {
         invalidate(queryKeys.rawCaptures.detail(rawMemoryId));
       }

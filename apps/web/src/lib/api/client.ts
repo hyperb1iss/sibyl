@@ -1,3 +1,4 @@
+import { activityApi } from './activity';
 import {
   adminApi,
   backupsApi,
@@ -41,4 +42,5 @@ export const api = {
   metrics: metricsApi,
   setup: setupApi,
   settings: settingsApi,
+  activity: activityApi,
 };

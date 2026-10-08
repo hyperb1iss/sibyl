@@ -60,6 +60,7 @@ describe('useRealtimeUpdates', () => {
     await vi.advanceTimersByTimeAsync(INVALIDATION_DEBOUNCE_MS);
 
     expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: queryKeys.rawCaptures.all });
+    expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: queryKeys.activity.all });
     expect(invalidateQueries).toHaveBeenCalledWith({
       queryKey: queryKeys.rawCaptures.detail('raw-a'),
     });
@@ -90,6 +91,7 @@ describe('useRealtimeUpdates', () => {
     const keys = invalidateQueries.mock.calls.map(([filters]) => JSON.stringify(filters?.queryKey));
     expect(keys.filter(key => key === JSON.stringify(queryKeys.tasks.all))).toHaveLength(1);
     expect(keys.filter(key => key === JSON.stringify(['metrics']))).toHaveLength(1);
+    expect(keys.filter(key => key === JSON.stringify(queryKeys.activity.all))).toHaveLength(1);
     expect(
       keys.filter(key => key === JSON.stringify(queryKeys.tasks.detail('task_1')))
     ).toHaveLength(1);
