@@ -1,7 +1,7 @@
 'use client';
 
 import { useQueries } from '@tanstack/react-query';
-import { useCallback } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import type {
   TeamActivityItem,
   TeamActivityParams,
@@ -114,6 +114,11 @@ function scopeParams({ window, projectId, projectIds }: TeamActivityScope): Team
  * Who on the team did what inside a time window, for every project, one
  * project, or several. Mirrors a single query's state so callers do not care
  * how many requests the scope took.
+ *
+ * While a new window or scope loads, the previous answer stays on screen
+ * flagged `isPlaceholderData`. The app's `keepPreviousData` default does not
+ * reach `useQueries`: every new key gets a fresh observer with no previous
+ * data, so the hook carries the last answer itself.
  */
 export function useTeamActivity(
   scope: TeamActivityScope,
@@ -153,7 +158,7 @@ export function useTeamActivity(
     [enabled]
   );
 
-  return useQueries({
+  const current = useQueries({
     queries: params.map(query => ({
       queryKey: queryKeys.activity.team(query),
       queryFn: ({ signal }: { signal: AbortSignal }) => activityApi.team(query, { signal }),
@@ -162,4 +167,14 @@ export function useTeamActivity(
     })),
     combine,
   });
+
+  // The combined answer is structurally shared, so this only fires when the
+  // data on screen actually changes.
+  const [previous, setPrevious] = useState<TeamActivityResponse | undefined>(undefined);
+  useEffect(() => {
+    if (current.data) setPrevious(current.data);
+  }, [current.data]);
+
+  if (current.data || current.isError || !current.isLoading || !previous) return current;
+  return { ...current, data: previous, isLoading: false, isPlaceholderData: true };
 }

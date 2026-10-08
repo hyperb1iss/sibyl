@@ -81,7 +81,7 @@ function json(body: unknown, status = 200) {
   });
 }
 
-let activityResponse: () => Response;
+let activityResponse: (url: URL) => Response | Promise<Response>;
 let fetchMock: ReturnType<typeof vi.fn>;
 
 function activityRequests(): URL[] {
@@ -107,6 +107,26 @@ function renderTeam(search = 'projects=all') {
   );
 }
 
+// jsdom in this runner has no usable localStorage, and the project context
+// remembers "All projects" there, so each test gets its own empty store.
+function createMemoryStorage(): Storage {
+  const store = new Map<string, string>();
+  return {
+    get length() {
+      return store.size;
+    },
+    clear: () => store.clear(),
+    getItem: (key: string) => store.get(key) ?? null,
+    key: (index: number) => [...store.keys()][index] ?? null,
+    removeItem: (key: string) => {
+      store.delete(key);
+    },
+    setItem: (key: string, value: string) => {
+      store.set(key, String(value));
+    },
+  };
+}
+
 function feed() {
   return screen.getByRole('region', { name: /^Activity/ });
 }
@@ -120,12 +140,13 @@ describe('TeamContent', () => {
     serve(fixtureTeamActivity(NOW));
     fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = new URL(String(input), 'http://localhost');
-      if (url.pathname === '/api/activity/team') return activityResponse();
+      if (url.pathname === '/api/activity/team') return activityResponse(url);
       if (url.pathname === '/api/search/explore') return json(PROJECTS_RESPONSE);
       if (url.pathname === '/api/auth/me') return json(ME_RESPONSE);
       return json({ detail: 'not found' }, 404);
     });
     vi.stubGlobal('fetch', fetchMock);
+    vi.stubGlobal('localStorage', createMemoryStorage());
   });
 
   afterEach(() => {
@@ -179,6 +200,45 @@ describe('TeamContent', () => {
     expect(url.searchParams.get('projects')).toBe('all');
     await waitFor(() => expect(lastActivityRequest()?.searchParams.get('window')).toBe('24h'));
     expect(screen.getByRole('button', { name: '24h' })).toHaveAttribute('aria-pressed', 'true');
+  });
+
+  it('keeps the current answer on screen while a new window loads', async () => {
+    const { user } = renderTeam();
+    await screen.findByRole('region', { name: /^People/ });
+
+    // The 24h answer never arrives, so the page stays mid-switch.
+    activityResponse = url =>
+      url.searchParams.get('window') === '24h'
+        ? new Promise<Response>(() => undefined)
+        : json(fixtureTeamActivity(NOW));
+    await user.click(screen.getByRole('button', { name: '24h' }));
+
+    await waitFor(() => expect(lastActivityRequest()?.searchParams.get('window')).toBe('24h'));
+    const people = screen.getByRole('region', { name: /^People/ });
+    expect(people.parentElement).toHaveAttribute('aria-busy', 'true');
+    expect(screen.getByText('Updating')).toBeVisible();
+    expect(screen.queryByLabelText('Loading team activity')).not.toBeInTheDocument();
+    // The summary still describes the data on screen, not the pending window.
+    expect(screen.getByText('4 of 6 people active in the last 7 days')).toBeVisible();
+  });
+
+  it('opens a first visit on one project and never asks for every project', async () => {
+    renderTeam('');
+
+    await screen.findByRole('region', { name: /^People/ });
+    expect(activityRequests().map(url => url.searchParams.get('project_id'))).toEqual([
+      'project_core',
+    ]);
+  });
+
+  it('scopes a shared project link without an unscoped request first', async () => {
+    renderTeam('projects=project_web');
+
+    await screen.findByRole('region', { name: /^People/ });
+    expect(activityRequests().map(url => url.searchParams.get('project_id'))).toEqual([
+      'project_web',
+    ]);
+    expect(screen.getByRole('combobox', { name: 'Project scope' })).toHaveTextContent('Sibyl Web');
   });
 
   it('reads the window from a shared link', async () => {

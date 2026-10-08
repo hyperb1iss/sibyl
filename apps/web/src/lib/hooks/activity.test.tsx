@@ -91,6 +91,23 @@ describe('useTeamActivity', () => {
     expect(ada?.counts.captures).toBe(24);
   });
 
+  it('keeps the previous answer, flagged as a placeholder, while a new window loads', async () => {
+    const { result, rerender } = renderHook(
+      ({ window }: { window: '7d' | '24h' }) => useTeamActivity({ window }),
+      { wrapper: createWrapper(), initialProps: { window: '7d' } }
+    );
+    await waitFor(() => expect(result.current.data).toBeDefined());
+    const shown = result.current.data;
+
+    fetchMock.mockImplementationOnce(() => new Promise<Response>(() => undefined));
+    rerender({ window: '24h' });
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    expect(result.current.data).toBe(shown);
+    expect(result.current.isPlaceholderData).toBe(true);
+    expect(result.current.isLoading).toBe(false);
+  });
+
   it('waits while disabled', () => {
     const { result } = renderHook(() => useTeamActivity({ window: '7d' }, { enabled: false }), {
       wrapper: createWrapper(),
