@@ -1027,7 +1027,8 @@ class TestUpdateTaskCompletion:
         [
             ({"status": "doing"}, True),
             ({"status": "done", "completed_by": "alice"}, False),
-            ({"status": "doing", "migration": {"tool": "sibyl migrate to-team"}}, False),
+            # MCP status-done on a carried task credits the caller.
+            ({"status": "doing", "migration": {"tool": "sibyl migrate to-team"}}, True),
         ],
     )
     async def test_sync_status_edit_stamps_the_caller_on_the_revision_it_read(
@@ -1077,3 +1078,23 @@ class TestUpdateTaskCompletion:
 
         updates = queue.enqueue_update_task.await_args.args[1]
         assert updates == {"status": "done", "modified_by": "user-7"}
+
+    @pytest.mark.asyncio
+    async def test_a_missing_task_still_answers_failed_to_update(self) -> None:
+        from sibyl_core.tools.manage import _update_task
+
+        manager = SimpleNamespace(
+            get=AsyncMock(side_effect=KeyError("task_gone")),
+            update=AsyncMock(return_value=None),
+        )
+        result = await _update_task(
+            manager,
+            "task_gone",
+            {"status": "done"},
+            organization_id="org-1",
+            principal_id="user-7",
+        )
+
+        assert result.success is False
+        assert result.message == "Failed to update task"
+        assert "expected_revision" not in manager.update.await_args.kwargs

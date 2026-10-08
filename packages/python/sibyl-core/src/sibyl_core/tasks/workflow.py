@@ -76,6 +76,11 @@ def get_allowed_transitions(status: TaskStatus) -> set[TaskStatus]:
     return ALL_STATUSES | {TaskStatus.ARCHIVED}
 
 
+def _observed_revision(entity: object) -> int | None:
+    revision = getattr(entity, "observed_revision", None)
+    return revision if type(revision) is int and revision >= 1 else None
+
+
 class TaskWorkflowEngine:
     """Handles task status transitions and automations.
 
@@ -108,7 +113,13 @@ class TaskWorkflowEngine:
         *,
         current_status: object = None,
         actor_id: str | None = None,
+        observed_revision: int | None = None,
     ) -> Any:
+        if expected_revision is None and observed_revision is not None:
+            # The status this write decides from was read at that revision, so
+            # the write lands only there: a caller without the entity lock gets
+            # a conflict instead of acting on a status that has since moved.
+            expected_revision = observed_revision
         if current_status is not None and "status" in updates:
             # The status read with this write decides whether the completion
             # record is stamped, kept, or cleared (see tasks.completion).
@@ -206,6 +217,7 @@ class TaskWorkflowEngine:
                 all_updates,
                 expected_revision,
                 current_status=task.status,
+                observed_revision=_observed_revision(entity),
             )
             task = self._entity_to_task(updated_entity)
 
@@ -267,6 +279,7 @@ class TaskWorkflowEngine:
             updates,
             expected_revision,
             current_status=task.status,
+            observed_revision=_observed_revision(entity),
         )
         updated_task = self._entity_to_task(updated_entity)
 
@@ -324,6 +337,7 @@ class TaskWorkflowEngine:
             updates,
             expected_revision,
             current_status=task.status,
+            observed_revision=_observed_revision(entity),
         )
         updated_task = self._entity_to_task(updated_entity)
 
@@ -393,6 +407,7 @@ class TaskWorkflowEngine:
             updates,
             expected_revision,
             current_status=task.status,
+            observed_revision=_observed_revision(entity),
             actor_id=completed_by,
         )
         updated_task = self._entity_to_task(updated_entity)
@@ -454,6 +469,7 @@ class TaskWorkflowEngine:
             updates,
             expected_revision,
             current_status=task.status,
+            observed_revision=_observed_revision(entity),
         )
         updated_task = self._entity_to_task(updated_entity)
 
@@ -502,6 +518,7 @@ class TaskWorkflowEngine:
             updates,
             expected_revision,
             current_status=task.status,
+            observed_revision=_observed_revision(entity),
         )
         updated_task = self._entity_to_task(updated_entity)
 
@@ -549,6 +566,7 @@ class TaskWorkflowEngine:
             updates,
             expected_revision,
             current_status=task.status,
+            observed_revision=_observed_revision(entity),
         )
         updated_task = self._entity_to_task(updated_entity)
 

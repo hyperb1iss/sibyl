@@ -18,7 +18,7 @@ Task and epic workflow actions are soft-deprecated in favor of the RESTful
 analysis actions have no REST equivalent and are not deprecated.
 """
 
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
 from typing import Any, Literal, cast, get_args
@@ -32,7 +32,7 @@ from sibyl_core.auth.memory_policy import (
     memory_row_project_id,
     private_scope_granted_for,
 )
-from sibyl_core.errors import RevisionConflictError
+from sibyl_core.errors import EntityNotFoundError, RevisionConflictError
 from sibyl_core.models.entities import EntityType
 from sibyl_core.runtime_ports import (
     get_audit_port,
@@ -877,6 +877,22 @@ async def _handle_task_action(
     return ManageResponse(success=False, action=action, message="Unknown task action")
 
 
+async def _task_for_status_edit(
+    entity_manager: Any, entity_id: str, updates: Mapping[str, Any]
+) -> Any | None:
+    """The task a status edit replaces, or None when there is no status or no task.
+
+    A missing task is left for the update to report, so it still answers
+    "Failed to update task" rather than raising past the handler.
+    """
+    if "status" not in updates:
+        return None
+    try:
+        return await entity_manager.get(entity_id)
+    except (EntityNotFoundError, KeyError):
+        return None
+
+
 async def _update_task(
     entity_manager: Any,
     entity_id: str | None,
@@ -990,8 +1006,8 @@ async def _update_task(
 
     # Sync mode: update directly
     try:
-        if "status" in updates:
-            current = await entity_manager.get(entity_id)
+        current = await _task_for_status_edit(entity_manager, entity_id, updates)
+        if current is not None:
             current_metadata = getattr(current, "metadata", None) or {}
             updates.update(
                 status_edit_completion_updates(
@@ -1004,7 +1020,9 @@ async def _update_task(
             if expected_revision is None:
                 # The completion was decided from this read, so the write
                 # lands only on the revision it read.
-                read_revision = getattr(current, "revision", None)
+                read_revision = getattr(current, "observed_revision", None) or getattr(
+                    current, "revision", None
+                )
                 expected_revision = read_revision if isinstance(read_revision, int) else None
         if expected_revision is None:
             result = await entity_manager.update(entity_id, updates)

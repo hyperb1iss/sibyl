@@ -29,6 +29,7 @@ from sibyl.persistence.graph_runtime import (
     touch_graph_entity_bookkeeping,
     update_graph_entity,
 )
+from sibyl_core.errors import EntityNotFoundError
 from sibyl_core.models.entities import EntityType
 from sibyl_core.tasks.completion import status_edit_completion_updates
 from sibyl_core.tasks.workflow import TaskWorkflowEngine
@@ -257,20 +258,26 @@ async def status_edit_completion(
     next_status: object,
     *,
     actor_id: str | None,
+    mirrors_source: bool = False,
 ) -> dict[str, Any]:
     """The completion record a plain status edit writes, read inside the caller's lock.
 
     Callers hold the task's entity lock, so the status read here is the one
-    the write replaces. A task the migration carried gets no completion from a
-    status edit, because that edit is how the migration mirrors its source.
+    the write replaces. ``mirrors_source`` is the migration's mark on its own
+    status write (see ``status_edit_completion_updates``).
     """
-    current = await entity_manager.get(task_id)
+    try:
+        current = await entity_manager.get(task_id)
+    except (EntityNotFoundError, KeyError):
+        # Gone since the caller's check: the write that follows reports it.
+        return {}
     metadata = getattr(current, "metadata", None) or {}
     return status_edit_completion_updates(
         metadata,
         metadata.get("status") or getattr(current, "status", None),
         next_status,
         actor_id=actor_id,
+        mirrors_source=mirrors_source,
     )
 
 

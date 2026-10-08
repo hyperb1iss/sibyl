@@ -989,7 +989,9 @@ class TestUpdateEntityPassageReprojection:
     [
         ({"status": "review"}, True),
         ({"status": "done", "completed_by": "alice"}, False),
-        ({"status": "review", "migration": {"tool": "sibyl migrate to-team"}}, False),
+        # A queued edit of a carried task is a real completion (the migration
+        # never queues its mirror writes).
+        ({"status": "review", "migration": {"tool": "sibyl migrate to-team"}}, True),
     ],
 )
 async def test_queued_status_edit_stamps_the_editor_under_the_lock(

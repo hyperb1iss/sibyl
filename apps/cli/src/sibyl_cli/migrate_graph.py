@@ -1064,7 +1064,14 @@ async def execute_plan(
                 # it was sent before, and that later write is a different request.
                 intent = {
                     "target_id": target_id,
-                    "body": {"status": status, "expected_revision": revision},
+                    # mirrors_source_status: this write copies the source's
+                    # status, so the server records no completion for it. An
+                    # intent saved before the flag existed is resent as saved.
+                    "body": {
+                        "status": status,
+                        "expected_revision": revision,
+                        "mirrors_source_status": True,
+                    },
                     "key": operation_key(
                         node,
                         "status",

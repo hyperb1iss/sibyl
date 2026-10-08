@@ -595,7 +595,10 @@ async def test_execute_writes_bodies_links_and_statuses() -> None:
     assert posts["epic_1"]["metadata"]["migration"]["origin_status"] == "in_progress"
     patches = [call for call in target.calls if call[0] == "PATCH"]
     assert [(p[1], p[2]) for p in patches] == [
-        ("/tasks/target-task_1", {"status": "done", "expected_revision": 1})
+        (
+            "/tasks/target-task_1",
+            {"status": "done", "expected_revision": 1, "mirrors_source_status": True},
+        )
     ]
     assert ledger.statuses == {"task_1": "done"}
     assert ledger.partial == {}
@@ -1500,7 +1503,7 @@ async def test_initial_status_guard_refuses_a_team_edit_after_creation() -> None
     # The refused request is never sent again; the server would hold its key.
     second = await _execute(target, ledger, plan)
     assert second.failures == [] and target.status_requests == [
-        {"status": "done", "expected_revision": 1},
+        {"status": "done", "expected_revision": 1, "mirrors_source_status": True},
     ]
     assert row["metadata"]["status"] == "doing" and row["revision"] == 2
 
@@ -1517,7 +1520,9 @@ async def test_lost_create_receipt_does_not_adopt_an_edited_revision_for_status(
     row["revision"] += 1
     second = await _execute(target, ledger, plan)
     assert second.failures == [] and second.team_statuses == ["task_1"]
-    assert target.status_requests == [{"status": "done", "expected_revision": 1}]
+    assert target.status_requests == [
+        {"status": "done", "expected_revision": 1, "mirrors_source_status": True}
+    ]
     assert row["metadata"]["status"] == "doing" and row["revision"] == 2
 
 
@@ -1541,7 +1546,9 @@ async def test_status_intent_is_saved_from_the_exact_create_receipt_before_patch
                 intent = ledger.partial["task_1"]["status_intent"]
                 assert intent["target_id"] == "target-task_1"
                 assert (
-                    intent["body"] == kwargs["json"] == {"status": "done", "expected_revision": 7}
+                    intent["body"]
+                    == kwargs["json"]
+                    == {"status": "done", "expected_revision": 7, "mirrors_source_status": True}
                 )
                 assert intent["key"] == kwargs["_idempotency_key"]
                 assert ledger.saves >= 2
@@ -1659,7 +1666,9 @@ async def test_saved_create_revision_recovers_status_after_initial_target_read_f
     second = await _execute(target, resumed, plan)
     assert second.failures == []
     assert resumed.statuses == {"task_1": "done"}
-    assert target.status_requests == [{"status": "done", "expected_revision": 1}]
+    assert target.status_requests == [
+        {"status": "done", "expected_revision": 1, "mirrors_source_status": True}
+    ]
     assert target.rows["target-task_1"]["metadata"]["status"] == "done"
     assert second.unlinked  # No saved body cut means the missing links remain explicitly reported.
 

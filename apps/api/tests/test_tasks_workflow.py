@@ -612,7 +612,7 @@ async def test_workflow_transitions_persist_status_and_branch() -> None:
     assert completed.learnings == "use cache"
     assert completed.actual_hours == 3.5
     # No actor was named, so the completion credits nobody.
-    assert "completed_by" not in entity_manager.task.metadata
+    assert entity_manager.task.metadata["completed_by"] is None
     assert "modified_by" not in entity_manager.task.metadata
 
 
@@ -945,3 +945,41 @@ async def test_reopening_a_done_task_clears_its_completion() -> None:
     await engine.complete_task("task-reopen", create_episode=False, completed_by="bob")
     assert entity_manager.task.metadata["completed_by"] == "bob"
     assert entity_manager.task.metadata["completed_at"] != "2026-10-01T09:00:00+00:00"
+
+
+class _RevisionRecordingManager:
+    """Reads a stored row at a revision and records the revision each write expects."""
+
+    def __init__(self, task: Task, observed: int) -> None:
+        self.task = task
+        self.task.observed_revision = observed
+        self.expected: list[int | None] = []
+
+    async def get(self, entity_id: str) -> Task:
+        return self.task
+
+    async def update(self, entity_id: str, updates: dict, *, expected_revision=None):
+        self.expected.append(expected_revision)
+        return self.task
+
+    async def write_bookkeeping(self, entity_id: str, fields: dict) -> None:
+        return None
+
+
+@pytest.mark.asyncio
+async def test_transitions_write_only_on_the_revision_they_read() -> None:
+    """A caller without the entity lock gets a conflict, not a decision on a moved status."""
+    from sibyl_core.tasks.workflow import TaskWorkflowEngine
+
+    task = Task(id="task-pin", title="Pinned", description="", status=TaskStatus.DOING)
+    manager = _RevisionRecordingManager(task, observed=6)
+    engine = TaskWorkflowEngine(
+        manager, _FakeRelationshipManager(), _FakeGraphClient(), organization_id="test-org"
+    )
+
+    await engine.complete_task("task-pin", create_episode=False, completed_by="bob")
+    await engine.block_task("task-pin", blocker_description="waiting")
+    # An explicit revision from the caller still wins.
+    await engine.unblock_task("task-pin", expected_revision=9)
+
+    assert manager.expected == [6, 6, 9]

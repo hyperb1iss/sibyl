@@ -5,7 +5,9 @@ who took it there. Every writer that changes a task's status asks this module
 what else to write, against the status it read inside the same lock or
 revision as the write, so the record moves only on a real transition:
 
-- into done, it is stamped (``completed_by`` only when the actor is known);
+- into done, it is stamped with the instant and the actor; with no known
+  actor ``completed_by`` is cleared, so an earlier finisher never takes credit
+  for a later completion;
 - done to done is not a transition, so a second completion rewrites nothing;
 - out of done to an open status, it is cleared, so a reopened task does not
   keep a finisher it no longer has;
@@ -36,8 +38,9 @@ def completion_updates(
 ) -> dict[str, Any]:
     """What a write moving a task from ``current_status`` to ``next_status`` adds.
 
-    ``record=False`` writes no completion for a move into done (the status is
-    being carried from elsewhere, not reached here); a reopen still clears.
+    ``record=False`` marks a move into done that nobody on this server made
+    (the migration mirroring its source): the record is cleared, so the done
+    credits nobody. A reopen clears it either way.
     """
     current = status_text(current_status)
     target = status_text(next_status)
@@ -45,24 +48,19 @@ def completion_updates(
         return {}
     if target == DONE:
         if not record:
-            return {}
+            return {"completed_at": None, "completed_by": None}
         # ISO text, as the graph stores it, so the update also broadcasts as is.
-        updates: dict[str, Any] = {"completed_at": (now or datetime.now(UTC)).isoformat()}
-        if actor_id:
-            updates["completed_by"] = actor_id
-        return updates
+        return {
+            "completed_at": (now or datetime.now(UTC)).isoformat(),
+            "completed_by": actor_id or None,
+        }
     if current == DONE and target != ARCHIVED:
         return {"completed_at": None, "completed_by": None}
     return {}
 
 
 def carried_by_migration(metadata: Mapping[str, Any] | None) -> bool:
-    """Whether ``sibyl migrate to-team`` carried this row from another server.
-
-    The migration keeps such a task's status in step with its source through
-    the plain status edit, so a done it sets there is the source's completion,
-    not one anybody made on this server.
-    """
+    """Whether ``sibyl migrate to-team`` carried this row from another server."""
     return bool((metadata or {}).get("migration"))
 
 
@@ -72,13 +70,21 @@ def status_edit_completion_updates(
     next_status: object,
     *,
     actor_id: str | None,
+    mirrors_source: bool = False,
 ) -> dict[str, Any]:
-    """Completion fields for a plain status edit (task PATCH, MCP update_task)."""
+    """Completion fields for a plain status edit (task PATCH, MCP update_task).
+
+    ``mirrors_source`` marks the one write that is not a completion: the
+    migration keeping a carried task's status in step with its source. It is
+    honoured only on a row the migration carried, and only for that write;
+    every other edit of a carried task, from the CLI, MCP or the board,
+    records its completion like any other task.
+    """
     return completion_updates(
         current_status,
         next_status,
         actor_id=actor_id,
-        record=not carried_by_migration(current_metadata),
+        record=not (mirrors_source and carried_by_migration(current_metadata)),
     )
 
 

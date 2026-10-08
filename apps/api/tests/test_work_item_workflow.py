@@ -325,26 +325,35 @@ class TestLockSerialization:
         assert peak == 2, "distinct work items must not serialize against each other"
 
 
+CARRIED = {"status": "doing", "migration": {"tool": "sibyl migrate to-team"}}
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    ("stored", "requested", "expected"),
+    ("stored", "requested", "mirrors", "expected"),
     [
         # Into done: stamped from the editor.
-        ({"status": "doing"}, "done", {"completed_by": "user-1"}),
+        ({"status": "doing"}, "done", False, {"completed_by": "user-1"}),
         # Already done: a second done rewrites nothing.
-        ({"status": "done", "completed_by": "alice"}, "done", {}),
+        ({"status": "done", "completed_by": "alice"}, "done", False, {}),
         # Reopened: the stale completion is cleared.
-        ({"status": "done", "completed_by": "alice"}, "doing", {"completed_by": None}),
-        # A row the migration carried takes its done from the source, not here.
-        ({"status": "doing", "migration": {"tool": "sibyl migrate to-team"}}, "done", {}),
+        ({"status": "done", "completed_by": "alice"}, "doing", False, {"completed_by": None}),
+        # A later edit of a carried task is a real completion.
+        (CARRIED, "done", False, {"completed_by": "user-1"}),
+        # The migration's own mirror write credits nobody.
+        (CARRIED, "done", True, {"completed_by": None, "completed_at": None}),
+        # The mirror mark means nothing on a task the migration did not carry.
+        ({"status": "doing"}, "done", True, {"completed_by": "user-1"}),
     ],
 )
 async def test_status_edit_completion_reads_the_row_it_replaces(
-    stored, requested, expected
+    stored, requested, mirrors, expected
 ) -> None:
     manager = SimpleNamespace(get=AsyncMock(return_value=SimpleNamespace(metadata=stored)))
 
-    updates = await wiw.status_edit_completion(manager, "task-1", requested, actor_id="user-1")
+    updates = await wiw.status_edit_completion(
+        manager, "task-1", requested, actor_id="user-1", mirrors_source=mirrors
+    )
 
     manager.get.assert_awaited_once_with("task-1")
     for key, value in expected.items():
@@ -353,3 +362,9 @@ async def test_status_edit_completion_reads_the_row_it_replaces(
         assert updates["completed_at"] is not None
     if not expected:
         assert updates == {}
+
+
+@pytest.mark.asyncio
+async def test_status_edit_completion_leaves_a_vanished_task_to_the_write() -> None:
+    manager = SimpleNamespace(get=AsyncMock(side_effect=KeyError("task-1")))
+    assert await wiw.status_edit_completion(manager, "task-1", "done", actor_id="u") == {}

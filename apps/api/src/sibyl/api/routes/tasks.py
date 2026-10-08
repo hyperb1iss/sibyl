@@ -210,6 +210,14 @@ class UpdateTaskRequest(BaseModel):
     add_depends_on: list[str] = []
     remove_depends_on: list[str] = []
     expected_revision: int | None = Field(default=None, ge=1)
+    mirrors_source_status: bool = Field(
+        default=False,
+        description=(
+            "Set by `sibyl migrate to-team` alone: this status write mirrors the "
+            "source task's status, so it records no completion. Honoured only on a "
+            "task the migration carried, and only with sync=true."
+        ),
+    )
 
 
 class CreateTaskRequest(BaseModel):
@@ -404,6 +412,7 @@ async def _write_task_update(
                 task_id,
                 update_data["status"],
                 actor_id=update_data.get("modified_by"),
+                mirrors_source=request.mirrors_source_status,
             )
         )
     if request.expected_revision is None:
@@ -935,6 +944,11 @@ async def update_task(
     )
     if replayed is not None:
         return replayed
+
+    if request.mirrors_source_status and not sync:
+        # The mirror marks one write, decided under the lock that write holds;
+        # a queued update would decide it later, against another status.
+        raise HTTPException(status_code=422, detail="mirrors_source_status requires sync=true")
 
     has_dep_changes = bool(request.add_depends_on or request.remove_depends_on)
     if len(update_data) <= 1 and not has_dep_changes:  # only modified_by

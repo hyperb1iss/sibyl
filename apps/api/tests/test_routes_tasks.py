@@ -441,15 +441,20 @@ async def test_queued_status_edit_leaves_the_completion_to_the_locked_job() -> N
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    ("stored", "stamped"),
+    ("stored", "mirrors", "outcome"),
     [
-        ({"status": "doing"}, True),
-        ({"status": "done", "completed_by": "alice"}, False),
-        ({"status": "doing", "migration": {"tool": "sibyl migrate to-team"}}, False),
+        ({"status": "doing"}, False, "stamped"),
+        ({"status": "done", "completed_by": "alice"}, False, "untouched"),
+        # A CLI `sibyl task update --status done` on a carried task credits the editor.
+        ({"status": "doing", "migration": {"tool": "sibyl migrate to-team"}}, False, "stamped"),
+        # The migration's own mirror write credits nobody.
+        ({"status": "doing", "migration": {"tool": "sibyl migrate to-team"}}, True, "cleared"),
+        # The mark is ignored on a task the migration never carried.
+        ({"status": "doing"}, True, "stamped"),
     ],
 )
 async def test_sync_status_edit_decides_the_completion_under_the_lock(
-    stored: dict, stamped: bool
+    stored: dict, mirrors: bool, outcome: str
 ) -> None:
     org = SimpleNamespace(id=UUID("00000000-0000-0000-0000-000000000111"))
     user = SimpleNamespace(id=UUID("00000000-0000-0000-0000-000000000222"))
@@ -479,7 +484,7 @@ async def test_sync_status_edit_decides_the_completion_under_the_lock(
     ):
         await update_task(
             task_id="task-123",
-            request=UpdateTaskRequest(status=TaskStatus.DONE),
+            request=UpdateTaskRequest(status=TaskStatus.DONE, mirrors_source_status=mirrors),
             sync=True,
             org=org,
             user=user,
@@ -487,12 +492,32 @@ async def test_sync_status_edit_decides_the_completion_under_the_lock(
         )
 
     written = entity_manager.update.await_args.args[1]
-    if stamped:
+    if outcome == "stamped":
         assert written["completed_by"] == str(user.id)
         assert written["completed_at"] is not None
+    elif outcome == "cleared":
+        assert written["completed_by"] is None
+        assert written["completed_at"] is None
     else:
         assert "completed_by" not in written
         assert "completed_at" not in written
+
+
+@pytest.mark.asyncio
+async def test_the_mirror_mark_is_refused_on_a_queued_update() -> None:
+    with (
+        patch("sibyl.api.routes.tasks._verify_task_access", AsyncMock()),
+        pytest.raises(HTTPException) as refused,
+    ):
+        await update_task(
+            task_id="task-123",
+            request=UpdateTaskRequest(status=TaskStatus.DONE, mirrors_source_status=True),
+            sync=False,
+            org=SimpleNamespace(id=UUID("00000000-0000-0000-0000-000000000111")),
+            user=SimpleNamespace(id=UUID("00000000-0000-0000-0000-000000000222")),
+            auth=SimpleNamespace(),
+        )
+    assert refused.value.status_code == 422
 
 
 @pytest.mark.asyncio
