@@ -509,7 +509,7 @@ async def test_teammate_sees_only_rows_they_could_already_read(seeded) -> None:
     assert person(payload, team.bob)["counts"] == {
         "captures": 1,
         "tasks_created": 1,
-        "tasks_completed": 2,
+        "tasks_completed": 1,
         "decisions": 0,
         "notes": 0,
         "procedures": 1,
@@ -519,7 +519,6 @@ async def test_teammate_sees_only_rows_they_could_already_read(seeded) -> None:
         ("decision", rows["shared_decision"].id),
         ("task_created", rows["bob_task"].id),
         ("task_completed", rows["bob_task"].id),
-        ("task_completed", rows["patched_done"].id),
         ("procedure", rows["async_memory"].id),
         ("entity", rows["artifact"].id),
         ("capture", str(captures["bob_shared"].id)),
@@ -612,9 +611,9 @@ async def test_window_bounds_the_counts(seeded) -> None:
     assert person(month, team.bob)["counts"]["captures"] == 1
     assert ("decision", team.rows["old_decision"].id) in listed(month)
     assert str(team.captures["bob_old"].id) not in json.dumps(month)
-    # A completion made by a patch has no completed_at; its update is the
-    # instant, an hour ago, so every window holds it.
-    assert ("task_completed", team.rows["patched_done"].id) in listed(day)
+    # A done task with no completion record (here, an old patch) credits
+    # nobody: its last editor is not necessarily who finished it.
+    assert ("task_completed", team.rows["patched_done"].id) not in listed(month)
     # Both tasks Alice created 20 days ago count in the month and not the week.
     assert person(month, team.alice)["counts"]["tasks_created"] == 2
     assert person(day, team.alice)["counts"]["tasks_created"] == 0
@@ -652,6 +651,9 @@ async def test_project_filter_cannot_open_a_project_the_caller_lacks(seeded) -> 
     assert str(team.captures["alice_secret"].id) not in response.text
     missing = await read_activity(team, team.bob, project_id=_id("project"))
     assert missing.status_code == 403
+    # A real project and an invented one are refused alike, so the answer says
+    # nothing about which projects exist.
+    assert missing.json() == response.json()
 
 
 async def test_several_projects_count_activity_in_any_of_them(seeded) -> None:
@@ -707,6 +709,36 @@ async def test_actor_filter_narrows_recent_but_not_people(seeded) -> None:
     stranger = (await read_activity(team, team.bob, actor_id=str(uuid4()))).json()
     assert stranger["recent"] == []
     assert stranger["people"] == everyone["people"]
+
+
+async def test_a_remember_counts_once_whichever_path_wrote_it(seeded) -> None:
+    """MCP writes the raw memory and the graph row with no sidecar: still one act."""
+    team = seeded
+    raw = capture(
+        "Bob remembers over MCP",
+        principal=team.bob,
+        org=team.org,
+        scope="project",
+        project=team.shared,
+    )
+    await surreal_content.save_raw_capture_record(None, capture=raw)
+    decision = entity(
+        EntityType.DECISION,
+        "Bob remembers over MCP",
+        author=team.bob,
+        project=team.shared,
+        scope="project",
+        metadata={"raw_memory_id": str(raw.id)},
+    )
+    graph = await get_surreal_graph_runtime(team.org)
+    await graph.entity_manager.create_direct_bulk([decision])
+
+    payload = (await read_activity(team, team.alice)).json()
+    ids = listed(payload)
+    assert ("decision", decision.id) in ids
+    assert ("capture", str(raw.id)) not in ids
+    counts = person(payload, team.bob)["counts"]
+    assert (counts["decisions"], counts["captures"]) == (1, 1)
 
 
 async def test_projection_of_a_deleted_capture_is_not_counted(seeded) -> None:
@@ -793,8 +825,12 @@ async def plan_clients(request) -> AsyncIterator[tuple[SurrealGraphClient, Surre
 
 
 async def test_window_reads_walk_their_indexes(plan_clients) -> None:
+    """On a freshly bootstrapped schema, every window read is index served."""
     graph, content = plan_clients
     org = graph.group_id
+    # The raw read names its index, so the index must ship with a fresh schema.
+    info = json.dumps(await content.execute_query("INFO FOR TABLE raw_captures;"), default=str)
+    assert "idx_raw_captures_org_created" in info
     await graph.execute_query(
         "INSERT INTO entity $rows;",
         rows=[

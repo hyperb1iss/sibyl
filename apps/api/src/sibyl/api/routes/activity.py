@@ -39,6 +39,7 @@ from sibyl.api.routes.activity_rollup import (
     capture_project_id,
     entity_events,
     members_from_rows,
+    mirrored_capture_ids,
     resolve_window,
     standalone_capture,
     summarize,
@@ -139,13 +140,14 @@ async def resolve_reader_scope(
     Each requested project passes the entity list's access check and must be
     in the capture list's accessible set; one refusal refuses the request.
     """
-    (project_ids, real_project_ids, has_unassigned), accessible = await asyncio.gather(
-        policy.resolve_entity_list_project_filter(ctx=ctx, project_ids=requested_projects),
-        policy.accessible_project_ids_for_read(ctx),
-    )
+    accessible = await policy.accessible_project_ids_for_read(ctx)
     if requested_projects and not set(requested_projects) <= accessible:
-        # The capture list's answer to a project outside the caller's grants.
+        # Checked before the per-project lookup, as the capture list does, so a
+        # project that exists and one that does not are refused alike.
         raise HTTPException(status_code=403, detail="project_scope_denied")
+    project_ids, real_project_ids, has_unassigned = await policy.resolve_entity_list_project_filter(
+        ctx=ctx, project_ids=requested_projects
+    )
     return ReaderScope(
         user_id=policy.reader_user_id(ctx),
         accessible_projects=accessible,
@@ -291,8 +293,9 @@ def activity_events(
     window: Window,
     members: Mapping[str, Member],
 ) -> list[ActivityEvent]:
+    readable = list(entities)
     events: list[ActivityEvent] = []
-    for entity in entities:
+    for entity in readable:
         events.extend(
             entity_events(
                 entity,
@@ -301,10 +304,12 @@ def activity_events(
                 project_id=policy.entity_read_project_id(entity),
             )
         )
+    mirrored = mirrored_capture_ids(readable, events)
     events.extend(
         event
         for capture in captures
-        if (event := capture_event(capture, window=window, members=members)) is not None
+        if str(capture.id) not in mirrored
+        and (event := capture_event(capture, window=window, members=members)) is not None
     )
     return events
 

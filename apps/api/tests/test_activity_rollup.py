@@ -157,13 +157,34 @@ def test_an_unstamped_workflow_completion_does_not_guess() -> None:
     assert events(row) == []
 
 
-def test_a_patched_completion_credits_the_patcher_at_the_update() -> None:
+def test_a_done_task_without_a_completion_record_credits_nobody() -> None:
+    """Its last edit is not its completion: crediting the editor would guess."""
     row = entity(
         EntityType.TASK,
         age=timedelta(days=30),
         updated_age=timedelta(hours=4),
         modified_by=BOB,
         metadata=done(),
+    )
+    assert events(row) == []
+
+
+def test_a_finisher_without_an_instant_credits_nobody() -> None:
+    row = entity(
+        EntityType.TASK,
+        age=timedelta(days=30),
+        updated_age=timedelta(hours=4),
+        metadata=done(completed_by=BOB),
+    )
+    assert events(row) == []
+
+
+def test_a_stamped_completion_is_dated_by_its_own_instant() -> None:
+    row = entity(
+        EntityType.TASK,
+        age=timedelta(days=30),
+        updated_age=timedelta(minutes=5),
+        metadata=done(completed_at=(NOW - timedelta(hours=4)).isoformat(), completed_by=BOB),
     )
     [event] = rollup.entity_events(row, window=WEEK, members=MEMBERS, project_id="p1")
     assert (event.kind, event.actor_id, event.at) == (
@@ -220,6 +241,24 @@ def capture(**fields: object) -> RawCaptureRecord:
     return RawCaptureRecord(**{**defaults, **fields})  # type: ignore[arg-type]
 
 
+def test_a_graph_row_counted_as_created_stands_for_its_raw_memory() -> None:
+    raw_id = str(uuid4())
+    written = entity(created_by=None, metadata={"principal_id": ALICE, "raw_memory_id": raw_id})
+    old_row = entity(age=timedelta(days=20), metadata={"raw_memory_id": "kept-old"})
+    derived = entity(
+        EntityType.PASSAGE,
+        metadata={"raw_memory_id": "kept-derived", "category": "passage_projection"},
+    )
+    rows = [written, old_row, derived]
+    feed = [
+        item
+        for row in rows
+        for item in rollup.entity_events(row, window=WEEK, members=MEMBERS, project_id=None)
+    ]
+    # Only the counted row hides its memory; the old and derived rows do not.
+    assert rollup.mirrored_capture_ids(rows, feed) == {raw_id}
+
+
 def test_a_standalone_capture_credits_its_principal() -> None:
     record = capture(project_id="p1")
     event = rollup.capture_event(record, window=WEEK, members=MEMBERS)
@@ -234,6 +273,7 @@ def test_a_standalone_capture_credits_its_principal() -> None:
     [
         capture(entity_type="decision", entity_id="decision_1"),
         capture(metadata={"projected_capture_id": str(uuid4())}),
+        capture(metadata={"projected_entity_id": "decision_1"}),
         capture(capture_surface="reflection_candidate"),
         capture(metadata={"capture_surface": "synthesis_artifact"}),
         capture(capture_surface="migration"),

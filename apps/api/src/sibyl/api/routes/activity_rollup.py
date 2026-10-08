@@ -227,26 +227,19 @@ def _entity_status(entity: Any) -> str:
 
 
 def completion_actor(entity: Any, members: Mapping[str, Member]) -> Member | None:
-    """Who moved a done task to done, or None when no field says so faithfully.
+    """Who took a done task to done, or None when the row does not say.
 
-    The complete transition and an edit that sets a task to done both stamp
-    ``completed_by`` with ``completed_at``; a row naming a non-member credits
-    nobody. Rows finished before that stamp existed fall back as follows. One
-    with ``completed_at`` came through the complete transition, which never
-    recorded an actor, and its ``modified_by`` is whoever last edited it, so
-    it credits nobody rather than a guess. One without ``completed_at`` was
-    set to done by an edit, which stamped ``modified_by`` with the status;
-    that is the most faithful field it has, though a later edit moves it.
+    Only the server's completion record counts: ``completed_by`` stamped with
+    ``completed_at`` on the move into done, by the complete transition or an
+    edit, from the caller's credentials. Rows finished before that record
+    existed have no ``completed_by``, and their ``modified_by`` is whoever
+    edited them last, so they credit nobody: an uncounted completion is
+    better than one credited to the wrong person.
     """
     metadata = _metadata(entity)
-    completed_by = metadata.get("completed_by")
-    if completed_by:
-        return _first_member(members, completed_by)
-    if metadata.get("completed_at"):
+    if not metadata.get("completed_at"):
         return None
-    return _first_member(
-        members, getattr(entity, "modified_by", None) or metadata.get("modified_by")
-    )
+    return _first_member(members, metadata.get("completed_by"))
 
 
 def entity_href(entity: Any) -> str:
@@ -306,7 +299,9 @@ def entity_events(
             events.append(event(kind, author, created_at))
 
     if entity_type == "task" and _entity_status(entity) == "done":
-        completed_at = utc(metadata.get("completed_at")) or utc(getattr(entity, "updated_at", None))
+        # The completion's own instant; a task without one is not dated by its
+        # last edit, which would credit the editor.
+        completed_at = utc(metadata.get("completed_at"))
         if completed_at is not None and window.holds(completed_at):
             actor = completion_actor(entity, members)
             if actor is not None:
@@ -317,18 +312,40 @@ def entity_events(
 def standalone_capture(capture: RawCaptureRecord) -> bool:
     """Whether a raw capture is its own act rather than a mirror of a graph row.
 
-    ``remember`` writes the verbatim raw memory, then the graph row, then an
-    archive sidecar of that row, and stamps ``projected_capture_id`` on the
-    raw memory. The graph row is counted under its own type, so the sidecar
-    and the stamped raw memory would count the same act twice.
+    ``remember`` writes the verbatim raw memory and then the graph row. Over
+    REST it also archives a sidecar of that row and stamps
+    ``projected_capture_id`` on the raw memory; over MCP it stamps
+    ``projected_entity_id``. The graph row is counted under its own type, so
+    the sidecar and the stamped raw memory would count the same act twice.
+    Rows written before either stamp are caught by ``mirrored_capture_ids``.
     """
     metadata = capture.metadata or {}
     if capture.deleted_at is not None or capture.entity_type != "raw_memory":
         return False
-    if metadata.get("projected_capture_id"):
+    if metadata.get("projected_capture_id") or metadata.get("projected_entity_id"):
         return False
     surface = capture.capture_surface or metadata.get("capture_surface")
     return str(surface or "").strip().lower() not in _UNCOUNTED_CAPTURE_SURFACES
+
+
+def mirrored_capture_ids(entities: Iterable[Any], events: Iterable[ActivityEvent]) -> set[str]:
+    """Raw memories a counted graph row already stands for.
+
+    A graph row written from a raw memory names it in ``raw_memory_id``. When
+    that row is counted as created in the window, the memory behind it is the
+    same act, whatever path wrote it, so it is not counted again as a capture.
+    A row that earned no created event (a derived projection, a row outside
+    the window) leaves its memory to count on its own.
+    """
+    created = {item.id for item in events if item.kind != "task_completed"}
+    mirrored: set[str] = set()
+    for entity in entities:
+        if str(getattr(entity, "id", "")) not in created:
+            continue
+        raw_id = _text(_metadata(entity).get("raw_memory_id"))
+        if raw_id:
+            mirrored.add(raw_id.removeprefix("raw_memory:"))
+    return mirrored
 
 
 def capture_project_id(capture: RawCaptureRecord) -> str | None:
