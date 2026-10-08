@@ -12,7 +12,11 @@ from uuid import uuid4
 import structlog
 from pydantic import ValidationError
 
-from sibyl_core.auth.memory_policy import server_provenance_metadata, stamp_memory_scope_metadata
+from sibyl_core.auth.memory_policy import (
+    server_provenance_metadata,
+    stamp_memory_scope_metadata,
+    work_item_actor_metadata,
+)
 from sibyl_core.config import settings
 from sibyl_core.migrate.legacy_graph_archive import (
     episode_from_payload as _episode_from_payload,
@@ -338,6 +342,8 @@ def _normalized_backup_metadata(metadata: Any) -> dict[str, Any]:
         principal_id=principal_id,
     )
     stamped.update(server_provenance_metadata(fields))
+    # Who completed or last edited a task is the server's own record too.
+    stamped.update(work_item_actor_metadata(fields))
     return stamped
 
 

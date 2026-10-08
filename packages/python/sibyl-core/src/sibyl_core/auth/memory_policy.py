@@ -53,10 +53,12 @@ MEMORY_PROVENANCE_METADATA_KEYS = frozenset(
     }
 )
 
-# Work-item actors the workflow stamps from the authenticated caller. The team
-# activity view credits a completion to `completed_by`, so a payload that could
-# set it would hand one member's work to another.
-WORK_ITEM_ACTOR_METADATA_KEYS = frozenset({"completed_by"})
+# Work-item actors and the instant they acted, stamped by the server from the
+# authenticated caller. The team activity view credits a completion to
+# `completed_by` at `completed_at`, so a payload that could set either, or
+# `modified_by`, could hand one member's work to another or move it in time.
+# Restores re-attach the stored values through `work_item_actor_metadata`.
+WORK_ITEM_ACTOR_METADATA_KEYS = frozenset({"completed_at", "completed_by", "modified_by"})
 
 SERVER_OWNED_METADATA_KEYS = (
     MEMORY_OWNER_METADATA_KEYS | MEMORY_PROVENANCE_METADATA_KEYS | WORK_ITEM_ACTOR_METADATA_KEYS
@@ -742,6 +744,23 @@ def server_provenance_metadata(metadata: Mapping[str, Any] | None) -> dict[str, 
     }
 
 
+def work_item_actor_metadata(metadata: Mapping[str, Any] | None) -> dict[str, Any]:
+    """Lift the stored work-item actors out of a bag before it is stripped.
+
+    The strip keeps a caller from naming who completed or edited a row. A
+    backup restore or an archive import is not a caller naming anyone: it
+    carries the server's own record of writes it already performed, so it
+    re-attaches these after the strip, the way provenance is re-attached.
+    """
+
+    fields = metadata if isinstance(metadata, Mapping) else {}
+    return {
+        key: fields[key]
+        for key in WORK_ITEM_ACTOR_METADATA_KEYS
+        if fields.get(key) not in (None, "")
+    }
+
+
 def stamp_memory_scope_metadata(
     metadata: Mapping[str, Any] | None,
     *,
@@ -800,4 +819,5 @@ __all__ = [
     "private_scope_granted_for",
     "server_provenance_metadata",
     "stamp_memory_scope_metadata",
+    "work_item_actor_metadata",
 ]
