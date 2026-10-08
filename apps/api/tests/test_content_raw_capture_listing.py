@@ -239,3 +239,33 @@ async def test_projection_fold_backfill_stamps_legacy_pairs(content_client) -> N
     untouched = await surreal_content.get_raw_capture(None, organization_id=org, capture_id=lone.id)
     assert untouched is not None
     assert "projected_capture_id" not in untouched.metadata
+
+
+@pytest.mark.asyncio
+async def test_mcp_link_marks_the_raw_memory_without_hiding_it_from_review(
+    content_client,
+) -> None:
+    """The link names the graph row; the review list still shows the only capture."""
+    org = uuid4()
+    raw = _capture(org)
+    await _save(raw)
+
+    async def link(principal_id: str = "user-1") -> bool:
+        return await surreal_content.mark_raw_memory_projected_entity(
+            None,
+            organization_id=org,
+            raw_capture_id=str(raw.id),
+            entity_id="decision_abc123",
+            principal_id=principal_id,
+        )
+
+    # Bound to the writer: another principal cannot link someone's memory.
+    assert await link("user-2") is False
+    assert await link() is True
+    assert await link() is False
+
+    stored = await surreal_content.get_raw_capture(None, organization_id=org, capture_id=raw.id)
+    assert stored is not None
+    assert stored.metadata["projected_entity_id"] == "decision_abc123"
+    captures, _ = await _list(org)
+    assert raw.id in {capture.id for capture in captures}

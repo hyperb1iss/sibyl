@@ -443,6 +443,7 @@ async def test_remember_mcp_memory_scopes_project_metadata(monkeypatch) -> None:
             id="raw_123", source_id="mcp:remember:decision", revision=1, metadata={}
         )
     )
+    link_raw = AsyncMock(return_value=True)
 
     with (
         patch("sibyl.mcp_tools.context.require_context", AsyncMock(return_value=ctx)),
@@ -456,6 +457,10 @@ async def test_remember_mcp_memory_scopes_project_metadata(monkeypatch) -> None:
             AsyncMock(return_value=SimpleNamespace(entities=[])),
         ),
         patch("sibyl.mcp_tools.policy.validate_relationship_targets_for_caller", AsyncMock()),
+        patch(
+            "sibyl.mcp_tools.memory.content_runtime.mark_raw_memory_projected_entity",
+            link_raw,
+        ),
     ):
         result = await _remember_mcp_memory(
             title="Use scoped memory",
@@ -485,6 +490,14 @@ async def test_remember_mcp_memory_scopes_project_metadata(monkeypatch) -> None:
         "idempotency_key": None,
         "replayed": False,
     }
+    # The raw memory is linked to the row it became, so it is one act, not two.
+    link_raw.assert_awaited_once_with(
+        None,
+        organization_id=UUID(ctx.org_id),
+        raw_capture_id="raw_123",
+        entity_id="decision_123",
+        principal_id=ctx.user_id,
+    )
     remember_raw.assert_awaited_once_with(
         organization_id=ctx.org_id,
         principal_id=ctx.user_id,

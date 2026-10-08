@@ -1936,6 +1936,41 @@ async def mark_raw_capture_projected(
     return len(rows) > 0
 
 
+async def mark_raw_memory_projected_entity(
+    _session: object,
+    *,
+    organization_id: UUID,
+    raw_capture_id: str,
+    entity_id: str,
+    principal_id: str,
+) -> bool:
+    """Record that a raw memory now stands behind a graph row written from it.
+
+    The MCP capture path writes the raw memory and the graph row with no
+    archive sidecar, so it links the pair here rather than through
+    ``projected_capture_id``, which the capture review list reads as "a
+    sidecar exists" and would hide the only row. Bound to the principal that
+    wrote the raw row, like ``mark_raw_capture_projected``.
+    """
+    if not principal_id or not entity_id:
+        return False
+    async with surreal_content_client() as client:
+        rows = await _select_many(
+            client,
+            "UPDATE (SELECT VALUE id FROM raw_captures WHERE uuid = $raw_capture_id) "
+            "SET metadata.projected_entity_id = $entity_id "
+            "WHERE organization_id = $organization_id "
+            "AND principal_id = $principal_id "
+            "AND entity_type = 'raw_memory' AND metadata.projected_entity_id IS NONE "
+            "RETURN uuid;",
+            raw_capture_id=raw_capture_id,
+            organization_id=str(organization_id),
+            principal_id=principal_id,
+            entity_id=entity_id,
+        )
+    return len(rows) > 0
+
+
 async def get_raw_capture(
     _session: object,
     *,
