@@ -49,7 +49,6 @@ from sibyl.persistence.auth_runtime import (
 from sibyl.persistence.content_runtime import (
     get_content_read_session_dependency,
 )
-from sibyl.services.work_item_workflow import completion_stamp
 from sibyl_core.auth import AuthOrganization, ProjectRole
 from sibyl_core.auth.memory_policy import (
     SERVER_OWNED_METADATA_KEYS,
@@ -64,6 +63,7 @@ from sibyl_core.projection import (
     restamp_entity_passages,
     retire_entity_passages,
 )
+from sibyl_core.tasks.completion import completion_updates
 
 log = structlog.get_logger()
 
@@ -606,13 +606,14 @@ async def update_entity(
                     },
                 }
                 if existing.entity_type == EntityType.TASK and "status" in update.metadata:
-                    # Moving a task to done here records who finished it, as
-                    # the complete transition does.
+                    # The row was read under this lock, so its status decides
+                    # the completion record the way the complete transition
+                    # does: stamped into done, kept on done, cleared on reopen.
                     update_data["metadata"].update(
-                        completion_stamp(
+                        completion_updates(
                             existing_meta.get("status") or getattr(existing, "status", None),
                             update.metadata.get("status"),
-                            str(ctx.user.id) if ctx.user is not None else None,
+                            actor_id=str(ctx.user.id) if ctx.user is not None else None,
                         )
                     )
 

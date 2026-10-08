@@ -49,6 +49,7 @@ from sibyl_core.services.crawl_sources import (
     list_unlinked_document_chunks,
 )
 from sibyl_core.services.link_graph_status import get_link_graph_status_data
+from sibyl_core.tasks.completion import status_edit_completion_updates
 from sibyl_core.tasks.dependencies import detect_dependency_cycles
 from sibyl_core.tools.helpers import _project_id_for_policy
 
@@ -590,7 +591,11 @@ async def _dispatch(
     """Route a validated action to its category handler (exhaustive)."""
     if action in TASK_ACTIONS:
         return await _handle_task_action(
-            cast("TaskAction", action), entity_id, data, organization_id=organization_id
+            cast("TaskAction", action),
+            entity_id,
+            data,
+            organization_id=organization_id,
+            principal_id=principal_id,
         )
     if action in EPIC_ACTIONS:
         return await _handle_epic_action(
@@ -631,6 +636,7 @@ async def _handle_task_action(
     data: dict[str, Any],
     *,
     organization_id: str | None,
+    principal_id: str | None = None,
 ) -> ManageResponse:
     """Handle task workflow actions.
 
@@ -779,6 +785,7 @@ async def _handle_task_action(
                 actual_hours,
                 learnings,
                 create_episode=False,
+                completed_by=principal_id,
                 **revision_kwargs,
             )
             response_data = {
@@ -840,7 +847,11 @@ async def _handle_task_action(
 
         if action == "update_task":
             return await _update_task(
-                entity_manager, entity_id, data, organization_id=organization_id
+                entity_manager,
+                entity_id,
+                data,
+                organization_id=organization_id,
+                principal_id=principal_id,
             )
 
         if action == "add_note":
@@ -872,6 +883,7 @@ async def _update_task(
     data: dict[str, Any],
     *,
     organization_id: str | None = None,
+    principal_id: str | None = None,
 ) -> ManageResponse:
     """Update task fields.
 
@@ -935,6 +947,14 @@ async def _update_task(
             message=f"No valid fields to update. Allowed: {sorted(allowed_fields)}",
         )
 
+    # The caller is the editor. The completion record a status change keeps
+    # (completed_at, completed_by) is decided where the write happens, against
+    # the status read with it: under the worker's entity lock for a queued
+    # update, and under the revision read below for a direct one.
+    requested_fields = list(updates)
+    if principal_id:
+        updates["modified_by"] = principal_id
+
     # Async mode: queue via arq worker
     if not sync:
         if not organization_id:
@@ -955,10 +975,10 @@ async def _update_task(
             success=True,
             action="update_task",
             entity_id=entity_id,
-            message=f"Task update queued: {', '.join(updates.keys())}",
+            message=f"Task update queued: {', '.join(requested_fields)}",
             data={
                 "job_id": job_id,
-                "queued_fields": list(updates.keys()),
+                "queued_fields": requested_fields,
                 "mutation_receipt": _manage_mutation_receipt(
                     data,
                     applied=False,
@@ -970,6 +990,22 @@ async def _update_task(
 
     # Sync mode: update directly
     try:
+        if "status" in updates:
+            current = await entity_manager.get(entity_id)
+            current_metadata = getattr(current, "metadata", None) or {}
+            updates.update(
+                status_edit_completion_updates(
+                    current_metadata,
+                    current_metadata.get("status") or getattr(current, "status", None),
+                    updates["status"],
+                    actor_id=principal_id,
+                )
+            )
+            if expected_revision is None:
+                # The completion was decided from this read, so the write
+                # lands only on the revision it read.
+                read_revision = getattr(current, "revision", None)
+                expected_revision = read_revision if isinstance(read_revision, int) else None
         if expected_revision is None:
             result = await entity_manager.update(entity_id, updates)
         else:
@@ -993,9 +1029,9 @@ async def _update_task(
             success=True,
             action="update_task",
             entity_id=entity_id,
-            message=f"Task updated: {', '.join(updates.keys())}",
+            message=f"Task updated: {', '.join(requested_fields)}",
             data={
-                "updated_fields": list(updates.keys()),
+                "updated_fields": requested_fields,
                 "revision": revision,
                 "mutation_receipt": _manage_mutation_receipt(
                     data,

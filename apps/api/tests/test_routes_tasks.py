@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import UUID
@@ -415,15 +416,14 @@ async def test_update_task_sync_allows_title_description_with_actor_attribution(
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize(("current", "stamped"), [("doing", True), ("done", False)])
-async def test_update_task_to_done_records_who_finished_it(current: str, stamped: bool) -> None:
+async def test_queued_status_edit_leaves_the_completion_to_the_locked_job() -> None:
+    """The request reads nothing to decide a completion: the job does, under the lock."""
     org = SimpleNamespace(id=UUID("00000000-0000-0000-0000-000000000111"))
     user = SimpleNamespace(id=UUID("00000000-0000-0000-0000-000000000222"))
     enqueue = AsyncMock(return_value="job-123")
-    existing = SimpleNamespace(metadata={"status": current})
 
     with (
-        patch("sibyl.api.routes.tasks._verify_task_access", AsyncMock(return_value=existing)),
+        patch("sibyl.api.routes.tasks._verify_task_access", AsyncMock()),
         patch("sibyl.jobs.queue.enqueue_update_task", enqueue),
     ):
         await update_task(
@@ -436,14 +436,63 @@ async def test_update_task_to_done_records_who_finished_it(current: str, stamped
         )
 
     update_data = enqueue.await_args.args[1]
-    assert update_data["status"] == TaskStatus.DONE
-    assert update_data["modified_by"] == str(user.id)
+    assert update_data == {"modified_by": str(user.id), "status": TaskStatus.DONE}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("stored", "stamped"),
+    [
+        ({"status": "doing"}, True),
+        ({"status": "done", "completed_by": "alice"}, False),
+        ({"status": "doing", "migration": {"tool": "sibyl migrate to-team"}}, False),
+    ],
+)
+async def test_sync_status_edit_decides_the_completion_under_the_lock(
+    stored: dict, stamped: bool
+) -> None:
+    org = SimpleNamespace(id=UUID("00000000-0000-0000-0000-000000000111"))
+    user = SimpleNamespace(id=UUID("00000000-0000-0000-0000-000000000222"))
+    held: list[bool] = []
+    entity_manager = SimpleNamespace(
+        get=AsyncMock(return_value=SimpleNamespace(metadata=stored)),
+        update=AsyncMock(return_value=SimpleNamespace(name="Task", metadata={}, revision=2)),
+    )
+    runtime = SimpleNamespace(entity_manager=entity_manager, relationship_manager=None)
+
+    @asynccontextmanager
+    async def lock(*_args, **_kwargs):
+        held.append(True)
+        yield "token"
+        held.append(False)
+
+    async def read_inside_lock(task_id: str):
+        assert held == [True], "the completion must be decided while the lock is held"
+        return SimpleNamespace(metadata=stored)
+
+    entity_manager.get.side_effect = read_inside_lock
+    with (
+        patch("sibyl.api.routes.tasks._verify_task_access", AsyncMock()),
+        patch("sibyl.api.routes.tasks.entity_lock", lock),
+        patch("sibyl.api.routes.tasks.get_task_graph_runtime", AsyncMock(return_value=runtime)),
+        patch("sibyl.api.routes.tasks.broadcast_event", AsyncMock()),
+    ):
+        await update_task(
+            task_id="task-123",
+            request=UpdateTaskRequest(status=TaskStatus.DONE),
+            sync=True,
+            org=org,
+            user=user,
+            auth=SimpleNamespace(),
+        )
+
+    written = entity_manager.update.await_args.args[1]
     if stamped:
-        assert update_data["completed_by"] == str(user.id)
-        assert update_data["completed_at"]
+        assert written["completed_by"] == str(user.id)
+        assert written["completed_at"] is not None
     else:
-        assert "completed_by" not in update_data
-        assert "completed_at" not in update_data
+        assert "completed_by" not in written
+        assert "completed_at" not in written
 
 
 @pytest.mark.asyncio

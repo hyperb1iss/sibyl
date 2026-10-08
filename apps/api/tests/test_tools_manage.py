@@ -448,15 +448,18 @@ class TestTaskWorkflowHandlers:
                     "_memory_policy_context": POLICY_PAYLOAD,
                 },
                 organization_id=TEST_ORG_ID,
+                principal_id="user-finisher",
             )
 
             assert result.success is True
             assert "learnings captured" in result.message
+            # The completion is credited to the authenticated caller.
             mock_engine.complete_task.assert_awaited_once_with(
                 "task_123",
                 4.5,
                 "OAuth tokens expire after 1 hour",
                 create_episode=False,
+                completed_by="user-finisher",
             )
             mock_entity_manager.get.assert_awaited_once_with("task_123")
             enqueue_episode.assert_awaited_once_with(
@@ -1006,3 +1009,71 @@ class TestEpicActions:
 
             assert result.success is False
             assert "not an epic" in result.message.lower()
+
+
+class TestUpdateTaskCompletion:
+    """MCP update_task records the completion a status edit makes, server-side."""
+
+    @staticmethod
+    def _manager(stored: dict) -> SimpleNamespace:
+        return SimpleNamespace(
+            get=AsyncMock(return_value=SimpleNamespace(metadata=stored, revision=4)),
+            update=AsyncMock(return_value=SimpleNamespace(revision=5)),
+        )
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("stored", "stamped"),
+        [
+            ({"status": "doing"}, True),
+            ({"status": "done", "completed_by": "alice"}, False),
+            ({"status": "doing", "migration": {"tool": "sibyl migrate to-team"}}, False),
+        ],
+    )
+    async def test_sync_status_edit_stamps_the_caller_on_the_revision_it_read(
+        self, stored: dict, stamped: bool
+    ) -> None:
+        from sibyl_core.tools.manage import _update_task
+
+        manager = self._manager(stored)
+        result = await _update_task(
+            manager,
+            "task_1",
+            {"status": "done", "modified_by": "forged", "completed_by": "forged"},
+            organization_id="org-1",
+            principal_id="user-7",
+        )
+
+        assert result.success is True
+        assert result.data["updated_fields"] == ["status"]
+        written = manager.update.await_args.args[1]
+        assert written["modified_by"] == "user-7"
+        # The write lands only on the revision the completion was decided from.
+        assert manager.update.await_args.kwargs["expected_revision"] == 4
+        if stamped:
+            assert written["completed_by"] == "user-7"
+            assert written["completed_at"]
+        else:
+            assert "completed_by" not in written
+            assert "completed_at" not in written
+
+    @pytest.mark.asyncio
+    async def test_queued_status_edit_names_the_editor_for_the_locked_job(self) -> None:
+        from sibyl_core.tools.manage import _update_task
+
+        queue = MagicMock()
+        queue.enqueue_update_task = AsyncMock(return_value="job-1")
+        install_queue_port(queue)
+        try:
+            await _update_task(
+                self._manager({"status": "doing"}),
+                "task_1",
+                {"status": "done", "sync": False},
+                organization_id="org-1",
+                principal_id="user-7",
+            )
+        finally:
+            reset_runtime_ports()
+
+        updates = queue.enqueue_update_task.await_args.args[1]
+        assert updates == {"status": "done", "modified_by": "user-7"}

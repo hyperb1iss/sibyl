@@ -1371,6 +1371,7 @@ async def update_task(
         Dict with update results
     """
     from sibyl.locks import entity_lock
+    from sibyl.services.work_item_workflow import status_edit_completion
     from sibyl_core.models.entities import Relationship, RelationshipType
 
     add_depends_on = add_depends_on or []
@@ -1398,6 +1399,20 @@ async def update_task(
             if epic_id and not await _entity_exists(entity_manager, epic_id):
                 log.warning("update_task_epic_gone", task_id=task_id, epic_id=epic_id)
                 return {"task_id": task_id, "success": False, "message": "Epic not found"}
+
+            if "status" in updates:
+                # Decided here, under the lock, from the status this write
+                # replaces. modified_by names the editor: the request built it
+                # from the caller's credentials, never from the body.
+                updates = {
+                    **updates,
+                    **await status_edit_completion(
+                        entity_manager,
+                        task_id,
+                        updates["status"],
+                        actor_id=updates.get("modified_by"),
+                    ),
+                }
 
             # Perform the entity field update (skip if only dep changes)
             if expected_revision is None:

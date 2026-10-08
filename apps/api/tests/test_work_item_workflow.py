@@ -325,20 +325,31 @@ class TestLockSerialization:
         assert peak == 2, "distinct work items must not serialize against each other"
 
 
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
-    ("current", "requested", "actor", "stamped"),
+    ("stored", "requested", "expected"),
     [
-        ("doing", "done", "user-1", True),
-        (None, SimpleNamespace(value="done"), "user-1", True),
-        ("done", "done", "user-1", False),
-        ("doing", "review", "user-1", False),
-        ("doing", "done", None, False),
+        # Into done: stamped from the editor.
+        ({"status": "doing"}, "done", {"completed_by": "user-1"}),
+        # Already done: a second done rewrites nothing.
+        ({"status": "done", "completed_by": "alice"}, "done", {}),
+        # Reopened: the stale completion is cleared.
+        ({"status": "done", "completed_by": "alice"}, "doing", {"completed_by": None}),
+        # A row the migration carried takes its done from the source, not here.
+        ({"status": "doing", "migration": {"tool": "sibyl migrate to-team"}}, "done", {}),
     ],
 )
-def test_completion_stamp_only_marks_a_move_into_done(current, requested, actor, stamped) -> None:
-    stamp = wiw.completion_stamp(current, requested, actor)
-    if stamped:
-        assert stamp["completed_by"] == actor
-        assert stamp["completed_at"]
-    else:
-        assert stamp == {}
+async def test_status_edit_completion_reads_the_row_it_replaces(
+    stored, requested, expected
+) -> None:
+    manager = SimpleNamespace(get=AsyncMock(return_value=SimpleNamespace(metadata=stored)))
+
+    updates = await wiw.status_edit_completion(manager, "task-1", requested, actor_id="user-1")
+
+    manager.get.assert_awaited_once_with("task-1")
+    for key, value in expected.items():
+        assert updates[key] == value
+    if expected.get("completed_by") == "user-1":
+        assert updates["completed_at"] is not None
+    if not expected:
+        assert updates == {}

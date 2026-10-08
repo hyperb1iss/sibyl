@@ -2123,10 +2123,32 @@ async def test_moving_a_task_to_done_by_patch_records_who_finished_it() -> None:
 async def test_editing_a_task_that_is_already_done_keeps_its_completion() -> None:
     existing = _task_entity("done")
     existing.metadata["completed_by"] = "original-finisher"
-    merged = await _patch_task(existing, {"status": "done", "completed_by": "someone-else"})
+    existing.metadata["completed_at"] = "2026-10-01T09:00:00+00:00"
+    merged = await _patch_task(
+        existing,
+        {
+            "status": "done",
+            "completed_by": "someone-else",
+            "completed_at": "2026-10-08T09:00:00+00:00",
+            "modified_by": "someone-else",
+        },
+    )
 
+    # Neither the finisher nor the instant can be rewritten by a patch body.
     assert merged["completed_by"] == "original-finisher"
-    assert "completed_at" not in merged
+    assert merged["completed_at"] == "2026-10-01T09:00:00+00:00"
+    assert "modified_by" not in merged
+
+
+@pytest.mark.asyncio
+async def test_reopening_a_task_by_patch_clears_its_completion() -> None:
+    existing = _task_entity("done")
+    existing.metadata["completed_by"] = "original-finisher"
+    existing.metadata["completed_at"] = "2026-10-01T09:00:00+00:00"
+    merged = await _patch_task(existing, {"status": "doing"})
+
+    assert merged["completed_by"] is None
+    assert merged["completed_at"] is None
 
 
 @pytest.mark.asyncio

@@ -896,3 +896,52 @@ async def test_start_task_does_not_duplicate_assignee() -> None:
     started = await engine.start_task(task.id, assignee="alice")
     # Should only have one "alice"
     assert started.assignees.count("alice") == 1
+
+
+def _done_task(task_id: str) -> Task:
+    task = Task(
+        id=task_id,
+        title="Finished by Alice",
+        description="",
+        project_id="proj-001",
+        status=TaskStatus.DONE,
+    )
+    task.metadata = {
+        "status": "done",
+        "completed_by": "alice",
+        "completed_at": "2026-10-01T09:00:00+00:00",
+    }
+    return task
+
+
+@pytest.mark.asyncio
+async def test_completing_a_done_task_again_does_not_take_the_credit() -> None:
+    from sibyl_core.tasks.workflow import TaskWorkflowEngine
+
+    entity_manager = _FakeEntityManager(_done_task("task-recomplete"))
+    engine = TaskWorkflowEngine(
+        entity_manager, _FakeRelationshipManager(), _FakeGraphClient(), organization_id="test-org"
+    )
+
+    await engine.complete_task("task-recomplete", create_episode=False, completed_by="bob")
+
+    assert entity_manager.task.metadata["completed_by"] == "alice"
+    assert entity_manager.task.metadata["completed_at"] == "2026-10-01T09:00:00+00:00"
+
+
+@pytest.mark.asyncio
+async def test_reopening_a_done_task_clears_its_completion() -> None:
+    from sibyl_core.tasks.workflow import TaskWorkflowEngine
+
+    entity_manager = _FakeEntityManager(_done_task("task-reopen"))
+    engine = TaskWorkflowEngine(
+        entity_manager, _FakeRelationshipManager(), _FakeGraphClient(), organization_id="test-org"
+    )
+
+    await engine.start_task("task-reopen", assignee="bob")
+    assert entity_manager.task.metadata.get("completed_by") is None
+    assert entity_manager.task.metadata.get("completed_at") is None
+
+    await engine.complete_task("task-reopen", create_episode=False, completed_by="bob")
+    assert entity_manager.task.metadata["completed_by"] == "bob"
+    assert entity_manager.task.metadata["completed_at"] != "2026-10-01T09:00:00+00:00"

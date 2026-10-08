@@ -30,6 +30,7 @@ from sibyl.persistence.graph_runtime import (
     update_graph_entity,
 )
 from sibyl_core.models.entities import EntityType
+from sibyl_core.tasks.completion import status_edit_completion_updates
 from sibyl_core.tasks.workflow import TaskWorkflowEngine
 
 log = structlog.get_logger()
@@ -250,25 +251,27 @@ async def _run_epic_transition(
     return _TransitionOutcome("archived", name, {}, {})
 
 
-def _status_text(value: object) -> str:
-    return str(getattr(value, "value", value) or "").strip().lower()
-
-
-def completion_stamp(
-    current_status: object, next_status: object, actor_id: str | None
+async def status_edit_completion(
+    entity_manager: Any,
+    task_id: str,
+    next_status: object,
+    *,
+    actor_id: str | None,
 ) -> dict[str, Any]:
-    """What a patch that moves a task to done records about the completion.
+    """The completion record a plain status edit writes, read inside the caller's lock.
 
-    The complete transition stamps ``completed_at`` and ``completed_by``; a task
-    set to done by an edit records the same two fields, so every completion
-    names its actor and instant the same way. A write that leaves a task done,
-    or moves it anywhere else, stamps nothing.
+    Callers hold the task's entity lock, so the status read here is the one
+    the write replaces. A task the migration carried gets no completion from a
+    status edit, because that edit is how the migration mirrors its source.
     """
-    if _status_text(next_status) != "done" or _status_text(current_status) == "done":
-        return {}
-    if not actor_id:
-        return {}
-    return {"completed_at": datetime.now(UTC).isoformat(), "completed_by": actor_id}
+    current = await entity_manager.get(task_id)
+    metadata = getattr(current, "metadata", None) or {}
+    return status_edit_completion_updates(
+        metadata,
+        metadata.get("status") or getattr(current, "status", None),
+        next_status,
+        actor_id=actor_id,
+    )
 
 
 async def _touch_project_activity(group_id: str, entity: Any) -> None:

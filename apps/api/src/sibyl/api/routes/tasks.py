@@ -35,7 +35,7 @@ from sibyl.locks import entity_lock
 from sibyl.persistence.auth_runtime import list_accessible_project_graph_ids
 from sibyl.services.work_item_workflow import (
     WorkItemAction,
-    completion_stamp,
+    status_edit_completion,
     transition_work_item,
 )
 from sibyl_core.auth import AuthOrganization, AuthUser, OrganizationRole, ProjectRole
@@ -397,6 +397,15 @@ async def _write_task_update(
 
     if request.epic_id:
         await _verify_epic_exists(runtime.entity_manager, request.epic_id)
+    if "status" in update_data:
+        update_data.update(
+            await status_edit_completion(
+                runtime.entity_manager,
+                task_id,
+                update_data["status"],
+                actor_id=update_data.get("modified_by"),
+            )
+        )
     if request.expected_revision is None:
         updated = await runtime.entity_manager.update(task_id, update_data)
     else:
@@ -900,19 +909,13 @@ async def update_task(
     """
     from sibyl.jobs.queue import enqueue_update_task as enqueue_update_task_async
 
-    verified_task = await _verify_task_access(task_id, org, auth)
+    await _verify_task_access(task_id, org, auth)
 
     group_id = str(org.id)
+    # A status change's completion record is decided under the entity lock,
+    # from the status read there: in _write_task_update for a sync write and in
+    # the update_task job for a queued one.
     update_data = _build_update_data(request, str(user.id))
-    if request.status is not None:
-        update_data.update(
-            completion_stamp(
-                (getattr(verified_task, "metadata", None) or {}).get("status")
-                or getattr(verified_task, "status", None),
-                request.status,
-                str(user.id),
-            )
-        )
     idempotency_path = f"/tasks/{task_id}"
     idempotency_payload = {
         "body": request.model_dump(mode="json"),
