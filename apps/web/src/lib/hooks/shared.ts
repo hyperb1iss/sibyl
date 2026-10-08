@@ -67,6 +67,8 @@ export function invalidateByEntityType(
   if (options?.includeStats) {
     invalidate(queryKeys.admin.stats);
   }
+  // Any entity change can move a teammate's counts or the team feed
+  invalidate(queryKeys.activity.all);
 
   switch (entityType) {
     case 'task':
