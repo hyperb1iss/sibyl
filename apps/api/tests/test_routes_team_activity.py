@@ -458,6 +458,14 @@ async def seeded(team: SimpleNamespace) -> SimpleNamespace:
             entity_type="decision",
             entity_id=rows["shared_decision"].id,
         ),
+        "bob_linked": capture(
+            "Bob linked raw over MCP",
+            principal=team.bob,
+            org=team.org,
+            scope="project",
+            project=team.shared,
+            metadata={"projected_entity_id": "decision_elsewhere"},
+        ),
         "bob_projected": capture(
             "Bob projected raw",
             principal=team.bob,
@@ -535,6 +543,7 @@ async def test_teammate_sees_only_rows_they_could_already_read(seeded) -> None:
         assert hidden.id not in text
         assert hidden.name not in text
     for hidden_capture in (
+        "bob_linked",
         "alice_private",
         "alice_secret",
         "bob_hidden",

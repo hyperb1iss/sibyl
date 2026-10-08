@@ -1851,8 +1851,9 @@ _RAW_ACTIVITY_FIELDS = (
 # and would walk every capture the organization holds, so the statement names
 # the (organization_id, created_at, uuid) index and ranges on created_at.
 # Only standalone raw memories qualify: a sidecar row (entity_type is the graph
-# type) and a raw memory carrying projected_capture_id both mirror a graph row
-# the activity view counts on its own.
+# type) and a raw memory carrying projected_capture_id (REST) or
+# projected_entity_id (MCP) all mirror a graph row the activity view counts on
+# its own.
 RAW_ACTIVITY_STATEMENT = (
     f"SELECT {_RAW_ACTIVITY_FIELDS} FROM raw_captures "  # noqa: S608
     "WITH INDEX idx_raw_captures_org_created "
@@ -1860,7 +1861,8 @@ RAW_ACTIVITY_STATEMENT = (
     "AND created_at >= $since AND created_at < $until "
     "AND deleted_at = NONE "
     "AND entity_type = 'raw_memory' "
-    "AND metadata.projected_capture_id = NONE"
+    "AND metadata.projected_capture_id = NONE "
+    "AND metadata.projected_entity_id = NONE"
 )
 # Narrows the scan to rows the reader policy could allow. The policy still runs
 # on every row returned; a private row without a stamped principal is left to it.

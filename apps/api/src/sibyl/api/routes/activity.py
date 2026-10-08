@@ -314,6 +314,14 @@ def activity_events(
     return events
 
 
+def _caller_uuid(ctx: AuthContext) -> UUID:
+    """The caller as a user id, or a 401 when the credential names no user."""
+    try:
+        return UUID(str(ctx.user.id))
+    except (AttributeError, TypeError, ValueError) as exc:
+        raise HTTPException(status_code=401, detail="Not authenticated") from exc
+
+
 async def build_team_activity(
     *,
     org: AuthOrganization,
@@ -326,7 +334,7 @@ async def build_team_activity(
     scope = await resolve_reader_scope(ctx, project_ids)
     window = resolve_window(window_label, now=now or datetime.now(UTC))
     group_id = str(org.id)
-    caller_id = UUID(str(ctx.user.id))
+    caller_id = _caller_uuid(ctx)
 
     member_rows, (graph_rows, project_names), raw_rows = await asyncio.gather(
         organization_runtime.list_org_members(slug=org.slug, actor_id=caller_id),

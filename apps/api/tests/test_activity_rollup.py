@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
+from types import SimpleNamespace
 from uuid import UUID, uuid4
 
 import pytest
@@ -405,3 +406,14 @@ def test_members_read_from_the_member_listing() -> None:
     assert members[ALICE].role == "admin"
     assert members[BOB].name == BOB
     assert members[BOB].role == "member"
+
+
+@pytest.mark.parametrize("user", [None, SimpleNamespace(id="not-a-user-id")])
+def test_a_credential_naming_no_user_is_refused_not_crashed(user) -> None:
+    from fastapi import HTTPException
+
+    from sibyl.api.routes.activity import _caller_uuid
+
+    with pytest.raises(HTTPException) as refused:
+        _caller_uuid(SimpleNamespace(user=user))
+    assert refused.value.status_code == 401
