@@ -108,6 +108,25 @@ describe('useTeamActivity', () => {
     expect(result.current.isLoading).toBe(false);
   });
 
+  it('drops the old answer once a window fails, so it cannot flash back', async () => {
+    const { result, rerender } = renderHook(
+      ({ window }: { window: '7d' | '24h' | '30d' }) => useTeamActivity({ window }),
+      { wrapper: createWrapper(), initialProps: { window: '7d' } }
+    );
+    await waitFor(() => expect(result.current.data).toBeDefined());
+
+    fetchMock.mockImplementationOnce(async () => new Response('boom', { status: 500 }));
+    rerender({ window: '24h' });
+    await waitFor(() => expect(result.current.isError).toBe(true));
+    expect(result.current.data).toBeUndefined();
+
+    fetchMock.mockImplementationOnce(() => new Promise<Response>(() => undefined));
+    rerender({ window: '30d' });
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
+    expect(result.current.data).toBeUndefined();
+    expect(result.current.isLoading).toBe(true);
+  });
+
   it('waits while disabled', () => {
     const { result } = renderHook(() => useTeamActivity({ window: '7d' }, { enabled: false }), {
       wrapper: createWrapper(),

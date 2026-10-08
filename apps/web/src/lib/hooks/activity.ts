@@ -169,11 +169,13 @@ export function useTeamActivity(
   });
 
   // The combined answer is structurally shared, so this only fires when the
-  // data on screen actually changes.
+  // data on screen actually changes. A failed scope drops the old answer, as
+  // keepPreviousData would, so a retry or the next switch cannot flash it.
   const [previous, setPrevious] = useState<TeamActivityResponse | undefined>(undefined);
   useEffect(() => {
     if (current.data) setPrevious(current.data);
-  }, [current.data]);
+    else if (current.isError) setPrevious(undefined);
+  }, [current.data, current.isError]);
 
   if (current.data || current.isError || !current.isLoading || !previous) return current;
   return { ...current, data: previous, isLoading: false, isPlaceholderData: true };
