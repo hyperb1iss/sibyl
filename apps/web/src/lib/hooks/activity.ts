@@ -1,20 +1,9 @@
 'use client';
 
-import { useQueries } from '@tanstack/react-query';
-import { useCallback, useEffect, useState } from 'react';
-import type {
-  TeamActivityItem,
-  TeamActivityParams,
-  TeamActivityPerson,
-  TeamActivityResponse,
-  TeamActivityWindow,
-} from '../api/activity';
+import { keepPreviousData, useQuery } from '@tanstack/react-query';
+import { useEffect, useState } from 'react';
+import type { TeamActivityParams, TeamActivityResponse, TeamActivityWindow } from '../api/activity';
 import { activityApi } from '../api/activity';
-import {
-  TEAM_ACTIVITY_COUNT_KEYS,
-  TEAM_ACTIVITY_RECENT_LIMIT,
-  teamActivityTotal,
-} from '../constants/activity';
 import { TIMING } from '../constants/app';
 import { queryKeys } from './query-keys';
 
@@ -22,11 +11,10 @@ export interface TeamActivityScope {
   window: TeamActivityWindow;
   /** One project. Omit, with no `projectIds`, for every project. */
   projectId?: string;
-  /**
-   * Several projects. The endpoint filters one project per request, so each
-   * project is fetched on its own and the answers are merged.
-   */
+  /** Several projects; activity in any of them counts. */
   projectIds?: string[];
+  /** Narrow the feed to one member; the people list stays whole. */
+  actorId?: string;
 }
 
 export interface TeamActivityResult {
@@ -35,148 +23,73 @@ export interface TeamActivityResult {
   isLoading: boolean;
   /** A request is in flight, including a background refresh. */
   isFetching: boolean;
-  /** The data on screen belongs to the previous window or scope. */
+  /** The data on screen belongs to the previous window, scope, or member. */
   isPlaceholderData: boolean;
   isError: boolean;
   error: Error | null;
   refetch: () => void;
 }
 
-function timeOf(iso: string | null): number {
-  if (!iso) return 0;
-  const time = Date.parse(iso);
-  return Number.isNaN(time) ? 0 : time;
-}
-
 /**
- * Fold per-project answers into one. People are the same members in every
- * answer, so their counts add up and their latest activity wins; the feed is
- * re-sorted newest first and capped the way the server caps it.
+ * The request for a scope, normalized so the same scope always maps to the
+ * same query key: project ids deduplicated and sorted, empty fields left out.
  */
-export function mergeTeamActivity(
-  responses: TeamActivityResponse[]
-): TeamActivityResponse | undefined {
-  const [first] = responses;
-  if (!first) return undefined;
-  if (responses.length === 1) return first;
-
-  const people = new Map<string, TeamActivityPerson>();
-  for (const response of responses) {
-    for (const person of response.people) {
-      const seen = people.get(person.user_id);
-      if (!seen) {
-        people.set(person.user_id, { ...person, counts: { ...person.counts } });
-        continue;
-      }
-      for (const key of TEAM_ACTIVITY_COUNT_KEYS) {
-        seen.counts[key] += person.counts[key] ?? 0;
-      }
-      if (timeOf(person.last_active_at) > timeOf(seen.last_active_at)) {
-        seen.last_active_at = person.last_active_at;
-      }
-    }
-  }
-  const ranked = [...people.values()].sort(
-    (a, b) =>
-      teamActivityTotal(b.counts) - teamActivityTotal(a.counts) ||
-      timeOf(b.last_active_at) - timeOf(a.last_active_at)
-  );
-
-  const seenItems = new Set<string>();
-  const recent: TeamActivityItem[] = [];
-  for (const response of responses) {
-    for (const item of response.recent) {
-      const key = `${item.kind}:${item.id}`;
-      if (seenItems.has(key)) continue;
-      seenItems.add(key);
-      recent.push(item);
-    }
-  }
-  recent.sort((a, b) => timeOf(b.at) - timeOf(a.at));
-
+export function teamActivityParams({
+  window,
+  projectId,
+  projectIds,
+  actorId,
+}: TeamActivityScope): TeamActivityParams {
+  const ids = projectIds?.length ? projectIds : projectId ? [projectId] : [];
+  const unique = [...new Set(ids)].sort();
   return {
-    window: first.window,
-    project_id: null,
-    people: ranked,
-    recent: recent.slice(0, TEAM_ACTIVITY_RECENT_LIMIT),
-    truncated:
-      responses.some(response => response.truncated) || recent.length > TEAM_ACTIVITY_RECENT_LIMIT,
+    window,
+    ...(unique.length > 0 ? { project_ids: unique } : {}),
+    ...(actorId ? { actor_id: actorId } : {}),
   };
 }
 
-function scopeParams({ window, projectId, projectIds }: TeamActivityScope): TeamActivityParams[] {
-  const ids = projectIds?.length ? [...new Set(projectIds)] : projectId ? [projectId] : [];
-  if (ids.length === 0) return [{ window }];
-  return ids.map(id => ({ window, project_id: id }));
-}
-
 /**
- * Who on the team did what inside a time window, for every project, one
- * project, or several. Mirrors a single query's state so callers do not care
- * how many requests the scope took.
- *
- * While a new window or scope loads, the previous answer stays on screen
- * flagged `isPlaceholderData`. The app's `keepPreviousData` default does not
- * reach `useQueries`: every new key gets a fresh observer with no previous
- * data, so the hook carries the last answer itself.
+ * Who on the team did what inside a time window, for every project, one, or
+ * several, optionally with the feed narrowed to one member. One request per
+ * scope; while a new scope loads, the previous answer stays on screen flagged
+ * `isPlaceholderData`.
  */
 export function useTeamActivity(
   scope: TeamActivityScope,
   options?: { enabled?: boolean }
 ): TeamActivityResult {
-  const enabled = options?.enabled ?? true;
-  const params = scopeParams(scope);
-
-  const combine = useCallback(
-    (
-      results: Array<{
-        data: TeamActivityResponse | undefined;
-        isFetching: boolean;
-        isPlaceholderData: boolean;
-        isError: boolean;
-        error: Error | null;
-        refetch: () => Promise<unknown>;
-      }>
-    ): TeamActivityResult => {
-      const answers = results.map(result => result.data);
-      const complete = answers.every(answer => answer !== undefined);
-      const failed = results.find(result => result.isError);
-      return {
-        data: complete ? mergeTeamActivity(answers as TeamActivityResponse[]) : undefined,
-        isLoading: enabled && !complete && !failed,
-        isFetching: results.some(result => result.isFetching),
-        isPlaceholderData: results.some(result => result.isPlaceholderData),
-        isError: failed !== undefined,
-        error: failed?.error ?? null,
-        refetch: () => {
-          for (const result of results) {
-            if (result.isError || !result.isFetching) void result.refetch();
-          }
-        },
-      };
-    },
-    [enabled]
-  );
-
-  const current = useQueries({
-    queries: params.map(query => ({
-      queryKey: queryKeys.activity.team(query),
-      queryFn: ({ signal }: { signal: AbortSignal }) => activityApi.team(query, { signal }),
-      staleTime: TIMING.STALE_TIME,
-      enabled,
-    })),
-    combine,
+  const params = teamActivityParams(scope);
+  // keepPreviousData reaches back to the last scope that had data, even past
+  // a failed one, so a retry or the next switch would flash an answer from
+  // two scopes ago. After a failure the hook shows a plain load instead,
+  // until a real answer lands.
+  const [afterFailure, setAfterFailure] = useState(false);
+  const query = useQuery({
+    queryKey: queryKeys.activity.team(params),
+    queryFn: ({ signal }) => activityApi.team(params, { signal }),
+    staleTime: TIMING.STALE_TIME,
+    // Explicit rather than inherited, so the hook behaves the same under any
+    // QueryClient.
+    placeholderData: afterFailure ? undefined : keepPreviousData,
+    enabled: options?.enabled ?? true,
   });
-
-  // The combined answer is structurally shared, so this only fires when the
-  // data on screen actually changes. A failed scope drops the old answer, as
-  // keepPreviousData would, so a retry or the next switch cannot flash it.
-  const [previous, setPrevious] = useState<TeamActivityResponse | undefined>(undefined);
+  const failedWithoutData = query.isError && query.data === undefined;
+  const answered = query.data !== undefined && !query.isPlaceholderData;
   useEffect(() => {
-    if (current.data) setPrevious(current.data);
-    else if (current.isError) setPrevious(undefined);
-  }, [current.data, current.isError]);
+    if (failedWithoutData) setAfterFailure(true);
+    else if (answered) setAfterFailure(false);
+  }, [failedWithoutData, answered]);
 
-  if (current.data || current.isError || !current.isLoading || !previous) return current;
-  return { ...current, data: previous, isLoading: false, isPlaceholderData: true };
+  return {
+    data: query.data,
+    isLoading: query.isLoading,
+    isFetching: query.isFetching,
+    isPlaceholderData: query.isPlaceholderData,
+    isError: query.isError,
+    error: query.error,
+    refetch: () => {
+      void query.refetch();
+    },
+  };
 }

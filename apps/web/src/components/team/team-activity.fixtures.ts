@@ -104,7 +104,7 @@ export function fixturePeople(now: number): TeamActivityPerson[] {
       name: 'Dennis Ritchie',
       email: null,
       avatar_url: null,
-      role: 'member',
+      role: 'viewer',
       counts: counts({}),
       last_active_at: null,
     },
@@ -204,17 +204,19 @@ const ITEM_SEEDS: ItemSeed[] = [
   ],
 ];
 
-const HREF_PREFIX: Record<TeamActivityItem['kind'], string> = {
-  capture: '/archive',
-  task_created: '/tasks',
-  task_completed: '/tasks',
-  decision: '/entities',
-  note: '/entities',
-  procedure: '/entities',
-  entity: '/entities',
-};
+// The API builds hrefs; these mirror its shapes.
+function hrefFor(kind: TeamActivityItem['kind'], id: string): string {
+  if (kind === 'capture') return `/memory/captures?id=${id}`;
+  if (kind === 'task_created' || kind === 'task_completed') return `/tasks/${id}`;
+  return `/entities/${id}`;
+}
+
+const PROJECT_NAMES: Record<string, string> = Object.fromEntries(
+  FIXTURE_PROJECTS.map(project => [project.id, project.name])
+);
 
 export function fixtureRecent(now: number): TeamActivityItem[] {
+  const people = new Map(fixturePeople(now).map(person => [person.user_id, person]));
   return ITEM_SEEDS.map(([kind, title, actor, project, agoMs, entityType], index) => {
     const id = `item_${index + 1}`;
     return {
@@ -224,9 +226,12 @@ export function fixtureRecent(now: number): TeamActivityItem[] {
       entity_type:
         entityType ?? (kind.startsWith('task') ? 'task' : kind === 'capture' ? null : kind),
       project_id: project,
+      project_name: project ? (PROJECT_NAMES[project] ?? null) : null,
       actor_id: actor,
+      actor_name: people.get(actor)?.name ?? null,
+      actor_avatar_url: people.get(actor)?.avatar_url ?? null,
       at: new Date(now - agoMs).toISOString(),
-      href: `${HREF_PREFIX[kind]}/${id}`,
+      href: hrefFor(kind, id),
     };
   });
 }
@@ -243,11 +248,25 @@ export function fixtureTeamActivity(
       label: window,
     },
     project_id: null,
+    project_ids: null,
+    actor_id: null,
     people: fixturePeople(now),
     recent: fixtureRecent(now),
     truncated: false,
     ...overrides,
   };
+}
+
+/** The answer with `actor_id` set: the feed holds only that member's events. */
+export function fixtureActorActivity(
+  now: number,
+  actorId: string,
+  window: TeamActivityWindow = '7d'
+): TeamActivityResponse {
+  return fixtureTeamActivity(now, window, {
+    actor_id: actorId,
+    recent: fixtureRecent(now).filter(item => item.actor_id === actorId),
+  });
 }
 
 /** Everyone on the team, nobody active. */

@@ -8,6 +8,7 @@ import {
   Cube,
   Database,
   EditPencil,
+  Eye,
   GitBranch,
   type IconComponent,
   PlusCircle,
@@ -155,6 +156,11 @@ export const TEAM_ROLE_CONFIG: Record<
     label: 'Member',
     icon: User,
     badge: 'bg-sc-cyan/10 text-sc-cyan border-sc-cyan/25',
+  },
+  viewer: {
+    label: 'Viewer',
+    icon: Eye,
+    badge: 'bg-sc-bg-highlight text-sc-fg-muted border-sc-fg-subtle/25',
   },
 };
 

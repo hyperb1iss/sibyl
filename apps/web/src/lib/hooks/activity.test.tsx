@@ -3,11 +3,13 @@ import { renderHook, waitFor } from '@testing-library/react';
 import type { ReactNode } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { fixtureTeamActivity } from '@/components/team/team-activity.fixtures';
-import type { TeamActivityItem, TeamActivityResponse } from '../api/activity';
-import { mergeTeamActivity, useTeamActivity } from './activity';
+import type { TeamActivityWindow } from '../api/activity';
+import { teamActivityParams, useTeamActivity } from './activity';
 
 const NOW = Date.parse('2026-10-08T15:00:00Z');
 
+// No placeholder default here, unlike the app's client: the hook must keep
+// the previous answer on its own.
 function createWrapper() {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return ({ children }: { children: ReactNode }) => (
@@ -15,22 +17,23 @@ function createWrapper() {
   );
 }
 
-function item(id: string, at: string, actor = 'user_ada'): TeamActivityItem {
-  return {
-    kind: 'capture',
-    id,
-    title: id,
-    entity_type: null,
-    project_id: null,
-    actor_id: actor,
-    at,
-    href: `/archive/${id}`,
-  };
-}
-
 function requestedUrls(fetchMock: ReturnType<typeof vi.fn>): URL[] {
   return fetchMock.mock.calls.map(([input]) => new URL(String(input), 'http://localhost'));
 }
+
+describe('teamActivityParams', () => {
+  it('sorts and dedupes projects and leaves empty fields out', () => {
+    expect(teamActivityParams({ window: '7d' })).toEqual({ window: '7d' });
+    expect(teamActivityParams({ window: '7d', projectIds: [] })).toEqual({ window: '7d' });
+    expect(teamActivityParams({ window: '7d', projectId: 'p1' })).toEqual({
+      window: '7d',
+      project_ids: ['p1'],
+    });
+    expect(
+      teamActivityParams({ window: '24h', projectIds: ['p2', 'p1', 'p2'], actorId: 'user_ada' })
+    ).toEqual({ window: '24h', project_ids: ['p1', 'p2'], actor_id: 'user_ada' });
+  });
+});
 
 describe('useTeamActivity', () => {
   let fetchMock: ReturnType<typeof vi.fn>;
@@ -60,47 +63,55 @@ describe('useTeamActivity', () => {
     expect(url.pathname).toBe('/api/activity/team');
     expect(url.searchParams.get('window')).toBe('7d');
     expect(url.searchParams.has('project_id')).toBe(false);
-    expect(result.current.data?.people.map(person => person.name)[0]).toBe('Ada Lovelace');
+    expect(url.searchParams.has('actor_id')).toBe(false);
   });
 
-  it('scopes the request to one project', async () => {
-    const { result } = renderHook(() => useTeamActivity({ window: '24h', projectId: 'p1' }), {
-      wrapper: createWrapper(),
-    });
-
-    await waitFor(() => expect(result.current.data).toBeDefined());
-    const [url] = requestedUrls(fetchMock);
-    expect(url.searchParams.get('window')).toBe('24h');
-    expect(url.searchParams.get('project_id')).toBe('p1');
-  });
-
-  it('fetches each of several projects and merges the answers', async () => {
+  it('sends several projects as one request with a repeated project_id', async () => {
     const { result } = renderHook(
-      () => useTeamActivity({ window: '30d', projectIds: ['p1', 'p2'] }),
+      () => useTeamActivity({ window: '30d', projectIds: ['p2', 'p1'] }),
       { wrapper: createWrapper() }
     );
 
     await waitFor(() => expect(result.current.data).toBeDefined());
-    expect(
-      requestedUrls(fetchMock)
-        .map(url => url.searchParams.get('project_id'))
-        .sort()
-    ).toEqual(['p1', 'p2']);
-    const ada = result.current.data?.people.find(person => person.user_id === 'user_ada');
-    // Same fixture twice: every count doubles.
-    expect(ada?.counts.captures).toBe(24);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(requestedUrls(fetchMock)[0].searchParams.getAll('project_id')).toEqual(['p1', 'p2']);
   });
 
-  it('keeps the previous answer, flagged as a placeholder, while a new window loads', async () => {
+  it('keeps one cache entry whatever order the projects arrive in', async () => {
     const { result, rerender } = renderHook(
-      ({ window }: { window: '7d' | '24h' }) => useTeamActivity({ window }),
-      { wrapper: createWrapper(), initialProps: { window: '7d' } }
+      ({ ids }: { ids: string[] }) => useTeamActivity({ window: '7d', projectIds: ids }),
+      { wrapper: createWrapper(), initialProps: { ids: ['p2', 'p1'] } }
+    );
+    await waitFor(() => expect(result.current.data).toBeDefined());
+
+    rerender({ ids: ['p1', 'p2', 'p1'] });
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(result.current.isPlaceholderData).toBe(false);
+  });
+
+  it('narrows the feed to one member with actor_id', async () => {
+    const { result } = renderHook(
+      () => useTeamActivity({ window: '7d', projectId: 'p1', actorId: 'user_ada' }),
+      { wrapper: createWrapper() }
+    );
+
+    await waitFor(() => expect(result.current.data).toBeDefined());
+    const [url] = requestedUrls(fetchMock);
+    expect(url.searchParams.getAll('project_id')).toEqual(['p1']);
+    expect(url.searchParams.get('actor_id')).toBe('user_ada');
+  });
+
+  it('keeps the previous answer, flagged as a placeholder, while a new scope loads', async () => {
+    const { result, rerender } = renderHook(
+      ({ actorId }: { actorId?: string }) => useTeamActivity({ window: '7d', actorId }),
+      { wrapper: createWrapper(), initialProps: {} as { actorId?: string } }
     );
     await waitFor(() => expect(result.current.data).toBeDefined());
     const shown = result.current.data;
 
     fetchMock.mockImplementationOnce(() => new Promise<Response>(() => undefined));
-    rerender({ window: '24h' });
+    rerender({ actorId: 'user_ada' });
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
     expect(result.current.data).toBe(shown);
@@ -110,8 +121,8 @@ describe('useTeamActivity', () => {
 
   it('drops the old answer once a window fails, so it cannot flash back', async () => {
     const { result, rerender } = renderHook(
-      ({ window }: { window: '7d' | '24h' | '30d' }) => useTeamActivity({ window }),
-      { wrapper: createWrapper(), initialProps: { window: '7d' } }
+      ({ window }: { window: TeamActivityWindow }) => useTeamActivity({ window }),
+      { wrapper: createWrapper(), initialProps: { window: '7d' as TeamActivityWindow } }
     );
     await waitFor(() => expect(result.current.data).toBeDefined());
 
@@ -134,67 +145,5 @@ describe('useTeamActivity', () => {
 
     expect(fetchMock).not.toHaveBeenCalled();
     expect(result.current.isLoading).toBe(false);
-  });
-});
-
-describe('mergeTeamActivity', () => {
-  it('adds counts, keeps the latest activity, and re-ranks people', () => {
-    const base = fixtureTeamActivity(NOW);
-    const quietProject: TeamActivityResponse = {
-      ...base,
-      people: base.people.map(person =>
-        person.user_id === 'user_dennis'
-          ? {
-              ...person,
-              counts: { ...person.counts, captures: 40 },
-              last_active_at: '2026-10-08T14:59:00Z',
-            }
-          : {
-              ...person,
-              counts: {
-                captures: 0,
-                tasks_created: 0,
-                tasks_completed: 0,
-                decisions: 0,
-                notes: 0,
-                procedures: 0,
-                other: 0,
-              },
-            }
-      ),
-      recent: [],
-    };
-
-    const merged = mergeTeamActivity([base, quietProject]);
-
-    expect(merged?.people[0].user_id).toBe('user_dennis');
-    expect(merged?.people[0].last_active_at).toBe('2026-10-08T14:59:00Z');
-    expect(merged?.people.find(person => person.user_id === 'user_ada')?.counts.captures).toBe(12);
-    expect(merged?.project_id).toBeNull();
-  });
-
-  it('interleaves feeds newest first, drops repeats, and caps at the server limit', () => {
-    const base = fixtureTeamActivity(NOW);
-    const older = Array.from({ length: 60 }, (_, index) =>
-      item(`a${index}`, new Date(NOW - (index * 2 + 1) * 60_000).toISOString())
-    );
-    const newer = Array.from({ length: 60 }, (_, index) =>
-      item(`b${index}`, new Date(NOW - index * 2 * 60_000).toISOString())
-    );
-
-    const merged = mergeTeamActivity([
-      { ...base, recent: older },
-      { ...base, recent: [...newer, older[0]] },
-    ]);
-
-    expect(merged?.recent).toHaveLength(100);
-    expect(merged?.recent.slice(0, 3).map(entry => entry.id)).toEqual(['b0', 'a0', 'b1']);
-    expect(merged?.truncated).toBe(true);
-  });
-
-  it('passes a single answer through untouched', () => {
-    const base = fixtureTeamActivity(NOW);
-    expect(mergeTeamActivity([base])).toBe(base);
-    expect(mergeTeamActivity([])).toBeUndefined();
   });
 });
