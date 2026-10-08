@@ -6,10 +6,11 @@ import { Button } from '@/components/ui/button';
 import { ErrorState } from '@/components/ui/empty-state';
 import { AlertTriangle, Users } from '@/components/ui/icons';
 import { Spinner } from '@/components/ui/spinner';
-import type {
-  TeamActivityCounts,
-  TeamActivityPerson,
-  TeamActivityWindow,
+import {
+  isTeamActivityAccessDenied,
+  type TeamActivityCounts,
+  type TeamActivityPerson,
+  type TeamActivityWindow,
 } from '@/lib/api/activity';
 import {
   isTeamActivityWindow,
@@ -38,7 +39,7 @@ export interface TeamActivityViewProps {
   activity: Pick<
     TeamActivityResult,
     'data' | 'isLoading' | 'isFetching' | 'isPlaceholderData' | 'isError' | 'refetch'
-  >;
+  > & { error?: Error | null };
   /** The member the feed is narrowed to, if any. */
   personId: string | null;
   onPersonChange: (userId: string | null) => void;
@@ -82,6 +83,8 @@ export function TeamActivityView({
   now,
 }: TeamActivityViewProps) {
   const { data, isLoading, isFetching, isPlaceholderData, isError, refetch } = activity;
+  // A refusal is not an outage: the viewer asked for a project they cannot read.
+  const accessDenied = isError && isTeamActivityAccessDenied(activity.error);
 
   // Describe the window the data on screen covers, which trails the switcher
   // while a new window loads.
@@ -199,15 +202,31 @@ export function TeamActivityView({
         >
           <span className="inline-flex items-center gap-2">
             <AlertTriangle width={16} height={16} className="text-sc-yellow" aria-hidden="true" />
-            Couldn't refresh team activity. Showing the last answer.
+            {accessDenied
+              ? "You can't see one of the selected projects. Showing the last answer."
+              : "Couldn't refresh team activity. Showing the last answer."}
           </span>
-          <Button size="sm" variant="secondary" onClick={refetch}>
-            Retry
-          </Button>
+          {accessDenied ? (
+            <Button size="sm" variant="secondary" onClick={onSelectAllProjects}>
+              Show every project
+            </Button>
+          ) : (
+            <Button size="sm" variant="secondary" onClick={refetch}>
+              Retry
+            </Button>
+          )}
         </div>
       )}
 
-      {!data && isError ? (
+      {!data && accessDenied ? (
+        <div className="rounded-xl border border-sc-fg-subtle/20 bg-sc-bg-elevated shadow-card">
+          <ErrorState
+            title="You can't see one of these projects"
+            message="Team activity only covers projects you can read. Pick projects you belong to, or show every project you can see."
+            action={<Button onClick={onSelectAllProjects}>Show every project</Button>}
+          />
+        </div>
+      ) : !data && isError ? (
         <div className="rounded-xl border border-sc-fg-subtle/20 bg-sc-bg-elevated shadow-card">
           <ErrorState
             title="Couldn't load team activity"

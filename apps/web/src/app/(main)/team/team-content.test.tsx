@@ -454,6 +454,22 @@ describe('TeamContent', () => {
     expect(within(people).getAllByText(/^No activity in/)).toHaveLength(6);
   });
 
+  it('explains a project the viewer cannot read instead of blaming the service', async () => {
+    activityResponse = url =>
+      url.searchParams.has('project_id')
+        ? json({ detail: 'project_scope_denied' }, 403)
+        : json(fixtureTeamActivity(NOW));
+    const { user } = renderTeam(`projects=${FIXTURE_PROJECTS[0].id}`);
+
+    expect(await screen.findByText("You can't see one of these projects")).toBeVisible();
+    expect(screen.queryByText(/did not answer/)).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Show every project' }));
+
+    expect(await screen.findByRole('region', { name: /^People/ })).toBeVisible();
+    expect(lastActivityRequest()?.searchParams.has('project_id')).toBe(false);
+  });
+
   it('shows an error with a retry that recovers', async () => {
     activityResponse = () => json({ detail: 'boom' }, 500);
     const { user } = renderTeam();

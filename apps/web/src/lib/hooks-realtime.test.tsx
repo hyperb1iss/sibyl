@@ -69,6 +69,25 @@ describe('useRealtimeUpdates', () => {
     });
   });
 
+  it.each([
+    ['note_created', { task_id: 'task_1', note_id: 'note_1' }],
+    ['permission_changed', { user_id: 'user-1', change_type: 'org_member_added' }],
+  ])('refreshes team activity on %s', async (event, payload) => {
+    const queryClient = createTestQueryClient();
+    const invalidateQueries = vi.spyOn(queryClient, 'invalidateQueries');
+
+    render(<RealtimeHarness />, { queryClient });
+
+    await waitFor(() => {
+      expect(websocket.handlers.has(event)).toBe(true);
+    });
+
+    websocket.handlers.get(event)?.(payload);
+    await vi.advanceTimersByTimeAsync(INVALIDATION_DEBOUNCE_MS);
+
+    expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: queryKeys.activity.all });
+  });
+
   it('coalesces a burst of task events into one refetch per query key', async () => {
     const queryClient = createTestQueryClient();
     const invalidateQueries = vi.spyOn(queryClient, 'invalidateQueries');

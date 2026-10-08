@@ -100,6 +100,9 @@ export function useRealtimeUpdates(isAuthenticated?: boolean) {
       invalidate(queryKeys.auth.me);
       // Also invalidate org data in case role affects what's visible
       invalidate(queryKeys.orgs.list);
+      // Team activity lists members and counts only what the caller can read,
+      // so a membership or role change reshapes it.
+      invalidate(queryKeys.activity.all);
     });
 
     // Crawl started - refresh source to show crawling status
@@ -210,6 +213,8 @@ export function useRealtimeUpdates(isAuthenticated?: boolean) {
 
     const unsubNoteCreated = wsClient.on('note_created', data => {
       refreshTaskNotes(data.task_id);
+      // A task note is a member's activity.
+      invalidate(queryKeys.activity.all);
     });
 
     const unsubSourceImportUpdated = wsClient.on('source_import_updated', data => {

@@ -91,3 +91,14 @@ export const activityApi = {
     });
   },
 };
+
+/**
+ * Whether a team activity request was refused because a requested project is
+ * one the viewer cannot read. The API answers a project outside the viewer's
+ * grants and one that does not exist the same way, so the page can only say
+ * "not one you can see".
+ */
+export function isTeamActivityAccessDenied(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error ?? '');
+  return /project_scope_denied|project_access_denied/.test(message);
+}
