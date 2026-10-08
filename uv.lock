@@ -3516,7 +3516,7 @@ provides-extras = ["bedrock", "embeddings", "graph", "graphrag", "llm", "reranki
 [package.metadata.requires-dev]
 dev = [
     { name = "anthropic", extras = ["bedrock"], specifier = ">=1.0.0,<2" },
-    { name = "cbor2", specifier = ">=6.1.5" },
+    { name = "cbor2", specifier = ">=6.1.5,<7" },
     { name = "httpx2", specifier = ">=2.5.0,<3" },
     { name = "numpy", specifier = ">=2.5.1" },
     { name = "pydantic-ai-slim", extras = ["anthropic", "google", "openai"], specifier = ">=2.42.0,<2.52" },
@@ -3621,7 +3621,7 @@ requires-dist = [
     { name = "argon2-cffi", specifier = ">=25.1.0" },
     { name = "arq", specifier = ">=0.26.3" },
     { name = "authlib", specifier = ">=1.7.2,<1.8" },
-    { name = "cbor2", specifier = ">=6.1.5" },
+    { name = "cbor2", specifier = ">=6.1.5,<7" },
     { name = "crawl4ai", specifier = ">=0.9.2" },
     { name = "email-validator", specifier = ">=2.3.0" },
     { name = "fastapi", specifier = ">=0.141.1" },

@@ -98,7 +98,7 @@ dev = [
     "numpy>=2.5.1",
     "pydantic-ai-slim[anthropic,google,openai]>=2.42.0,<2.52",
     "ty>=0.0.84",
-    "cbor2>=6.1.5",
+    "cbor2>=6.1.5,<7",
 ]
 
 [project.urls]
