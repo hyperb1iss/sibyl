@@ -253,6 +253,7 @@ async def available_graph_relationships(
     read: GraphReadValidation | None = None,
     source_visible: SourceVisible | None = None,
     memo: GraphReadMemo | None = None,
+    proven_endpoints: Mapping[str, Entity] | None = None,
 ) -> dict[str, Relationship]:
     """Refresh stored edges and require their protected operational generation.
 
@@ -261,12 +262,17 @@ async def available_graph_relationships(
     ``source_visible`` narrows the endpoints an edge may stand on to the rows
     this reader can see, which is the check an edge reader applies afterwards
     in any case; proving it here lets a memo settle each endpoint once.
+    ``proven_endpoints`` hands over the rows the caller already proved in the same
+    phase; an edge then stands only on those, and its endpoints are compared
+    with each snapshot instead of being proven again.
     """
     if read is not None and read.content_execute_query is not None:
         raise ValueError("explicit validation readers do not materialize relationships")
     ids = list(dict.fromkeys(relationship_ids))
     if not ids:
         return {}
+    if proven_endpoints is not None and memo is not None:
+        raise ValueError("proven endpoints and a read memo settle the same rows twice")
     if memo is not None:
         if read is not None:
             raise ValueError("a read memo cannot share an explicit validation phase")
@@ -285,7 +291,12 @@ async def available_graph_relationships(
         )
         return {identifier: row for identifier, row in verdicts.items() if row is not None}
     return await _load_available_graph_relationships(
-        organization_id, ids, runtime=runtime, read=read, source_visible=source_visible
+        organization_id,
+        ids,
+        runtime=runtime,
+        read=read,
+        source_visible=source_visible,
+        proven_endpoints=proven_endpoints,
     )
 
 
@@ -297,6 +308,7 @@ async def _load_available_graph_relationships(
     read: GraphReadValidation | None = None,
     source_visible: SourceVisible | None,
     memo: GraphReadMemo | None = None,
+    proven_endpoints: Mapping[str, Entity] | None = None,
 ) -> dict[str, Relationship]:
     from sibyl_core.backends.surreal.records import normalize_records
     from sibyl_core.services.graph_records import (
@@ -341,39 +353,56 @@ async def _load_available_graph_relationships(
     )
     all_endpoints: set[str] = set().union(*(endpoints for _, endpoints, _ in captured))
 
+    def endpoint_evidence(entity: Entity) -> tuple[Any, ...]:
+        # Vectors are storage, not evidence: entity_read_evidence leaves them
+        # out, and neither side was read with them.
+        return (
+            entity.model_dump(mode="json", exclude={"embedding"}),
+            entity.derivation_required,
+            entity.observed_revision,
+        )
+
     async def validate(snapshots, read):
         result = {}
-        current = await available_graph_entities(
-            organization_id,
-            sorted(all_endpoints),
-            runtime=graph,
-            read=None if memo is not None else read,
-            source_visible=source_visible,
-            memo=memo,
-            include_embeddings=False,
+        current = (
+            proven_endpoints
+            if proven_endpoints is not None
+            else await available_graph_entities(
+                organization_id,
+                sorted(all_endpoints),
+                runtime=graph,
+                read=None if memo is not None else read,
+                source_visible=source_visible,
+                memo=memo,
+                include_embeddings=False,
+            )
         )
+        # Each side is decoded once per snapshot, however many edges share it.
+        current_evidence: dict[str, tuple[Any, ...]] = {}
+
+        def unchanged(endpoint: str, targets, stored_evidence) -> bool:
+            if endpoint not in current_evidence:
+                current_evidence[endpoint] = endpoint_evidence(current[endpoint])
+            if endpoint not in stored_evidence:
+                stored_evidence[endpoint] = endpoint_evidence(
+                    entity_from_surreal_row(targets[endpoint])
+                )
+            return current_evidence[endpoint] == stored_evidence[endpoint]
+
         for snapshot in snapshots:
             targets = {r["uuid"]: r for r in snapshot["targets"]}
             states = {r["source_id"]: r for r in snapshot["states"]}
             associations = {r["target_id"]: r for r in snapshot["associations"]}
+            stored_evidence: dict[str, tuple[Any, ...]] = {}
             for row in snapshot["relationships"]:
                 if any(
                     row.get(key) not in current or row.get(key) not in targets
                     for key in ("source_uuid", "target_uuid")
                 ):
                     continue
-                # Vectors are storage, not evidence: entity_read_evidence
-                # leaves them out, and neither side was read with them.
-                if any(
-                    current[endpoint].model_dump(mode="json", exclude={"embedding"})
-                    != entity_from_surreal_row(targets[endpoint]).model_dump(
-                        mode="json", exclude={"embedding"}
-                    )
-                    or current[endpoint].derivation_required
-                    != entity_from_surreal_row(targets[endpoint]).derivation_required
-                    or current[endpoint].observed_revision
-                    != entity_from_surreal_row(targets[endpoint]).observed_revision
-                    for endpoint in (row["source_uuid"], row["target_uuid"])
+                if not all(
+                    unchanged(row[key], targets, stored_evidence)
+                    for key in ("source_uuid", "target_uuid")
                 ):
                     continue
                 relationship = readable_relationship_from_surreal_row(row)

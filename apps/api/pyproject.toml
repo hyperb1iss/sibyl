@@ -65,6 +65,7 @@ dependencies = [
     "itsdangerous>=2.2,<3",
     # Transactional email (SMTP uses the standard library)
     "resend>=2.47.0,<3",
+    "cbor2>=6.1.5,<7",
 ]
 
 [project.scripts]
