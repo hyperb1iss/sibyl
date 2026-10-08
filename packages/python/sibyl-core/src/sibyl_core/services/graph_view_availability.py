@@ -185,7 +185,7 @@ async def available_graph_view(
         include_embeddings=False,
     )
     current_edges = await available_graph_relationships(
-        organization_id, list(relationships), runtime=runtime, read=read, endpoints=nodes
+        organization_id, list(relationships), runtime=runtime, read=read, proven_endpoints=nodes
     )
     current_edges = {
         identifier: edge

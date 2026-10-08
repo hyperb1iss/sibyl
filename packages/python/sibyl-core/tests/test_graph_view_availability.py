@@ -303,9 +303,7 @@ async def test_final_view_keeps_protected_generation_bound_to_canonical_source(
     assert set(nodes) == {healthy.id, "ordinary"} and not edges
 
 
-async def test_final_view_malformed_stored_edge_preserves_healthy_nodes_and_edge(
-    runtime, content_store, monkeypatch
-):
+async def _two_edges(runtime):
     ids = ["root", "changing", "healthy"]
     await _ordinary(runtime, *ids)
     changing = Relationship(
@@ -319,32 +317,69 @@ async def test_final_view_malformed_stored_edge_preserves_healthy_nodes_and_edge
     proven = await available_graph_relationships(
         runtime.client.group_id, [changing.id, healthy.id], runtime=runtime
     )
+    return ids, changing, healthy, proven
+
+
+async def _store_malformed(runtime, changing):
+    replacement = Relationship(
+        id=changing.id,
+        source_id=changing.source_id,
+        target_id=changing.target_id,
+        relationship_type=changing.relationship_type,
+        weight=1,
+        metadata={"weight": -1},
+    )
+    assert replacement.weight == 1
+    assert await runtime.relationship_manager.create_direct_bulk([replacement]) == [changing.id]
+    stored = await runtime.client.execute_query(
+        "SELECT attributes FROM relates_to WHERE uuid=$id;", id=changing.id
+    )
+    assert stored[0]["attributes"]["weight"] == -1
+
+
+async def test_final_view_malformed_stored_edge_preserves_healthy_nodes_and_edge(
+    runtime, content_store, monkeypatch
+):
+    ids, changing, healthy, proven = await _two_edges(runtime)
     baseline_nodes, baseline_edges = await view.available_graph_view(
         runtime.client.group_id, ids, proven, runtime=runtime
     )
     assert set(baseline_nodes) == set(ids)
     assert set(baseline_edges) == {changing.id, healthy.id}
-    collect_nodes = view.available_graph_entities
+    final_capture = view._snapshot
+    warnings = []
+    warn = view.log.warning
+
+    def record_warning(event, **fields):
+        warnings.append(event)
+        return warn(event, **fields)
+
+    async def corrupt_edge_at_final_capture(*args, **kwargs):
+        await _store_malformed(runtime, changing)
+        return await final_capture(*args, **kwargs)
+
+    monkeypatch.setattr(view.log, "warning", record_warning)
+    monkeypatch.setattr(view, "_snapshot", corrupt_edge_at_final_capture)
+    nodes, edges = await view.available_graph_view(
+        runtime.client.group_id, ids, proven, runtime=runtime
+    )
+    assert "graph_view_relationship_invalid" in warnings
+    assert set(nodes) == set(ids)
+    assert set(edges) == {healthy.id}
+
+
+async def test_edge_malformed_after_the_node_proof_is_dropped_by_the_edge_proof(
+    runtime, content_store, monkeypatch
+):
+    ids, changing, healthy, proven = await _two_edges(runtime)
+    prove_nodes = view.available_graph_entities
     changed = False
 
     async def corrupt_edge_after_actual_node_proof(org, wanted, **kwargs):
         nonlocal changed
-        nodes = await collect_nodes(org, wanted, **kwargs)
+        nodes = await prove_nodes(org, wanted, **kwargs)
         assert set(ids) <= nodes.keys()
-        replacement = Relationship(
-            id=changing.id,
-            source_id=changing.source_id,
-            target_id=changing.target_id,
-            relationship_type=changing.relationship_type,
-            weight=1,
-            metadata={"weight": -1},
-        )
-        assert replacement.weight == 1
-        assert await runtime.relationship_manager.create_direct_bulk([replacement]) == [changing.id]
-        stored = await runtime.client.execute_query(
-            "SELECT attributes FROM relates_to WHERE uuid=$id;", id=changing.id
-        )
-        assert stored[0]["attributes"]["weight"] == -1
+        await _store_malformed(runtime, changing)
         changed = True
         return nodes
 
@@ -428,18 +463,18 @@ async def test_supplied_endpoints_hold_edges_to_the_proven_rows(runtime, content
     rows = await available_graph_entities(org, ids, runtime=runtime, include_embeddings=False)
 
     everything = await available_graph_relationships(
-        org, [edge.id for edge in edges], runtime=runtime, endpoints=rows
+        org, [edge.id for edge in edges], runtime=runtime, proven_endpoints=rows
     )
     without_right = await available_graph_relationships(
         org,
         [edge.id for edge in edges],
         runtime=runtime,
-        endpoints={key: row for key, row in rows.items() if key != "right"},
+        proven_endpoints={key: row for key, row in rows.items() if key != "right"},
     )
 
     assert set(everything) == {"left-edge", "right-edge"}
     assert set(without_right) == {"left-edge"}
     with pytest.raises(ValueError, match="settle the same rows twice"):
         await available_graph_relationships(
-            org, ["left-edge"], runtime=runtime, endpoints=rows, memo=GraphReadMemo(org)
+            org, ["left-edge"], runtime=runtime, proven_endpoints=rows, memo=GraphReadMemo(org)
         )

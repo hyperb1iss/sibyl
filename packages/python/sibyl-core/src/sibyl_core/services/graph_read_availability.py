@@ -253,7 +253,7 @@ async def available_graph_relationships(
     read: GraphReadValidation | None = None,
     source_visible: SourceVisible | None = None,
     memo: GraphReadMemo | None = None,
-    endpoints: Mapping[str, Entity] | None = None,
+    proven_endpoints: Mapping[str, Entity] | None = None,
 ) -> dict[str, Relationship]:
     """Refresh stored edges and require their protected operational generation.
 
@@ -262,7 +262,7 @@ async def available_graph_relationships(
     ``source_visible`` narrows the endpoints an edge may stand on to the rows
     this reader can see, which is the check an edge reader applies afterwards
     in any case; proving it here lets a memo settle each endpoint once.
-    ``endpoints`` hands over the rows the caller already proved in the same
+    ``proven_endpoints`` hands over the rows the caller already proved in the same
     phase; an edge then stands only on those, and its endpoints are compared
     with each snapshot instead of being proven again.
     """
@@ -271,7 +271,7 @@ async def available_graph_relationships(
     ids = list(dict.fromkeys(relationship_ids))
     if not ids:
         return {}
-    if endpoints is not None and memo is not None:
+    if proven_endpoints is not None and memo is not None:
         raise ValueError("proven endpoints and a read memo settle the same rows twice")
     if memo is not None:
         if read is not None:
@@ -296,7 +296,7 @@ async def available_graph_relationships(
         runtime=runtime,
         read=read,
         source_visible=source_visible,
-        endpoints=endpoints,
+        proven_endpoints=proven_endpoints,
     )
 
 
@@ -308,7 +308,7 @@ async def _load_available_graph_relationships(
     read: GraphReadValidation | None = None,
     source_visible: SourceVisible | None,
     memo: GraphReadMemo | None = None,
-    endpoints: Mapping[str, Entity] | None = None,
+    proven_endpoints: Mapping[str, Entity] | None = None,
 ) -> dict[str, Relationship]:
     from sibyl_core.backends.surreal.records import normalize_records
     from sibyl_core.services.graph_records import (
@@ -365,8 +365,8 @@ async def _load_available_graph_relationships(
     async def validate(snapshots, read):
         result = {}
         current = (
-            endpoints
-            if endpoints is not None
+            proven_endpoints
+            if proven_endpoints is not None
             else await available_graph_entities(
                 organization_id,
                 sorted(all_endpoints),
