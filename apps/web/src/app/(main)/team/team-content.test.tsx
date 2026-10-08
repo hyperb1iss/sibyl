@@ -339,6 +339,44 @@ describe('TeamContent', () => {
     expect(within(feed()).getAllByRole('link')).toHaveLength(14);
   });
 
+  it('offers a way back to everyone when a member request fails', async () => {
+    const { user } = renderTeam();
+    await screen.findByRole('region', { name: /^People/ });
+
+    activityResponse = url =>
+      url.searchParams.has('actor_id')
+        ? json({ detail: 'boom' }, 500)
+        : json(fixtureTeamActivity(NOW));
+    await user.click(screen.getByRole('button', { name: 'Alan Turing' }));
+
+    expect(await screen.findByText("Couldn't load team activity")).toBeVisible();
+    await user.click(screen.getByRole('button', { name: 'Show everyone' }));
+
+    expect(await screen.findByRole('region', { name: /^People/ })).toBeVisible();
+    expect(within(feed()).getAllByRole('link')).toHaveLength(14);
+    expect(lastActivityRequest()?.searchParams.has('actor_id')).toBe(false);
+  });
+
+  it('never shows a member answer as the team feed while deselecting', async () => {
+    const { user } = renderTeam();
+    await screen.findByRole('region', { name: /^People/ });
+    const alan = screen.getByRole('button', { name: 'Alan Turing' });
+    await user.click(alan);
+    await user.click(screen.getByRole('button', { name: '30 days' }));
+    await waitFor(() => expect(lastActivityRequest()?.searchParams.get('window')).toBe('30d'));
+    await waitFor(() => expect(within(feed()).getAllByRole('link')).toHaveLength(2));
+
+    // The team's 30-day answer is not cached yet and never arrives.
+    activityResponse = url =>
+      url.searchParams.has('actor_id')
+        ? json(fixtureTeamActivity(NOW, '30d'))
+        : new Promise<Response>(() => undefined);
+    await user.click(alan);
+
+    expect(screen.getByLabelText('Loading the team feed')).toBeInTheDocument();
+    expect(screen.queryByRole('region', { name: /^Activity/ })).not.toBeInTheDocument();
+  });
+
   it('names actors and projects from the item, with fallbacks', async () => {
     const base = fixtureTeamActivity(NOW);
     const [first, second, third] = base.recent;

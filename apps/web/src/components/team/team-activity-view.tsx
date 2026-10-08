@@ -138,7 +138,7 @@ export function TeamActivityView({
             </div>
             <div className="min-w-0">
               <h1 className="text-xl font-bold text-sc-fg-primary sm:text-2xl">Team activity</h1>
-              <p className="flex items-center gap-2 text-sm text-sc-fg-muted">
+              <div className="flex items-center gap-2 text-sm text-sc-fg-muted">
                 <span className="truncate">{summary}</span>
                 {data && isFetching && (
                   <span className="inline-flex shrink-0 items-center gap-1.5 text-xs text-sc-cyan">
@@ -146,7 +146,7 @@ export function TeamActivityView({
                     Updating
                   </span>
                 )}
-              </p>
+              </div>
             </div>
           </div>
           <div className="flex flex-col gap-2 xs:flex-row xs:flex-wrap xs:items-center">
@@ -212,7 +212,17 @@ export function TeamActivityView({
           <ErrorState
             title="Couldn't load team activity"
             message="The activity service did not answer. Check the API is reachable, then retry."
-            action={<Button onClick={refetch}>Retry</Button>}
+            action={
+              <div className="flex flex-wrap items-center justify-center gap-2">
+                <Button onClick={refetch}>Retry</Button>
+                {/* A failed member request must not strand the page on that member */}
+                {personId && (
+                  <Button variant="secondary" onClick={() => onPersonChange(null)}>
+                    Show everyone
+                  </Button>
+                )}
+              </div>
+            }
           />
         </div>
       ) : !data || isLoading ? (
@@ -267,18 +277,28 @@ export function TeamActivityView({
             aria-busy={isPlaceholderData || undefined}
             className={`transition-opacity duration-200 ${isPlaceholderData ? 'opacity-60' : ''}`}
           >
-            <ActivityFeed
-              items={feedItems}
-              people={peopleById}
-              projectNames={projectNames}
-              scopedProjectId={selectedProjectIds.length === 1 ? selectedProjectIds[0] : undefined}
-              truncated={data.truncated}
-              windowPhrase={windowPhrase}
-              person={person}
-              personScoped={personScoped}
-              onClearPerson={() => onPersonChange(null)}
-              now={now}
-            />
+            {!person && data.actor_id ? (
+              // One member's answer standing in while the team's loads: never
+              // pass it off as everyone's feed.
+              <output aria-label="Loading the team feed" className="block">
+                <TeamFeedSkeleton />
+              </output>
+            ) : (
+              <ActivityFeed
+                items={feedItems}
+                people={peopleById}
+                projectNames={projectNames}
+                scopedProjectId={
+                  selectedProjectIds.length === 1 ? selectedProjectIds[0] : undefined
+                }
+                truncated={data.truncated}
+                windowPhrase={windowPhrase}
+                person={person}
+                personScoped={personScoped}
+                onClearPerson={() => onPersonChange(null)}
+                now={now}
+              />
+            )}
           </div>
         </div>
       )}
