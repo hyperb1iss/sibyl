@@ -173,14 +173,9 @@ async def available_graph_view(
     transaction or a reservation against writes after those captures.
     """
     read = GraphReadValidation(organization_id)
-    current_edges = await available_graph_relationships(
-        organization_id, list(relationships), runtime=runtime, read=read
-    )
-    current_edges = {
-        identifier: edge
-        for identifier, edge in current_edges.items()
-        if _edge_evidence(edge) == _edge_evidence(relationships[identifier])
-    }
+    # Every rendered edge must stand on rendered nodes, so the nodes are
+    # proven once and the edge proof compares its snapshots against them
+    # rather than proving each endpoint again in both of its phases.
     nodes = await available_graph_entities(
         organization_id,
         entity_ids,
@@ -189,6 +184,14 @@ async def available_graph_view(
         source_visible=source_visible,
         include_embeddings=False,
     )
+    current_edges = await available_graph_relationships(
+        organization_id, list(relationships), runtime=runtime, read=read, endpoints=nodes
+    )
+    current_edges = {
+        identifier: edge
+        for identifier, edge in current_edges.items()
+        if _edge_evidence(edge) == _edge_evidence(relationships[identifier])
+    }
     edge_dependencies: dict[str, set[SourceIdentity]] = {}
     for identifier, edge in current_edges.items():
         dependencies = {

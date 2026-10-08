@@ -355,3 +355,91 @@ async def test_final_view_malformed_stored_edge_preserves_healthy_nodes_and_edge
     assert changed
     assert set(nodes) == set(ids)
     assert set(edges) == {healthy.id}
+
+
+async def test_graph_view_proves_each_node_once_and_hands_them_to_the_edge_proof(
+    runtime, content_store, monkeypatch
+):
+    from sibyl_core.services import graph_read_availability as availability
+
+    ids = ["hub", "left", "right"]
+    await _ordinary(runtime, *ids)
+    edges = [
+        Relationship(
+            id=f"{target}-edge",
+            source_id="hub",
+            target_id=target,
+            relationship_type=RelationshipType.RELATED_TO,
+        )
+        for target in ("left", "right")
+    ]
+    await runtime.relationship_manager.create_direct_bulk(edges)
+    proven = await available_graph_relationships(
+        runtime.client.group_id, [edge.id for edge in edges], runtime=runtime
+    )
+    baseline = await view.available_graph_view(
+        runtime.client.group_id, ids, proven, runtime=runtime
+    )
+
+    node_proofs = []
+    endpoint_proofs = []
+    prove_nodes = view.available_graph_entities
+    prove_endpoints = availability.available_graph_entities
+
+    async def count_node_proofs(org, wanted, **kwargs):
+        node_proofs.append(sorted(wanted))
+        return await prove_nodes(org, wanted, **kwargs)
+
+    async def count_endpoint_proofs(org, wanted, **kwargs):
+        endpoint_proofs.append(sorted(wanted))
+        return await prove_endpoints(org, wanted, **kwargs)
+
+    monkeypatch.setattr(view, "available_graph_entities", count_node_proofs)
+    monkeypatch.setattr(availability, "available_graph_entities", count_endpoint_proofs)
+    nodes, current = await view.available_graph_view(
+        runtime.client.group_id, ids, proven, runtime=runtime
+    )
+
+    assert node_proofs == [sorted(ids)]
+    assert endpoint_proofs == []
+    assert (set(nodes), set(current)) == (set(baseline[0]), set(baseline[1]))
+    assert set(current) == {edge.id for edge in edges}
+
+
+async def test_supplied_endpoints_hold_edges_to_the_proven_rows(runtime, content_store):
+    from sibyl_core.services.graph_read_availability import (
+        GraphReadMemo,
+        available_graph_entities,
+    )
+
+    ids = ["hub", "left", "right"]
+    await _ordinary(runtime, *ids)
+    edges = [
+        Relationship(
+            id=f"{target}-edge",
+            source_id="hub",
+            target_id=target,
+            relationship_type=RelationshipType.RELATED_TO,
+        )
+        for target in ("left", "right")
+    ]
+    await runtime.relationship_manager.create_direct_bulk(edges)
+    org = runtime.client.group_id
+    rows = await available_graph_entities(org, ids, runtime=runtime, include_embeddings=False)
+
+    everything = await available_graph_relationships(
+        org, [edge.id for edge in edges], runtime=runtime, endpoints=rows
+    )
+    without_right = await available_graph_relationships(
+        org,
+        [edge.id for edge in edges],
+        runtime=runtime,
+        endpoints={key: row for key, row in rows.items() if key != "right"},
+    )
+
+    assert set(everything) == {"left-edge", "right-edge"}
+    assert set(without_right) == {"left-edge"}
+    with pytest.raises(ValueError, match="settle the same rows twice"):
+        await available_graph_relationships(
+            org, ["left-edge"], runtime=runtime, endpoints=rows, memo=GraphReadMemo(org)
+        )
