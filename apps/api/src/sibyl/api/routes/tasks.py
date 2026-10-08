@@ -926,8 +926,13 @@ async def update_task(
     # the update_task job for a queued one.
     update_data = _build_update_data(request, str(user.id))
     idempotency_path = f"/tasks/{task_id}"
+    # The mirror flag joins the replay hash only when it is set, so a status
+    # write whose receipt was stored before the flag existed still replays.
+    body = request.model_dump(mode="json")
+    if not request.mirrors_source_status:
+        body.pop("mirrors_source_status", None)
     idempotency_payload = {
-        "body": request.model_dump(mode="json"),
+        "body": body,
         "sync": sync,
         **({"replay_interrupted": False} if replay_interrupted is False else {}),
     }

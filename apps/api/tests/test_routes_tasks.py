@@ -333,6 +333,69 @@ async def test_create_task_rejects_idempotency_key_payload_mismatch() -> None:
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("mirrors_source_status", [False, True])
+async def test_task_update_receipts_stored_before_the_mirror_flag_still_replay(
+    mirrors_source_status: bool,
+) -> None:
+    """A receipt hashed before mirrors_source_status existed matches an unflagged write."""
+    org = SimpleNamespace(id=UUID("00000000-0000-0000-0000-000000000111"))
+    user = SimpleNamespace(id=UUID("00000000-0000-0000-0000-000000000222"))
+    pre_flag_body = {
+        key: value
+        for key, value in UpdateTaskRequest(status=TaskStatus.DONE, expected_revision=3)
+        .model_dump(mode="json")
+        .items()
+        if key != "mirrors_source_status"
+    }
+    record = ApiIdempotencyRecord(
+        organization_id=org.id,
+        principal_id=str(user.id),
+        idempotency_key="idem-update",
+        method="PATCH",
+        path="/tasks/task_saved",
+        request_hash=idempotency_request_hash({"body": pre_flag_body, "sync": True}),
+        response_status_code=200,
+        response_body={
+            "success": True,
+            "action": "update",
+            "task_id": "task_saved",
+            "message": "Task updated",
+        },
+    )
+    request = UpdateTaskRequest(
+        status=TaskStatus.DONE,
+        expected_revision=3,
+        mirrors_source_status=mirrors_source_status,
+    )
+
+    with (
+        patch("sibyl.api.routes.tasks._verify_task_access", AsyncMock()),
+        patch(
+            "sibyl.api.idempotency.content_runtime.reserve_api_idempotency_record",
+            AsyncMock(return_value=(record, False)),
+        ),
+    ):
+        call = update_task(
+            task_id="task_saved",
+            request=request,
+            http_request=_request(idempotency_key="idem-update"),
+            sync=True,
+            replay_interrupted=True,
+            org=org,
+            user=user,
+            auth=SimpleNamespace(),
+        )
+        if mirrors_source_status:
+            # A flagged write is a different request from the one stored.
+            with pytest.raises(HTTPException) as exc:
+                await call
+            assert exc.value.status_code == 409
+        else:
+            replayed = await call
+            assert replayed.task_id == "task_saved"
+
+
+@pytest.mark.asyncio
 async def test_idempotency_replay_marks_mutation_receipt() -> None:
     org_id = UUID("00000000-0000-0000-0000-000000000111")
     payload = {"body": {"expected_revision": 1}}
