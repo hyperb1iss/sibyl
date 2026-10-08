@@ -66,6 +66,11 @@ describe('Sidebar', () => {
       expect(rail.getByRole('group', { name: label })).toBeInTheDocument();
     }
     expect(rail.getByText('Work')).toBeInTheDocument();
+    expect(
+      within(rail.getByRole('group', { name: 'Overview' }))
+        .getAllByRole('link')
+        .map(link => link.textContent)
+    ).toEqual(['Dashboard', 'Team']);
     expect(within(rail.getByRole('group', { name: 'Work' })).getAllByRole('link')).toHaveLength(3);
     expect(
       within(rail.getByRole('group', { name: 'Memory' }))

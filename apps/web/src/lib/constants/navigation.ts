@@ -11,6 +11,7 @@ import {
   Network,
   Search,
   Settings,
+  Users,
 } from '@/components/ui/icons';
 
 export interface NavigationItem {
@@ -54,6 +55,13 @@ export const ROUTE_CONFIG: Record<string, RouteConfigItem> = {
     href: '/',
     icon: LayoutDashboard,
     navLabel: 'Dashboard',
+    showInNavigation: true,
+    section: 'overview',
+  },
+  team: {
+    label: 'Team',
+    href: '/team',
+    icon: Users,
     showInNavigation: true,
     section: 'overview',
   },
