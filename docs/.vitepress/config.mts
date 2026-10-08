@@ -1,6 +1,14 @@
 import { defineConfig } from 'vitepress'
 import llmstxt from 'vitepress-plugin-llms'
 
+// Crawlers need absolute URLs for og:image and og:url; `base` does not apply to head tags.
+const SITE_URL = 'https://hyperb1iss.github.io/sibyl/'
+const SOCIAL_TITLE = 'Sibyl: Cross-agent memory for AI coding tools'
+const SOCIAL_DESCRIPTION =
+    'One self-hostable knowledge graph shared across Claude Code, Codex, OpenCode, Cursor, and the agents you build. If it runs a shell command, it speaks Sibyl.'
+const SOCIAL_IMAGE = `${SITE_URL}og-image.png`
+const SOCIAL_IMAGE_ALT = 'Sibyl: One CLI. One graph. Every AI tool you use, sharing memory.'
+
 export default defineConfig({
     vite: {
         plugins: [llmstxt()],
@@ -10,7 +18,8 @@ export default defineConfig({
     },
 
     title: 'Sibyl',
-    description: 'Knowledge graph, semantic search, and task workflow for durable project memory',
+    description:
+        'Cross-agent memory for AI coding tools: one self-hostable knowledge graph shared across Claude Code, Codex, OpenCode, Cursor, and the agents you build.',
     base: '/sibyl/',
 
     // Internal planning, audits, and strategy stay in-repo but never publish.
@@ -26,26 +35,33 @@ export default defineConfig({
     head: [
         ['meta', { name: 'theme-color', content: '#e135ff' }],
         ['meta', { property: 'og:type', content: 'website' }],
-        ['meta', { property: 'og:title', content: 'Sibyl - Knowledge Graph + Task Workflow' }],
-        [
-            'meta',
-            {
-                property: 'og:description',
-                content:
-                    'Give your projects durable memory with a knowledge graph, semantic search, and task workflow.',
-            },
-        ],
+        ['meta', { property: 'og:site_name', content: 'Sibyl' }],
+        ['meta', { property: 'og:title', content: SOCIAL_TITLE }],
+        ['meta', { property: 'og:description', content: SOCIAL_DESCRIPTION }],
+        ['meta', { property: 'og:image', content: SOCIAL_IMAGE }],
+        ['meta', { property: 'og:image:type', content: 'image/png' }],
+        ['meta', { property: 'og:image:width', content: '1200' }],
+        ['meta', { property: 'og:image:height', content: '630' }],
+        ['meta', { property: 'og:image:alt', content: SOCIAL_IMAGE_ALT }],
         ['meta', { name: 'twitter:card', content: 'summary_large_image' }],
-        ['meta', { name: 'twitter:title', content: 'Sibyl - Knowledge Graph + Task Workflow' }],
-        [
-            'meta',
-            {
-                name: 'twitter:description',
-                content: 'Durable project memory with semantic search and task workflow.',
-            },
-        ],
-        ['link', { rel: 'icon', type: 'image/svg+xml', href: '/sibyl/favicon.svg' }],
+        ['meta', { name: 'twitter:title', content: SOCIAL_TITLE }],
+        ['meta', { name: 'twitter:description', content: SOCIAL_DESCRIPTION }],
+        ['meta', { name: 'twitter:image', content: SOCIAL_IMAGE }],
+        ['meta', { name: 'twitter:image:alt', content: SOCIAL_IMAGE_ALT }],
+        ['link', { rel: 'icon', type: 'image/png', href: '/sibyl/favicon.png' }],
     ],
+
+    // og:url has to name the page being shared, so it is set per page rather than in `head`.
+    transformPageData(pageData) {
+        const path = pageData.relativePath
+            .replace(/(^|\/)index\.md$/, '$1')
+            .replace(/\.md$/, '.html')
+        pageData.frontmatter.head ??= []
+        pageData.frontmatter.head.push([
+            'meta',
+            { property: 'og:url', content: `${SITE_URL}${path}` },
+        ])
+    },
 
     themeConfig: {
         logo: '/sibyl-logo.png',
