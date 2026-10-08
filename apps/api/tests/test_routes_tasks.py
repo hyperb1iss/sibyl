@@ -557,6 +557,7 @@ class TestCompleteTaskRoute:
             "task-123",
             WorkItemAction.COMPLETE_TASK,
             payload={"actual_hours": 2.5, "learnings": "Capture the pattern"},
+            actor_id="user-1",
             expected_revision=1,
         )
         auth.to_memory_policy_context.assert_called_once_with(

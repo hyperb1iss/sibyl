@@ -146,6 +146,7 @@ async def _run_task_transition(
     item_id: str,
     payload: dict[str, Any],
     expected_revision: int | None,
+    actor_id: str | None = None,
 ) -> _TransitionOutcome:
     """Apply a task-style transition via the core engine.
 
@@ -199,6 +200,7 @@ async def _run_task_transition(
             payload.get("actual_hours"),
             payload.get("learnings") or "",
             create_episode=False,
+            completed_by=actor_id,
             **revision_kwargs,
         )
         fields = {"learnings": payload.get("learnings")}
@@ -284,6 +286,7 @@ async def transition_work_item(
     entity: Any | None = None,
     broadcast: bool = True,
     expected_revision: int | None = None,
+    actor_id: str | None = None,
 ) -> WorkItemTransition:
     """Perform a locked, broadcasting work-item transition.
 
@@ -299,6 +302,9 @@ async def transition_work_item(
         entity: Pre-loaded entity from the caller's access check; reused to
             avoid a redundant read and to source the epic's project_id.
         broadcast: Whether to emit the WebSocket event (default True).
+        actor_id: Authenticated user performing the transition. A completion
+            records it, so the row says who finished the task. It comes from
+            the caller's credentials, never from ``payload``.
 
     Returns:
         The canonical transition result.
@@ -330,6 +336,7 @@ async def transition_work_item(
                 item_id,
                 payload,
                 expected_revision,
+                actor_id,
             )
             entity_type = EntityType.TASK
         else:

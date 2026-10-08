@@ -611,6 +611,32 @@ async def test_workflow_transitions_persist_status_and_branch() -> None:
     assert completed.status == TaskStatus.DONE
     assert completed.learnings == "use cache"
     assert completed.actual_hours == 3.5
+    # No actor was named, so the completion credits nobody.
+    assert "completed_by" not in entity_manager.task.metadata
+    assert "modified_by" not in entity_manager.task.metadata
+
+
+@pytest.mark.asyncio
+async def test_complete_task_stamps_the_completing_actor() -> None:
+    from sibyl_core.tasks.workflow import TaskWorkflowEngine
+
+    task = Task(
+        id="task-actor",
+        title="Finish the migration",
+        description="",
+        project_id="proj-001",
+        status=TaskStatus.DOING,
+    )
+    entity_manager = _FakeEntityManager(task)
+    engine = TaskWorkflowEngine(
+        entity_manager, _FakeRelationshipManager(), _FakeGraphClient(), organization_id="test-org"
+    )
+
+    await engine.complete_task(task.id, create_episode=False, completed_by="user-42")
+
+    assert entity_manager.task.metadata["completed_by"] == "user-42"
+    assert entity_manager.task.metadata["modified_by"] == "user-42"
+    assert entity_manager.task.metadata["completed_at"] is not None
 
 
 @pytest.mark.asyncio

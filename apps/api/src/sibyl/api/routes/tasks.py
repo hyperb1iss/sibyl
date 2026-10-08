@@ -750,7 +750,8 @@ async def complete_task(
     learnings = request.learnings if request else None
 
     transition_kwargs: dict[str, Any] = {
-        "payload": {"actual_hours": actual_hours, "learnings": learnings}
+        "payload": {"actual_hours": actual_hours, "learnings": learnings},
+        "actor_id": auth.user_id,
     }
     if request and request.expected_revision is not None:
         transition_kwargs["expected_revision"] = request.expected_revision

@@ -369,6 +369,19 @@ def test_stamped_metadata_drops_owner_fields_when_no_scope_is_declared() -> None
     assert stamped == {"note": "kept"}
 
 
+def test_stamped_metadata_drops_a_forged_completion_actor() -> None:
+    """Team activity credits completions to completed_by, so a body can't name it."""
+    stamped = stamp_memory_scope_metadata(
+        {"completed_by": "teammate", "note": "kept"},
+        memory_scope="project",
+        scope_key="project_1",
+        principal_id="author",
+    )
+
+    assert "completed_by" not in stamped
+    assert stamped["note"] == "kept"
+
+
 def test_stamped_metadata_keeps_an_unrecognized_scope_so_reads_deny() -> None:
     """A typo must not read as "no scope", which is the fail-open case."""
     stamped = stamp_memory_scope_metadata(

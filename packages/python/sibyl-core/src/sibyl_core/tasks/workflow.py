@@ -333,6 +333,7 @@ class TaskWorkflowEngine:
         *,
         create_episode: bool = True,
         expected_revision: int | None = None,
+        completed_by: str | None = None,
     ) -> Task:
         """Mark task as done and capture learnings.
 
@@ -342,6 +343,9 @@ class TaskWorkflowEngine:
             learnings: What was learned completing this task
             create_episode: Whether to create learning episode synchronously.
                 Set to False when using async job queue for episode creation.
+            completed_by: Authenticated user completing the task. Stamped as
+                ``completed_by`` and ``modified_by`` so the completion has an
+                actor; nothing else in the row records who moved it to done.
 
         Returns:
             Updated task
@@ -361,6 +365,9 @@ class TaskWorkflowEngine:
             "status": TaskStatus.DONE,
             "completed_at": datetime.now(UTC),
         }
+        if completed_by:
+            updates["completed_by"] = completed_by
+            updates["modified_by"] = completed_by
 
         if actual_hours is not None:
             updates["actual_hours"] = actual_hours

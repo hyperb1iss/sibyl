@@ -300,7 +300,11 @@ async def _manage_workflow_transition(
         )
 
     try:
-        transition_kwargs: dict[str, Any] = {"payload": data, "entity": entity}
+        transition_kwargs: dict[str, Any] = {
+            "payload": data,
+            "entity": entity,
+            "actor_id": ctx.user_id,
+        }
         if expected_revision is not None:
             transition_kwargs["expected_revision"] = expected_revision
         result = await transition_work_item(

@@ -115,6 +115,31 @@ class TestTaskTransition:
         assert "reason" not in broadcast.await_args.args[1]
 
     @pytest.mark.asyncio
+    async def test_completion_records_the_authenticated_actor_not_the_payload(self) -> None:
+        engine = SimpleNamespace(complete_task=AsyncMock(return_value=_task(status="done")))
+        runtime = SimpleNamespace(
+            client=object(), entity_manager=MagicMock(), relationship_manager=MagicMock()
+        )
+
+        with (
+            patch.object(wiw, "entity_lock", MagicMock(side_effect=_granting_lock)),
+            patch.object(wiw, "get_task_graph_runtime", AsyncMock(return_value=runtime)),
+            patch.object(wiw, "TaskWorkflowEngine", return_value=engine),
+            patch.object(wiw, "broadcast_event", AsyncMock()),
+        ):
+            await transition_work_item(
+                GROUP_ID,
+                "task-1",
+                WorkItemAction.COMPLETE_TASK,
+                payload={"learnings": "x", "completed_by": "forged-user"},
+                actor_id="user-7",
+            )
+
+        engine.complete_task.assert_awaited_once_with(
+            "task-1", None, "x", create_episode=False, completed_by="user-7"
+        )
+
+    @pytest.mark.asyncio
     async def test_broadcast_false_skips_event(self) -> None:
         engine = SimpleNamespace(unblock_task=AsyncMock(return_value=_task()))
         runtime = SimpleNamespace(

@@ -53,7 +53,14 @@ MEMORY_PROVENANCE_METADATA_KEYS = frozenset(
     }
 )
 
-SERVER_OWNED_METADATA_KEYS = MEMORY_OWNER_METADATA_KEYS | MEMORY_PROVENANCE_METADATA_KEYS
+# Work-item actors the workflow stamps from the authenticated caller. The team
+# activity view credits a completion to `completed_by`, so a payload that could
+# set it would hand one member's work to another.
+WORK_ITEM_ACTOR_METADATA_KEYS = frozenset({"completed_by"})
+
+SERVER_OWNED_METADATA_KEYS = (
+    MEMORY_OWNER_METADATA_KEYS | MEMORY_PROVENANCE_METADATA_KEYS | WORK_ITEM_ACTOR_METADATA_KEYS
+)
 
 
 class MemoryPolicyAction(StrEnum):
@@ -780,6 +787,7 @@ __all__ = [
     "MEMORY_OWNER_METADATA_KEYS",
     "MEMORY_PROVENANCE_METADATA_KEYS",
     "SERVER_OWNED_METADATA_KEYS",
+    "WORK_ITEM_ACTOR_METADATA_KEYS",
     "MemoryPolicyAction",
     "MemoryPolicyDecision",
     "authorize_memory_read",

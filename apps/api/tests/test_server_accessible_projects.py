@@ -1078,6 +1078,8 @@ async def test_manage_mcp_complete_task_routes_through_workflow_service(monkeypa
     assert transition.await_args.args[1] == "task-1"
     assert transition.await_args.args[2] == WorkItemAction.COMPLETE_TASK
     assert transition.await_args.kwargs["expected_revision"] == 1
+    # The completion is credited to the authenticated caller.
+    assert transition.await_args.kwargs["actor_id"] == ctx.user_id
 
     # Learning jobs are enqueued with the policy context the authz step resolved.
     expected_policy = {
