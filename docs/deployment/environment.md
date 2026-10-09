@@ -380,8 +380,7 @@ reports `missing_credentials`, and an unknown model reports `model_not_found`.
 Unset, each request takes the memory model's own budget: 1,600,000 characters for `claude-opus-5`,
 `claude-opus-5-5` and `claude-sonnet-5-5` on the `anthropic` and `bedrock` providers, and 40,000 for
 every other model, Claude Haiku 5.5 included, since its prompts cost five times as much past 100,000
-tokens.
-The lookup matches the model alias exactly, so a dated id, a `[1m]` suffix or an
+tokens. The lookup matches the model alias exactly, so a dated id, a `[1m]` suffix or an
 `anthropic/`-prefixed OpenRouter id gets 40,000, while a Bedrock ID such as
 `us.anthropic.claude-opus-5-5` counts as its alias. When the variable is set, its value replaces the
 model's budget, even a value equal to a default.
