@@ -1,12 +1,12 @@
-"""Prices for models newer than the bundled genai-prices data.
+"""Prices for models the bundled genai-prices data gets wrong or lacks.
 
-genai-prices 0.1.8 has no Claude Haiku 5.5 or GPT-6.1 Sol entry, so pricing
-one of their responses raises ``LookupError`` and the call is recorded at no
-cost. It prices Claude Sonnet 5.5 through its ``claude-sonnet-5`` prefix
-match, which charges cache reads at Sonnet 5's $0.20 instead of $0.10. The
-entries here go ahead of the bundled ones for the first-party Anthropic,
-OpenAI and Bedrock providers, so they win for these models and every other
-model prices exactly as before.
+genai-prices 0.1.10 prices Claude Sonnet 5.5 through its Sonnet 5 rates,
+charging cache reads at $0.20 instead of $0.10. Releases before 0.1.10 had
+no Claude Haiku 5.5 or GPT-6.1 Sol entry, so those calls were recorded at
+no cost; 0.1.10 carries both at the rates kept here. The entries go ahead
+of the bundled ones for the first-party Anthropic, OpenAI and Bedrock
+providers, so they win for these models and every other model prices
+exactly as before.
 
 An entry can go once a genai-prices release carries the same rates.
 """

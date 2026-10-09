@@ -6,7 +6,7 @@ import time
 from typing import Literal
 
 from pydantic import BaseModel, Field, SecretStr
-from pydantic_ai import Agent, NativeOutput
+from pydantic_ai import Agent, NativeOutput, ToolOutput
 from pydantic_ai.exceptions import ModelHTTPError
 
 from sibyl_core.ai.bedrock import BedrockConfigError, resolve_bedrock_credentials
@@ -201,7 +201,7 @@ async def test_surface_config(
             output_type=(
                 NativeOutput(_SurfaceProbe, strict=True)
                 if prefers_native_output(config)
-                else _SurfaceProbe
+                else ToolOutput(_SurfaceProbe)
             ),
             retries=output_retry_budget(1),
         )

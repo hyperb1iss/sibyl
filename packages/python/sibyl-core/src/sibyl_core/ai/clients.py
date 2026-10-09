@@ -99,15 +99,18 @@ def _output_type_key(output_type: AgentOutputType) -> str:
 
 
 def _provider_output_type(config: LLMConfig, output_type: AgentOutputType) -> AgentOutputType:
-    if config.provider == "gemini" and output_type is not str:
-        return PromptedOutput(output_type)
-    if (
-        output_type is not str
-        and not isinstance(output_type, NativeOutput | PromptedOutput | TextOutput | ToolOutput)
-        and prefers_native_output(config)
+    if output_type is str or isinstance(
+        output_type, NativeOutput | PromptedOutput | TextOutput | ToolOutput
     ):
+        return output_type
+    if config.provider == "gemini":
+        return PromptedOutput(output_type)
+    if prefers_native_output(config):
         return NativeOutput(output_type, strict=True)
-    return output_type
+    # Tool output is named rather than left to pydantic-ai's default, which
+    # became native output for Claude in 2.52; Sibyl budgets, receipts and
+    # retries a request in the mode it chose.
+    return ToolOutput(output_type)
 
 
 def _config_fingerprint(config: LLMConfig) -> str:

@@ -5,7 +5,6 @@ from contextlib import AsyncExitStack
 import pytest
 from pydantic import SecretStr
 from pydantic_ai.providers.anthropic import AnthropicProvider
-from pydantic_ai.providers.openai import OpenAIProvider
 
 from sibyl_core.ai import providers
 from sibyl_core.ai.llm.config import LLMConfig
@@ -24,7 +23,7 @@ def test_haiku_5_5_profile_corrects_what_pydantic_ai_does_not_know() -> None:
     assert corrected["anthropic_supports_effort"] is True
     assert corrected["anthropic_supports_adaptive_thinking"] is True
     assert corrected["supports_json_schema_output"] is True
-    assert corrected.get("anthropic_supports_forced_tool_choice", True) is True
+    assert corrected.get("supports_forced_tool_choice", True) is True
 
 
 async def test_haiku_5_5_settings_and_model_carry_the_corrected_profile() -> None:
@@ -42,18 +41,21 @@ def test_models_pydantic_ai_already_profiles_are_left_as_they_are(model: str) ->
     assert providers.anthropic_profile(model) == upstream
 
 
-@pytest.mark.parametrize(
-    ("model", "stand_in"), [("gpt-6-luna", "gpt-5.6-luna"), ("gpt-6.1-sol", "gpt-6-astra")]
-)
-def test_gpt_6_models_are_profiled_as_the_reasoning_models_they_are(
-    model: str, stand_in: str
-) -> None:
+@pytest.mark.parametrize("model", ["gpt-6-luna", "gpt-6.1-sol"])
+def test_gpt_6_models_are_profiled_as_the_reasoning_models_they_are(model: str) -> None:
+    # A non-reasoning profile would send temperature, which both reject.
     config = LLMConfig(provider="openai", model=model, api_key=SecretStr("fixture"))
-    upstream = OpenAIProvider.model_profile(model) or {}
-    assert upstream.get("openai_supports_reasoning") is False
-    profile = providers.resolved_model_profile(config)
-    assert profile == OpenAIProvider.model_profile(stand_in)
-    assert profile["openai_supports_reasoning"] is True
+    assert providers.resolved_model_profile(config)["openai_supports_reasoning"] is True
+
+
+@pytest.mark.parametrize(
+    ("configured", "sent"), [(None, providers.ANTHROPIC_DEFAULT_MAX_TOKENS), (32_768, 32_768)]
+)
+async def test_claude_requests_keep_sibyls_output_ceiling(configured, sent) -> None:
+    config = anthropic("claude-opus-5-5", max_tokens=configured)
+    async with AsyncExitStack() as resources:
+        model = providers.build_model(config, resources=resources)
+    assert (model.settings or {})["max_tokens"] == sent
 
 
 async def test_openai_models_are_built_with_the_resolved_profile() -> None:
