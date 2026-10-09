@@ -116,6 +116,8 @@ jobs:
       # its own native runner, so this costs wall time rather than emulation.
       images: '["api", "web"]'
       platforms: '["amd64", "arm64"]'
+    secrets:
+      DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
 
   # The browser and API end-to-end suites need a production-shaped fixture:
   # SurrealDB, the API, the job worker, the seeded baseline corpus and a built
@@ -165,6 +167,9 @@ jobs:
 
       - name: Start SurrealDB
         uses: ./.github/actions/start-surrealdb
+        with:
+          dockerhub-username: ${{ vars.DOCKERHUB_USERNAME }}
+          dockerhub-token: ${{ secrets.DOCKERHUB_TOKEN }}
 
       - name: Install system dependencies
         run: |

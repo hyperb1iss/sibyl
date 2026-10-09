@@ -1,9 +1,29 @@
 name: Start SurrealDB
 description: Start the repo SurrealDB compose service for CI jobs.
 
+inputs:
+  dockerhub-username:
+    description: "Docker Hub user for authenticated image pulls. Optional."
+    required: false
+    default: ""
+  dockerhub-token:
+    description: >-
+      Docker Hub token for authenticated image pulls. Optional; without it the
+      pull is anonymous and shares the runner IP's unauthenticated rate limit.
+    required: false
+    default: ""
+
 runs:
   using: composite
   steps:
+    - name: Log in to Docker Hub
+      if: ${{ inputs.dockerhub-token != '' }}
+      shell: bash
+      env:
+        DOCKERHUB_USERNAME: ${{ inputs.dockerhub-username }}
+        DOCKERHUB_TOKEN: ${{ inputs.dockerhub-token }}
+      run: printf '%s' "$DOCKERHUB_TOKEN" | docker login docker.io --username "$DOCKERHUB_USERNAME" --password-stdin
+
     - name: Start SurrealDB service
       shell: bash
       run: |
