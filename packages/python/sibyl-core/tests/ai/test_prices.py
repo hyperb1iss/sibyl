@@ -33,6 +33,11 @@ def test_sonnet_5_5_cache_reads_cost_half_of_sonnet_5s() -> None:
     cached = RequestUsage(input_tokens=1_000_000, cache_read_tokens=1_000_000)
     assert total("claude-sonnet-5-5", cached, provider_id="anthropic") == Decimal("0.10")
     assert total("claude-sonnet-5", cached, provider_id="anthropic") == Decimal("0.2")
+    # genai-prices 0.1.10 still charges Sonnet 5.5 cache reads at Sonnet 5's rate.
+    bundled = data_snapshot.get_snapshot().calc(
+        cached, "claude-sonnet-5-5", "anthropic", None, None
+    )
+    assert bundled.total_price == Decimal("0.2")
 
 
 @pytest.mark.parametrize(
@@ -85,8 +90,6 @@ def test_the_api_url_is_tried_before_the_provider_name() -> None:
 def test_genai_prices_global_snapshot_is_left_alone() -> None:
     calc_price(SHORT, "claude-haiku-5-5", provider_id="anthropic")
     assert data_snapshot._custom_snapshot is None
-    with pytest.raises(LookupError):
-        data_snapshot.get_snapshot().calc(SHORT, "claude-haiku-5-5", "anthropic", None, None)
 
 
 def test_an_unknown_model_still_raises_lookup_error() -> None:

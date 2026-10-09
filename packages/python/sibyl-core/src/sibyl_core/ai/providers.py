@@ -94,7 +94,6 @@ def build_model(config: LLMConfig, *, resources: AsyncExitStack | None = None) -
                     )
                 ),
                 settings=OpenAIResponsesModelSettings(**_settings(config)),
-                profile=openai_profile(provider_model_id),
             )
 
 
@@ -106,7 +105,7 @@ ANTHROPIC_MODELS_WITHOUT_FORCED_TOOLS = frozenset(
 )
 
 #: Profile corrections for Claude models newer than the installed pydantic-ai.
-#: pydantic-ai 2.42 matches no profile rule for Claude Haiku 5.5, so it would
+#: pydantic-ai 2.54 matches no profile rule for Claude Haiku 5.5, so it would
 #: send ``temperature`` (a 400 on this model), skip effort and adaptive
 #: thinking, and refuse native structured output, all of which the model takes.
 ANTHROPIC_PROFILE_PATCHES: dict[str, AnthropicModelProfile] = {
@@ -196,31 +195,25 @@ def resolved_model_profile(config: LLMConfig) -> ModelProfile:
         return _bedrock_profile(config, provider_model_id, bedrock_settings())
     if config.provider == "anthropic":
         return anthropic_profile(provider_model_id)
-    if config.provider == "openai":
-        return openai_profile(provider_model_id)
-    return GoogleProvider.model_profile(provider_model_id) or {}
+    provider = {"openai": OpenAIProvider, "gemini": GoogleProvider}[config.provider]
+    return provider.model_profile(provider_model_id) or {}
 
 
-#: OpenAI models newer than the installed pydantic-ai, each profiled as an
-#: older model that behaves the same on the wire. pydantic-ai 2.42 does not
-#: know GPT-6 Luna or GPT-6.1 Sol reason, so it sends ``temperature`` (a 400)
-#: and no reasoning settings. pydantic-ai 2.54 profiles Luna exactly as 2.42
-#: profiles GPT-5.6 Luna, and Sol as 2.42 profiles GPT-6 Astra apart from
-#: image output, which Sibyl never asks for.
-OPENAI_PROFILE_STAND_INS: dict[str, str] = {
-    "gpt-6-luna": "gpt-5.6-luna",
-    "gpt-6.1-sol": "gpt-6-astra",
-}
-
-
-def openai_profile(model_id: str) -> ModelProfile:
-    """pydantic-ai's profile for an OpenAI model ID, or for its stand-in."""
-    return OpenAIProvider.model_profile(OPENAI_PROFILE_STAND_INS.get(model_id, model_id)) or {}
+#: Sibyl decides each request's output mode itself and budgets, receipts and
+#: retries it in that mode. pydantic-ai 2.52+ marks Claude models that think by
+#: default (Opus 5) as answering a forced tool without thinking, and then stops
+#: forcing the output tool, or sends native output for a plain output type, so
+#: the model can think first. Turning that off keeps a tool-mode request forced
+#: as Sibyl recorded it; models that reject a forced tool are unaffected, since
+#: their profiles already refuse forcing.
+_ANTHROPIC_OUTPUT_MODE_PROFILE = ModelProfile(forced_tool_choice_disables_thinking=False)
 
 
 def anthropic_profile(model_id: str) -> ModelProfile:
     """pydantic-ai's profile for a Claude model ID, with Sibyl's corrections applied."""
-    profile = AnthropicProvider.model_profile(model_id) or {}
+    profile = merge_profile(
+        AnthropicProvider.model_profile(model_id) or {}, _ANTHROPIC_OUTPUT_MODE_PROFILE
+    )
     patch = ANTHROPIC_PROFILE_PATCHES.get(canonical_model_alias(model_id))
     return merge_profile(profile, patch) if patch else profile
 
@@ -246,7 +239,7 @@ def bedrock_profile_overrides(config: LLMConfig, bedrock: BedrockSettings) -> An
     if alias in ANTHROPIC_MODELS_WITHOUT_FORCED_TOOLS:
         # With native output unavailable too, tool output has to ask with
         # ``tool_choice=auto``, which these models accept.
-        overrides["anthropic_supports_forced_tool_choice"] = False
+        overrides["supports_forced_tool_choice"] = False
     return overrides
 
 
@@ -343,8 +336,17 @@ def _bedrock_model_id(config: LLMConfig) -> str:
     return apply_inference_scope(base, bedrock.inference_scope)
 
 
+#: Output ceiling for a Claude request with no configured ``max_tokens``.
+#: pydantic-ai 2.42 sent 4,096; from 2.52 it sends the model's whole output
+#: limit (128K on Opus 5.5) and streams to stay under the SDK's non-streaming
+#: ceiling. Sibyl keeps the ceiling its surfaces were sized and budgeted on;
+#: a surface that needs more sets ``max_tokens``, as memory does.
+ANTHROPIC_DEFAULT_MAX_TOKENS = 4096
+
+
 def _anthropic_settings(config: LLMConfig) -> dict[str, float | int | str]:
     settings = _settings(config)
+    settings.setdefault("max_tokens", ANTHROPIC_DEFAULT_MAX_TOKENS)
     if resolved_model_profile(config).get("anthropic_disallows_sampling_settings", False):
         settings.pop("temperature", None)
     if (effort := anthropic_effort(config)) is not None:

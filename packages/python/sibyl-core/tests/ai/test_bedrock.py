@@ -138,7 +138,7 @@ def test_inference_profile_arns_keep_the_rules_of_the_model_they_name(monkeypatc
     assert providers.anthropic_effort(config) == "high"
     profile = providers.resolved_model_profile(config)
     assert profile["anthropic_disallows_sampling_settings"] is True
-    assert profile["anthropic_supports_forced_tool_choice"] is False
+    assert profile["supports_forced_tool_choice"] is False
     assert memory_model_defaults("bedrock", arn) == memory_model_defaults(
         "bedrock", "claude-opus-5-5"
     )
@@ -279,7 +279,7 @@ def test_native_output_is_gated_to_models_bedrock_accepts_it_for(monkeypatch):
     assert effective_output_mode("tool", opus) == "tool"
     profile = providers.resolved_model_profile(opus)
     assert profile["supports_json_schema_output"] is False
-    assert profile["anthropic_supports_forced_tool_choice"] is False
+    assert profile["supports_forced_tool_choice"] is False
     assert profile["anthropic_supports_effort"] is True
     haiku = providers.resolved_model_profile(bedrock_config("claude-haiku-4-5"))
     assert haiku["supports_json_schema_output"] is True
@@ -296,7 +296,7 @@ def test_5_5_generation_routes_and_profiles_on_bedrock(monkeypatch):
     # InvokeModel takes native output for Haiku 5.5, but it also takes a forced
     # tool, so extraction stays in tool mode with the tool forced.
     assert profile["supports_json_schema_output"] is True
-    assert profile.get("anthropic_supports_forced_tool_choice", True) is True
+    assert profile.get("supports_forced_tool_choice", True) is True
     assert profile["anthropic_disallows_sampling_settings"] is True
     assert effective_output_mode("tool", haiku) == "tool"
     assert providers.anthropic_effort(haiku) == "xhigh"
@@ -313,7 +313,7 @@ def test_5_5_generation_routes_and_profiles_on_bedrock(monkeypatch):
     assert not providers.prefers_native_output(sonnet)
     assert effective_output_mode("tool", sonnet) == "tool"
     profile = providers.resolved_model_profile(sonnet)
-    assert profile["anthropic_supports_forced_tool_choice"] is False
+    assert profile["supports_forced_tool_choice"] is False
     assert profile["supports_json_schema_output"] is False
 
 

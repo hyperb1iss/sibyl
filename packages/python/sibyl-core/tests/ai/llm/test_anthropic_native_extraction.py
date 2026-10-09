@@ -805,6 +805,9 @@ async def test_a_tool_mode_extractor_never_forces_a_tool_on_a_model_that_rejects
     wire = wires[0]
     assert ("tool_choice" in wire) is not native
     assert ("tools" in wire) is not native
+    if not native:
+        # Forced, as Sibyl records tool mode, even though Opus 5 thinks by default.
+        assert wire["tool_choice"]["type"] == "any"
     if native:
         assert wire["output_config"]["format"] == {"type": "json_schema", "schema": declared}
     assert result.output.outcome.kind == "abstention"
