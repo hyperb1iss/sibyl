@@ -78,10 +78,9 @@ def _sonnet_5_5_prices(scale: str) -> ModelPrice:
 
 
 #: OpenAI charges 2x input and cache and 1.5x output on the whole request for
-#: prompts over 272K input tokens. This follows genai-prices' own encoding of
-#: that tier for OpenAI models: it selects a tier when the count is greater
-#: than the start, and writes the start as 271,999.
-_OPENAI_LONG_PROMPT_START = 271_999
+#: prompts over 272K input tokens. genai-prices selects a tier when the count
+#: is greater than the start, and writes its GPT-6 entries with 272,000.
+_OPENAI_LONG_PROMPT_START = 272_000
 
 
 def _gpt_6_1_sol_prices() -> ModelPrice:
