@@ -21,7 +21,6 @@ import pytest
 from pydantic import BaseModel
 
 from sibyl_core.ai import clients, validation
-from sibyl_core.ai.bedrock import anthropic_bedrock_client, resolve_bedrock_settings
 from sibyl_core.ai.llm import Extractor
 from sibyl_core.ai.llm.config import LLMSurface
 from sibyl_core.ai.memory_extraction import (
@@ -55,35 +54,9 @@ def fresh_agents(monkeypatch):
     clients.invalidate_agent_cache()
 
 
-async def test_opus_5_5_rejects_native_output_so_sibyl_uses_tools_with_high_effort(
-    monkeypatch,
-):
-    from anthropic import BadRequestError
-    from anthropic import DefaultAsyncHttpxClient as HttpClient
-
-    settings = resolve_bedrock_settings()
-    raw = anthropic_bedrock_client(settings, http_client=HttpClient(), max_retries=0)
-    schema = {
-        "type": "object",
-        "properties": {"ok": {"type": "boolean"}},
-        "required": ["ok"],
-        "additionalProperties": False,
-    }
-    with pytest.raises(BadRequestError) as rejected:
-        await raw.messages.create(
-            model="us.anthropic.claude-opus-5-5",
-            max_tokens=32,
-            messages=[{"role": "user", "content": "Return ok=true."}],
-            extra_body={
-                "output_config": {
-                    "effort": "high",
-                    "format": {"type": "json_schema", "schema": schema},
-                }
-            },
-        )
-    evidence("opus-5-5 native strict", status=rejected.value.status_code, body=rejected.value.body)
-    assert "output_config.format" in json.dumps(rejected.value.body)
-
+async def test_opus_5_5_stays_on_tool_output_through_bedrock_with_high_effort(monkeypatch):
+    # Bedrock has accepted native output for Opus 5.5 since October 2026, but
+    # memory consolidation is qualified on tool output there, so it stays.
     monkeypatch.setenv("SIBYL_LLM_MEMORY_PROVIDER", "bedrock")
     monkeypatch.setenv("SIBYL_LLM_MEMORY_MODEL", "claude-opus-5-5")
     extractor = Extractor(
@@ -113,7 +86,7 @@ async def test_opus_5_5_rejects_native_output_so_sibyl_uses_tools_with_high_effo
 
 async def test_haiku_runs_the_memory_entity_extraction_path(monkeypatch):
     monkeypatch.setenv("SIBYL_LLM_MEMORY_PROVIDER", "bedrock")
-    monkeypatch.setenv("SIBYL_LLM_MEMORY_MODEL", "claude-haiku-4-5")
+    monkeypatch.setenv("SIBYL_LLM_MEMORY_MODEL", "claude-haiku-5-5")
     extractor = memory_entity_extractor(max_tokens=1024)
     prompt = build_memory_entity_extraction_prompt(
         title="Deploy note",
