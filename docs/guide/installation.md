@@ -84,7 +84,8 @@ is ready:
 curl -fsSL https://raw.githubusercontent.com/hyperb1iss/sibyl/main/install.sh | sh
 ```
 
-Homebrew installs the CLI and daemon. Start the full local server UI with one command:
+Homebrew installs the CLI, which runs the server in Docker. Start the full local server UI with one
+command:
 
 ```bash
 brew install hyperb1iss/tap/sibyl
@@ -135,9 +136,9 @@ moon run api:install-dev
 ```
 
 The uv install (`uv tool install --upgrade sibyl-dev`) puts only the `sibyl` CLI on a machine, which
-is all a machine that connects to a server needs. To run a server, go through the shell installer,
-Homebrew, or Docker flow so the CLI and daemon stay paired; installing `sibyld` directly is a
-developer and CI escape hatch.
+is all a machine that connects to a server needs, and Homebrew installs the same CLI. To run a
+server, use the shell installer, `sibyl up` or the Docker flow, which run the daemon from the image
+that matches the CLI; installing `sibyld` directly is a developer and CI escape hatch.
 
 ## Infrastructure Setup
 
