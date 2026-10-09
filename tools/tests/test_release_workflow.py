@@ -12,7 +12,12 @@ import tomllib
 import yaml
 from packaging.requirements import Requirement
 from tools.release.aur_pkgbuild import render_pkgbuild as render_aur_pkgbuild
-from tools.release.homebrew_formula import PackageArtifact, pep440_version, render_formula
+from tools.release.homebrew_formula import (
+    PackageArtifact,
+    cli_requirements,
+    pep440_version,
+    render_formula,
+)
 from tools.release.release_notes import RELEASE_NOTES_SURFACE, validate_release_notes_claims
 from tools.release.version import parse_release_version
 from tools.tests.conftest import REPO_ROOT
@@ -988,38 +993,111 @@ def test_python_package_build_covers_cli_core_and_daemon() -> None:
         assert package_command in script
 
 
-def test_homebrew_formula_renders_cli_and_daemon_formula() -> None:
-    artifacts = {
-        "sibyl-dev": PackageArtifact(
-            name="sibyl-dev",
-            url="https://files.pythonhosted.org/sibyl_dev-1.0.0rc1.tar.gz",
-            sha256="a" * 64,
-        ),
-        "sibyld": PackageArtifact(
-            name="sibyld",
-            url="https://files.pythonhosted.org/sibyld-1.0.0rc1.tar.gz",
-            sha256="b" * 64,
-        ),
-        "sibyl-core": PackageArtifact(
-            name="sibyl-core",
-            url="https://files.pythonhosted.org/sibyl_core-1.0.0rc1.tar.gz",
-            sha256="c" * 64,
-        ),
-    }
+REQUIREMENTS = (
+    "rich==15.0.0 \\\n"
+    "    --hash=sha256:" + "d" * 64 + " \\\n"
+    "    --hash=sha256:" + "e" * 64 + "\n"
+    "typer==0.27.2 \\\n"
+    "    --hash=sha256:" + "f" * 64 + "\n"
+    "colorama==0.4.6 ; sys_platform == 'win32' \\\n"
+    "    --hash=sha256:" + "1" * 64 + "\n"
+)
 
+HOMEBREW_ARTIFACTS = {
+    "sibyl-dev": PackageArtifact(
+        name="sibyl-dev",
+        url="https://files.pythonhosted.org/sibyl_dev-1.0.0rc1.tar.gz",
+        sha256="a" * 64,
+    ),
+    "sibyl-core": PackageArtifact(
+        name="sibyl-core",
+        url="https://files.pythonhosted.org/sibyl_core-1.0.0rc1.tar.gz",
+        sha256="c" * 64,
+    ),
+}
+
+
+def test_homebrew_formula_installs_the_cli_with_pinned_hashed_dependencies() -> None:
     formula = render_formula(
         release_version="1.0.0-rc.1",
         python_version=pep440_version("1.0.0-rc.1"),
-        artifacts=artifacts,
+        artifacts=HOMEBREW_ARTIFACTS,
+        requirements=REQUIREMENTS,
     )
 
     assert "class Sibyl < Formula" in formula
     assert 'version "1.0.0-rc.1"' in formula
     assert 'PYTHON_PACKAGE_VERSION = "1.0.0rc1"' in formula
     assert 'resource "sibyl-core"' in formula
-    assert 'resource "sibyld"' in formula
     assert 'bin.install_symlink libexec/"bin/sibyl"' in formula
-    assert 'bin.install_symlink libexec/"bin/sibyld"' in formula
+    # Homebrew's pip_install passes --no-deps, so every third-party pin has to
+    # be installed by the formula itself, hash-checked, from wheels.
+    assert "REQUIREMENTS = <<~'EOS'" in formula
+    assert "    typer==0.27.2 \\\n" in formula
+    assert "--hash=sha256:" + "f" * 64 in formula
+    for flag in (
+        '"--require-hashes"',
+        '"--no-deps"',
+        '"--only-binary=:all:"',
+        # Without it, pins already in brewed Python's shared site-packages are
+        # skipped and the keg depends on files other formulae change.
+        '"--ignore-installed"',
+    ):
+        assert flag in formula
+    assert "OS.mac? && Hardware::CPU.intel?" in formula
+    assert formula.index('(buildpath/"requirements.txt").write REQUIREMENTS') < formula.index(
+        'resource("sibyl-core").stage'
+    )
+    # The daemon is a container image, not a Homebrew install.
+    assert "sibyld" not in formula
+
+
+@pytest.mark.parametrize(
+    ("requirements", "problem"),
+    [
+        ("", "no CLI requirements"),
+        ("typer>=0.27 \\\n    --hash=sha256:" + "f" * 64 + "\n", "not pinned"),
+        ("typer==0.27.2\n", "no hash"),
+        ("sibyl-core==1.0.0 \\\n    --hash=sha256:" + "f" * 64 + "\n", "Sibyl's own"),
+    ],
+)
+def test_homebrew_formula_refuses_requirements_pip_could_not_install(
+    requirements: str, problem: str
+) -> None:
+    with pytest.raises(RuntimeError, match=problem):
+        render_formula(
+            release_version="1.0.0",
+            python_version="1.0.0",
+            artifacts=HOMEBREW_ARTIFACTS,
+            requirements=requirements,
+        )
+
+
+def test_homebrew_cli_requirements_come_from_the_lock() -> None:
+    requirements = cli_requirements()
+    names = {
+        line.split("==", 1)[0]
+        for line in requirements.splitlines()
+        if line and not line.startswith((" ", "#"))
+    }
+    assert {"typer", "rich", "httpx", "pydantic", "websockets"} <= names
+    assert not names & {"sibyl-dev", "sibyl-core", "sibyld"}
+
+
+def test_publish_and_pr_workflows_install_the_formula_before_it_ships() -> None:
+    publish = (REPO_ROOT / ".github/workflows/publish.yml").read_text()
+    verify = "tools/release/verify_homebrew_formula.sh homebrew-formula/Formula/sibyl.rb"
+    homebrew_job = publish[publish.index("  homebrew:") : publish.index("  aur:")]
+    assert "astral-sh/setup-uv@" in homebrew_job
+    assert homebrew_job.index("homebrew_formula.py") < homebrew_job.index(verify)
+    assert homebrew_job.index(verify) < homebrew_job.index("Checkout Homebrew tap")
+    assert homebrew_job.index("Upload Homebrew formula artifact") < homebrew_job.index(verify)
+
+    pr = (REPO_ROOT / ".github/workflows/homebrew-formula.yml").read_text()
+    for path in ("tools/release/homebrew_formula.py", "uv.lock", "apps/cli/pyproject.toml"):
+        assert f'"{path}"' in pr
+    assert verify in pr
+    assert (REPO_ROOT / "tools/release/verify_homebrew_formula.sh").stat().st_mode & 0o111
 
 
 def test_aur_pkgbuild_renders_cli_package() -> None:

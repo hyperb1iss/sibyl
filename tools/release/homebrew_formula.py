@@ -2,6 +2,9 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
+import shutil
+import subprocess
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -12,7 +15,13 @@ if __package__ in {None, ""}:
 
 from tools.release.version import pep440_version
 
-PACKAGES = ("sibyl-dev", "sibyld", "sibyl-core")
+#: The formula installs the CLI. sibyld runs as a container image, and its
+#: dependency tree (scipy, playwright, crawl4ai) is not something Homebrew
+#: should build on a laptop.
+PACKAGES = ("sibyl-dev", "sibyl-core")
+
+ROOT = Path(__file__).resolve().parents[2]
+_PIN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*==\S+")
 
 
 @dataclass(frozen=True)
@@ -49,20 +58,65 @@ def fetch_package_artifact(package: str, version: str) -> PackageArtifact:
     )
 
 
+def cli_requirements(root: Path = ROOT) -> str:
+    """The CLI's third-party dependencies, pinned with hashes from uv.lock.
+
+    Homebrew's ``pip_install`` passes ``--no-deps``, so a formula that only
+    stages Sibyl's own packages installs none of what they import. These
+    pins come from the lock at the release tag, every one carrying the
+    hashes pip checks under ``--require-hashes``.
+    """
+    uv = shutil.which("uv")
+    if uv is None:
+        raise RuntimeError("uv is required to export the CLI's pinned requirements")
+    exported = subprocess.run(  # noqa: S603
+        [
+            uv,
+            "export",
+            "--frozen",
+            "--no-dev",
+            "--no-emit-workspace",
+            "--no-header",
+            "--no-annotate",
+            "--package",
+            "sibyl-dev",
+        ],
+        cwd=root,
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout
+    validate_requirements(exported)
+    return exported
+
+
+def validate_requirements(requirements: str) -> None:
+    """Refuse requirements pip could not install under ``--require-hashes``."""
+    entries = [entry.strip() for entry in requirements.replace("\\\n", " ").splitlines()]
+    entries = [entry for entry in entries if entry and not entry.startswith("#")]
+    if not entries:
+        raise RuntimeError("uv export produced no CLI requirements")
+    for entry in entries:
+        if not _PIN.match(entry):
+            raise RuntimeError(f"CLI requirement is not pinned to one version: {entry}")
+        if "--hash=sha256:" not in entry:
+            raise RuntimeError(f"CLI requirement has no hash: {entry}")
+        if entry.split("==", 1)[0].lower() in PACKAGES:
+            raise RuntimeError(f"CLI requirements must not include Sibyl's own {entry}")
+
+
 def render_formula(
     *,
     release_version: str,
     python_version: str,
     artifacts: dict[str, PackageArtifact],
+    requirements: str,
 ) -> str:
+    validate_requirements(requirements)
     cli = artifacts["sibyl-dev"]
-    resources = [artifacts["sibyl-core"], artifacts["sibyld"]]
-    resource_blocks = "\n\n".join(
-        f'  resource "{artifact.name}" do\n'
-        f'    url "{artifact.url}"\n'
-        f'    sha256 "{artifact.sha256}"\n'
-        "  end"
-        for artifact in resources
+    core = artifacts["sibyl-core"]
+    pinned = "".join(
+        f"    {line}\n" if line else "\n" for line in requirements.strip().splitlines()
     )
 
     return f'''# typed: false
@@ -80,29 +134,48 @@ class Sibyl < Formula
 
   PYTHON_PACKAGE_VERSION = "{python_version}"
 
+  # The CLI's third-party dependencies, pinned with hashes from the release's
+  # uv.lock. They install as wheels, so no compiler or Rust toolchain is needed.
+  REQUIREMENTS = <<~'EOS'
+{pinned}  EOS
+
   depends_on "python@3.13"
 
-{resource_blocks}
+  resource "sibyl-core" do
+    url "{core.url}"
+    sha256 "{core.sha256}"
+  end
 
   def install
+    # cryptography publishes no Intel macOS wheel, and the dependencies install
+    # from wheels only, so say so plainly rather than fail inside pip.
+    if OS.mac? && Hardware::CPU.intel?
+      odie "The sibyl formula needs Apple silicon on macOS; on Intel, run: uv tool install sibyl-dev"
+    end
+
     venv = virtualenv_create(libexec, "python3.13")
+
+    # Homebrew's pip_install skips dependencies, so they install here first.
+    # --ignore-installed keeps every pin inside the keg: the venv can see
+    # brewed Python's shared site-packages, which other formulae change.
+    (buildpath/"requirements.txt").write REQUIREMENTS
+    system Formula["python@3.13"].opt_bin/"python3.13", "-m", "pip",
+           "--python=#{{libexec}}/bin/python", "install",
+           "--require-hashes", "--no-deps", "--only-binary=:all:", "--ignore-installed",
+           "--no-cache-dir", "--requirement", buildpath/"requirements.txt"
 
     resource("sibyl-core").stage do
       venv.pip_install Pathname.pwd
     end
 
-    resource("sibyld").stage do
-      venv.pip_install Pathname.pwd
-    end
-
     venv.pip_install buildpath
     bin.install_symlink libexec/"bin/sibyl"
-    bin.install_symlink libexec/"bin/sibyld"
   end
 
   test do
     assert_match PYTHON_PACKAGE_VERSION, shell_output("#{{bin}}/sibyl --version")
-    assert_match PYTHON_PACKAGE_VERSION, shell_output("#{{bin}}/sibyld --version")
+    system Formula["python@3.13"].opt_bin/"python3.13", "-m", "pip",
+           "--python=#{{libexec}}/bin/python", "check"
   end
 end
 '''
@@ -120,6 +193,7 @@ def main(argv: list[str] | None = None) -> int:
         release_version=args.version,
         python_version=python_version,
         artifacts=artifacts,
+        requirements=cli_requirements(),
     )
 
     args.output.parent.mkdir(parents=True, exist_ok=True)
