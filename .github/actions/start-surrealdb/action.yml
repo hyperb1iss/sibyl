@@ -16,21 +16,27 @@ inputs:
 runs:
   using: composite
   steps:
-    - name: Pull Docker Hub images through a mirror
+    - name: Pull the SurrealDB image through a mirror
       shell: bash
       run: |
-        set -euo pipefail
+        set -uo pipefail
         # Google's mirror serves the same content-addressed Docker Hub images
-        # and keeps compose pulls going when Docker Hub's token service fails
-        # GitHub's runners; the daemon falls back to Docker Hub on a miss.
-        config=/etc/docker/daemon.json
-        current="$(sudo cat "$config" 2>/dev/null || true)"
-        [[ -n "$current" ]] || current='{}'
-        printf '%s' "$current" |
-          jq '. + {"registry-mirrors": ["https://mirror.gcr.io"]}' |
-          sudo tee "$config" >/dev/null
-        sudo systemctl restart docker
-        docker info --format '{{json .RegistryConfig.Mirrors}}'
+        # and keeps working when Docker Hub's token service fails GitHub's
+        # runners. Pulling from it and tagging the Docker Hub name lets compose
+        # find the image locally; if the mirror misses, compose pulls as usual.
+        image="$(docker compose --env-file /dev/null config --images surrealdb)"
+        first="${image%%/*}"
+        if [[ "$image" == */* && ( "$first" == *.* || "$first" == *:* ) ]]; then
+          echo "SurrealDB image $image is not on Docker Hub; pulling it directly."
+          exit 0
+        fi
+        path="$image"
+        [[ "$image" == */* ]] || path="library/$image"
+        if docker pull "mirror.gcr.io/$path"; then
+          docker tag "mirror.gcr.io/$path" "$image"
+        else
+          echo "::warning::mirror.gcr.io has no $image; compose pulls it from Docker Hub."
+        fi
 
     - name: Log in to Docker Hub
       if: ${{ inputs.dockerhub-token != '' }}
