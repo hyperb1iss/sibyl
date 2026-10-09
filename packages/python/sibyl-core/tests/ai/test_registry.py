@@ -9,12 +9,18 @@ def test_registry_has_initial_llm_entries() -> None:
     entries = model_registry.llm_entries()
 
     assert [entry.alias for entry in entries] == [
+        "claude-haiku-5-5",
         "claude-haiku-4-5",
         "claude-opus-5",
         "claude-opus-5-5",
+        "claude-sonnet-5-5",
         "claude-sonnet-4-6",
+        "gemini-3-8-flash",
+        "gemini-3-5-flash-lite",
         "gemini-3-flash",
         "gemini-3-1-flash-lite",
+        "gpt-6.1-sol",
+        "gpt-6-luna",
         "gpt-5.4-mini",
         "gpt-5.4-nano",
     ]
@@ -37,8 +43,9 @@ def test_registry_lookup_by_alias_and_snapshot() -> None:
     assert alias_entry.provider_model_id == "claude-haiku-4-5-20251001"
     assert ModelCapability.STRUCTURED_OUTPUT in alias_entry.capabilities
 
+    # The preview this alias first named is shut down; it resolves to the GA ID.
     gemini_entry = model_registry.require("gemini-3-1-flash-lite", kind=ModelKind.LLM)
-    assert gemini_entry.provider_model_id == "gemini-3.1-flash-lite-preview"
+    assert gemini_entry.provider_model_id == "gemini-3.1-flash-lite"
 
 
 def test_registry_filters_kind() -> None:
@@ -48,7 +55,35 @@ def test_registry_filters_kind() -> None:
 def test_registry_recommendation() -> None:
     entry = model_registry.recommended_for("default", kind=ModelKind.LLM)
 
-    assert entry.alias == "claude-haiku-4-5"
+    assert entry.alias == "claude-haiku-5-5"
+
+
+@pytest.mark.parametrize(
+    ("use_case", "alias"),
+    [
+        ("default", "claude-haiku-5-5"),
+        ("extraction", "claude-haiku-5-5"),
+        ("synthesis", "claude-sonnet-5-5"),
+        ("quality", "claude-sonnet-5-5"),
+    ],
+)
+def test_latest_claude_models_carry_the_recommendations(use_case: str, alias: str) -> None:
+    assert model_registry.recommended_for(use_case).alias == alias
+
+
+def test_registry_prices_the_5_5_generation_at_published_rates() -> None:
+    haiku = model_registry.require("claude-haiku-5-5")
+    sonnet = model_registry.require("claude-sonnet-5-5")
+    assert haiku.platform_model_ids == {"bedrock": "anthropic.claude-haiku-5-5"}
+    assert sonnet.platform_model_ids == {"bedrock": "anthropic.claude-sonnet-5-5"}
+    assert (haiku.input_cost_per_mtok_usd, haiku.output_cost_per_mtok_usd) == (0.1, 0.5)
+    assert (sonnet.input_cost_per_mtok_usd, sonnet.output_cost_per_mtok_usd) == (2.0, 10.0)
+    for entry in (haiku, sonnet):
+        # Both reject a non-default temperature.
+        assert entry.default_temperature is None and entry.max_output_tokens == 128_000
+    # The previous generation stays selectable, without a recommendation.
+    assert model_registry.require("claude-haiku-4-5").use_cases == ()
+    assert model_registry.require("claude-sonnet-4-6").use_cases == ()
 
 
 def test_registry_custom_entry_is_marked_unverified() -> None:
@@ -64,3 +99,32 @@ def test_registry_custom_entry_is_marked_unverified() -> None:
 def test_registry_require_raises_for_unknown_model() -> None:
     with pytest.raises(KeyError, match="Unknown llm model"):
         ModelRegistry().require("missing-model", kind=ModelKind.LLM)
+
+
+@pytest.mark.parametrize(
+    ("use_case", "alias", "provider_model_id"),
+    [
+        ("cost-optimized-extraction", "gemini-3-8-flash", "gemini-3.8-flash"),
+        ("bulk-crawling", "gemini-3-5-flash-lite", "gemini-3.5-flash-lite"),
+        ("openai-parity", "gpt-6.1-sol", "gpt-6.1-sol"),
+        ("budget-extraction", "gpt-6-luna", "gpt-6-luna"),
+    ],
+)
+def test_each_provider_tier_recommends_its_latest_model(
+    use_case: str, alias: str, provider_model_id: str
+) -> None:
+    entry = model_registry.recommended_for(use_case)
+    assert (entry.alias, entry.provider_model_id) == (alias, provider_model_id)
+
+
+def test_superseded_provider_models_stay_resolvable_with_their_retirement_dates() -> None:
+    for alias in ("gemini-3-flash", "gemini-3-1-flash-lite", "gpt-5.4-mini", "gpt-5.4-nano"):
+        assert model_registry.require(alias).use_cases == ()
+    retirements = {
+        alias: model_registry.require(alias).deprecated_after
+        for alias in ("gpt-5.4-nano", "gemini-3-1-flash-lite")
+    }
+    assert {alias: when and when.date().isoformat() for alias, when in retirements.items()} == {
+        "gpt-5.4-nano": "2027-04-01",
+        "gemini-3-1-flash-lite": "2027-05-07",
+    }

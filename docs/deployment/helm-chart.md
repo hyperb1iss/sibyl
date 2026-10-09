@@ -239,7 +239,7 @@ backend:
     SIBYL_SERVER_PORT: "3334"
     SIBYL_ENVIRONMENT: "production"
     SIBYL_LLM_PROVIDER: "anthropic"
-    SIBYL_LLM_MODEL: "claude-haiku-4-5"
+    SIBYL_LLM_MODEL: "claude-haiku-5-5"
     SIBYL_EMBEDDING_MODEL: "text-embedding-3-small"
     SIBYL_EMBEDDING_DIMENSIONS: "1536"
     # BLAS/OpenMP thread caps keep native math libraries from oversubscribing pods
@@ -780,7 +780,7 @@ backend:
   env:
     AWS_REGION: "us-west-2"
     SIBYL_LLM_PROVIDER: "bedrock"
-    SIBYL_LLM_MODEL: "claude-haiku-4-5"
+    SIBYL_LLM_MODEL: "claude-haiku-5-5"
     SIBYL_LLM_MEMORY_MODEL: "claude-opus-5-5"
     SIBYL_BEDROCK_INFERENCE_SCOPE: "us"
     SIBYL_EMBEDDING_PROVIDER: "bedrock"

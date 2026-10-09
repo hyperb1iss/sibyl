@@ -132,7 +132,7 @@ def test_build_model_uses_google_env_fallback_for_gemini(
 
     model = build_model(LLMConfig(provider="gemini", model="gemini-3-1-flash-lite"))
 
-    assert model.model_name == "gemini-3.1-flash-lite-preview"
+    assert model.model_name == "gemini-3.1-flash-lite"
     assert model.system == "google"
 
 

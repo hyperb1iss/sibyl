@@ -55,6 +55,7 @@ def build_model(config: LLMConfig, *, resources: AsyncExitStack | None = None) -
                     )
                 ),
                 settings=AnthropicModelSettings(**_anthropic_settings(config)),
+                profile=anthropic_profile(provider_model_id),
             )
         case "bedrock":
             bedrock = bedrock_settings(api_key=api_key)
@@ -93,6 +94,7 @@ def build_model(config: LLMConfig, *, resources: AsyncExitStack | None = None) -
                     )
                 ),
                 settings=OpenAIResponsesModelSettings(**_settings(config)),
+                profile=openai_profile(provider_model_id),
             )
 
 
@@ -100,18 +102,39 @@ def build_model(config: LLMConfig, *, resources: AsyncExitStack | None = None) -
 #: ``any`` or ``tool``). Tool output forces its output tool, so structured
 #: output on these models has to go through native structured output.
 ANTHROPIC_MODELS_WITHOUT_FORCED_TOOLS = frozenset(
-    {"claude-opus-5-5", "claude-fable-5-1", "claude-mythos-5-1"}
+    {"claude-opus-5-5", "claude-sonnet-5-5", "claude-fable-5-1", "claude-mythos-5-1"}
 )
+
+#: Profile corrections for Claude models newer than the installed pydantic-ai.
+#: pydantic-ai 2.42 matches no profile rule for Claude Haiku 5.5, so it would
+#: send ``temperature`` (a 400 on this model), skip effort and adaptive
+#: thinking, and refuse native structured output, all of which the model takes.
+ANTHROPIC_PROFILE_PATCHES: dict[str, AnthropicModelProfile] = {
+    "claude-haiku-5-5": AnthropicModelProfile(
+        supports_json_schema_output=True,
+        anthropic_supports_adaptive_thinking=True,
+        anthropic_supports_effort=True,
+        anthropic_supports_xhigh_effort=True,
+        anthropic_disallows_sampling_settings=True,
+        anthropic_disallows_budget_thinking=True,
+    ),
+}
 
 #: Claude models whose Bedrock InvokeModel route accepts native structured
 #: output (``output_config.format``). AWS documents Sonnet 4.5, Haiku 4.5,
-#: Opus 4.5 and Opus 4.6; Sonnet 4.6 also answers it live. Opus 4.8, Opus 5,
-#: Opus 5.5 and Sonnet 5 reject it with ``output_config.format: Extra inputs
-#: are not permitted``, and bedrock-mantle rejects it for every model.
+#: Opus 4.5 and Opus 4.6; Sonnet 4.6 also answers it live, and Haiku 5.5 and
+#: Sonnet 5.5 answered it with schema-valid output in us-west-2 on
+#: 2026-10-08. Opus 4.8 and Sonnet 5 reject it with ``output_config.format:
+#: Extra inputs are not permitted``, and bedrock-mantle rejects it for every
+#: model. Opus 5 and Opus 5.5 also answered it on 2026-10-08, but stay on
+#: tool output here until memory consolidation is qualified on native output
+#: through Bedrock.
 BEDROCK_JSON_SCHEMA_OUTPUT_MODELS = (
     "claude-haiku-4-5",
+    "claude-haiku-5-5",
     "claude-sonnet-4-5",
     "claude-sonnet-4-6",
+    "claude-sonnet-5-5",
     "claude-opus-4-5",
     "claude-opus-4-6",
 )
@@ -171,10 +194,35 @@ def resolved_model_profile(config: LLMConfig) -> ModelProfile:
     provider_model_id = resolve_provider_model_id(config)
     if config.provider == "bedrock":
         return _bedrock_profile(config, provider_model_id, bedrock_settings())
-    provider = {"anthropic": AnthropicProvider, "openai": OpenAIProvider, "gemini": GoogleProvider}[
-        config.provider
-    ]
-    return provider.model_profile(provider_model_id) or {}
+    if config.provider == "anthropic":
+        return anthropic_profile(provider_model_id)
+    if config.provider == "openai":
+        return openai_profile(provider_model_id)
+    return GoogleProvider.model_profile(provider_model_id) or {}
+
+
+#: OpenAI models newer than the installed pydantic-ai, each profiled as an
+#: older model that behaves the same on the wire. pydantic-ai 2.42 does not
+#: know GPT-6 Luna or GPT-6.1 Sol reason, so it sends ``temperature`` (a 400)
+#: and no reasoning settings. pydantic-ai 2.54 profiles Luna exactly as 2.42
+#: profiles GPT-5.6 Luna, and Sol as 2.42 profiles GPT-6 Astra apart from
+#: image output, which Sibyl never asks for.
+OPENAI_PROFILE_STAND_INS: dict[str, str] = {
+    "gpt-6-luna": "gpt-5.6-luna",
+    "gpt-6.1-sol": "gpt-6-astra",
+}
+
+
+def openai_profile(model_id: str) -> ModelProfile:
+    """pydantic-ai's profile for an OpenAI model ID, or for its stand-in."""
+    return OpenAIProvider.model_profile(OPENAI_PROFILE_STAND_INS.get(model_id, model_id)) or {}
+
+
+def anthropic_profile(model_id: str) -> ModelProfile:
+    """pydantic-ai's profile for a Claude model ID, with Sibyl's corrections applied."""
+    profile = AnthropicProvider.model_profile(model_id) or {}
+    patch = ANTHROPIC_PROFILE_PATCHES.get(canonical_model_alias(model_id))
+    return merge_profile(profile, patch) if patch else profile
 
 
 def _bedrock_profile(
@@ -185,8 +233,8 @@ def _bedrock_profile(
     pydantic-ai cannot see through an ARN, so the profile resolves from the
     model ID the ARN names and is handed to ``AnthropicModel`` whole.
     """
-    profile = AnthropicProvider.model_profile(arn_model_id(provider_model_id) or provider_model_id)
-    return merge_profile(profile or {}, bedrock_profile_overrides(config, bedrock))
+    profile = anthropic_profile(arn_model_id(provider_model_id) or provider_model_id)
+    return merge_profile(profile, bedrock_profile_overrides(config, bedrock))
 
 
 def bedrock_profile_overrides(config: LLMConfig, bedrock: BedrockSettings) -> AnthropicModelProfile:

@@ -150,7 +150,7 @@ COMPOSE_CONFIG = {
                 "SIBYL_OPENAI_API_KEY": "${SIBYL_OPENAI_API_KEY}",
                 "SIBYL_ANTHROPIC_API_KEY": "${SIBYL_ANTHROPIC_API_KEY}",
                 "SIBYL_LLM_PROVIDER": "anthropic",
-                "SIBYL_LLM_MODEL": "claude-haiku-4-5",
+                "SIBYL_LLM_MODEL": "claude-haiku-5-5",
                 "SIBYL_SERVER_HOST": "0.0.0.0",
                 "SIBYL_SERVER_PORT": "3334",
                 "SIBYL_ENVIRONMENT": "production",

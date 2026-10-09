@@ -41,7 +41,7 @@ Outcome = Literal[
     "NO_VERB",
     "FALSE_POSITIVE",
 ]
-DEFAULT_MODEL = "claude-opus-4-7"
+DEFAULT_MODEL = "claude-opus-5-5"
 
 # Multi-token sibyl verbs that should be matched as a single unit when the
 # expected_verbs entry has the same shape. Anything not in this set is

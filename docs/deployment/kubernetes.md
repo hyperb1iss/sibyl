@@ -114,7 +114,7 @@ backend:
     SIBYL_ENVIRONMENT: "production"
     SIBYL_PUBLIC_URL: "https://sibyl.example.com"
     SIBYL_LLM_PROVIDER: "anthropic"
-    SIBYL_LLM_MODEL: "claude-haiku-4-5"
+    SIBYL_LLM_MODEL: "claude-haiku-5-5"
 
   # Enable autoscaling
   autoscaling:
