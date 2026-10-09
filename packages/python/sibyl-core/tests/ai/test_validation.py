@@ -47,7 +47,7 @@ async def test_check_provider_key_returns_valid_result(monkeypatch: pytest.Monke
 
     assert result.valid is True
     assert result.status == "valid"
-    assert result.model == "gpt-5.4-nano"
+    assert result.model == "gpt-6-luna"
     assert result.output_tokens is not None
 
 

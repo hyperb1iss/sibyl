@@ -5,6 +5,7 @@ from contextlib import AsyncExitStack
 import pytest
 from pydantic import SecretStr
 from pydantic_ai.providers.anthropic import AnthropicProvider
+from pydantic_ai.providers.openai import OpenAIProvider
 
 from sibyl_core.ai import providers
 from sibyl_core.ai.llm.config import LLMConfig
@@ -39,3 +40,24 @@ async def test_haiku_5_5_settings_and_model_carry_the_corrected_profile() -> Non
 def test_models_pydantic_ai_already_profiles_are_left_as_they_are(model: str) -> None:
     upstream = AnthropicProvider.model_profile(model) or {}
     assert providers.anthropic_profile(model) == upstream
+
+
+def test_gpt_6_luna_is_profiled_as_the_reasoning_model_it_is() -> None:
+    config = LLMConfig(provider="openai", model="gpt-6-luna", api_key=SecretStr("fixture"))
+    upstream = OpenAIProvider.model_profile("gpt-6-luna") or {}
+    assert upstream.get("openai_supports_reasoning") is False
+    profile = providers.resolved_model_profile(config)
+    assert profile == OpenAIProvider.model_profile("gpt-5.6-luna")
+    assert profile["openai_supports_reasoning"] is True
+
+
+async def test_openai_models_are_built_with_the_resolved_profile() -> None:
+    for model in ("gpt-6-luna", "gpt-5.6-terra"):
+        config = LLMConfig(provider="openai", model=model, api_key=SecretStr("fixture"))
+        async with AsyncExitStack() as resources:
+            built = providers.build_model(config, resources=resources)
+        resolved = providers.resolved_model_profile(config)
+        assert built.model_name == model
+        # The built model layers provider defaults over the profile it is handed.
+        assert {key: built.profile.get(key) for key in resolved} == resolved
+        assert built.profile["openai_supports_reasoning"] is True

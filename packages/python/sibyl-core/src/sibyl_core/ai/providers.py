@@ -94,6 +94,7 @@ def build_model(config: LLMConfig, *, resources: AsyncExitStack | None = None) -
                     )
                 ),
                 settings=OpenAIResponsesModelSettings(**_settings(config)),
+                profile=openai_profile(provider_model_id),
             )
 
 
@@ -189,8 +190,22 @@ def resolved_model_profile(config: LLMConfig) -> ModelProfile:
         return _bedrock_profile(config, provider_model_id, bedrock_settings())
     if config.provider == "anthropic":
         return anthropic_profile(provider_model_id)
-    provider = {"openai": OpenAIProvider, "gemini": GoogleProvider}[config.provider]
-    return provider.model_profile(provider_model_id) or {}
+    if config.provider == "openai":
+        return openai_profile(provider_model_id)
+    return GoogleProvider.model_profile(provider_model_id) or {}
+
+
+#: OpenAI models newer than the installed pydantic-ai, each profiled as an
+#: older model that behaves the same on the wire. pydantic-ai 2.42 does not
+#: know GPT-6 Luna is a reasoning model, so it sends ``temperature`` (a 400)
+#: and no reasoning settings. pydantic-ai 2.54 profiles it exactly as 2.42
+#: profiles GPT-5.6 Luna.
+OPENAI_PROFILE_STAND_INS: dict[str, str] = {"gpt-6-luna": "gpt-5.6-luna"}
+
+
+def openai_profile(model_id: str) -> ModelProfile:
+    """pydantic-ai's profile for an OpenAI model ID, or for its stand-in."""
+    return OpenAIProvider.model_profile(OPENAI_PROFILE_STAND_INS.get(model_id, model_id)) or {}
 
 
 def anthropic_profile(model_id: str) -> ModelProfile:

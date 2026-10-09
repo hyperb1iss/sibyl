@@ -274,8 +274,8 @@ def _cheapest_probe_model(provider: LLMProviderName) -> str:
     return {
         "anthropic": "claude-haiku-5-5",
         "bedrock": "claude-haiku-5-5",
-        "gemini": "gemini-3-1-flash-lite",
-        "openai": "gpt-5.4-nano",
+        "gemini": "gemini-3-5-flash-lite",
+        "openai": "gpt-6-luna",
     }[provider]
 
 

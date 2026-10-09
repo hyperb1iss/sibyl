@@ -218,7 +218,7 @@ SIBYL_LLM_MEMORY_TIMEOUT_SECONDS=600
 
 # Surface-specific values override shared LLM values.
 SIBYL_LLM_CRAWLER_PROVIDER=gemini
-SIBYL_LLM_CRAWLER_MODEL=gemini-3-1-flash-lite
+SIBYL_LLM_CRAWLER_MODEL=gemini-3-5-flash-lite
 SIBYL_LLM_SYNTHESIS_PROVIDER=anthropic
 SIBYL_LLM_SYNTHESIS_MODEL=claude-sonnet-5-5
 

@@ -274,13 +274,48 @@ _DEFAULT_ENTRIES = [
         last_verified_at=_VERIFIED_AT,
     ),
     ModelEntry(
+        alias="gemini-3-8-flash",
+        snapshot="gemini-3.8-flash",
+        kind=ModelKind.LLM,
+        provider="gemini",
+        provider_model_id="gemini-3.8-flash",
+        pydantic_ai_model_class="GoogleModel",
+        use_cases=("cost-optimized-extraction", "extraction"),
+        capabilities=frozenset(
+            {ModelCapability.STRUCTURED_OUTPUT, ModelCapability.STREAMING, ModelCapability.THINKING}
+        ),
+        max_output_tokens=65536,
+        default_temperature=0.0,
+        input_cost_per_mtok_usd=0.75,
+        output_cost_per_mtok_usd=3.75,
+        cost_source_url=_GOOGLE_COST_SOURCE,
+        last_verified_at=_LATEST_VERIFIED_AT,
+    ),
+    ModelEntry(
+        alias="gemini-3-5-flash-lite",
+        snapshot="gemini-3.5-flash-lite",
+        kind=ModelKind.LLM,
+        provider="gemini",
+        provider_model_id="gemini-3.5-flash-lite",
+        pydantic_ai_model_class="GoogleModel",
+        use_cases=("bulk", "bulk-crawling"),
+        capabilities=frozenset(
+            {ModelCapability.STRUCTURED_OUTPUT, ModelCapability.STREAMING, ModelCapability.THINKING}
+        ),
+        max_output_tokens=65536,
+        default_temperature=0.0,
+        input_cost_per_mtok_usd=0.3,
+        output_cost_per_mtok_usd=2.5,
+        cost_source_url=_GOOGLE_COST_SOURCE,
+        last_verified_at=_LATEST_VERIFIED_AT,
+    ),
+    ModelEntry(
         alias="gemini-3-flash",
         snapshot="gemini-3-flash-preview",
         kind=ModelKind.LLM,
         provider="gemini",
         provider_model_id="gemini-3-flash-preview",
         pydantic_ai_model_class="GoogleModel",
-        use_cases=("cost-optimized-extraction", "extraction"),
         capabilities=frozenset(
             {ModelCapability.STRUCTURED_OUTPUT, ModelCapability.STREAMING, ModelCapability.THINKING}
         ),
@@ -289,16 +324,17 @@ _DEFAULT_ENTRIES = [
         input_cost_per_mtok_usd=0.5,
         output_cost_per_mtok_usd=3.0,
         cost_source_url=_GOOGLE_COST_SOURCE,
-        last_verified_at=_VERIFIED_AT,
+        last_verified_at=_LATEST_VERIFIED_AT,
     ),
     ModelEntry(
+        # The preview this alias named shut down on 2026-05-25; Google's GA
+        # release under the bare ID replaced it.
         alias="gemini-3-1-flash-lite",
-        snapshot="gemini-3.1-flash-lite-preview",
+        snapshot="gemini-3.1-flash-lite",
         kind=ModelKind.LLM,
         provider="gemini",
-        provider_model_id="gemini-3.1-flash-lite-preview",
+        provider_model_id="gemini-3.1-flash-lite",
         pydantic_ai_model_class="GoogleModel",
-        use_cases=("bulk", "bulk-crawling"),
         capabilities=frozenset(
             {ModelCapability.STRUCTURED_OUTPUT, ModelCapability.STREAMING, ModelCapability.THINKING}
         ),
@@ -307,7 +343,54 @@ _DEFAULT_ENTRIES = [
         input_cost_per_mtok_usd=0.25,
         output_cost_per_mtok_usd=1.5,
         cost_source_url=_GOOGLE_COST_SOURCE,
-        last_verified_at=_VERIFIED_AT,
+        last_verified_at=_LATEST_VERIFIED_AT,
+        deprecated_after=datetime(2027, 5, 7, tzinfo=UTC),
+    ),
+    ModelEntry(
+        alias="gpt-5.6-terra",
+        snapshot="gpt-5.6-terra",
+        kind=ModelKind.LLM,
+        provider="openai",
+        provider_model_id="gpt-5.6-terra",
+        pydantic_ai_model_class="OpenAIResponsesModel",
+        use_cases=("openai-parity", "parity"),
+        capabilities=frozenset(
+            {
+                ModelCapability.STRUCTURED_OUTPUT,
+                ModelCapability.STREAMING,
+                ModelCapability.TOOL_USE,
+                ModelCapability.THINKING,
+            }
+        ),
+        max_output_tokens=128000,
+        default_temperature=None,
+        input_cost_per_mtok_usd=2.0,
+        output_cost_per_mtok_usd=12.0,
+        cost_source_url=_OPENAI_COST_SOURCE,
+        last_verified_at=_LATEST_VERIFIED_AT,
+    ),
+    ModelEntry(
+        alias="gpt-6-luna",
+        snapshot="gpt-6-luna",
+        kind=ModelKind.LLM,
+        provider="openai",
+        provider_model_id="gpt-6-luna",
+        pydantic_ai_model_class="OpenAIResponsesModel",
+        use_cases=("budget", "budget-extraction"),
+        capabilities=frozenset(
+            {
+                ModelCapability.STRUCTURED_OUTPUT,
+                ModelCapability.STREAMING,
+                ModelCapability.TOOL_USE,
+                ModelCapability.THINKING,
+            }
+        ),
+        max_output_tokens=128000,
+        default_temperature=None,
+        input_cost_per_mtok_usd=0.1,
+        output_cost_per_mtok_usd=0.5,
+        cost_source_url=_OPENAI_COST_SOURCE,
+        last_verified_at=_LATEST_VERIFIED_AT,
     ),
     ModelEntry(
         alias="gpt-5.4-mini",
@@ -316,7 +399,6 @@ _DEFAULT_ENTRIES = [
         provider="openai",
         provider_model_id="gpt-5.4-mini",
         pydantic_ai_model_class="OpenAIResponsesModel",
-        use_cases=("openai-parity", "parity"),
         capabilities=frozenset(
             {
                 ModelCapability.STRUCTURED_OUTPUT,
@@ -330,7 +412,7 @@ _DEFAULT_ENTRIES = [
         input_cost_per_mtok_usd=0.75,
         output_cost_per_mtok_usd=4.5,
         cost_source_url=_OPENAI_COST_SOURCE,
-        last_verified_at=_VERIFIED_AT,
+        last_verified_at=_LATEST_VERIFIED_AT,
     ),
     ModelEntry(
         alias="gpt-5.4-nano",
@@ -339,7 +421,6 @@ _DEFAULT_ENTRIES = [
         provider="openai",
         provider_model_id="gpt-5.4-nano",
         pydantic_ai_model_class="OpenAIResponsesModel",
-        use_cases=("budget", "budget-extraction"),
         capabilities=frozenset(
             {
                 ModelCapability.STRUCTURED_OUTPUT,
@@ -353,7 +434,8 @@ _DEFAULT_ENTRIES = [
         input_cost_per_mtok_usd=0.2,
         output_cost_per_mtok_usd=1.25,
         cost_source_url=_OPENAI_COST_SOURCE,
-        last_verified_at=_VERIFIED_AT,
+        last_verified_at=_LATEST_VERIFIED_AT,
+        deprecated_after=datetime(2027, 4, 1, tzinfo=UTC),
     ),
 ]
 
