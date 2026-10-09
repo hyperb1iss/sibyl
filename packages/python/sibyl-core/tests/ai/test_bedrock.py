@@ -293,16 +293,23 @@ def test_5_5_generation_routes_and_profiles_on_bedrock(monkeypatch):
     haiku = bedrock_config("claude-haiku-5-5", effort="xhigh")
     assert providers.resolve_provider_model_id(haiku) == "us.anthropic.claude-haiku-5-5"
     profile = providers.resolved_model_profile(haiku)
-    # Bedrock serves no structured outputs here, and Haiku 5.5 takes a forced
+    # InvokeModel takes native output for Haiku 5.5, but it also takes a forced
     # tool, so extraction stays in tool mode with the tool forced.
-    assert profile["supports_json_schema_output"] is False
+    assert profile["supports_json_schema_output"] is True
     assert profile.get("anthropic_supports_forced_tool_choice", True) is True
     assert profile["anthropic_disallows_sampling_settings"] is True
     assert effective_output_mode("tool", haiku) == "tool"
     assert providers.anthropic_effort(haiku) == "xhigh"
 
+    # Sonnet 5.5 refuses a forced tool, so it takes native output, as on the
+    # Claude API.
     sonnet = bedrock_config("us.anthropic.claude-sonnet-5-5")
     assert providers.rejects_forced_tool_choice(sonnet)
+    assert providers.prefers_native_output(sonnet)
+    assert effective_output_mode("tool", sonnet) == "native_strict"
+
+    # bedrock-mantle has no native output, so Sonnet 5.5 asks with auto there.
+    monkeypatch.setenv("SIBYL_BEDROCK_API", "mantle")
     assert not providers.prefers_native_output(sonnet)
     assert effective_output_mode("tool", sonnet) == "tool"
     profile = providers.resolved_model_profile(sonnet)

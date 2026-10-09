@@ -58,8 +58,9 @@ class MemoryModelDefaults(NamedTuple):
 #: output ceiling with the answer. Opus 5 and Sonnet 5.5 already run at high
 #: effort by default, so they send none. Opus 5.5 defaults to medium, a level
 #: below the depth memory validation was qualified at, so it is pinned to high.
-#: Sonnet 5.5 rejects a forced tool, so its memory calls always take native
-#: output and think before answering.
+#: Sonnet 5.5 rejects a forced tool, so its memory calls take native output
+#: (tool output with ``tool_choice=auto`` on bedrock-mantle) and think before
+#: answering.
 #:
 #: These models take a 1M-token input window billed at standard rates, so a
 #: consolidation request can hold a whole task family. 1.6M characters was about

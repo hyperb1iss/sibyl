@@ -122,13 +122,19 @@ ANTHROPIC_PROFILE_PATCHES: dict[str, AnthropicModelProfile] = {
 
 #: Claude models whose Bedrock InvokeModel route accepts native structured
 #: output (``output_config.format``). AWS documents Sonnet 4.5, Haiku 4.5,
-#: Opus 4.5 and Opus 4.6; Sonnet 4.6 also answers it live. Opus 4.8, Opus 5,
-#: Opus 5.5 and Sonnet 5 reject it with ``output_config.format: Extra inputs
-#: are not permitted``, and bedrock-mantle rejects it for every model.
+#: Opus 4.5 and Opus 4.6; Sonnet 4.6 also answers it live, and Haiku 5.5 and
+#: Sonnet 5.5 answered it with schema-valid output in us-west-2 on
+#: 2026-10-08. Opus 4.8 and Sonnet 5 reject it with ``output_config.format:
+#: Extra inputs are not permitted``, and bedrock-mantle rejects it for every
+#: model. Opus 5 and Opus 5.5 also answered it on 2026-10-08, but stay on
+#: tool output here until memory consolidation is qualified on native output
+#: through Bedrock.
 BEDROCK_JSON_SCHEMA_OUTPUT_MODELS = (
     "claude-haiku-4-5",
+    "claude-haiku-5-5",
     "claude-sonnet-4-5",
     "claude-sonnet-4-6",
+    "claude-sonnet-5-5",
     "claude-opus-4-5",
     "claude-opus-4-6",
 )

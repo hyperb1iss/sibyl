@@ -344,17 +344,20 @@ Bedrock ID through the inference scope, so `claude-opus-5-5` becomes `us.anthrop
 under `us` and `global.anthropic.claude-opus-5-5` under `global`. An ID that already names an
 inference profile, or any Bedrock ARN, is sent as given. Most current Claude models and Cohere Embed
 v4 offer no in-Region on-demand throughput, so `regional` only works where the model card lists
-In-Region support. Effort, memory-surface defaults and the forced-tool rule all key by alias, so a
-raw Bedrock ID, or an inference-profile or foundation-model ARN, behaves exactly like its alias. An
-application inference profile or provisioned throughput ARN hides the model behind it, so it gets
-none of those Claude-specific rules; route Opus 5 and Opus 5.5 through an inference profile ID
-instead.
+In-Region support. Effort, memory-surface defaults, the forced-tool rule and Haiku 5.5's request
+corrections all key by alias, so a raw Bedrock ID, or an inference-profile or foundation-model ARN,
+behaves exactly like its alias. An application inference profile or provisioned throughput ARN hides
+the model behind it, so it gets none of those Claude-specific rules: Haiku 5.5 behind one would be
+sent a `temperature` it rejects. Route Haiku 5.5, Sonnet 5.5, Opus 5 and Opus 5.5 through an
+inference profile ID instead.
 
-Bedrock rejects native structured output (`output_config.format`) for Claude Opus 4.8, Opus 5, Opus
-5.5 and Sonnet 5, and for every model on bedrock-mantle. On those models Sibyl uses tool output
-instead, and Opus 5.5, which also refuses a forced tool choice, asks with `tool_choice: auto`. An
-explicit `SIBYL_CONSOLIDATION_OUTPUT_MODE=native_strict` fails before any request on those routes.
-Opus 5.5 keeps its 1M-token context window on Bedrock with no beta header.
+Sibyl sends native structured output (`output_config.format`) through Bedrock for Claude Haiku 4.5
+and 5.5, Sonnet 4.5, 4.6 and 5.5, and Opus 4.5 and 4.6. Opus 4.8 and Sonnet 5 reject it, and so does
+every model on bedrock-mantle. Opus 5 and Opus 5.5 accept it as of October 2026, but Sibyl keeps
+them on tool output until memory consolidation is qualified on native output through Bedrock. Where
+Sibyl uses tool output, Opus 5.5 and Sonnet 5.5, which also refuse a forced tool choice, ask with
+`tool_choice: auto`. An explicit `SIBYL_CONSOLIDATION_OUTPUT_MODE=native_strict` fails before any
+request on those routes. Opus 5.5 keeps its 1M-token context window on Bedrock with no beta header.
 
 The IAM role needs `bedrock:InvokeModel` and `bedrock:InvokeModelWithResponseStream` on each
 inference profile it routes through and on the foundation models behind it in every destination
@@ -374,8 +377,10 @@ reports `missing_credentials`, and an unknown model reports `model_not_found`.
 | `SIBYL_CONSOLIDATION_MAX_INPUT_CHARS` | unset (per model) | Character cap on one consolidation request: system, evidence, schema             |
 | `SIBYL_CONSOLIDATION_RUN_MAX_TOKENS`  | `10000000`        | Token ceiling one reflection dream run may reserve across all of its model calls |
 
-Unset, each request takes the memory model's own budget: 1,600,000 characters for `claude-opus-5`
-and `claude-opus-5-5` on the `anthropic` and `bedrock` providers, and 40,000 for every other model.
+Unset, each request takes the memory model's own budget: 1,600,000 characters for `claude-opus-5`,
+`claude-opus-5-5` and `claude-sonnet-5-5` on the `anthropic` and `bedrock` providers, and 40,000 for
+every other model, Claude Haiku 5.5 included, since its prompts cost five times as much past 100,000
+tokens.
 The lookup matches the model alias exactly, so a dated id, a `[1m]` suffix or an
 `anthropic/`-prefixed OpenRouter id gets 40,000, while a Bedrock ID such as
 `us.anthropic.claude-opus-5-5` counts as its alias. When the variable is set, its value replaces the
@@ -812,7 +817,7 @@ SIBYL_SURREAL_PASSWORD=<secure-password>
 SIBYL_OPENAI_API_KEY=sk-...
 SIBYL_ANTHROPIC_API_KEY=sk-ant-...
 SIBYL_LLM_PROVIDER=anthropic
-SIBYL_LLM_MODEL=claude-sonnet-4
+SIBYL_LLM_MODEL=claude-haiku-5-5
 
 # Email
 SIBYL_SMTP_HOST=smtp.gmail.com
