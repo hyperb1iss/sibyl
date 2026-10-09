@@ -45,6 +45,9 @@ jobs:
 
       - name: Start SurrealDB
         uses: ./.github/actions/start-surrealdb
+        with:
+          dockerhub-username: ${{ vars.DOCKERHUB_USERNAME }}
+          dockerhub-token: ${{ secrets.DOCKERHUB_TOKEN }}
 
       - name: Install system dependencies
         run: |
@@ -226,6 +229,9 @@ jobs:
 
       - name: Start SurrealDB
         uses: ./.github/actions/start-surrealdb
+        with:
+          dockerhub-username: ${{ vars.DOCKERHUB_USERNAME }}
+          dockerhub-token: ${{ secrets.DOCKERHUB_TOKEN }}
 
       - name: Install system dependencies
         run: |
@@ -314,6 +320,9 @@ jobs:
 
       - name: Start SurrealDB
         uses: ./.github/actions/start-surrealdb
+        with:
+          dockerhub-username: ${{ vars.DOCKERHUB_USERNAME }}
+          dockerhub-token: ${{ secrets.DOCKERHUB_TOKEN }}
 
       - name: Install system dependencies
         run: |
