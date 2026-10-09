@@ -340,7 +340,7 @@ The CLI writes a pinned compose bundle and generated secrets under `~/.sibyl/doc
 ```bash
 sibyl docker init --with-worker
 sibyl docker up --pull
-sibyl docker upgrade --tag 1.4.8
+sibyl docker upgrade --tag 1.4.9
 ```
 
 When `--tag` is provided, `upgrade` updates the generated `.env` and the pinned Sibyl image
