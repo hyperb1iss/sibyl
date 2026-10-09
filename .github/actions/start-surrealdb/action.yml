@@ -22,7 +22,7 @@ runs:
       env:
         DOCKERHUB_USERNAME: ${{ inputs.dockerhub-username }}
         DOCKERHUB_TOKEN: ${{ inputs.dockerhub-token }}
-      run: printf '%s' "$DOCKERHUB_TOKEN" | docker login docker.io --username "$DOCKERHUB_USERNAME" --password-stdin
+      run: ${{ github.action_path }}/dockerhub-login.sh
 
     - name: Start SurrealDB service
       shell: bash
