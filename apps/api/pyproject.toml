@@ -35,7 +35,7 @@ dependencies = [
     # Sibyl Core Library with daemon/runtime extras
     "sibyl-core[bedrock,embeddings,graph,graphrag,llm]==1.4.8",
     # Core Framework
-    "fastapi>=0.141.1",
+    "fastapi>=0.142.2",
     "mcp>=2.2.0,<3",
     "starlette>=1.4.1",
     "uvicorn[standard]>=0.53.0",
