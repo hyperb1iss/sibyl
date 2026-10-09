@@ -42,17 +42,22 @@ def test_models_pydantic_ai_already_profiles_are_left_as_they_are(model: str) ->
     assert providers.anthropic_profile(model) == upstream
 
 
-def test_gpt_6_luna_is_profiled_as_the_reasoning_model_it_is() -> None:
-    config = LLMConfig(provider="openai", model="gpt-6-luna", api_key=SecretStr("fixture"))
-    upstream = OpenAIProvider.model_profile("gpt-6-luna") or {}
+@pytest.mark.parametrize(
+    ("model", "stand_in"), [("gpt-6-luna", "gpt-5.6-luna"), ("gpt-6.1-sol", "gpt-6-astra")]
+)
+def test_gpt_6_models_are_profiled_as_the_reasoning_models_they_are(
+    model: str, stand_in: str
+) -> None:
+    config = LLMConfig(provider="openai", model=model, api_key=SecretStr("fixture"))
+    upstream = OpenAIProvider.model_profile(model) or {}
     assert upstream.get("openai_supports_reasoning") is False
     profile = providers.resolved_model_profile(config)
-    assert profile == OpenAIProvider.model_profile("gpt-5.6-luna")
+    assert profile == OpenAIProvider.model_profile(stand_in)
     assert profile["openai_supports_reasoning"] is True
 
 
 async def test_openai_models_are_built_with_the_resolved_profile() -> None:
-    for model in ("gpt-6-luna", "gpt-5.6-terra"):
+    for model in ("gpt-6-luna", "gpt-6.1-sol", "gpt-5.4-mini"):
         config = LLMConfig(provider="openai", model=model, api_key=SecretStr("fixture"))
         async with AsyncExitStack() as resources:
             built = providers.build_model(config, resources=resources)

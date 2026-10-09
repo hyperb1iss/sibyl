@@ -347,11 +347,11 @@ _DEFAULT_ENTRIES = [
         deprecated_after=datetime(2027, 5, 7, tzinfo=UTC),
     ),
     ModelEntry(
-        alias="gpt-5.6-terra",
-        snapshot="gpt-5.6-terra",
+        alias="gpt-6.1-sol",
+        snapshot="gpt-6.1-sol",
         kind=ModelKind.LLM,
         provider="openai",
-        provider_model_id="gpt-5.6-terra",
+        provider_model_id="gpt-6.1-sol",
         pydantic_ai_model_class="OpenAIResponsesModel",
         use_cases=("openai-parity", "parity"),
         capabilities=frozenset(
@@ -365,7 +365,7 @@ _DEFAULT_ENTRIES = [
         max_output_tokens=128000,
         default_temperature=None,
         input_cost_per_mtok_usd=2.0,
-        output_cost_per_mtok_usd=12.0,
+        output_cost_per_mtok_usd=10.0,
         cost_source_url=_OPENAI_COST_SOURCE,
         last_verified_at=_LATEST_VERIFIED_AT,
     ),

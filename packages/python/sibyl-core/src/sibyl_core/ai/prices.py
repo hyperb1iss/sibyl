@@ -1,11 +1,12 @@
-"""Prices for Claude models newer than the bundled genai-prices data.
+"""Prices for models newer than the bundled genai-prices data.
 
-genai-prices 0.1.8 has no Claude Haiku 5.5 entry, so pricing one of its
-responses raises ``LookupError`` and the call is recorded at no cost. It
-prices Claude Sonnet 5.5 through its ``claude-sonnet-5`` prefix match, which
-charges cache reads at Sonnet 5's $0.20 instead of $0.10. The entries here
-go ahead of the bundled ones for the first-party and Bedrock providers, so
-they win for these models and every other model prices exactly as before.
+genai-prices 0.1.8 has no Claude Haiku 5.5 or GPT-6.1 Sol entry, so pricing
+one of their responses raises ``LookupError`` and the call is recorded at no
+cost. It prices Claude Sonnet 5.5 through its ``claude-sonnet-5`` prefix
+match, which charges cache reads at Sonnet 5's $0.20 instead of $0.10. The
+entries here go ahead of the bundled ones for the first-party Anthropic,
+OpenAI and Bedrock providers, so they win for these models and every other
+model prices exactly as before.
 
 An entry can go once a genai-prices release carries the same rates.
 """
@@ -76,6 +77,28 @@ def _sonnet_5_5_prices(scale: str) -> ModelPrice:
     )
 
 
+#: OpenAI charges 2x input and cache and 1.5x output on the whole request for
+#: prompts over 272K input tokens. This follows genai-prices' own encoding of
+#: that tier for OpenAI models: it selects a tier when the count is greater
+#: than the start, and writes the start as 271,999.
+_OPENAI_LONG_PROMPT_START = 271_999
+
+
+def _gpt_6_1_sol_prices() -> ModelPrice:
+    def tiered(base: str, multiplier: str) -> TieredPrices:
+        return TieredPrices(
+            base=_usd(base),
+            tiers=[Tier(start=_OPENAI_LONG_PROMPT_START, price=_usd(base) * Decimal(multiplier))],
+        )
+
+    return ModelPrice(
+        input_mtok=tiered("2", "2"),
+        cache_read_mtok=tiered("0.10", "2"),
+        cache_write_mtok=tiered("2.50", "2"),
+        output_mtok=tiered("10", "1.5"),
+    )
+
+
 def _first_party_match(alias: str) -> MatchLogic:
     return ClauseOr(or_=[ClauseEquals(equals=alias), ClauseStartsWith(starts_with=f"{alias}-")])
 
@@ -105,6 +128,7 @@ def _bedrock_regional_match(alias: str) -> MatchLogic:
 
 
 _ANTHROPIC_SOURCE = "https://platform.claude.com/docs/en/about-claude/pricing"
+_OPENAI_SOURCE = "https://developers.openai.com/api/docs/models/gpt-6.1-sol"
 _BEDROCK_SOURCE = (
     "AWS price list API, AmazonBedrockFoundationModels, us-west-2 "
     "(https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws/AmazonBedrockFoundationModels/current/index.json)"
@@ -131,6 +155,19 @@ def _first_party_models() -> list[ModelInfo]:
             price_comments=f"Cache hits are 0.05x base input. Ref: {_ANTHROPIC_SOURCE}",
             prices=_sonnet_5_5_prices("1"),
         ),
+    ]
+
+
+def _openai_models() -> list[ModelInfo]:
+    return [
+        ModelInfo(
+            id="gpt-6.1-sol",
+            match=_first_party_match("gpt-6.1-sol"),
+            name="GPT-6.1 Sol",
+            context_window=1_050_000,
+            price_comments=f"Long-context rates from 272K input tokens. Ref: {_OPENAI_SOURCE}",
+            prices=_gpt_6_1_sol_prices(),
+        )
     ]
 
 
@@ -167,14 +204,20 @@ def _bedrock_models() -> list[ModelInfo]:
 
 @cache
 def _supplement_ids() -> frozenset[str]:
-    return frozenset(model.id for model in (*_first_party_models(), *_bedrock_models()))
+    return frozenset(
+        model.id for model in (*_first_party_models(), *_openai_models(), *_bedrock_models())
+    )
 
 
 @cache
 def price_snapshot() -> data_snapshot.DataSnapshot:
     """genai-prices' bundled data with Sibyl's entries ahead of the bundled ones."""
     bundled = data_snapshot.get_snapshot()
-    supplements = {"anthropic": _first_party_models(), "aws": _bedrock_models()}
+    supplements = {
+        "anthropic": _first_party_models(),
+        "openai": _openai_models(),
+        "aws": _bedrock_models(),
+    }
     providers: list[types.Provider] = [
         replace(provider, models=[*supplements[provider.id], *provider.models])
         if provider.id in supplements

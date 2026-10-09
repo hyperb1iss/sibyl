@@ -19,7 +19,7 @@ def test_registry_has_initial_llm_entries() -> None:
         "gemini-3-5-flash-lite",
         "gemini-3-flash",
         "gemini-3-1-flash-lite",
-        "gpt-5.6-terra",
+        "gpt-6.1-sol",
         "gpt-6-luna",
         "gpt-5.4-mini",
         "gpt-5.4-nano",
@@ -106,7 +106,7 @@ def test_registry_require_raises_for_unknown_model() -> None:
     [
         ("cost-optimized-extraction", "gemini-3-8-flash", "gemini-3.8-flash"),
         ("bulk-crawling", "gemini-3-5-flash-lite", "gemini-3.5-flash-lite"),
-        ("openai-parity", "gpt-5.6-terra", "gpt-5.6-terra"),
+        ("openai-parity", "gpt-6.1-sol", "gpt-6.1-sol"),
         ("budget-extraction", "gpt-6-luna", "gpt-6-luna"),
     ],
 )

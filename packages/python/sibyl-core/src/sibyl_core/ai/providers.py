@@ -197,10 +197,14 @@ def resolved_model_profile(config: LLMConfig) -> ModelProfile:
 
 #: OpenAI models newer than the installed pydantic-ai, each profiled as an
 #: older model that behaves the same on the wire. pydantic-ai 2.42 does not
-#: know GPT-6 Luna is a reasoning model, so it sends ``temperature`` (a 400)
-#: and no reasoning settings. pydantic-ai 2.54 profiles it exactly as 2.42
-#: profiles GPT-5.6 Luna.
-OPENAI_PROFILE_STAND_INS: dict[str, str] = {"gpt-6-luna": "gpt-5.6-luna"}
+#: know GPT-6 Luna or GPT-6.1 Sol reason, so it sends ``temperature`` (a 400)
+#: and no reasoning settings. pydantic-ai 2.54 profiles Luna exactly as 2.42
+#: profiles GPT-5.6 Luna, and Sol as 2.42 profiles GPT-6 Astra apart from
+#: image output, which Sibyl never asks for.
+OPENAI_PROFILE_STAND_INS: dict[str, str] = {
+    "gpt-6-luna": "gpt-5.6-luna",
+    "gpt-6.1-sol": "gpt-6-astra",
+}
 
 
 def openai_profile(model_id: str) -> ModelProfile:

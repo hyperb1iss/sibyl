@@ -101,3 +101,16 @@ def test_only_sibyls_own_entries_take_the_supplement_path() -> None:
     assert supplement_price(SHORT, "claude-opus-5-5", provider_id="anthropic") is None
     assert supplement_price(SHORT, "us.anthropic.claude-sonnet-5", provider_id="aws") is None
     assert supplement_price(SHORT, "gpt-test", provider_id="openai") is None
+    assert supplement_price(SHORT, "gpt-6.1-sol", provider_id="openai") is not None
+    assert supplement_price(SHORT, "gpt-6-luna", provider_id="openai") is None
+
+
+def test_gpt_6_1_sol_prices_its_long_context_tier_from_272k_input_tokens() -> None:
+    below = RequestUsage(input_tokens=271_999, output_tokens=1_000_000)
+    above = RequestUsage(input_tokens=272_000, cache_read_tokens=72_000, output_tokens=1_000_000)
+    # 271,999 x $2 + 1M x $10.
+    assert total("gpt-6.1-sol", below, provider_id="openai") == Decimal("10.543998")
+    # 200K x $4 + 72K cache reads x $0.20 + 1M x $15.
+    assert total("gpt-6.1-sol", above, provider_api_url="https://api.openai.com/v1") == (
+        Decimal("0.8") + Decimal("0.0144") + Decimal("15")
+    )
