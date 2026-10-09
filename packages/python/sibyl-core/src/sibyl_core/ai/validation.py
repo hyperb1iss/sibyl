@@ -272,8 +272,8 @@ async def _run_text_probe(config: LLMConfig):
 
 def _cheapest_probe_model(provider: LLMProviderName) -> str:
     return {
-        "anthropic": "claude-haiku-4-5",
-        "bedrock": "claude-haiku-4-5",
+        "anthropic": "claude-haiku-5-5",
+        "bedrock": "claude-haiku-5-5",
         "gemini": "gemini-3-1-flash-lite",
         "openai": "gpt-5.4-nano",
     }[provider]

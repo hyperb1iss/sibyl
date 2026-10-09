@@ -206,7 +206,7 @@ candidates live in `sibyl_core/models/relations.py`.
 
 ```bash
 SIBYL_LLM_PROVIDER=anthropic          # anthropic | bedrock | openai | gemini
-SIBYL_LLM_MODEL=claude-haiku-4-5
+SIBYL_LLM_MODEL=claude-haiku-5-5
 SIBYL_LLM_TEMPERATURE=0
 SIBYL_LLM_MAX_TOKENS=2048
 
@@ -220,7 +220,7 @@ SIBYL_LLM_MEMORY_TIMEOUT_SECONDS=600
 SIBYL_LLM_CRAWLER_PROVIDER=gemini
 SIBYL_LLM_CRAWLER_MODEL=gemini-3-1-flash-lite
 SIBYL_LLM_SYNTHESIS_PROVIDER=anthropic
-SIBYL_LLM_SYNTHESIS_MODEL=claude-sonnet-4-6
+SIBYL_LLM_SYNTHESIS_MODEL=claude-sonnet-5-5
 
 SIBYL_ANTHROPIC_API_KEY=...           # LLM provider key
 SIBYL_OPENAI_API_KEY=sk-...           # LLM or embedding provider key

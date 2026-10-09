@@ -87,9 +87,9 @@ SIBYL_SURREAL_PASSWORD=root
 SIBYL_REDIS_HOST=127.0.0.1            # only needed for Redis coordination
 SIBYL_REDIS_PORT=6381
 SIBYL_LLM_PROVIDER=anthropic          # anthropic | bedrock | openai | gemini
-SIBYL_LLM_MODEL=claude-haiku-4-5
-SIBYL_LLM_CRAWLER_MODEL=claude-haiku-4-5
-SIBYL_LLM_SYNTHESIS_MODEL=claude-sonnet-4-6
+SIBYL_LLM_MODEL=claude-haiku-5-5
+SIBYL_LLM_CRAWLER_MODEL=claude-haiku-5-5
+SIBYL_LLM_SYNTHESIS_MODEL=claude-sonnet-5-5
 SIBYL_LLM_TEMPERATURE=0
 # A shared timeout wins over every surface default, so the memory surface needs
 # its own value; consolidation sends a whole cohort in one request.

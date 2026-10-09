@@ -88,6 +88,10 @@ def keys(value):
         ("claude-opus-5", False, None, 10 * 5e-6 + 2 * 25e-6),
         ("claude-opus-5-5", False, "high", 10 * 4e-6 + 2 * 20e-6),
         ("claude-haiku-4-5", True, None, 10 * 1e-6 + 2 * 5e-6),
+        # pydantic-ai has no Haiku 5.5 rule; Sibyl's profile drops temperature
+        # and its price table charges the short-prompt tier.
+        ("claude-haiku-5-5", False, None, 10 * 0.1e-6 + 2 * 0.5e-6),
+        ("claude-sonnet-5-5", False, None, 10 * 2e-6 + 2 * 10e-6),
     ],
 )
 async def test_anthropic_native_factory_emits_profile_schema_and_settings(
@@ -409,7 +413,7 @@ def test_anthropic_registered_model_resolves_provider_and_snapshot_without_defau
     assert providers.resolve_provider_model_id(config) == "claude-opus-5"
     with pytest.raises(LLMError):
         providers.resolve_provider_model_id(config.model_copy(update={"provider": "openai"}))
-    assert model_registry.recommended_for("default").alias == "claude-haiku-4-5"
+    assert model_registry.recommended_for("default").alias == "claude-haiku-5-5"
 
 
 async def test_anthropic_build_receipt_hashes_actual_transformed_schema(monkeypatch):
@@ -745,7 +749,10 @@ def test_tool_mode_moves_to_native_output_only_on_models_that_reject_forced_tool
         )
 
     assert mode("tool", "claude-opus-5-5") == "native_strict"
+    assert mode("tool", "claude-sonnet-5-5") == "native_strict"
     assert mode("tool", "claude-fable-5-1") == "native_strict"
+    # Haiku 5.5 accepts a forced tool and answers it without thinking.
+    assert mode("tool", "claude-haiku-5-5") == "tool"
     assert mode("tool", "claude-opus-5") == "tool"
     assert mode("native_strict", "claude-opus-5") == "native_strict"
     assert mode("tool", "claude-opus-5-5", provider="openai") == "tool"
@@ -848,6 +855,10 @@ async def test_consolidation_revision_records_the_mode_the_model_can_run(
         ("claude-sonnet-4-6", "xhigh", "high"),
         # Haiku 4.5 rejects effort outright, so none is sent.
         ("claude-haiku-4-5", "high", None),
+        # Haiku 5.5 takes every level, xhigh included.
+        ("claude-haiku-5-5", "low", "low"),
+        ("claude-haiku-5-5", "xhigh", "xhigh"),
+        ("claude-sonnet-5-5", "xhigh", "xhigh"),
         ("claude-opus-5-5", None, None),
     ],
 )

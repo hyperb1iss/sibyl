@@ -181,7 +181,7 @@ class CoreConfig(BaseSettings):
         description="Default LLM provider for every surface",
     )
     llm_model: str = Field(
-        default="claude-haiku-4-5",
+        default="claude-haiku-5-5",
         description="LLM model for entity extraction",
     )
 

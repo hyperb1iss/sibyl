@@ -225,7 +225,7 @@ Do not infer entities that aren't explicitly present."""
         """Initialize the extractor.
 
         Args:
-            model: LLM model to use (default: claude-haiku-4-5 for cost efficiency)
+            model: LLM model to use (default: claude-haiku-5-5 for cost efficiency)
         """
         self.model = model
         self._extractor: EntityPayloadExtractor = extractor or Extractor(

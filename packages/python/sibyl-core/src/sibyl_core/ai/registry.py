@@ -54,6 +54,7 @@ class ModelEntry(BaseModel):
 
 
 _VERIFIED_AT = datetime(2026, 5, 15, tzinfo=UTC)
+_LATEST_VERIFIED_AT = datetime(2026, 10, 8, tzinfo=UTC)
 
 _ANTHROPIC_COST_SOURCE = "https://platform.claude.com/docs/en/about-claude/models/overview"
 _GOOGLE_COST_SOURCE = "https://ai.google.dev/gemini-api/docs/pricing"
@@ -134,6 +135,32 @@ def _default_model_class(provider: ProviderName, kind: ModelKind) -> str:
 
 _DEFAULT_ENTRIES = [
     ModelEntry(
+        alias="claude-haiku-5-5",
+        snapshot="claude-haiku-5-5",
+        kind=ModelKind.LLM,
+        provider="anthropic",
+        provider_model_id="claude-haiku-5-5",
+        platform_model_ids={"bedrock": "anthropic.claude-haiku-5-5"},
+        pydantic_ai_model_class="AnthropicModel",
+        use_cases=("extraction", "default"),
+        capabilities=frozenset(
+            {
+                ModelCapability.STRUCTURED_OUTPUT,
+                ModelCapability.STREAMING,
+                ModelCapability.TOOL_USE,
+                ModelCapability.THINKING,
+            }
+        ),
+        max_output_tokens=128_000,
+        default_temperature=None,
+        # Prompts up to 100,000 tokens. Longer prompts pay five times as much on
+        # every token, which sibyl_core.ai.prices charges exactly.
+        input_cost_per_mtok_usd=0.1,
+        output_cost_per_mtok_usd=0.5,
+        cost_source_url="https://platform.claude.com/docs/en/models/haiku-5-5/overview",
+        last_verified_at=_LATEST_VERIFIED_AT,
+    ),
+    ModelEntry(
         alias="claude-haiku-4-5",
         snapshot="claude-haiku-4-5-20251001",
         kind=ModelKind.LLM,
@@ -141,7 +168,6 @@ _DEFAULT_ENTRIES = [
         provider_model_id="claude-haiku-4-5-20251001",
         platform_model_ids={"bedrock": "anthropic.claude-haiku-4-5-20251001-v1:0"},
         pydantic_ai_model_class="AnthropicModel",
-        use_cases=("extraction", "default"),
         capabilities=frozenset(
             {ModelCapability.STRUCTURED_OUTPUT, ModelCapability.STREAMING, ModelCapability.THINKING}
         ),
@@ -201,6 +227,30 @@ _DEFAULT_ENTRIES = [
         last_verified_at=datetime(2026, 9, 23, tzinfo=UTC),
     ),
     ModelEntry(
+        alias="claude-sonnet-5-5",
+        snapshot="claude-sonnet-5-5",
+        kind=ModelKind.LLM,
+        provider="anthropic",
+        provider_model_id="claude-sonnet-5-5",
+        platform_model_ids={"bedrock": "anthropic.claude-sonnet-5-5"},
+        pydantic_ai_model_class="AnthropicModel",
+        use_cases=("synthesis", "quality"),
+        capabilities=frozenset(
+            {
+                ModelCapability.STRUCTURED_OUTPUT,
+                ModelCapability.STREAMING,
+                ModelCapability.TOOL_USE,
+                ModelCapability.THINKING,
+            }
+        ),
+        max_output_tokens=128_000,
+        default_temperature=None,
+        input_cost_per_mtok_usd=2.0,
+        output_cost_per_mtok_usd=10.0,
+        cost_source_url="https://platform.claude.com/docs/en/models/sonnet-5-5/overview",
+        last_verified_at=_LATEST_VERIFIED_AT,
+    ),
+    ModelEntry(
         alias="claude-sonnet-4-6",
         snapshot="claude-sonnet-4-6",
         kind=ModelKind.LLM,
@@ -208,7 +258,6 @@ _DEFAULT_ENTRIES = [
         provider_model_id="claude-sonnet-4-6",
         platform_model_ids={"bedrock": "anthropic.claude-sonnet-4-6"},
         pydantic_ai_model_class="AnthropicModel",
-        use_cases=("synthesis", "quality"),
         capabilities=frozenset(
             {
                 ModelCapability.STRUCTURED_OUTPUT,

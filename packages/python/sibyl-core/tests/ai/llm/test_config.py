@@ -32,7 +32,7 @@ async def test_env_config_source_uses_defaults_without_env() -> None:
     assert resolved.surface is LLMSurface.CRAWLER
     assert resolved.provider.value == "anthropic"
     assert resolved.provider.source == "default"
-    assert resolved.model.value == "claude-haiku-4-5"
+    assert resolved.model.value == "claude-haiku-5-5"
     assert resolved.temperature.value == 0.0
     assert resolved.max_tokens.value is None
     assert resolved.timeout_seconds.value == 60.0
@@ -166,6 +166,10 @@ def test_config_field_tracks_env_lock_metadata() -> None:
         (LLMSurface.MEMORY, "anthropic", "claude-opus-5-5", "8192", 8192),
         (LLMSurface.DEFAULT, "anthropic", "claude-opus-5", None, None),
         (LLMSurface.MEMORY, "anthropic", "claude-haiku-4-5", None, None),
+        (LLMSurface.MEMORY, "anthropic", "claude-sonnet-5-5", None, 32768),
+        (LLMSurface.MEMORY, "bedrock", "us.anthropic.claude-sonnet-5-5", None, 32768),
+        # Haiku 5.5 answers memory's forced output tool without thinking.
+        (LLMSurface.MEMORY, "anthropic", "claude-haiku-5-5", None, None),
         (LLMSurface.MEMORY, "openai", "claude-opus-5", None, None),
     ],
 )
@@ -190,6 +194,9 @@ async def test_opus_memory_output_default_preserves_explicit_policy(
         (LLMSurface.MEMORY, "anthropic", "claude-opus-5-5", "xhigh", "xhigh"),
         (LLMSurface.MEMORY, "anthropic", "claude-opus-5", None, None),
         (LLMSurface.MEMORY, "anthropic", "claude-opus-5", "medium", "medium"),
+        # Sonnet 5.5 already defaults to high; Haiku 5.5 keeps its API default.
+        (LLMSurface.MEMORY, "anthropic", "claude-sonnet-5-5", None, None),
+        (LLMSurface.MEMORY, "anthropic", "claude-haiku-5-5", None, None),
         (LLMSurface.DEFAULT, "anthropic", "claude-opus-5-5", None, None),
         (LLMSurface.MEMORY, "openai", "claude-opus-5-5", None, None),
     ],
@@ -258,6 +265,9 @@ async def test_memory_timeout_env_overrides_the_raised_default(name: str, expect
         ("anthropic", "claude-opus-5", 1_600_000),
         ("anthropic", "claude-opus-5-5", 1_600_000),
         ("anthropic", "claude-haiku-4-5", 40_000),
+        ("anthropic", "claude-sonnet-5-5", 1_600_000),
+        # Haiku 5.5 bills five times as much past 100K prompt tokens.
+        ("anthropic", "claude-haiku-5-5", 40_000),
         ("openai", "claude-opus-5", 40_000),
     ],
 )

@@ -55,20 +55,25 @@ class MemoryModelDefaults(NamedTuple):
 
 
 #: Memory-surface defaults for Anthropic models whose adaptive thinking shares the
-#: output ceiling with the answer. Opus 5 already runs at high effort by default,
-#: so it sends none. Opus 5.5 defaults to medium, a level below the depth memory
-#: validation was qualified at, so it is pinned to high.
+#: output ceiling with the answer. Opus 5 and Sonnet 5.5 already run at high
+#: effort by default, so they send none. Opus 5.5 defaults to medium, a level
+#: below the depth memory validation was qualified at, so it is pinned to high.
+#: Sonnet 5.5 rejects a forced tool, so its memory calls always take native
+#: output and think before answering.
 #:
-#: Both Opus models take a 1M-token input window billed at standard rates, so a
+#: These models take a 1M-token input window billed at standard rates, so a
 #: consolidation request can hold a whole task family. 1.6M characters was about
 #: 420K tokens on the screen48 corpus, and stays inside the window beside the
 #: 32K output at any density above about 1.7 characters per token. Twice that no
 #: longer fits once text runs denser than about 3.3 characters per token.
 #: Amazon Bedrock serves the same 1M window with no beta header, so the
-#: defaults key by alias and hold on either provider.
+#: defaults key by alias and hold on either provider. Haiku 5.5 is not here:
+#: its window costs five times as much past 100K prompt tokens, and in the tool
+#: output memory uses by default it answers through the forced tool unthinking.
 MEMORY_MODEL_DEFAULTS: dict[str, MemoryModelDefaults] = {
     "claude-opus-5": MemoryModelDefaults(32_768, None, 1_600_000),
     "claude-opus-5-5": MemoryModelDefaults(32_768, "high", 1_600_000),
+    "claude-sonnet-5-5": MemoryModelDefaults(32_768, None, 1_600_000),
 }
 
 
@@ -158,7 +163,7 @@ class EnvConfigSource:
             model=self._resolve_string(
                 surface,
                 "MODEL",
-                default="claude-haiku-4-5",
+                default="claude-haiku-5-5",
             ),
             temperature=self._resolve_float(surface, "TEMPERATURE", default=0.0),
             max_tokens=self._resolve_int(surface, "MAX_TOKENS", default=None),

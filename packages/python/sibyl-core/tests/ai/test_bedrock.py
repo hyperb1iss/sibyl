@@ -288,6 +288,28 @@ def test_native_output_is_gated_to_models_bedrock_accepts_it_for(monkeypatch):
     assert mantle["supports_json_schema_output"] is False
 
 
+def test_5_5_generation_routes_and_profiles_on_bedrock(monkeypatch):
+    monkeypatch.setenv("AWS_REGION", "us-west-2")
+    haiku = bedrock_config("claude-haiku-5-5", effort="xhigh")
+    assert providers.resolve_provider_model_id(haiku) == "us.anthropic.claude-haiku-5-5"
+    profile = providers.resolved_model_profile(haiku)
+    # Bedrock serves no structured outputs here, and Haiku 5.5 takes a forced
+    # tool, so extraction stays in tool mode with the tool forced.
+    assert profile["supports_json_schema_output"] is False
+    assert profile.get("anthropic_supports_forced_tool_choice", True) is True
+    assert profile["anthropic_disallows_sampling_settings"] is True
+    assert effective_output_mode("tool", haiku) == "tool"
+    assert providers.anthropic_effort(haiku) == "xhigh"
+
+    sonnet = bedrock_config("us.anthropic.claude-sonnet-5-5")
+    assert providers.rejects_forced_tool_choice(sonnet)
+    assert not providers.prefers_native_output(sonnet)
+    assert effective_output_mode("tool", sonnet) == "tool"
+    profile = providers.resolved_model_profile(sonnet)
+    assert profile["anthropic_supports_forced_tool_choice"] is False
+    assert profile["supports_json_schema_output"] is False
+
+
 def test_transport_policy_records_the_bedrock_api(monkeypatch):
     monkeypatch.setenv("AWS_REGION", "us-west-2")
     policy = transport_policy(bedrock_config("claude-haiku-4-5"))
@@ -483,7 +505,7 @@ async def test_probe_without_a_region_reports_missing_credentials_without_a_call
     assert result.valid is False
     assert result.status == "missing_credentials"
     assert "SIBYL_BEDROCK_REGION" in (result.error or "")
-    assert result.model == "claude-haiku-4-5"
+    assert result.model == "claude-haiku-5-5"
 
 
 async def test_probe_without_credentials_reports_missing_credentials(monkeypatch):

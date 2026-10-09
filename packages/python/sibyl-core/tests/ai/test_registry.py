@@ -9,9 +9,11 @@ def test_registry_has_initial_llm_entries() -> None:
     entries = model_registry.llm_entries()
 
     assert [entry.alias for entry in entries] == [
+        "claude-haiku-5-5",
         "claude-haiku-4-5",
         "claude-opus-5",
         "claude-opus-5-5",
+        "claude-sonnet-5-5",
         "claude-sonnet-4-6",
         "gemini-3-flash",
         "gemini-3-1-flash-lite",
@@ -48,7 +50,35 @@ def test_registry_filters_kind() -> None:
 def test_registry_recommendation() -> None:
     entry = model_registry.recommended_for("default", kind=ModelKind.LLM)
 
-    assert entry.alias == "claude-haiku-4-5"
+    assert entry.alias == "claude-haiku-5-5"
+
+
+@pytest.mark.parametrize(
+    ("use_case", "alias"),
+    [
+        ("default", "claude-haiku-5-5"),
+        ("extraction", "claude-haiku-5-5"),
+        ("synthesis", "claude-sonnet-5-5"),
+        ("quality", "claude-sonnet-5-5"),
+    ],
+)
+def test_latest_claude_models_carry_the_recommendations(use_case: str, alias: str) -> None:
+    assert model_registry.recommended_for(use_case).alias == alias
+
+
+def test_registry_prices_the_5_5_generation_at_published_rates() -> None:
+    haiku = model_registry.require("claude-haiku-5-5")
+    sonnet = model_registry.require("claude-sonnet-5-5")
+    assert haiku.platform_model_ids == {"bedrock": "anthropic.claude-haiku-5-5"}
+    assert sonnet.platform_model_ids == {"bedrock": "anthropic.claude-sonnet-5-5"}
+    assert (haiku.input_cost_per_mtok_usd, haiku.output_cost_per_mtok_usd) == (0.1, 0.5)
+    assert (sonnet.input_cost_per_mtok_usd, sonnet.output_cost_per_mtok_usd) == (2.0, 10.0)
+    for entry in (haiku, sonnet):
+        # Both reject a non-default temperature.
+        assert entry.default_temperature is None and entry.max_output_tokens == 128_000
+    # The previous generation stays selectable, without a recommendation.
+    assert model_registry.require("claude-haiku-4-5").use_cases == ()
+    assert model_registry.require("claude-sonnet-4-6").use_cases == ()
 
 
 def test_registry_custom_entry_is_marked_unverified() -> None:

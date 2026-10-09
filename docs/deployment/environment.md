@@ -304,7 +304,7 @@ Redis/Valkey is optional. The default Surreal runtime uses local in-process coor
 | Variable                           | Default            | Description                                      |
 | ---------------------------------- | ------------------ | ------------------------------------------------ |
 | `SIBYL_LLM_PROVIDER`               | `anthropic`        | LLM provider: anthropic, bedrock, gemini, openai |
-| `SIBYL_LLM_MODEL`                  | `claude-haiku-4-5` | LLM model for entity extraction                  |
+| `SIBYL_LLM_MODEL`                  | `claude-haiku-5-5` | LLM model for entity extraction                  |
 | `SIBYL_LLM_TIMEOUT_SECONDS`        | `60`               | Per-attempt read timeout                         |
 | `SIBYL_LLM_MEMORY_TIMEOUT_SECONDS` | `600`              | Per-attempt read timeout for the memory surface  |
 
@@ -364,7 +364,7 @@ resources. The `mantle` API takes `bedrock-mantle:CreateInference` instead, serv
 only, and runs in fewer Regions, so `invoke` is the default.
 
 The provider **Test** button and `/api/settings/ai/keys/bedrock/test` first prove a region and
-credentials resolve, then make one minimal Claude Haiku 4.5 call. A missing region or credential
+credentials resolve, then make one minimal Claude Haiku 5.5 call. A missing region or credential
 reports `missing_credentials`, and an unknown model reports `model_not_found`.
 
 ### Consolidation Input Budget
@@ -840,7 +840,7 @@ data:
   SIBYL_PUBLIC_URL: "https://sibyl.example.com"
   SIBYL_FORWARDED_ALLOW_IPS: "10.250.0.0/28"
   SIBYL_LLM_PROVIDER: "anthropic"
-  SIBYL_LLM_MODEL: "claude-haiku-4-5"
+  SIBYL_LLM_MODEL: "claude-haiku-5-5"
   SIBYL_EMBEDDING_MODEL: "text-embedding-3-small"
   SIBYL_EMBEDDING_DIMENSIONS: "1536"
 ```
