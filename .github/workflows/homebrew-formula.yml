@@ -1,0 +1,48 @@
+name: Homebrew Formula
+
+# Proves the generated formula installs whenever its generator or verifier
+# changes. It renders the formula for the last published version with this
+# branch's generator and lock, then installs it with the runner's Homebrew.
+on:
+  pull_request:
+    paths:
+      - "tools/release/homebrew_formula.py"
+      - "tools/release/verify_homebrew_formula.sh"
+      - ".github/workflows/homebrew-formula.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: homebrew-formula-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  install:
+    name: "◇ Homebrew: formula installs"
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: "◆ Checkout Sibyl"
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: "◇ Setup Python"
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.13.15"
+
+      - name: "◇ Install uv"
+        uses: astral-sh/setup-uv@v10.2.0
+
+      - name: "△ Generate formula for the published version"
+        run: |
+          set -euo pipefail
+          python tools/release/homebrew_formula.py \
+            --version "$(cat VERSION)" \
+            --output homebrew-formula/Formula/sibyl.rb
+
+      - name: "◇ Install and test the formula"
+        run: tools/release/verify_homebrew_formula.sh homebrew-formula/Formula/sibyl.rb

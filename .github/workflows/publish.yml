@@ -174,7 +174,7 @@ jobs:
     needs: python
     if: ${{ !inputs.dry_run }}
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 25
     permissions:
       contents: read
     steps:
@@ -188,6 +188,9 @@ jobs:
         uses: actions/setup-python@v7
         with:
           python-version: "3.13.15"
+
+      - name: "◇ Install uv"
+        uses: astral-sh/setup-uv@v10.2.0
 
       - name: "△ Extract and validate version from tag"
         id: version
@@ -217,6 +220,9 @@ jobs:
           path: homebrew-formula/Formula/sibyl.rb
           if-no-files-found: error
           retention-days: 90
+
+      - name: "◇ Install and test the formula"
+        run: tools/release/verify_homebrew_formula.sh homebrew-formula/Formula/sibyl.rb
 
       - name: "◇ Verify Homebrew tap token"
         env:
@@ -269,7 +275,7 @@ jobs:
           git commit \
             -m "feat: update sibyl to v$VERSION" \
             -m "Generate the formula from the published PyPI artifacts." \
-            -m "The tap now installs both the sibyl CLI and sibyld daemon."
+            -m "The formula installs the sibyl CLI with its dependencies pinned from the release lock."
           git push
 
   # =========================================================================
