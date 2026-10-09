@@ -404,6 +404,14 @@ jobs:
 
       - name: "◇ Setup Docker Buildx"
         uses: docker/setup-buildx-action@v4
+        with:
+          # Pull Docker Hub images through Google's mirror first. It serves the
+          # same content-addressed images and keeps builds going when Docker
+          # Hub's token service fails GitHub's runners; a miss falls back to
+          # Docker Hub.
+          buildkitd-config-inline: |
+            [registry."docker.io"]
+              mirrors = ["mirror.gcr.io"]
 
       - name: "◇ Login to GHCR"
         if: ${{ !inputs.dry_run }}
@@ -489,6 +497,14 @@ jobs:
 
       - name: "◇ Setup Docker Buildx"
         uses: docker/setup-buildx-action@v4
+        with:
+          # Pull Docker Hub images through Google's mirror first. It serves the
+          # same content-addressed images and keeps builds going when Docker
+          # Hub's token service fails GitHub's runners; a miss falls back to
+          # Docker Hub.
+          buildkitd-config-inline: |
+            [registry."docker.io"]
+              mirrors = ["mirror.gcr.io"]
 
       - name: "◇ Login to GHCR"
         uses: docker/login-action@v4
@@ -666,6 +682,14 @@ jobs:
 
       - name: "◇ Setup Docker Buildx"
         uses: docker/setup-buildx-action@v4
+        with:
+          # Pull Docker Hub images through Google's mirror first. It serves the
+          # same content-addressed images and keeps builds going when Docker
+          # Hub's token service fails GitHub's runners; a miss falls back to
+          # Docker Hub.
+          buildkitd-config-inline: |
+            [registry."docker.io"]
+              mirrors = ["mirror.gcr.io"]
 
       - name: "◇ Login to GHCR"
         uses: docker/login-action@v4

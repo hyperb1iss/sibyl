@@ -16,6 +16,22 @@ inputs:
 runs:
   using: composite
   steps:
+    - name: Pull Docker Hub images through a mirror
+      shell: bash
+      run: |
+        set -euo pipefail
+        # Google's mirror serves the same content-addressed Docker Hub images
+        # and keeps compose pulls going when Docker Hub's token service fails
+        # GitHub's runners; the daemon falls back to Docker Hub on a miss.
+        config=/etc/docker/daemon.json
+        current="$(sudo cat "$config" 2>/dev/null || true)"
+        [[ -n "$current" ]] || current='{}'
+        printf '%s' "$current" |
+          jq '. + {"registry-mirrors": ["https://mirror.gcr.io"]}' |
+          sudo tee "$config" >/dev/null
+        sudo systemctl restart docker
+        docker info --format '{{json .RegistryConfig.Mirrors}}'
+
     - name: Log in to Docker Hub
       if: ${{ inputs.dockerhub-token != '' }}
       shell: bash
