@@ -147,14 +147,22 @@ class Sibyl < Formula
   end
 
   def install
+    # cryptography publishes no Intel macOS wheel, and the dependencies install
+    # from wheels only, so say so plainly rather than fail inside pip.
+    if OS.mac? && Hardware::CPU.intel?
+      odie "The sibyl formula needs Apple silicon on macOS; on Intel, run: uv tool install sibyl-dev"
+    end
+
     venv = virtualenv_create(libexec, "python3.13")
 
     # Homebrew's pip_install skips dependencies, so they install here first.
+    # --ignore-installed keeps every pin inside the keg: the venv can see
+    # brewed Python's shared site-packages, which other formulae change.
     (buildpath/"requirements.txt").write REQUIREMENTS
     system Formula["python@3.13"].opt_bin/"python3.13", "-m", "pip",
            "--python=#{{libexec}}/bin/python", "install",
-           "--require-hashes", "--no-deps", "--only-binary=:all:", "--no-cache-dir",
-           "--requirement", buildpath/"requirements.txt"
+           "--require-hashes", "--no-deps", "--only-binary=:all:", "--ignore-installed",
+           "--no-cache-dir", "--requirement", buildpath/"requirements.txt"
 
     resource("sibyl-core").stage do
       venv.pip_install Pathname.pwd

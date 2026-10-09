@@ -1035,8 +1035,16 @@ def test_homebrew_formula_installs_the_cli_with_pinned_hashed_dependencies() -> 
     assert "REQUIREMENTS = <<~'EOS'" in formula
     assert "    typer==0.27.2 \\\n" in formula
     assert "--hash=sha256:" + "f" * 64 in formula
-    for flag in ('"--require-hashes"', '"--no-deps"', '"--only-binary=:all:"'):
+    for flag in (
+        '"--require-hashes"',
+        '"--no-deps"',
+        '"--only-binary=:all:"',
+        # Without it, pins already in brewed Python's shared site-packages are
+        # skipped and the keg depends on files other formulae change.
+        '"--ignore-installed"',
+    ):
         assert flag in formula
+    assert "OS.mac? && Hardware::CPU.intel?" in formula
     assert formula.index('(buildpath/"requirements.txt").write REQUIREMENTS') < formula.index(
         'resource("sibyl-core").stage'
     )
@@ -1086,7 +1094,8 @@ def test_publish_and_pr_workflows_install_the_formula_before_it_ships() -> None:
     assert homebrew_job.index("Upload Homebrew formula artifact") < homebrew_job.index(verify)
 
     pr = (REPO_ROOT / ".github/workflows/homebrew-formula.yml").read_text()
-    assert "tools/release/homebrew_formula.py" in pr
+    for path in ("tools/release/homebrew_formula.py", "uv.lock", "apps/cli/pyproject.toml"):
+        assert f'"{path}"' in pr
     assert verify in pr
     assert (REPO_ROOT / "tools/release/verify_homebrew_formula.sh").stat().st_mode & 0o111
 

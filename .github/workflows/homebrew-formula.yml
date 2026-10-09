@@ -9,6 +9,9 @@ on:
       - "tools/release/homebrew_formula.py"
       - "tools/release/verify_homebrew_formula.sh"
       - ".github/workflows/homebrew-formula.yml"
+      - "uv.lock"
+      - "apps/cli/pyproject.toml"
+      - "packages/python/sibyl-core/pyproject.toml"
   workflow_dispatch:
 
 permissions:
