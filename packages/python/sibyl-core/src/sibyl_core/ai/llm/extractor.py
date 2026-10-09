@@ -32,6 +32,7 @@ from sibyl_core.ai.llm.budget import (
     settle_llm_reservations,
 )
 from sibyl_core.ai.llm.config import LLMConfig, LLMSurface
+from sibyl_core.ai.prices import supplement_price
 from sibyl_core.ai.providers import prefers_native_output
 from sibyl_core.ai.registry import canonical_model_alias, model_registry
 from sibyl_core.ai.transport import (
@@ -392,13 +393,33 @@ def _bedrock_price_ref(model: object) -> str | None:
 
 def _response_cost(response: ModelResponse, bedrock_ref: str | None) -> float:
     if bedrock_ref is None:
-        return float(response.cost().total_price)
+        own = (
+            supplement_price(
+                response.usage,
+                response.model_name,
+                provider_id=response.provider_name,
+                provider_api_url=response.provider_url,
+                genai_request_timestamp=response.timestamp,
+            )
+            if response.model_name
+            else None
+        )
+        return float((own or response.cost()).total_price)
+    own = supplement_price(
+        response.usage,
+        bedrock_ref,
+        provider_id="aws",
+        genai_request_timestamp=response.timestamp,
+    )
     return float(
-        calc_price(
-            response.usage,
-            bedrock_ref,
-            provider_id="aws",
-            genai_request_timestamp=response.timestamp,
+        (
+            own
+            or calc_price(
+                response.usage,
+                bedrock_ref,
+                provider_id="aws",
+                genai_request_timestamp=response.timestamp,
+            )
         ).total_price
     )
 
