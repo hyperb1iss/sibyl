@@ -199,9 +199,21 @@ def resolved_model_profile(config: LLMConfig) -> ModelProfile:
     return provider.model_profile(provider_model_id) or {}
 
 
+#: Sibyl decides each request's output mode itself and budgets, receipts and
+#: retries it in that mode. pydantic-ai 2.52+ marks Claude models that think by
+#: default (Opus 5) as answering a forced tool without thinking, and then stops
+#: forcing the output tool, or sends native output for a plain output type, so
+#: the model can think first. Turning that off keeps a tool-mode request forced
+#: as Sibyl recorded it; models that reject a forced tool are unaffected, since
+#: their profiles already refuse forcing.
+_ANTHROPIC_OUTPUT_MODE_PROFILE = ModelProfile(forced_tool_choice_disables_thinking=False)
+
+
 def anthropic_profile(model_id: str) -> ModelProfile:
     """pydantic-ai's profile for a Claude model ID, with Sibyl's corrections applied."""
-    profile = AnthropicProvider.model_profile(model_id) or {}
+    profile = merge_profile(
+        AnthropicProvider.model_profile(model_id) or {}, _ANTHROPIC_OUTPUT_MODE_PROFILE
+    )
     patch = ANTHROPIC_PROFILE_PATCHES.get(canonical_model_alias(model_id))
     return merge_profile(profile, patch) if patch else profile
 
