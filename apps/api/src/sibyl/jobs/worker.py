@@ -126,6 +126,10 @@ async def startup(ctx: dict[str, Any]) -> None:
 
     start_surreal_connectivity_monitor()
 
+    from sibyl import gc_tuning
+
+    gc_tuning.tune_gc_for_long_running_process()
+
 
 async def shutdown(ctx: dict[str, Any]) -> None:  # noqa: ARG001
     """Worker shutdown - cleanup resources."""
