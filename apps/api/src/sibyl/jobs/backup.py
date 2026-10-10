@@ -32,6 +32,7 @@ from sibyl.config import settings
 from sibyl.persistence.auth_archive import export_auth_archive_payload
 from sibyl.persistence.backups_common import (
     BackupRecord,
+    BackupRuntimeOptions,
     BackupStatus,
     resolve_backup_runtime_options,
     resolve_object_database_dump,
@@ -40,13 +41,19 @@ from sibyl.persistence.backups_runtime import (
     attach_backup_job,
     create_backup_record,
     delete_backup_record,
+    find_backup_record,
     forget_backup_record,
     list_backups as list_backup_records,
     list_enabled_backup_settings,
     update_backup_record,
 )
 from sibyl.persistence.content_archive import export_content_archive_payload
-from sibyl_core.backends.archive_store import archive_name as archive_name_for, backup_id_of
+from sibyl_core.backends.archive_store import (
+    ArchiveConflict,
+    ArchiveStore,
+    archive_name as archive_name_for,
+    backup_id_of,
+)
 
 log = structlog.get_logger()
 
@@ -146,6 +153,99 @@ async def _create_backup_archive_async(
     )
 
 
+@dataclass(frozen=True)
+class PublishedArchive:
+    """What a published archive holds, as its record reports it."""
+
+    size: int
+    entity_count: int
+    relationship_count: int
+    graph_size: int
+
+
+# Staging untouched this long belongs to a backup that is no longer running.
+_STALE_STAGING_AGE = timedelta(days=1)
+# Staged export JSON is typically five to ten times the size of its gzip
+# archive, and the archive itself is written beside it before publishing.
+_STAGING_EXPANSION = 11
+
+
+def _verify_published_archive(
+    store: ArchiveStore,
+    name: str,
+    organization_id: str,
+    staging: Path | None,
+) -> PublishedArchive | None:
+    """Prove an archive already under this backup's name is this backup.
+
+    The name is derived from the backup id, so only an earlier attempt of
+    this same backup writes it. Before that archive is adopted it must match
+    the digest the store recorded at publish time (S3 keeps one), load as an
+    API backup whose inventory, checksums and payloads pass the restore
+    validator, and belong to this organization. Anything else raises
+    ArchiveConflict and the archive is left untouched. None means there is
+    no archive under the name.
+    """
+    from sibyl_core.migrate.archive import load_archive, validate_archive
+
+    reader = store.open(name)
+    if reader is None:
+        return None
+    with tempfile.TemporaryDirectory(prefix=".staging-", dir=staging) as tmpdir:
+        copy = Path(tmpdir) / name
+        digest = hashlib.sha256()
+        with copy.open("wb") as handle:
+            for chunk in reader.chunks():
+                digest.update(chunk)
+                handle.write(chunk)
+        if reader.sha256 is not None and reader.sha256 != digest.hexdigest():
+            raise ArchiveConflict(f"{name} differs from the digest recorded when it was published")
+        try:
+            loaded = load_archive(copy)
+            problems = validate_archive(loaded)
+        except (ValueError, OSError, tarfile.TarError) as error:
+            raise ArchiveConflict(f"{name} is not a readable backup archive") from error
+        metadata = loaded.manifest.metadata.get("backup_metadata")
+        if (
+            problems
+            or not isinstance(metadata, dict)
+            or loaded.manifest.organization_id != organization_id
+        ):
+            raise ArchiveConflict(f"{name} holds a different backup than this one")
+        return PublishedArchive(
+            size=copy.stat().st_size,
+            entity_count=int(metadata["graph_entities"]),
+            relationship_count=int(metadata["graph_relationships"]),
+            graph_size=len(loaded.files.get("graph.json", b"")),
+        )
+
+
+async def _find_backup_record(backup_id: str) -> BackupRecord | None:
+    try:
+        return await find_backup_record(backup_id)
+    except Exception as e:
+        log.warning("backup_db_lookup_failed", backup_id=backup_id, error=str(e))
+        return None
+
+
+async def _estimated_backup_bytes(organization_id: str) -> int:
+    """Room the next backup needs while it runs, from the last one's archive.
+
+    The first backup of an organization has nothing to go on and only the
+    store's reserve is checked; the staged JSON is checked again, at its real
+    size, before the archive is written.
+    """
+    try:
+        page = await list_backup_records(UUID(organization_id), limit=20, offset=0)
+    except Exception as e:
+        log.warning("backup_size_estimate_failed", organization_id=organization_id, error=str(e))
+        return 0
+    for record in page.backups:
+        if record.status == BackupStatus.COMPLETED.value and record.size_bytes > 0:
+            return record.size_bytes * _STAGING_EXPANSION
+    return 0
+
+
 async def _safe_broadcast(event: str, data: dict[str, Any], *, org_id: str | None) -> None:
     """Broadcast event via Redis pub/sub."""
     try:
@@ -194,7 +294,180 @@ async def _update_backup_db(
         log.warning("backup_db_update_failed", backup_id=backup_id, error=str(e))
 
 
-async def run_backup(  # noqa: PLR0915
+async def _build_and_publish(  # noqa: PLR0915
+    store: ArchiveStore,
+    staging: Path | None,
+    archive_name: str,
+    *,
+    organization_id: str,
+    backup_id: str,
+    options: BackupRuntimeOptions,
+) -> PublishedArchive:
+    """Export the organization, assemble its archive and publish it once."""
+    import socket
+
+    include_auth_snapshot = options.include_auth_snapshot
+    include_content_snapshot = options.include_content_snapshot
+    include_graph = options.include_graph
+
+    # Assemble next to the store when it is a directory, so publishing is a
+    # hard link on one filesystem; otherwise in the system temp dir.
+    with tempfile.TemporaryDirectory(prefix=".staging-", dir=staging) as tmpdir:
+        tmp_path = Path(tmpdir)
+        auth_file = tmp_path / "auth.json"
+        content_file = tmp_path / "content.json"
+        graph_file = tmp_path / "graph.json"
+        metadata_file = tmp_path / "metadata.json"
+
+        auth_size = 0
+        content_size = 0
+        graph_size = 0
+        entity_count = 0
+        relationship_count = 0
+        file_checksums: dict[str, str] = {}
+
+        # Step 1: Surreal auth backup
+        if include_auth_snapshot:
+            log.info("backup_auth_snapshot_start", backup_id=backup_id)
+            auth_payload = await export_auth_archive_payload(organization_id=organization_id)
+            auth_size = await _write_json_file_async(auth_file, auth_payload, default=str)
+            file_checksums["auth.json"] = await _sha256_file_async(auth_file)
+            log.info("backup_auth_snapshot_complete", backup_id=backup_id, size_bytes=auth_size)
+
+        # Step 2: Surreal content backup
+        if include_content_snapshot:
+            log.info("backup_content_snapshot_start", backup_id=backup_id)
+            content_payload = await export_content_archive_payload(organization_id=organization_id)
+            content_size = await _write_json_file_async(
+                content_file,
+                content_payload,
+                default=str,
+            )
+            file_checksums["content.json"] = await _sha256_file_async(content_file)
+            log.info(
+                "backup_content_snapshot_complete",
+                backup_id=backup_id,
+                size_bytes=content_size,
+            )
+
+        # Step 3: Graph backup
+        if include_graph:
+            log.info("backup_graph_start", backup_id=backup_id, organization_id=organization_id)
+            try:
+                from dataclasses import asdict as dc_asdict
+
+                from sibyl_core.tools.admin import create_backup
+
+                graph_result = await create_backup(organization_id=organization_id)
+
+                if not graph_result.success or graph_result.backup_data is None:
+                    raise RuntimeError(f"Graph backup failed: {graph_result.message}")
+
+                entity_count = graph_result.entity_count
+                relationship_count = graph_result.relationship_count
+
+                # Write graph backup
+                backup_dict = dc_asdict(graph_result.backup_data)
+                graph_size = await _write_json_file_async(
+                    graph_file,
+                    backup_dict,
+                    default=str,
+                )
+                file_checksums["graph.json"] = await _sha256_file_async(graph_file)
+
+                log.info(
+                    "backup_graph_complete",
+                    backup_id=backup_id,
+                    entities=entity_count,
+                    relationships=relationship_count,
+                    size_bytes=graph_size,
+                )
+
+            except Exception as e:
+                log.exception("backup_graph_failed", backup_id=backup_id, error=str(e))
+                raise
+
+        from sibyl_core.migrate.archive_lineage import seal_archive_lineage
+
+        captured_graph = (
+            await asyncio.to_thread(lambda: json.loads(graph_file.read_text()))
+            if graph_file.exists()
+            else None
+        )
+        captured_content = (
+            await asyncio.to_thread(lambda: json.loads(content_file.read_text()))
+            if content_file.exists()
+            else None
+        )
+        sealed_graph, sealed_content, lineage_report = seal_archive_lineage(
+            captured_graph, captured_content
+        )
+        if sealed_graph is not None:
+            graph_size = await _write_json_file_async(graph_file, sealed_graph, default=str)
+            file_checksums["graph.json"] = await _sha256_file_async(graph_file)
+        if sealed_content is not None:
+            content_size = await _write_json_file_async(content_file, sealed_content, default=str)
+            file_checksums["content.json"] = await _sha256_file_async(content_file)
+
+        # Step 4: Create metadata
+        metadata = BackupMetadata(
+            version=BACKUP_VERSION,
+            created_at=datetime.now(UTC).isoformat(),
+            organization_id=organization_id,
+            hostname=socket.gethostname(),
+            database_dump_tables=0,
+            graph_entities=entity_count,
+            graph_relationships=relationship_count,
+            files=file_checksums,
+            lineage_validation=lineage_report,
+        )
+        await _write_json_file_async(metadata_file, asdict(metadata))
+
+        # Step 5: Create tar.gz archive. The staged JSON bounds its size, and
+        # on a directory store it shares the volume with everything else.
+        archive_tmp_path = tmp_path / archive_name
+        await asyncio.to_thread(store.reserve, auth_size + content_size + graph_size)
+
+        log.info("backup_archive_start", backup_id=backup_id)
+
+        archive_entries = [(metadata_file, "metadata.json", True)]
+        if include_auth_snapshot:
+            archive_entries.append((auth_file, "auth.json", False))
+        if include_content_snapshot:
+            archive_entries.append((content_file, "content.json", False))
+        if include_graph:
+            archive_entries.append((graph_file, "graph.json", False))
+        archive_size = await _create_backup_archive_async(
+            archive_tmp_path,
+            archive_entries,
+            compresslevel=6,
+        )
+        # Published once, never replaced: a name that already holds these
+        # bytes is a retried write that landed. Other bytes under the name
+        # are an earlier attempt of this same backup that finished publishing
+        # after it was given up on; adopt it once it proves to be ours.
+        archive_sha256 = await _sha256_file_async(archive_tmp_path)
+        try:
+            await asyncio.to_thread(
+                store.put_new, archive_name, archive_tmp_path, sha256=archive_sha256
+            )
+        except ArchiveConflict:
+            earlier = await asyncio.to_thread(
+                _verify_published_archive, store, archive_name, organization_id, staging
+            )
+            if earlier is None:
+                raise
+            log.info("backup_archive_adopted", backup_id=backup_id, reason="publish_conflict")
+            return earlier
+        return PublishedArchive(
+            size=archive_size,
+            entity_count=entity_count,
+            relationship_count=relationship_count,
+            graph_size=graph_size,
+        )
+
+
+async def run_backup(
     ctx: dict[str, Any],  # noqa: ARG001
     organization_id: str,
     *,
@@ -220,7 +493,6 @@ async def run_backup(  # noqa: PLR0915
     Returns:
         Dict with backup result details
     """
-    import socket
     import time
 
     start_time = time.time()
@@ -237,6 +509,37 @@ async def run_backup(  # noqa: PLR0915
     include_graph = options.include_graph
     include_auth_snapshot = options.include_auth_snapshot
     include_content_snapshot = options.include_content_snapshot
+
+    # arq retries a job whose worker died or was cancelled, including after
+    # the archive was published and recorded. A finished backup stays
+    # finished: its result is reported again and nothing is rebuilt.
+    record = await _find_backup_record(backup_id)
+    if record is not None and str(record.organization_id) != organization_id:
+        log.warning("backup_organization_mismatch", backup_id=backup_id)
+        return {
+            "success": False,
+            "backup_id": backup_id,
+            "job_id": job_id,
+            "organization_id": organization_id,
+            "error": "Backup belongs to another organization",
+            "duration_seconds": 0.0,
+        }
+    if record is not None and record.status == BackupStatus.COMPLETED.value:
+        log.info("backup_already_completed", backup_id=backup_id)
+        return {
+            "success": True,
+            "backup_id": backup_id,
+            "job_id": job_id,
+            "organization_id": organization_id,
+            "archive_path": record.file_path,
+            "archive_size_bytes": record.size_bytes,
+            "database_dump_size_bytes": 0,
+            "graph_size_bytes": 0,
+            "entity_count": record.entity_count,
+            "relationship_count": record.relationship_count,
+            "duration_seconds": record.duration_seconds,
+            "already_completed": True,
+        }
 
     # Update DB to mark as in progress
     await _update_backup_db(backup_id, status="in_progress", started_at=started_at)
@@ -262,191 +565,73 @@ async def run_backup(  # noqa: PLR0915
         store = backup_archive_store()
         await asyncio.to_thread(store.ready)
         archive_name = archive_name_for(backup_id)
+        archive_path = await asyncio.to_thread(store.location, archive_name)
         staging = await asyncio.to_thread(store.staging_dir)
 
-        # Assemble next to the store when it is a directory, so publishing is
-        # a hard link on one filesystem; otherwise in the system temp dir.
-        with tempfile.TemporaryDirectory(prefix=".staging-", dir=staging) as tmpdir:
-            tmp_path = Path(tmpdir)
-            auth_file = tmp_path / "auth.json"
-            content_file = tmp_path / "content.json"
-            graph_file = tmp_path / "graph.json"
-            metadata_file = tmp_path / "metadata.json"
-
-            database_dump_size = 0
-            auth_size = 0
-            content_size = 0
-            graph_size = 0
-            entity_count = 0
-            relationship_count = 0
-            file_checksums: dict[str, str] = {}
-
-            # Step 1: Surreal auth backup
-            if include_auth_snapshot:
-                log.info("backup_auth_snapshot_start", backup_id=backup_id)
-                auth_payload = await export_auth_archive_payload(organization_id=organization_id)
-                auth_size = await _write_json_file_async(auth_file, auth_payload, default=str)
-                file_checksums["auth.json"] = await _sha256_file_async(auth_file)
-                log.info("backup_auth_snapshot_complete", backup_id=backup_id, size_bytes=auth_size)
-
-            # Step 2: Surreal content backup
-            if include_content_snapshot:
-                log.info("backup_content_snapshot_start", backup_id=backup_id)
-                content_payload = await export_content_archive_payload(
-                    organization_id=organization_id
-                )
-                content_size = await _write_json_file_async(
-                    content_file,
-                    content_payload,
-                    default=str,
-                )
-                file_checksums["content.json"] = await _sha256_file_async(content_file)
-                log.info(
-                    "backup_content_snapshot_complete",
-                    backup_id=backup_id,
-                    size_bytes=content_size,
-                )
-
-            # Step 3: Graph backup
-            if include_graph:
-                log.info("backup_graph_start", backup_id=backup_id, organization_id=organization_id)
-                try:
-                    from dataclasses import asdict as dc_asdict
-
-                    from sibyl_core.tools.admin import create_backup
-
-                    graph_result = await create_backup(organization_id=organization_id)
-
-                    if not graph_result.success or graph_result.backup_data is None:
-                        raise RuntimeError(f"Graph backup failed: {graph_result.message}")
-
-                    entity_count = graph_result.entity_count
-                    relationship_count = graph_result.relationship_count
-
-                    # Write graph backup
-                    backup_dict = dc_asdict(graph_result.backup_data)
-                    graph_size = await _write_json_file_async(
-                        graph_file,
-                        backup_dict,
-                        default=str,
-                    )
-                    file_checksums["graph.json"] = await _sha256_file_async(graph_file)
-
-                    log.info(
-                        "backup_graph_complete",
-                        backup_id=backup_id,
-                        entities=entity_count,
-                        relationships=relationship_count,
-                        size_bytes=graph_size,
-                    )
-
-                except Exception as e:
-                    log.exception("backup_graph_failed", backup_id=backup_id, error=str(e))
-                    raise
-
-            from sibyl_core.migrate.archive_lineage import seal_archive_lineage
-
-            captured_graph = (
-                await asyncio.to_thread(lambda: json.loads(graph_file.read_text()))
-                if graph_file.exists()
-                else None
-            )
-            captured_content = (
-                await asyncio.to_thread(lambda: json.loads(content_file.read_text()))
-                if content_file.exists()
-                else None
-            )
-            sealed_graph, sealed_content, lineage_report = seal_archive_lineage(
-                captured_graph, captured_content
-            )
-            if sealed_graph is not None:
-                graph_size = await _write_json_file_async(graph_file, sealed_graph, default=str)
-                file_checksums["graph.json"] = await _sha256_file_async(graph_file)
-            if sealed_content is not None:
-                content_size = await _write_json_file_async(
-                    content_file, sealed_content, default=str
-                )
-                file_checksums["content.json"] = await _sha256_file_async(content_file)
-
-            # Step 4: Create metadata
-            metadata = BackupMetadata(
-                version=BACKUP_VERSION,
-                created_at=datetime.now(UTC).isoformat(),
+        published = await asyncio.to_thread(
+            _verify_published_archive, store, archive_name, organization_id, staging
+        )
+        if published is not None:
+            # An earlier attempt published this backup and died before
+            # recording it; its archive is complete, so keep it.
+            log.info("backup_archive_adopted", backup_id=backup_id, reason="already_published")
+        else:
+            estimate = await _estimated_backup_bytes(organization_id)
+            await asyncio.to_thread(store.reserve, estimate)
+            published = await _build_and_publish(
+                store,
+                staging,
+                archive_name,
                 organization_id=organization_id,
-                hostname=socket.gethostname(),
-                database_dump_tables=0,
-                graph_entities=entity_count,
-                graph_relationships=relationship_count,
-                files=file_checksums,
-                lineage_validation=lineage_report,
-            )
-            await _write_json_file_async(metadata_file, asdict(metadata))
-
-            # Step 5: Create tar.gz archive
-            archive_path = store.location(archive_name)
-            archive_tmp_path = tmp_path / archive_name
-
-            log.info("backup_archive_start", backup_id=backup_id, archive_path=archive_path)
-
-            archive_entries = [(metadata_file, "metadata.json", True)]
-            if include_auth_snapshot:
-                archive_entries.append((auth_file, "auth.json", False))
-            if include_content_snapshot:
-                archive_entries.append((content_file, "content.json", False))
-            if include_graph:
-                archive_entries.append((graph_file, "graph.json", False))
-            archive_size = await _create_backup_archive_async(
-                archive_tmp_path,
-                archive_entries,
-                compresslevel=6,
-            )
-            # Published once, never replaced: a name that already holds these
-            # bytes is a retried write that landed, any other bytes a conflict.
-            archive_sha256 = await _sha256_file_async(archive_tmp_path)
-            await asyncio.to_thread(
-                store.put_new, archive_name, archive_tmp_path, sha256=archive_sha256
-            )
-            duration = time.time() - start_time
-            completed_at = datetime.now(UTC)
-
-            log.info(
-                "backup_complete",
                 backup_id=backup_id,
-                archive_path=archive_path,
-                archive_size_bytes=archive_size,
-                duration_seconds=duration,
+                options=options,
             )
+        archive_size = published.size
+        entity_count = published.entity_count
+        relationship_count = published.relationship_count
+        graph_size = published.graph_size
+        database_dump_size = 0
+        duration = time.time() - start_time
+        completed_at = datetime.now(UTC)
 
-            # Update DB with completion status
-            await _update_backup_db(
-                backup_id,
-                status="completed",
-                filename=archive_name,
-                file_path=archive_path,
-                size_bytes=archive_size,
-                entity_count=entity_count,
-                relationship_count=relationship_count,
-                completed_at=completed_at,
-                duration_seconds=duration,
-            )
+        log.info(
+            "backup_complete",
+            backup_id=backup_id,
+            archive_path=archive_path,
+            archive_size_bytes=archive_size,
+            duration_seconds=duration,
+        )
 
-            result_data = {
-                "success": True,
-                "backup_id": backup_id,
-                "job_id": job_id,
-                "organization_id": organization_id,
-                "archive_path": archive_path,
-                "archive_size_bytes": archive_size,
-                "database_dump_size_bytes": database_dump_size,
-                "graph_size_bytes": graph_size,
-                "entity_count": entity_count,
-                "relationship_count": relationship_count,
-                "duration_seconds": duration,
-            }
+        # Update DB with completion status
+        await _update_backup_db(
+            backup_id,
+            status="completed",
+            filename=archive_name,
+            file_path=archive_path,
+            size_bytes=archive_size,
+            entity_count=entity_count,
+            relationship_count=relationship_count,
+            completed_at=completed_at,
+            duration_seconds=duration,
+        )
 
-            await _safe_broadcast(WSEvent.BACKUP_COMPLETE, result_data, org_id=organization_id)
+        result_data = {
+            "success": True,
+            "backup_id": backup_id,
+            "job_id": job_id,
+            "organization_id": organization_id,
+            "archive_path": archive_path,
+            "archive_size_bytes": archive_size,
+            "database_dump_size_bytes": database_dump_size,
+            "graph_size_bytes": graph_size,
+            "entity_count": entity_count,
+            "relationship_count": relationship_count,
+            "duration_seconds": duration,
+        }
 
-            return result_data
+        await _safe_broadcast(WSEvent.BACKUP_COMPLETE, result_data, org_id=organization_id)
+
+        return result_data
 
     except Exception as e:
         # Update DB with failure status
@@ -527,6 +712,7 @@ async def cleanup_old_backups(
     import time
 
     start_time = time.time()
+    staging_removed = 0
     retention = retention_days or settings.backup_retention_days
     cutoff = datetime.now(UTC) - timedelta(days=retention)
     store = backup_archive_store()
@@ -559,6 +745,18 @@ async def cleanup_old_backups(
             deleted += 1
             freed_bytes += archive.size
             log.info("backup_deleted", backup_id=backup_id, size_bytes=archive.size)
+        # Staging left by a killed job holds plaintext export JSON on a
+        # durable, shared volume; nothing a day old belongs to a live backup.
+        try:
+            stale = await asyncio.to_thread(
+                store.sweep_stale, datetime.now(UTC) - _STALE_STAGING_AGE
+            )
+        except Exception as e:
+            log.warning("backup_staging_sweep_failed", error=str(e))
+        else:
+            staging_removed = stale
+            if stale:
+                log.info("backup_staging_swept", removed=stale)
 
     duration = time.time() - start_time
 
@@ -574,6 +772,7 @@ async def cleanup_old_backups(
     return {
         "deleted": deleted,
         "freed_bytes": freed_bytes,
+        "staging_removed": staging_removed,
         "retention_days": retention,
         "duration_seconds": duration,
     }

@@ -314,6 +314,12 @@ async def test_delete_backup_keeps_the_record_when_the_store_refuses(
             ArchiveStoreUnavailable("Backup archive bucket b refused GetObject: SlowDown (503)"),
             503,
         ),
+        # Any storage OSError is an outage answer, never a 500.
+        (
+            SimpleNamespace(backup_id="backup_a", status="completed"),
+            PermissionError(13, "Permission denied"),
+            503,
+        ),
     ],
 )
 async def test_download_answers_missing_and_unavailable_archives(
@@ -321,7 +327,7 @@ async def test_download_answers_missing_and_unavailable_archives(
 ) -> None:
     monkeypatch.setattr(backup_routes, "get_backup_record", AsyncMock(return_value=record))
 
-    def open_archive(_name: str):
+    def open_archive(_name: str, _byte_range=None):
         if isinstance(opened, Exception):
             raise opened
         return opened

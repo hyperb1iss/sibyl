@@ -8,10 +8,10 @@ Provides REST API for:
 """
 
 import asyncio
-from typing import Any
+from typing import Annotated, Any
 
 import structlog
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, Header, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 from starlette.background import BackgroundTask
@@ -36,7 +36,11 @@ from sibyl.persistence.backups_runtime import (
     update_backup_settings as save_backup_settings,
 )
 from sibyl_core.auth import AuthOrganization, AuthUser
-from sibyl_core.backends.archive_store import ArchiveStoreUnavailable, archive_name
+from sibyl_core.backends.archive_store import (
+    RangeNotSatisfiable,
+    archive_name,
+    parse_byte_range,
+)
 
 log = structlog.get_logger()
 
@@ -372,7 +376,9 @@ async def get_backup_details(
     )
 
 
-def _archive_store_error(action: str, error: ArchiveStoreUnavailable) -> HTTPException:
+def _archive_store_error(action: str, error: OSError) -> HTTPException:
+    # Every store reports an outage as ArchiveStoreUnavailable, an OSError;
+    # any other OSError reaching here is the same condition, never a 500.
     log.warning("backup_archive_store_failed", action=action, error=str(error))
     return HTTPException(status_code=503, detail="Backup archive store is unavailable")
 
@@ -381,11 +387,14 @@ def _archive_store_error(action: str, error: ArchiveStoreUnavailable) -> HTTPExc
 async def download_backup(
     backup_id: str,
     org: AuthOrganization = Depends(get_current_organization),
+    range_header: Annotated[str | None, Header(alias="range")] = None,
 ) -> StreamingResponse:
     """Download a backup archive.
 
     Streams the .tar.gz from the shared archive store, so any API replica
-    serves an archive whichever process wrote it.
+    serves an archive whichever process wrote it. A single ``Range: bytes=``
+    request is answered with 206 and that part, so an interrupted download
+    can resume; archives never change once published.
     """
     backup = await get_backup_record(org.id, backup_id)
 
@@ -396,22 +405,37 @@ async def download_backup(
         )
 
     name = archive_name(backup.backup_id)
+    byte_range = parse_byte_range(range_header)
     try:
-        reader = await asyncio.to_thread(backup_archive_store().open, name)
-    except ArchiveStoreUnavailable as error:
+        reader = await asyncio.to_thread(backup_archive_store().open, name, byte_range)
+    except RangeNotSatisfiable as error:
+        raise HTTPException(
+            status_code=416,
+            detail="Requested range is not satisfiable",
+            headers={"Content-Range": f"bytes */{error.total}"}
+            if error.total is not None
+            else None,
+        ) from None
+    except OSError as error:
         raise _archive_store_error("download", error) from error
     if reader is None:
         raise HTTPException(status_code=404, detail="Backup archive not found in the archive store")
 
+    headers = {
+        "Accept-Ranges": "bytes",
+        "Content-Disposition": f'attachment; filename="{name}"',
+        "Content-Length": str(reader.size),
+    }
+    if byte_range is not None:
+        last = reader.start + reader.size - 1
+        headers["Content-Range"] = f"bytes {reader.start}-{last}/{reader.total}"
     # Chunks are read on the thread pool as the client consumes them; the
     # background close also releases the archive when the client goes away.
     return StreamingResponse(
         reader.chunks(),
+        status_code=206 if byte_range is not None else 200,
         media_type="application/gzip",
-        headers={
-            "Content-Disposition": f'attachment; filename="{name}"',
-            "Content-Length": str(reader.size),
-        },
+        headers=headers,
         background=BackgroundTask(reader.close),
     )
 
@@ -433,7 +457,7 @@ async def delete_backup(
     # the backup listed for a retry instead of orphaning its archive.
     try:
         await asyncio.to_thread(backup_archive_store().delete, archive_name(backup.backup_id))
-    except ArchiveStoreUnavailable as error:
+    except OSError as error:
         raise _archive_store_error("delete", error) from error
     await delete_backup_record(org.id, backup.backup_id)
 

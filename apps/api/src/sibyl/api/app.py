@@ -221,7 +221,8 @@ def create_api_app() -> FastAPI:  # noqa: PLR0915
             status_code=exc.status_code,
             error=payload["error"],
         )
-        return JSONResponse(status_code=exc.status_code, content=payload)
+        # Headers are part of some answers, such as Content-Range on a 416.
+        return JSONResponse(status_code=exc.status_code, content=payload, headers=exc.headers)
 
     @app.exception_handler(RequestValidationError)
     async def validation_exception_handler(

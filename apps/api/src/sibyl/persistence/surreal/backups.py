@@ -378,6 +378,11 @@ async def delete_backup_record(org_id: UUID, backup_id: str) -> BackupRecord:
     return backup
 
 
+async def find_backup_record(backup_id: str) -> BackupRecord | None:
+    """The record of a backup by its id, whichever organization owns it."""
+    return await _get_backup_by_backup_id(backup_id)
+
+
 async def forget_backup_record(backup_id: str) -> BackupRecord | None:
     """Delete the record of a backup whose archive retention removed, if any."""
     backup = await _get_backup_by_backup_id(backup_id)

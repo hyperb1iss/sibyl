@@ -988,6 +988,14 @@ class Settings(BaseSettings):
             "Directory of backup archives; every API and worker process must mount the same one"
         ),
     )
+    backup_free_space_reserve_mb: int = Field(
+        default=512,
+        ge=0,
+        description=(
+            "MiB a directory archive store keeps free for other writers on its volume; "
+            "a backup that would eat into it is refused before it starts"
+        ),
+    )
     backup_archive_url: str = Field(
         default="",
         description=(

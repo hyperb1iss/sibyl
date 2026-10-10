@@ -83,16 +83,28 @@ async def test_scheduled_cleanup_sweeps_old_archives_and_forgets_their_records(
     monkeypatch.setattr(backup_jobs.settings, "backup_retention_days", 1)
     _publish(tmp_path, "backup_old", b"old", age_days=30)
     _publish(tmp_path, "backup_new", b"new archive", age_days=0)
+    # A killed job's staging holds plaintext export JSON; a running one's is fresh.
+    dead = tmp_path / ".staging-dead"
+    dead.mkdir()
+    (dead / "content.json").write_text("{}")
+    stamp = (datetime.now(UTC) - timedelta(days=2)).timestamp()
+    os.utime(dead / "content.json", (stamp, stamp))
+    os.utime(dead, (stamp, stamp))
+    (tmp_path / ".staging-running").mkdir()
     forget = AsyncMock()
     monkeypatch.setattr(backup_jobs, "forget_backup_record", forget)
 
     result = await backup_jobs.cleanup_old_backups({})
 
-    # Listing and deleting run on the thread pool, never on the event loop.
-    assert calls == ["archives", "delete"]
+    # Listing, deleting and sweeping run on the thread pool, never on the loop.
+    assert calls == ["archives", "delete", "sweep_stale"]
     assert result["deleted"] == 1
     assert result["freed_bytes"] == 3
-    assert sorted(path.name for path in tmp_path.iterdir()) == ["sibyl_backup_new.tar.gz"]
+    assert result["staging_removed"] == 1
+    assert sorted(path.name for path in tmp_path.iterdir()) == [
+        ".staging-running",
+        "sibyl_backup_new.tar.gz",
+    ]
     forget.assert_awaited_once_with("backup_old")
 
 
@@ -328,7 +340,14 @@ async def test_run_backup_in_fully_surreal_mode_includes_org_runtime_snapshots(
 
     monkeypatch.setattr(backup_jobs.settings, "store", "surreal")
     monkeypatch.setattr(backup_jobs.settings, "auth_store", "surreal")
+    monkeypatch.setattr(backup_jobs.settings, "backup_archive_url", "")
     monkeypatch.setattr(backup_jobs.settings, "backup_dir", tmp_path)
+    monkeypatch.setattr(backup_jobs, "find_backup_record", AsyncMock(return_value=None))
+    monkeypatch.setattr(
+        backup_jobs,
+        "list_backup_records",
+        AsyncMock(return_value=SimpleNamespace(backups=[], total=0)),
+    )
 
     with (
         patch(
