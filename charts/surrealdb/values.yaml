@@ -128,7 +128,10 @@ export:
   failedJobsHistoryLimit: 3
   concurrencyPolicy: Forbid
   startingDeadlineSeconds: 900
-  # Retries rerun the whole export into a new run directory.
+  # Retries rerun the whole export into a new run directory. A run whose
+  # recorded failures are all deterministic (names the SurrealDB headers
+  # cannot carry) exits 111 and is not retried (podFailurePolicy): it would
+  # fail the same way again. Any transient failure exits 1 and is retried.
   backoffLimit: 2
   # Kill a run that has not finished in 6 hours, well before the next
   # daily schedule.
@@ -181,6 +184,16 @@ export:
   extraVolumes: []
   workspace:
     emptyDir: true
+  # Lists, in the manifest's `organizations.without_graph`, organizations
+  # in the auth database that have no graph database at export time. It
+  # never fails the run: a new organization has no graph until it first
+  # uses it. An organization whose graph was lost shows up here too. Match
+  # Sibyl's SIBYL_SURREAL_NAMESPACE_PREFIX and SIBYL_SURREAL_DATABASE.
+  organizationCheck:
+    authNamespace: sibyl_auth
+    authDatabase: auth
+    graphNamespacePrefix: org_
+    graphDatabase: graph
 
 restoreDrill:
   enabled: false
@@ -212,10 +225,11 @@ restoreDrill:
   # export pipeline pages instead of the drill passing on old data. Exports
   # run daily by default; 36 allows one late run. 0 disables the check.
   maxExportAgeHours: 36
-  # The export counts rows just before it exports, in a separate read, so
-  # writes in between move counts a little. Per table, a restore may fall
-  # short of the exported count by max(rows, percent% of that count); any
-  # larger shortfall, or a missing table, fails the drill.
+  # The export counts each table just before and just after it streams,
+  # and its snapshot lies between the two. Per table, a restore may fall
+  # short of the lower count by max(rows, percent% of that count); any
+  # larger shortfall, a missing table, or a table restored empty although
+  # both counts saw rows fails the drill.
   rowDrift:
     rows: 2
     percent: 1

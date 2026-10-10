@@ -12,7 +12,20 @@ work, against servers described in a JSON state file
      "empty_exports": ["ns/db"], "drop_on_import": ["ns/db"],
      "sql_errors": ["ns/db"], "refuse_import": ["ns/db"],
      "drop_tables_on_import": ["ns/db/table"],
-     "shrink_on_import": {"ns/db/table": rows}}
+     "shrink_on_import": {"ns/db/table": rows},
+     "ns_info_errors": ["ns"], "org_check_error": false,
+     "change_before_export": {"ns/db/table": rows or null},
+     "recount_errors": ["ns/db"], "export_errors": ["ns/db"]}
+
+A source server may also carry "org_uuids": [...], the organizations the
+export's read-only organization check finds in the auth database.
+``change_before_export`` is a write landing between the export's first row
+count and its snapshot: the table takes the new row count (null drops it)
+just before ``/export`` reads it, so the snapshot and the export's second
+count both see the change and the first count does not.
+``recount_errors`` refuses the row count for ``ns/db`` once that database
+has been exported, so only the export's second count fails.
+``export_errors`` answers ``/export`` for ``ns/db`` with HTTP 500.
 
 Response shapes mirror a real v3.2.4 server: ``/sql`` answers HTTP 200
 with one ``{"status", "result"}`` entry per statement, ``/import`` answers
@@ -30,6 +43,7 @@ import json
 import os
 import re
 import sys
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -156,6 +170,27 @@ def _statement(
     )
 
 
+def _injected(
+    state: dict[str, Any], server: dict[str, Any], ns: str, db: str, body: str
+) -> list[dict[str, object]] | None:
+    """Faults the test asked for, and the organization check's query."""
+    if body.startswith(TABLE_ROWS_QUERY_PREFIX) and f"{ns}/{db}" in state.get("sql_errors", []):
+        return [_err("fake surreal: the query was refused")]
+    if (
+        body.startswith(TABLE_ROWS_QUERY_PREFIX)
+        and f"{ns}/{db}" in state.get("recount_errors", [])
+        and f"{ns}/{db}" in state.get("exported", [])
+    ):
+        return [_err("fake surreal: the recount was refused")]
+    if body == "INFO FOR NS;" and ns in state.get("ns_info_errors", []):
+        return [_err("fake surreal: INFO FOR NS was refused")]
+    if body != "SELECT VALUE uuid FROM organizations;":
+        return None
+    if state.get("org_check_error"):
+        return [_err("The table 'organizations' does not exist")]
+    return [_ok(server.get("org_uuids", []))]
+
+
 def _sql(
     state: dict[str, Any], server: dict[str, Any], request: Request
 ) -> list[dict[str, object]]:
@@ -164,8 +199,9 @@ def _sql(
     ns = request.headers.get("surreal-ns", "")
     db = request.headers.get("surreal-db", "")
     body = (request.body or "").strip()
-    if body.startswith(TABLE_ROWS_QUERY_PREFIX) and f"{ns}/{db}" in state.get("sql_errors", []):
-        return [_err("fake surreal: the query was refused")]
+    injected = _injected(state, server, ns, db, body)
+    if injected is not None:
+        return injected
     if body.startswith(TABLE_ROWS_QUERY_PREFIX):
         tables = namespaces.get(ns, {}).get(db)
         if tables is None:
@@ -190,6 +226,15 @@ def _export(state: dict[str, Any], server: dict[str, Any], request: Request) -> 
     tables = server.get("namespaces", {}).get(namespace, {}).get(database)
     if tables is None:
         return EXPORT_HEADER
+    state.setdefault("exported", []).append(f"{namespace}/{database}")
+    for key, rows in state.get("change_before_export", {}).items():
+        changed_ns, changed_db, table = key.split("/")
+        if (changed_ns, changed_db) != (namespace, database):
+            continue
+        if rows is None:
+            tables.pop(table, None)
+        else:
+            tables[table] = rows
     return f"{EXPORT_HEADER}\n{TABLES_MARKER}{json.dumps(tables, sort_keys=True)}\n"
 
 
@@ -226,6 +271,18 @@ def _import(state: dict[str, Any], server: dict[str, Any], request: Request) -> 
     return []
 
 
+def _export_refused(state: dict[str, Any], request: Request) -> bool:
+    key = f"{request.headers.get('surreal-ns', '')}/{request.headers.get('surreal-db', '')}"
+    return request.fail and key in state.get("export_errors", [])
+
+
+ROUTES: dict[str, Callable[[dict[str, Any], dict[str, Any], Request], object]] = {
+    "/sql": _sql,
+    "/export": _export,
+    "/import": _import,
+}
+
+
 def main(argv: list[str]) -> int:
     request = Request(argv)
     state_path = Path(os.environ["FAKE_SURREAL_STATE"])
@@ -250,12 +307,11 @@ def main(argv: list[str]) -> int:
         if request.fail:
             sys.stderr.write("curl: (22) The requested URL returned error: 401\n")
             return 22
-    elif route == "/sql":
-        body = _sql(state, server, request)
-    elif route == "/export":
-        body = _export(state, server, request)
-    elif route == "/import":
-        body = _import(state, server, request)
+    elif route == "/export" and _export_refused(state, request):
+        sys.stderr.write("curl: (22) The requested URL returned error: 500\n")
+        return 22
+    elif route in ROUTES:
+        body = ROUTES[route](state, server, request)
     else:
         sys.stderr.write(f"fake curl: unsupported route {route}\n")
         return 2

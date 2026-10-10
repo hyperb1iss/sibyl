@@ -129,12 +129,24 @@ class OpsHarness:
         refuse_import: tuple[str, ...] = (),
         drop_tables_on_import: tuple[str, ...] = (),
         shrink_on_import: dict[str, int] | None = None,
+        ns_info_errors: tuple[str, ...] = (),
+        org_uuids: tuple[str, ...] = (),
+        org_check_error: bool = False,
+        change_before_export: dict[str, int | None] | None = None,
+        recount_errors: tuple[str, ...] = (),
+        export_errors: tuple[str, ...] = (),
     ) -> None:
         """Describe the fake servers and the faults they inject. Each fault
         names ``ns/db`` pairs (``ns/db/table`` for the table faults): an
         empty export, an import that zeroes every row, a refused row count,
         a refused import, a table that vanishes on import, or one that comes
-        back with the given number of rows."""
+        back with the given number of rows. ``ns_info_errors`` refuses INFO
+        FOR NS for whole namespaces; ``org_uuids`` are the organizations the
+        auth database holds, and ``org_check_error`` refuses that query.
+        ``change_before_export`` sets a table's rows (None drops it) between
+        the export's first count and its snapshot; ``recount_errors`` refuses
+        only the export's second count; ``export_errors`` fails ``/export``
+        with HTTP 500."""
         servers: dict[str, object] = {
             "http://restore": {"user": "drill:drill", "namespaces": restore or {}},
         }
@@ -143,6 +155,7 @@ class OpsHarness:
                 "user": "root:secret",
                 "version": "surrealdb-3.2.4",
                 "namespaces": source,
+                "org_uuids": list(org_uuids),
             }
         self.state_path.write_text(
             json.dumps(
@@ -154,6 +167,11 @@ class OpsHarness:
                     "refuse_import": list(refuse_import),
                     "drop_tables_on_import": list(drop_tables_on_import),
                     "shrink_on_import": shrink_on_import or {},
+                    "ns_info_errors": list(ns_info_errors),
+                    "org_check_error": org_check_error,
+                    "change_before_export": change_before_export or {},
+                    "recount_errors": list(recount_errors),
+                    "export_errors": list(export_errors),
                 }
             )
         )
@@ -237,6 +255,8 @@ def _source() -> dict[str, dict[str, dict[str, int]]]:
 
 SOURCE_DATABASES = sum(len(databases) for databases in _source().values())
 MANIFEST_VERSION = 2
+RECORDED_FAILURE_EXIT = 111
+TRANSIENT_FAILURE_EXIT = 1
 DEFAULT_DEADLINE_SECONDS = 21600
 CUSTOM_BACKOFF = 2
 CUSTOM_DEADLINE_SECONDS = 600
@@ -477,7 +497,8 @@ def test_helm_restore_drill_restores_every_database_in_the_newest_manifest(
         assert item["status"] == "PASS"
         assert item["rows_exported"] == item["rows_restored"] == sum(expected.values())
         assert item["tables"] == {
-            table: {"exported": rows, "restored": rows} for table, rows in expected.items()
+            table: {"exported": rows, "exported_after": rows, "restored": rows}
+            for table, rows in expected.items()
         }
     assert receipt["row_counts"] == {"sibyl_auth.auth.users": {"expected": 2, "actual": 2}}
     restore = harness.server("http://restore")
@@ -501,12 +522,13 @@ def _flip_letters(path: Path) -> None:
         (
             None,
             lambda h: h.serve(drop_on_import=(f"{ORG_A}/graph",)),
-            "tables short after import: entity (0 of 7, allowed shortfall 2), relates_to (0 of 6",
+            "tables short after import: entity (0 of 7, 7 after export, emptied),"
+            " relates_to (0 of 6, 6 after export, emptied)",
         ),
         (
             None,
             lambda h: h.serve(shrink_on_import={f"{ORG_A}/graph/entity": 0}),
-            "tables short after import: entity (0 of 7, allowed shortfall 2)",
+            "tables short after import: entity (0 of 7, 7 after export, emptied)",
         ),
         (
             None,
@@ -821,8 +843,9 @@ def test_helm_export_records_what_it_cannot_export_and_keeps_the_rest(
     harness: OpsHarness,
 ) -> None:
     """One unusable name or one failing database must not cost every other
-    backup: the run exports the rest, records each failure in the manifest,
-    syncs, and then fails so it pages."""
+    backup: the run exports the rest, records each failure and its kind in
+    the manifest, syncs, and then fails. A transient failure among them
+    makes the run retryable."""
     unsafe = {"tenant-ü": {"graph": {"entity": 1}}, "bad\nline": {"graph": {"entity": 1}}}
     harness.serve(
         source={**_source(), **ODD_NAMES, **unsafe, "ok_ns": {"weird\tdb": {"t": 1}}},
@@ -834,8 +857,8 @@ def test_helm_export_records_what_it_cannot_export_and_keeps_the_rest(
         *harness.values({"export": {"syncCommand": 'echo synced >> "$HOME/synced.log"'}}),
     )
 
-    assert result.returncode != 0
-    assert "failures recorded in" in result.stderr
+    assert result.returncode == TRANSIENT_FAILURE_EXIT, result.stderr
+    assert "5 failures (2 transient) recorded in" in result.stderr
     assert (harness.root / "synced.log").read_text() == "synced\n", "the partial run still syncs"
     manifest = _manifest(harness)
     exported = {(entry["namespace"], entry["database"]) for entry in manifest["databases"]}
@@ -854,6 +877,14 @@ def test_helm_export_records_what_it_cannot_export_and_keeps_the_rest(
     assert "surreal-db header" in reasons[("ok_ns", "weird\tdb")]
     assert reasons[(ORG_B, "graph")] == "the export came back empty"
     assert "SurrealQL failed in legacy-tenant/graph" in reasons[("legacy-tenant", "graph")]
+    kinds = {(f["namespace"], f["database"]): f["kind"] for f in manifest["failures"]}
+    assert kinds == {
+        ("tenant-ü", None): "deterministic",
+        ("bad\nline", None): "deterministic",
+        ("ok_ns", "weird\tdb"): "deterministic",
+        (ORG_B, "graph"): "transient",
+        ("legacy-tenant", "graph"): "transient",
+    }
 
     harness.serve()
     drilled = harness.run(
@@ -861,7 +892,8 @@ def test_helm_export_records_what_it_cannot_export_and_keeps_the_rest(
         *harness.values({"restoreDrill": {"failureNotification": {"command": NOTIFY}}}),
     )
     assert drilled.returncode != 0
-    assert 'export recorded a failure for "tenant-ü"/"*"' in drilled.stderr
+    assert 'export recorded a failure for "tenant-ü"/"*" (deterministic)' in drilled.stderr
+    assert 'export recorded a failure for "legacy-tenant"/"graph" (transient)' in drilled.stderr
     assert (harness.root / "notified.log").read_text() == "notified\n"
     restored = harness.server("http://restore")["namespaces"]
     assert restored[ORG_A] == _source()[ORG_A], "the rest of the backup still restores"
@@ -907,6 +939,7 @@ def test_helm_export_prunes_only_its_own_stale_incomplete_runs(harness: OpsHarne
         f"sibyl-{recent}": False,  # incomplete, recent: may still be running
         "sibyl-20000101000001": True,  # complete, old: retention's business
         "sibyl-staging-20000101000000": False,  # another prefix
+        "sibyl-20000101": False,  # not <prefix>-<14 digits>: never touched
     }
     for name, complete in layout.items():
         (harness.backups / name).mkdir()
@@ -921,7 +954,12 @@ def test_helm_export_prunes_only_its_own_stale_incomplete_runs(harness: OpsHarne
     assert "pruned incomplete run sibyl-20000101000000" in result.stdout
     remaining = {path.name for path in harness.backups.iterdir()}
     assert "sibyl-20000101000000" not in remaining
-    assert {f"sibyl-{recent}", "sibyl-20000101000001", "sibyl-staging-20000101000000"} <= remaining
+    assert {
+        f"sibyl-{recent}",
+        "sibyl-20000101000001",
+        "sibyl-staging-20000101000000",
+        "sibyl-20000101",
+    } <= remaining
 
 
 @pytest.mark.parametrize(
@@ -1075,3 +1113,444 @@ def test_helm_ops_values_are_validated_at_render(override: tuple[str, str], mess
     )
     assert rendered.returncode != 0
     assert message in rendered.stderr
+
+
+def _org_uuid(namespace: str) -> str:
+    hexes = namespace.removeprefix("org_")
+    return f"{hexes[:8]}-{hexes[8:12]}-{hexes[12:16]}-{hexes[16:20]}-{hexes[20:]}"
+
+
+ORPHAN_ORG = "11111111-2222-4333-8444-555555555555"
+
+
+def test_helm_restore_drill_fails_when_a_tiny_table_empties(harness: OpsHarness) -> None:
+    """users exports 2 rows; the 2-row allowance must not let it restore 0."""
+    _export_then_reset(harness, lambda h: h.serve(shrink_on_import={"sibyl_auth/auth/users": 0}))
+
+    result = harness.run("restore-drill")
+
+    assert result.returncode != 0
+    assert (
+        "restore failed for sibyl_auth/auth: tables short after import:"
+        " users (0 of 2, 2 after export, emptied)" in result.stderr
+    )
+
+
+@pytest.mark.parametrize(
+    ("restored", "passes"),
+    [(992, True), (985, False)],
+    ids=["within-one-percent", "beyond-one-percent"],
+)
+def test_helm_restore_drill_allowance_scales_with_large_tables(
+    harness: OpsHarness, restored: int, *, passes: bool
+) -> None:
+    """For 1000 rows, 1% (10 rows) is the allowance, not the 2-row floor."""
+    source = _source()
+    source[ORG_A]["graph"]["entity"] = 1000
+    harness.serve(source=source)
+    exported = harness.run("export")
+    assert exported.returncode == 0, exported.stderr
+    harness.serve(shrink_on_import={f"{ORG_A}/graph/entity": restored})
+
+    result = harness.run("restore-drill")
+
+    assert (result.returncode == 0) is passes, result.stderr
+    if not passes:
+        assert f"entity ({restored} of 1000, allowed shortfall 10)" in result.stderr
+
+
+UNSAFE_NAMES: dict[str, dict[str, dict[str, int]]] = {
+    "tenant-ü": {"graph": {"entity": 1}},
+    "ok_ns": {"weird\tdb": {"t": 1}},
+}
+
+
+@pytest.mark.parametrize(
+    ("extra_names", "ns_info_errors", "exit_code", "kinds"),
+    [
+        ({}, (ORG_B,), TRANSIENT_FAILURE_EXIT, {(ORG_B, None): "transient"}),
+        (
+            UNSAFE_NAMES,
+            (),
+            RECORDED_FAILURE_EXIT,
+            {("tenant-ü", None): "deterministic", ("ok_ns", "weird\tdb"): "deterministic"},
+        ),
+        (
+            UNSAFE_NAMES,
+            (ORG_B,),
+            TRANSIENT_FAILURE_EXIT,
+            {
+                ("tenant-ü", None): "deterministic",
+                ("ok_ns", "weird\tdb"): "deterministic",
+                (ORG_B, None): "transient",
+            },
+        ),
+    ],
+    ids=["transient-only", "deterministic-only", "mixed"],
+)
+def test_helm_export_exit_code_follows_the_failure_kinds(
+    harness: OpsHarness,
+    extra_names: dict[str, dict[str, dict[str, int]]],
+    ns_info_errors: tuple[str, ...],
+    exit_code: int,
+    kinds: dict[tuple[str, str | None], str],
+) -> None:
+    """Only a run whose every recorded failure is deterministic (a name the
+    headers cannot carry) exits 111, which podFailurePolicy fails at once.
+    Any transient failure (here a refused INFO FOR NS) exits 1, so the Job
+    retries the export instead of losing that night's backup."""
+    harness.serve(source={**_source(), **extra_names}, ns_info_errors=ns_info_errors)
+    result = harness.run("export")
+
+    assert result.returncode == exit_code, result.stderr
+    failures = _manifest(harness)["failures"]
+    assert {(f["namespace"], f["database"]): f["kind"] for f in failures} == kinds
+    transient = sum(kind == "transient" for kind in kinds.values())
+    assert f"{len(kinds)} failures ({transient} transient) recorded in" in result.stderr
+    for failure in failures:
+        assert f"({failure['kind']}): " in result.stderr
+    if ns_info_errors:
+        reason = next(f["reason"] for f in failures if f["namespace"] == ORG_B)
+        assert reason.startswith("INFO FOR NS failed: SurrealQL failed in")
+
+
+def test_helm_export_records_a_failed_export_as_transient(harness: OpsHarness) -> None:
+    harness.serve(source=_source(), export_errors=(f"{ORG_A}/graph",))
+    result = harness.run("export")
+
+    assert result.returncode == TRANSIENT_FAILURE_EXIT, result.stderr
+    manifest = _manifest(harness)
+    (failure,) = manifest["failures"]
+    assert (failure["namespace"], failure["database"], failure["kind"]) == (
+        ORG_A,
+        "graph",
+        "transient",
+    )
+    assert failure["reason"].startswith("GET /export failed: curl: (22)")
+    assert ORG_A not in {entry["namespace"] for entry in manifest["databases"]}
+
+
+def test_helm_export_unreachable_server_is_retried(harness: OpsHarness) -> None:
+    harness.serve()  # no source server: every request fails to connect
+    result = harness.run("export")
+    assert result.returncode not in (0, RECORDED_FAILURE_EXIT), result.stderr
+
+
+def test_helm_export_job_fails_fast_only_on_recorded_failures() -> None:
+    spec, _ = _raw_env("export")
+    pod = spec["template"]["spec"]
+    (container,) = pod["containers"]
+    assert pod["restartPolicy"] == "Never", "podFailurePolicy requires restartPolicy Never"
+    assert spec["podFailurePolicy"] == {
+        "rules": [
+            {
+                "action": "FailJob",
+                "onExitCodes": {
+                    "containerName": container["name"],
+                    "operator": "In",
+                    "values": [RECORDED_FAILURE_EXIT],
+                },
+            },
+            {
+                "action": "Ignore",
+                "onPodConditions": [{"type": "DisruptionTarget", "status": "True"}],
+            },
+        ]
+    }
+
+
+def test_helm_export_lists_organizations_without_a_graph(harness: OpsHarness) -> None:
+    harness.serve(source=_source(), org_uuids=(_org_uuid(ORG_A), _org_uuid(ORG_B), ORPHAN_ORG))
+    result = harness.run("export")
+
+    assert result.returncode == 0, result.stderr
+    assert f"organizations without a graph database: 1 of 3 {ORPHAN_ORG}" in result.stdout
+    organizations = _manifest(harness)["organizations"]
+    assert organizations == {
+        "total": 3,
+        "without_graph": [
+            {
+                "organization": ORPHAN_ORG,
+                "namespace": "org_" + ORPHAN_ORG.replace("-", ""),
+                "database": "graph",
+            }
+        ],
+    }
+
+    harness.serve()
+    drilled = harness.run("restore-drill")
+    assert drilled.returncode == 0, drilled.stderr
+    assert (
+        json.loads(harness.receipt_path.read_text())["manifest"]["organizations"] == organizations
+    )
+    assert (
+        f"organizations without a graph database at export: 1 of 3 {ORPHAN_ORG}" in drilled.stdout
+    )
+
+
+def test_helm_export_organization_check_never_fails_the_run(harness: OpsHarness) -> None:
+    harness.serve(source=_source(), org_check_error=True)
+    result = harness.run("export")
+
+    assert result.returncode == 0, result.stderr
+    error = _manifest(harness)["organizations"]["error"]
+    assert "SurrealQL failed in sibyl_auth/auth" in error
+
+
+def test_helm_export_removes_each_scratch_plaintext_after_encrypting(harness: OpsHarness) -> None:
+    """At most one plaintext export sits in scratch at a time."""
+    count = 'ls "$(dirname "$SIBYL_EXPORT_FILE")" | grep -c "[.]surql$" >> "$HOME/scratch-counts.log" || true'
+    harness.serve(source=_source())
+    result = harness.run(
+        "export",
+        *harness.values(
+            {"export": {"encryption": {"enabled": True, "command": f"{count}\n{ENCRYPT}"}}}
+        ),
+    )
+
+    assert result.returncode == 0, result.stderr
+    counts = [int(line) for line in (harness.root / "scratch-counts.log").read_text().split()]
+    assert max(counts) == 1, counts
+
+
+@pytest.mark.parametrize(
+    "corrupt",
+    [
+        lambda databases: databases[0].update(file="../escape.surql"),
+        lambda databases: databases[0].update(file="nested/dir.surql"),
+        lambda databases: databases[1].update(file=databases[0]["file"]),
+    ],
+    ids=["parent-traversal", "subdirectory", "duplicate-file"],
+)
+def test_helm_restore_drill_refuses_unsafe_or_repeated_manifest_files(
+    harness: OpsHarness, corrupt: Callable[[list[dict[str, Any]]], None]
+) -> None:
+    run_dir = _export_then_reset(harness)
+    manifest_path = run_dir / "manifest.json"
+    manifest = json.loads(manifest_path.read_text())
+    corrupt(manifest["databases"])
+    manifest_path.write_text(json.dumps(manifest))
+
+    result = harness.run("restore-drill")
+
+    assert result.returncode != 0
+    assert "an unsafe or repeated file" in result.stderr
+    assert harness.server("http://restore")["namespaces"] == {}, "nothing is restored"
+
+
+def test_helm_failure_notification_survives_kubelet_expansion(harness: OpsHarness) -> None:
+    """The notification hook lives in args, which the kubelet also expands."""
+    harness.serve()
+    result = harness.run(
+        "restore-drill",
+        *harness.values(
+            {"restoreDrill": {"failureNotification": {"command": f'[ "$$" -gt 0 ] && {NOTIFY}'}}}
+        ),
+    )
+
+    assert result.returncode != 0
+    assert (harness.root / "notified.log").read_text() == "notified\n"
+
+
+def test_helm_restore_drill_tolerates_a_table_emptied_during_the_export(
+    harness: OpsHarness,
+) -> None:
+    """A lease released between the export's first count and its snapshot:
+    the first count saw a row, the snapshot and the second count did not."""
+    harness.serve(source=_source(), change_before_export={f"{ORG_A}/graph/schema_version": 0})
+    exported = harness.run("export")
+    assert exported.returncode == 0, exported.stderr
+    entry = next(e for e in _manifest(harness)["databases"] if e["namespace"] == ORG_A)
+    assert entry["tables"]["schema_version"] == 1
+    assert entry["tables_after"]["schema_version"] == 0
+
+    harness.serve()
+    result = harness.run("restore-drill")
+
+    assert result.returncode == 0, result.stderr
+    receipt = json.loads(harness.receipt_path.read_text())
+    org_a = next(item for item in receipt["databases"] if item["namespace"] == ORG_A)
+    assert org_a["tables"]["schema_version"] == {"exported": 1, "exported_after": 0, "restored": 0}
+
+
+@pytest.mark.parametrize(
+    ("restored", "passes"),
+    [(None, True), (880, False)],
+    ids=["restores-what-the-snapshot-held", "loses-rows-beyond-it"],
+)
+def test_helm_restore_drill_judges_a_table_by_its_lower_count(
+    harness: OpsHarness, restored: int | None, *, passes: bool
+) -> None:
+    """1000 rows before the export, 900 after it: the snapshot holds 900,
+    which must pass, and the allowance is taken from 900, not 1000."""
+    source = _source()
+    source[ORG_A]["graph"]["entity"] = 1000
+    harness.serve(source=source, change_before_export={f"{ORG_A}/graph/entity": 900})
+    exported = harness.run("export")
+    assert exported.returncode == 0, exported.stderr
+    harness.serve(shrink_on_import={f"{ORG_A}/graph/entity": restored} if restored else None)
+
+    result = harness.run("restore-drill")
+
+    assert (result.returncode == 0) is passes, result.stderr
+    if not passes:
+        assert "entity (880 of 900, allowed shortfall 9)" in result.stderr
+
+
+def test_helm_restore_drill_ignores_a_table_dropped_during_the_export(harness: OpsHarness) -> None:
+    harness.serve(source=_source(), change_before_export={f"{ORG_A}/graph/relates_to": None})
+    exported = harness.run("export")
+    assert exported.returncode == 0, exported.stderr
+    harness.serve()
+
+    result = harness.run("restore-drill")
+
+    assert result.returncode == 0, result.stderr
+
+
+def test_helm_restore_drill_falls_back_to_one_count_for_older_manifests(
+    harness: OpsHarness,
+) -> None:
+    run_dir = _export_then_reset(
+        harness, lambda h: h.serve(shrink_on_import={f"{ORG_A}/graph/schema_version": 0})
+    )
+    manifest_path = run_dir / "manifest.json"
+    manifest = json.loads(manifest_path.read_text())
+    for entry in manifest["databases"]:
+        entry.pop("tables_after")
+        entry.pop("rows_after")
+    manifest_path.write_text(json.dumps(manifest))
+
+    result = harness.run("restore-drill")
+
+    assert result.returncode != 0
+    assert "schema_version (0 of 1, emptied)" in result.stderr
+
+
+def test_helm_drill_job_replaces_pods_lost_to_disruption() -> None:
+    spec, _ = _raw_env("restore-drill")
+    assert spec["template"]["spec"]["restartPolicy"] == "Never"
+    assert spec["podFailurePolicy"] == {
+        "rules": [
+            {
+                "action": "Ignore",
+                "onPodConditions": [{"type": "DisruptionTarget", "status": "True"}],
+            }
+        ]
+    }
+
+
+@pytest.mark.parametrize(
+    ("kube_version", "renders"),
+    [("1.28.9", False), ("1.29.0", True), ("v1.29.3-eks-abc123", True)],
+)
+def test_helm_chart_states_its_kubernetes_floor(kube_version: str, *, renders: bool) -> None:
+    """Native sidecars (the drill's scratch server) are on by default from
+    1.29; older clusters get a clear refusal, not a schema error."""
+    assert _HELM is not None
+    rendered = subprocess.run(  # noqa: S603
+        [
+            _HELM,
+            "template",
+            "drill",
+            "charts/surrealdb",
+            "--set",
+            "restoreDrill.enabled=true",
+            "--kube-version",
+            kube_version,
+        ],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert (rendered.returncode == 0) is renders, rendered.stderr
+    if not renders:
+        assert "chart requires kubeVersion: >=1.29.0-0" in rendered.stderr
+
+
+def test_helm_export_keeps_the_organization_log_bounded(harness: OpsHarness) -> None:
+    orphans = tuple(f"{index:08x}-2222-4333-8444-555555555555" for index in range(25))
+    harness.serve(source=_source(), org_uuids=(_org_uuid(ORG_A), _org_uuid(ORG_B), *orphans))
+    result = harness.run("export")
+
+    assert result.returncode == 0, result.stderr
+    line = next(
+        text for text in result.stdout.splitlines() if text.startswith("organizations without")
+    )
+    assert line == (
+        "organizations without a graph database: 25 of 27 "
+        + " ".join(orphans[:10])
+        + " and 15 more (see the manifest)"
+    )
+    listed = [item["organization"] for item in _manifest(harness)["organizations"]["without_graph"]]
+    assert listed == list(orphans)
+
+
+def test_helm_export_org_check_requires_the_graph_database(harness: OpsHarness) -> None:
+    """An org namespace holding some other database still has no graph."""
+    other = "org_" + ORPHAN_ORG.replace("-", "")
+    harness.serve(source={**_source(), other: {"scratch": {"t": 1}}}, org_uuids=(ORPHAN_ORG,))
+    result = harness.run("export")
+
+    assert result.returncode == 0, result.stderr
+    assert _manifest(harness)["organizations"]["without_graph"] == [
+        {"organization": ORPHAN_ORG, "namespace": other, "database": "graph"}
+    ]
+
+
+def test_helm_pod_condition_rules_carry_status() -> None:
+    """kube-apiserver before 1.34 rejects an onPodConditions entry without
+    status ("Required value"); only 1.34 defaults it, so a render-only check
+    on a recent cluster misses it."""
+    assert _HELM is not None
+    rendered = subprocess.run(  # noqa: S603
+        [
+            _HELM,
+            "template",
+            "drill",
+            "charts/surrealdb",
+            "--set",
+            "export.enabled=true",
+            "--set",
+            "restoreDrill.enabled=true",
+            "--set",
+            "snapshot.enabled=true",
+        ],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    entries = []
+    for document in yaml.safe_load_all(rendered.stdout):
+        if not document or document.get("kind") not in {"CronJob", "Job"}:
+            continue
+        spec = document["spec"].get("jobTemplate", {}).get("spec", document["spec"])
+        for rule in (spec.get("podFailurePolicy") or {}).get("rules", []):
+            entries.extend(rule.get("onPodConditions", []))
+    assert entries, "the chart renders onPodConditions rules"
+    for entry in entries:
+        assert entry.get("status") in {"True", "False", "Unknown"}, entry
+
+
+def test_helm_export_records_a_failed_recount(harness: OpsHarness) -> None:
+    """Without the second count the drill could page on a table that
+    emptied during the window, so a failed recount fails that database, as
+    a transient failure the Job retries."""
+    harness.serve(source=_source(), recount_errors=(f"{ORG_B}/graph",))
+    result = harness.run("export")
+
+    assert result.returncode == TRANSIENT_FAILURE_EXIT, result.stderr
+    manifest = _manifest(harness)
+    (failure,) = manifest["failures"]
+    assert (failure["namespace"], failure["database"], failure["kind"]) == (
+        ORG_B,
+        "graph",
+        "transient",
+    )
+    assert failure["reason"].startswith("recounting rows after the export failed: SurrealQL failed")
+    assert ORG_B not in {entry["namespace"] for entry in manifest["databases"]}
+    (run_dir,) = _run_dirs(harness)
+    assert not (run_dir / f"{ORG_B}.graph.surql").exists()
+    assert all(entry["tables_after"] is not None for entry in manifest["databases"])

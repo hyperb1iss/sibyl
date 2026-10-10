@@ -21,6 +21,23 @@ spec:
     spec:
       backoffLimit: {{ .Values.export.backoffLimit }}
       activeDeadlineSeconds: {{ .Values.export.activeDeadlineSeconds }}
+      # A run whose recorded failures are all deterministic (names the
+      # SurrealDB headers cannot carry) exits 111: every retry would record
+      # them again, so it fails the Job at once. A run with any transient
+      # failure exits 1 and is retried like any other failure. A pod lost
+      # to a drain or eviction is replaced without spending a retry.
+      podFailurePolicy:
+        rules:
+          - action: FailJob
+            onExitCodes:
+              containerName: export
+              operator: In
+              values: [111]
+          # status is required by the API server before 1.34.
+          - action: Ignore
+            onPodConditions:
+              - type: DisruptionTarget
+                status: "True"
       template:
         metadata:
           labels:
@@ -31,7 +48,9 @@ spec:
             {{- toYaml . | nindent 12 }}
           {{- end }}
         spec:
-          restartPolicy: OnFailure
+          # Never, not OnFailure: podFailurePolicy needs it, and each retry
+          # then starts from a fresh pod.
+          restartPolicy: Never
           serviceAccountName: {{ include "sibyl-surrealdb.serviceAccountName" . }}
           {{- with .Values.global.imagePullSecrets }}
           imagePullSecrets:
@@ -109,11 +128,14 @@ spec:
                   }
                   # A database that cannot be exported is recorded in the
                   # manifest and fails the job at the end, after every other
-                  # database has been exported and synced.
+                  # database has been exported and synced. The kind says
+                  # whether a retry can help: "deterministic" for a name the
+                  # headers cannot carry, "transient" for a request that
+                  # failed and may pass on the next attempt.
                   record_failure() {
-                    printf '%s\n' "$1" | jq -c --arg reason "$2" '. + {reason: $reason}' >> "$work/failures.jsonl"
-                    printf '%s\n' "$1" | jq -r --arg reason "$2" \
-                      '"cannot export \(.namespace | @json)/\(.database // "*" | @json): \($reason)"' >&2
+                    printf '%s\n' "$1" | jq -c --arg kind "$2" --arg reason "$3" '. + {kind: $kind, reason: $reason}' >> "$work/failures.jsonl"
+                    printf '%s\n' "$1" | jq -r --arg kind "$2" --arg reason "$3" \
+                      '"cannot export \(.namespace | @json)/\(.database // "*" | @json) (\($kind)): \($reason)"' >&2
                   }
                   # The hook reads plaintext from scratch and writes the
                   # ciphertext beside its final name in the run directory,
@@ -174,22 +196,22 @@ spec:
                     entry="$(jq -c --argjson index "$index" '{namespace: .[$index], database: null}' "$work/namespaces.json")"
                     index=$((index + 1))
                     if ! printf '%s\n' "$entry" | jq -e "$jq_defs"' .namespace | header_safe' >/dev/null; then
-                      record_failure "$entry" "the namespace name is not printable ASCII, which the surreal-ns header cannot carry"
+                      record_failure "$entry" deterministic "the namespace name is not printable ASCII, which the surreal-ns header cannot carry"
                       continue
                     fi
                     namespace="$(printf '%s\n' "$entry" | jq -r '.namespace')"
                     if ! namespace_info="$(sql_result "$namespace" "" "INFO FOR NS;" 2>"$work/error")"; then
-                      record_failure "$entry" "INFO FOR NS failed: $(head -c 500 "$work/error")"
+                      record_failure "$entry" transient "INFO FOR NS failed: $(head -c 500 "$work/error")"
                       continue
                     fi
                     printf '%s\n' "$namespace_info" | jq -c --arg namespace "$namespace" "$jq_defs"'
                       .databases // {} | keys[] | {namespace: $namespace, database: .}
                       | if (.database | header_safe) then {target: .}
-                        else {failure: (. + {reason: "the database name is not printable ASCII, which the surreal-db header cannot carry"})} end' \
+                        else {failure: (. + {kind: "deterministic", reason: "the database name is not printable ASCII, which the surreal-db header cannot carry"})} end' \
                       > "$work/discovered.jsonl"
                     jq -c 'select(.target) | .target' "$work/discovered.jsonl" >> "$work/targets.jsonl"
                     jq -c 'select(.failure) | .failure' "$work/discovered.jsonl" >> "$work/failures.jsonl"
-                    jq -r 'select(.failure) | .failure | "cannot export \(.namespace | @json)/\(.database | @json): \(.reason)"' \
+                    jq -r 'select(.failure) | .failure | "cannot export \(.namespace | @json)/\(.database | @json) (\(.kind)): \(.reason)"' \
                       "$work/discovered.jsonl" >&2
                   done
                   # SurrealDB always has its own main/main, so it cannot
@@ -207,6 +229,37 @@ spec:
                     echo "required databases missing at $SURREAL_ENDPOINT: $missing (wrong server, or a Sibyl that never bootstrapped); refusing to record a backup without them" >&2
                     exit 1
                   fi
+
+                  # Organizations in the auth database with no graph database
+                  # at export time. A new organization has none until it
+                  # first uses the graph, so this never fails the run; an
+                  # organization whose graph was lost shows up here too.
+                  if org_ids="$(sql_result "$SIBYL_ORG_CHECK_AUTH_NAMESPACE" "$SIBYL_ORG_CHECK_AUTH_DATABASE" \
+                    "SELECT VALUE uuid FROM organizations;" 2>"$work/error")"; then
+                    # A sorted list searched with bsearch keeps this near
+                    # linear: about 1s for 50k organizations, where building
+                    # a lookup object in jq grows quadratically and a linear
+                    # scan per organization took over a minute.
+                    printf '%s\n' "$org_ids" | jq -c \
+                      --slurpfile found "$work/targets.jsonl" \
+                      --arg prefix "$SIBYL_ORG_CHECK_GRAPH_NAMESPACE_PREFIX" \
+                      --arg database "$SIBYL_ORG_CHECK_GRAPH_DATABASE" '
+                      [.[] | select(type == "string")] as $ids
+                      | ([$found[] | select(.database == $database) | .namespace] | sort) as $graphs
+                      | {total: ($ids | length),
+                         without_graph: [$ids[]
+                           | {organization: ., namespace: ($prefix + (split("-") | join("") | ascii_downcase)), database: $database}
+                           | select(.namespace as $namespace | ($graphs | bsearch($namespace)) < 0)]}' \
+                      > "$work/organizations.json"
+                  else
+                    jq -cn --arg error "$(head -c 500 "$work/error")" '{error: $error}' > "$work/organizations.json"
+                  fi
+                  # The log names the first ten; the manifest has them all.
+                  jq -r 'if .error then "organization check skipped: \(.error)"
+                    else "organizations without a graph database: \(.without_graph | length) of \(.total)"
+                      + (.without_graph[:10] | map(" " + .organization) | join(""))
+                      + (if (.without_graph | length) > 10 then " and \((.without_graph | length) - 10) more (see the manifest)" else "" end) end' \
+                    "$work/organizations.json"
 
                   SIBYL_EXPORT_RUN_DIR="$SIBYL_EXPORT_DESTINATION_PATH/$SIBYL_EXPORT_FILE_PREFIX-$timestamp"
                   export SIBYL_EXPORT_RUN_DIR
@@ -235,7 +288,7 @@ spec:
                     # transaction: on a live server these are the rows the
                     # drill should find, give or take concurrent writes.
                     if ! tables="$(sql_result "$namespace" "$database" "$table_rows" 2>"$work/error")"; then
-                      record_failure "$target" "counting rows failed: $(head -c 500 "$work/error")"
+                      record_failure "$target" transient "counting rows failed: $(head -c 500 "$work/error")"
                       continue
                     fi
                     if ! http -fsS \
@@ -245,12 +298,25 @@ spec:
                       -H "surreal-db: $database" \
                       "$SURREAL_ENDPOINT/export" -o "$output" 2>"$work/error"; then
                       rm -f "$output"
-                      record_failure "$target" "GET /export failed: $(head -c 500 "$work/error")"
+                      record_failure "$target" transient "GET /export failed: $(head -c 500 "$work/error")"
                       continue
                     fi
                     if [ ! -s "$output" ]; then
                       rm -f "$output"
-                      record_failure "$target" "the export came back empty"
+                      record_failure "$target" transient "the export came back empty"
+                      continue
+                    fi
+                    # Counted again once the export has streamed. The snapshot
+                    # lies between the two counts, so the drill can tell rows
+                    # that left during the export window (an expired session,
+                    # a released lease) from rows lost on the way back.
+                    # Without it the drill would judge this database by one
+                    # count and could page on a table that emptied during the
+                    # window, so a failed recount fails the database like a
+                    # failed first count.
+                    if ! tables_after="$(sql_result "$namespace" "$database" "$table_rows" 2>"$work/error")"; then
+                      rm -f "$output"
+                      record_failure "$target" transient "recounting rows after the export failed: $(head -c 500 "$work/error")"
                       continue
                     fi
                     bytes="$(wc -c < "$output" | tr -d ' ')"
@@ -261,8 +327,11 @@ spec:
                       --arg file "$file" \
                       --argjson bytes "$bytes" \
                       --arg sha256 "$sha256" \
+                      --argjson after "$tables_after" \
                       '$target + {file: $file, bytes: $bytes, sha256: $sha256, rows: (map(.rows) | add // 0),
-                        tables: (map({key: .table, value: .rows}) | from_entries)}' \
+                        tables: (map({key: .table, value: .rows}) | from_entries),
+                        rows_after: ($after | map(.rows) | add // 0),
+                        tables_after: ($after | map({key: .table, value: .rows}) | from_entries)}' \
                       >> "$work/databases.jsonl"
                     if [ -n "${SIBYL_EXPORT_ENCRYPTION_COMMAND:-}" ]; then
                       encrypt_export_file "$output" "$SIBYL_EXPORT_RUN_DIR/$file"
@@ -280,8 +349,10 @@ spec:
                     --arg server_version "$server_version" \
                     --slurpfile databases "$work/databases.jsonl" \
                     --slurpfile failures "$work/failures.jsonl" \
+                    --slurpfile organizations "$work/organizations.json" \
                     '{format: "sibyl-surrealdb-export", version: 2, created_at: $created_at,
-                      server_version: $server_version, databases: $databases, failures: $failures}' \
+                      server_version: $server_version, databases: $databases, failures: $failures,
+                      organizations: $organizations[0]}' \
                     > "$work/manifest.json"
                   jq -r '.databases[] | "exported \(.namespace)/\(.database): \(.bytes) bytes, \(.rows) rows"' \
                     "$work/manifest.json"
@@ -295,8 +366,18 @@ spec:
                   {{ . | replace "$" "$$" | nindent 18 }}
                   {{- end }}
                   if [ -s "$work/failures.jsonl" ]; then
-                    echo "export finished with $(wc -l < "$work/failures.jsonl" | tr -d ' ') failures recorded in $SIBYL_EXPORT_RUN_DIR/manifest.json" >&2
-                    exit 1
+                    transient="$(jq -s '[.[] | select(.kind != "deterministic")] | length' "$work/failures.jsonl")"
+                    echo "export finished with $(wc -l < "$work/failures.jsonl" | tr -d ' ') failures ($transient transient) recorded in $SIBYL_EXPORT_RUN_DIR/manifest.json" >&2
+                    if [ "$transient" -gt 0 ]; then
+                      # A refused query or a failed /export may pass on the
+                      # next attempt, which reruns the whole export into a
+                      # new run directory.
+                      exit 1
+                    fi
+                    # Distinct from curl, jq and shell codes, so the Job's
+                    # podFailurePolicy fails at once on a run that every
+                    # retry would record the same way.
+                    exit 111
                   fi
                   echo "export complete: $SIBYL_EXPORT_RUN_DIR"
               env:
@@ -310,6 +391,14 @@ spec:
                   value: {{ .Values.export.filePrefix | quote }}
                 - name: SIBYL_EXPORT_REQUIRED_DATABASES
                   value: {{ .Values.databases | toJson | quote }}
+                - name: SIBYL_ORG_CHECK_AUTH_NAMESPACE
+                  value: {{ .Values.export.organizationCheck.authNamespace | quote }}
+                - name: SIBYL_ORG_CHECK_AUTH_DATABASE
+                  value: {{ .Values.export.organizationCheck.authDatabase | quote }}
+                - name: SIBYL_ORG_CHECK_GRAPH_NAMESPACE_PREFIX
+                  value: {{ .Values.export.organizationCheck.graphNamespacePrefix | quote }}
+                - name: SIBYL_ORG_CHECK_GRAPH_DATABASE
+                  value: {{ .Values.export.organizationCheck.graphDatabase | quote }}
                 {{- include "sibyl-surrealdb.httpEnv" . | nindent 16 }}
                 {{- if .Values.export.encryption.enabled }}
                 - name: SIBYL_EXPORT_ENCRYPTION_COMMAND
