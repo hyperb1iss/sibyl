@@ -56,6 +56,7 @@ _SETTING_ENV_VARS: dict[str, list[str]] = {
 
 # Settings that should be encrypted
 _SECRET_SETTINGS = {"openai_api_key", "anthropic_api_key", "gemini_api_key"}
+SECRET_SETTINGS = frozenset(_SECRET_SETTINGS)
 
 # Settings mirrored into the process environment, where the graph and
 # embedding runtimes read them. See ``sync_runtime_settings`` for the rule.

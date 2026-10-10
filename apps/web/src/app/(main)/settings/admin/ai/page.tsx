@@ -75,6 +75,20 @@ const OPENAI_EMBEDDING_MODEL = 'text-embedding-3-small';
 const GEMINI_EMBEDDING_MODEL = 'gemini-embedding-2';
 const BEDROCK_EMBEDDING_MODEL = 'cohere.embed-v4:0';
 
+type EmbeddingKey = keyof EmbeddingConfigState;
+
+/** The deployment variable that owns each embedding setting, when one does. */
+type EmbeddingLocks = Partial<Record<EmbeddingKey, string>>;
+
+const EMBEDDING_KEYS: EmbeddingKey[] = [
+  'embedding_provider',
+  'embedding_model',
+  'embedding_dimensions',
+  'graph_embedding_provider',
+  'graph_embedding_model',
+  'graph_embedding_dimensions',
+];
+
 const DEFAULT_EMBEDDING_CONFIG: EmbeddingConfigState = {
   embedding_provider: 'openai',
   embedding_model: OPENAI_EMBEDDING_MODEL,
@@ -160,6 +174,37 @@ function readSetting(
   return settings?.settings?.[key]?.value ?? fallback;
 }
 
+function embeddingLocks(settings: SettingsResponse | undefined): EmbeddingLocks {
+  const locks: EmbeddingLocks = {};
+  for (const key of EMBEDDING_KEYS) {
+    const setting = settings?.settings?.[key];
+    if (setting?.locked_by_env && setting.env_var) locks[key] = setting.env_var;
+  }
+  return locks;
+}
+
+/** The deployment variables a 409 LOCKED_BY_ENV refusal names, if the error is one. */
+function lockedVariables(error: unknown): string[] {
+  if (!(error instanceof Error)) return [];
+  try {
+    const body = JSON.parse(error.message) as {
+      detail?: { code?: string; fields?: { env_var?: string }[] };
+    };
+    if (body.detail?.code !== 'LOCKED_BY_ENV') return [];
+    return (body.detail.fields ?? []).map(field => field.env_var ?? '').filter(Boolean);
+  } catch {
+    return [];
+  }
+}
+
+function DeploymentOwnedNote({ envVar }: { envVar: string }) {
+  return (
+    <p className="mt-1 break-words text-[11px] text-sc-fg-muted">
+      Set by <code className="break-all font-mono text-sc-purple">{envVar}</code> in the deployment
+    </p>
+  );
+}
+
 function keyDisplayName(key: ApiKeySettingKey) {
   if (key === 'openai_api_key') return 'OpenAI';
   if (key === 'anthropic_api_key') return 'Anthropic';
@@ -196,6 +241,7 @@ function ApiKeyRow({
 }: ApiKeyRowProps) {
   const configured = setting?.configured ?? false;
   const source = setting?.source ?? 'none';
+  const ownedBy = setting?.locked_by_env ? setting.env_var : null;
 
   let pill: ReactNode;
   if (!configured) {
@@ -237,7 +283,7 @@ function ApiKeyRow({
           <h3 className="text-sm font-semibold text-sc-fg-primary">{name}</h3>
           {pill}
           {configured && source === 'environment' && (
-            <Tooltip content="Value comes from a deployment environment variable. Update here only overrides if the env var is unset.">
+            <Tooltip content="Value comes from a deployment environment variable. Change it in the deployment.">
               <span className="inline-flex items-center gap-1 rounded-full bg-sc-purple/10 px-2 py-0.5 text-[11px] text-sc-purple">
                 <Globe width={11} height={11} />
                 env
@@ -259,18 +305,21 @@ function ApiKeyRow({
             {setting.masked}
           </code>
         )}
+        {ownedBy && <DeploymentOwnedNote envVar={ownedBy} />}
         {valid === false && error && <p className="mt-1 text-xs text-sc-red">{error}</p>}
       </div>
       <div className="flex shrink-0 items-center gap-2">
-        <Button
-          variant="ghost"
-          size="sm"
-          icon={<EditPencil width={14} height={14} />}
-          onClick={onEdit}
-        >
-          {configured ? 'Update' : 'Configure'}
-        </Button>
-        {configured && source === 'database' && (
+        {!ownedBy && (
+          <Button
+            variant="ghost"
+            size="sm"
+            icon={<EditPencil width={14} height={14} />}
+            onClick={onEdit}
+          >
+            {configured ? 'Update' : 'Configure'}
+          </Button>
+        )}
+        {configured && source === 'database' && !ownedBy && (
           <Button
             variant="ghost"
             size="sm"
@@ -372,6 +421,8 @@ interface EmbeddingPanelProps {
   provider: EmbeddingProvider;
   model: string;
   dimensions: string;
+  /** Deployment variables owning the provider, model and dimensions, if any. */
+  ownedBy: { provider?: string; model?: string; dimensions?: string };
   onProviderChange: (provider: EmbeddingProvider) => void;
   onModelChange: (model: string) => void;
   onDimensionsChange: (dimensions: string) => void;
@@ -383,6 +434,7 @@ function EmbeddingPanel({
   provider,
   model,
   dimensions,
+  ownedBy,
   onProviderChange,
   onModelChange,
   onDimensionsChange,
@@ -397,6 +449,7 @@ function EmbeddingPanel({
         <SettingsField label="Provider">
           <Select
             value={provider}
+            disabled={Boolean(ownedBy.provider)}
             onValueChange={value => onProviderChange(value as EmbeddingProvider)}
           >
             <SelectTrigger className="w-full" aria-label={`${title} provider`}>
@@ -408,15 +461,19 @@ function EmbeddingPanel({
               <SelectItem value="bedrock">Amazon Bedrock</SelectItem>
             </SelectContent>
           </Select>
+          {ownedBy.provider && <DeploymentOwnedNote envVar={ownedBy.provider} />}
         </SettingsField>
         <SettingsField label="Model">
           <input
             type="text"
             value={model}
+            readOnly={Boolean(ownedBy.model)}
+            disabled={Boolean(ownedBy.model)}
             onChange={e => onModelChange(e.target.value)}
             aria-label={`${title} model`}
-            className="w-full rounded-lg border border-sc-fg-subtle/15 bg-sc-bg-highlight/40 px-3 py-2 text-sm text-sc-fg-primary placeholder:text-sc-fg-subtle transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sc-cyan focus-visible:ring-offset-2 focus-visible:ring-offset-sc-bg-elevated"
+            className="w-full rounded-lg border border-sc-fg-subtle/15 bg-sc-bg-highlight/40 px-3 py-2 text-sm text-sc-fg-primary placeholder:text-sc-fg-subtle transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sc-cyan focus-visible:ring-offset-2 focus-visible:ring-offset-sc-bg-elevated disabled:cursor-not-allowed disabled:opacity-70"
           />
+          {ownedBy.model && <DeploymentOwnedNote envVar={ownedBy.model} />}
         </SettingsField>
         <SettingsField label="Dimensions">
           <input
@@ -425,10 +482,13 @@ function EmbeddingPanel({
             max={3072}
             step={1}
             value={dimensions}
+            readOnly={Boolean(ownedBy.dimensions)}
+            disabled={Boolean(ownedBy.dimensions)}
             onChange={e => onDimensionsChange(e.target.value)}
             aria-label={`${title} dimensions`}
-            className="w-full rounded-lg border border-sc-fg-subtle/15 bg-sc-bg-highlight/40 px-3 py-2 text-sm text-sc-fg-primary placeholder:text-sc-fg-subtle transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sc-cyan focus-visible:ring-offset-2 focus-visible:ring-offset-sc-bg-elevated"
+            className="w-full rounded-lg border border-sc-fg-subtle/15 bg-sc-bg-highlight/40 px-3 py-2 text-sm text-sc-fg-primary placeholder:text-sc-fg-subtle transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sc-cyan focus-visible:ring-offset-2 focus-visible:ring-offset-sc-bg-elevated disabled:cursor-not-allowed disabled:opacity-70"
           />
+          {ownedBy.dimensions && <DeploymentOwnedNote envVar={ownedBy.dimensions} />}
         </SettingsField>
       </div>
     </div>
@@ -453,6 +513,8 @@ export default function AIServicesPage() {
   const [editingKey, setEditingKey] = useState<ApiKeySettingKey | null>(null);
   const [deletingKey, setDeletingKey] = useState<string | null>(null);
   const [embeddingConfig, setEmbeddingConfig] = useState(DEFAULT_EMBEDDING_CONFIG);
+  const [savedEmbeddingConfig, setSavedEmbeddingConfig] = useState(DEFAULT_EMBEDDING_CONFIG);
+  const locks = useMemo(() => embeddingLocks(settings), [settings]);
 
   useEffect(() => {
     if (!settings) return;
@@ -468,7 +530,7 @@ export default function AIServicesPage() {
       ),
       DEFAULT_EMBEDDING_CONFIG.graph_embedding_provider
     );
-    setEmbeddingConfig({
+    const loaded: EmbeddingConfigState = {
       embedding_provider: embeddingProvider,
       embedding_model: readSetting(
         settings,
@@ -491,7 +553,9 @@ export default function AIServicesPage() {
         'graph_embedding_dimensions',
         DEFAULT_EMBEDDING_CONFIG.graph_embedding_dimensions
       ),
-    });
+    };
+    setEmbeddingConfig(loaded);
+    setSavedEmbeddingConfig(loaded);
   }, [settings]);
 
   const handleValidate = async () => {
@@ -550,38 +614,47 @@ export default function AIServicesPage() {
   );
 
   const handleSaveEmbeddingConfig = useCallback(async () => {
-    const embeddingDimensions = Number.parseInt(embeddingConfig.embedding_dimensions, 10);
-    const graphDimensions = Number.parseInt(embeddingConfig.graph_embedding_dimensions, 10);
-    if (
-      !Number.isInteger(embeddingDimensions) ||
-      embeddingDimensions < 128 ||
-      embeddingDimensions > 3072 ||
-      !Number.isInteger(graphDimensions) ||
-      graphDimensions < 128 ||
-      graphDimensions > 3072
-    ) {
-      toast.error('Embedding dimensions must be whole numbers from 128 to 3072');
+    // Only what the admin changed, and never a setting the deployment owns.
+    const changed = EMBEDDING_KEYS.filter(
+      key => !locks[key] && embeddingConfig[key].trim() !== savedEmbeddingConfig[key].trim()
+    );
+    if (changed.length === 0) {
+      toast.info('No embedding changes to save');
       return;
     }
-    const request: UpdateSettingsRequest = {
-      embedding_provider: embeddingConfig.embedding_provider,
-      embedding_model: embeddingConfig.embedding_model.trim(),
-      embedding_dimensions: embeddingDimensions,
-      graph_embedding_provider: embeddingConfig.graph_embedding_provider,
-      graph_embedding_model: embeddingConfig.graph_embedding_model.trim(),
-      graph_embedding_dimensions: graphDimensions,
-    };
-    if (!request.embedding_model || !request.graph_embedding_model) {
-      toast.error('Embedding models cannot be blank');
-      return;
+    const request: UpdateSettingsRequest = {};
+    for (const key of changed) {
+      if (key === 'embedding_dimensions' || key === 'graph_embedding_dimensions') {
+        const dimensions = Number.parseInt(embeddingConfig[key], 10);
+        if (!Number.isInteger(dimensions) || dimensions < 128 || dimensions > 3072) {
+          toast.error('Embedding dimensions must be whole numbers from 128 to 3072');
+          return;
+        }
+        request[key] = dimensions;
+      } else if (key === 'embedding_model' || key === 'graph_embedding_model') {
+        const model = embeddingConfig[key].trim();
+        if (!model) {
+          toast.error('Embedding models cannot be blank');
+          return;
+        }
+        request[key] = model;
+      } else {
+        request[key] = embeddingConfig[key];
+      }
     }
     try {
       await updateSettings.mutateAsync(request);
+      setSavedEmbeddingConfig(embeddingConfig);
       toast.success('Embedding configuration saved');
-    } catch {
-      toast.error('Failed to save embedding configuration');
+    } catch (error) {
+      const variables = lockedVariables(error);
+      toast.error(
+        variables.length > 0
+          ? `Set by the deployment (${variables.join(', ')}); change it there`
+          : 'Failed to save embedding configuration'
+      );
     }
-  }, [embeddingConfig, updateSettings]);
+  }, [embeddingConfig, savedEmbeddingConfig, locks, updateSettings]);
 
   const openaiValid =
     validation?.openai_valid ?? updateSettings.data?.validation?.openai_api_key?.valid ?? null;
@@ -736,11 +809,18 @@ export default function AIServicesPage() {
           provider={embeddingConfig.embedding_provider}
           model={embeddingConfig.embedding_model}
           dimensions={embeddingConfig.embedding_dimensions}
+          ownedBy={{
+            provider: locks.embedding_provider,
+            model: locks.embedding_model,
+            dimensions: locks.embedding_dimensions,
+          }}
           onProviderChange={provider =>
             setEmbeddingConfig(current => ({
               ...current,
               embedding_provider: provider,
-              embedding_model: defaultModelForProvider(provider),
+              embedding_model: locks.embedding_model
+                ? current.embedding_model
+                : defaultModelForProvider(provider),
             }))
           }
           onModelChange={model => updateEmbeddingConfig('embedding_model', model)}
@@ -754,11 +834,18 @@ export default function AIServicesPage() {
           provider={embeddingConfig.graph_embedding_provider}
           model={embeddingConfig.graph_embedding_model}
           dimensions={embeddingConfig.graph_embedding_dimensions}
+          ownedBy={{
+            provider: locks.graph_embedding_provider,
+            model: locks.graph_embedding_model,
+            dimensions: locks.graph_embedding_dimensions,
+          }}
           onProviderChange={provider =>
             setEmbeddingConfig(current => ({
               ...current,
               graph_embedding_provider: provider,
-              graph_embedding_model: defaultModelForProvider(provider),
+              graph_embedding_model: locks.graph_embedding_model
+                ? current.graph_embedding_model
+                : defaultModelForProvider(provider),
             }))
           }
           onModelChange={model => updateEmbeddingConfig('graph_embedding_model', model)}
@@ -769,8 +856,9 @@ export default function AIServicesPage() {
       </SettingsSection>
 
       <HelpNote tone="muted" icon={InfoCircle}>
-        Environment variables take precedence over database settings for the same field. Gemini also
-        checks <code className="font-mono text-sc-fg-secondary">GEMINI_API_KEY</code> and{' '}
+        A setting the deployment sets through an environment variable is read-only here and names
+        that variable; change it in the deployment, or unset the variable to manage it here. Gemini
+        also checks <code className="font-mono text-sc-fg-secondary">GEMINI_API_KEY</code> and{' '}
         <code className="font-mono text-sc-fg-secondary">GOOGLE_API_KEY</code>; embedding providers
         can be set with{' '}
         <code className="font-mono text-sc-fg-secondary">SIBYL_EMBEDDING_PROVIDER</code> and{' '}

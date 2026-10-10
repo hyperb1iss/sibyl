@@ -372,9 +372,109 @@ async def test_the_settings_route_refuses_a_setting_the_deployment_pins(
     assert refused.value.detail == {
         "code": "LOCKED_BY_ENV",
         "fields": [{"field": field, "env_var": variable}],
+        "deployment_owned": [{"field": field, "env_var": variable}],
     }
     service.set.assert_not_awaited()
     applied.assert_not_awaited()
+
+
+async def test_resubmitting_the_deployments_own_values_saves_only_the_rest(
+    monkeypatch: pytest.MonkeyPatch, runtime_env: dict[str, str]
+) -> None:
+    """The default Helm values pin the document model and size; the web form sends all six."""
+    deploy(
+        runtime_env,
+        SIBYL_EMBEDDING_MODEL="text-embedding-3-small",
+        SIBYL_EMBEDDING_DIMENSIONS="1536",
+    )
+    monkeypatch.setattr(settings_routes, "require_settings_owner", AsyncMock())
+    service = AsyncMock()
+    monkeypatch.setattr(settings_routes, "get_settings_service", lambda: service)
+    applied = AsyncMock()
+    monkeypatch.setattr(settings_routes, "sync_runtime_settings", applied)
+    monkeypatch.setattr(settings_routes, "announce_runtime_settings_changed", AsyncMock())
+
+    response = await settings_routes.update_settings(
+        _patch_request(),
+        body=settings_routes.UpdateSettingsRequest(
+            embedding_provider="openai",
+            embedding_model="text-embedding-3-small",
+            embedding_dimensions=1536,
+            graph_embedding_provider="openai",
+            graph_embedding_model="text-embedding-3-large",
+            graph_embedding_dimensions=1024,
+        ),
+    )
+
+    assert response.updated == [
+        "embedding_provider",
+        "graph_embedding_provider",
+        "graph_embedding_model",
+        "graph_embedding_dimensions",
+    ]
+    saved = [call.args[0] for call in service.set.await_args_list]
+    assert "embedding_model" not in saved
+    assert "embedding_dimensions" not in saved
+    applied.assert_awaited_once()
+
+    with pytest.raises(HTTPException) as refused:
+        await settings_routes.update_settings(
+            _patch_request(),
+            body=settings_routes.UpdateSettingsRequest(
+                embedding_model="text-embedding-3-small", embedding_dimensions=768
+            ),
+        )
+    assert refused.value.detail["fields"] == [
+        {"field": "embedding_dimensions", "env_var": "SIBYL_EMBEDDING_DIMENSIONS"}
+    ]
+    assert {owned["field"] for owned in refused.value.detail["deployment_owned"]} == {
+        "embedding_model",
+        "embedding_dimensions",
+    }
+
+
+async def test_settings_report_what_the_deployment_owns(
+    monkeypatch: pytest.MonkeyPatch, runtime_env: dict[str, str]
+) -> None:
+    deploy(
+        runtime_env,
+        SIBYL_EMBEDDING_DIMENSIONS="1536",
+        SIBYL_OPENAI_API_KEY="sk-deploy-1234567890",
+    )
+    monkeypatch.setattr(settings_routes, "require_settings_owner", AsyncMock())
+    service = AsyncMock()
+    service.get_all.return_value = {
+        # A value stored before the deployment pinned the setting.
+        "embedding_dimensions": {
+            "configured": True,
+            "source": "database",
+            "is_secret": False,
+            "masked": None,
+            "value": "768",
+        },
+        "embedding_model": {
+            "configured": True,
+            "source": "database",
+            "is_secret": False,
+            "masked": None,
+            "value": "text-embedding-3-large",
+        },
+    }
+    monkeypatch.setattr(settings_routes, "get_settings_service", lambda: service)
+
+    response = await settings_routes.get_settings(_patch_request())
+
+    dimensions = response.settings["embedding_dimensions"]
+    assert dimensions.locked_by_env is True
+    assert dimensions.env_var == "SIBYL_EMBEDDING_DIMENSIONS"
+    assert dimensions.source == "environment"
+    assert dimensions.value == "1536"  # what is in effect, not what is stored
+    key = response.settings["openai_api_key"]
+    assert key.locked_by_env is True
+    assert key.value is None
+    assert key.masked is not None
+    assert "1234567890" not in key.masked
+    assert response.settings["embedding_model"].locked_by_env is False
 
 
 async def test_settings_routes_apply_locally_then_announce(

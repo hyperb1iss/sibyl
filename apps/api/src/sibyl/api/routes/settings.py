@@ -11,12 +11,15 @@ from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from sibyl.cache_invalidation import announce_runtime_settings_changed
+from sibyl.crypto import mask_secret
 from sibyl.persistence.operations_runtime import (
     is_setup_mode,
     require_settings_owner,
 )
 from sibyl.services.settings import (
     RUNTIME_SETTING_ENV_VARS,
+    SECRET_SETTINGS,
+    deployment_environment,
     get_settings_service,
     runtime_setting_lock,
     sync_runtime_settings,
@@ -29,20 +32,45 @@ router = APIRouter(prefix="/settings", tags=["settings"])
 log = structlog.get_logger()
 
 
-def _reject_env_locked_settings(keys: list[str]) -> None:
-    """Refuse to store a runtime setting the deployment environment owns here.
-
-    A stored value for such a setting would never take effect on this
-    replica, and a replica started without that variable would apply it, so
-    replicas would disagree. The LLM settings routes refuse the same way.
-    """
-    locked = [
+def _deployment_owned_settings() -> list[dict[str, str]]:
+    return [
         {"field": key, "env_var": env_var}
-        for key in keys
+        for key in RUNTIME_SETTING_ENV_VARS
         if (env_var := runtime_setting_lock(key)) is not None
     ]
-    if locked:
-        raise HTTPException(status_code=409, detail={"code": "LOCKED_BY_ENV", "fields": locked})
+
+
+def _unchanged_deployment_settings(requested: dict[str, object]) -> set[str]:
+    """Deployment-owned settings submitted unchanged, which the update skips.
+
+    A stored value for a setting the deployment owns would never take effect
+    on this replica, and a replica started without that variable would apply
+    it, so replicas would disagree. Resubmitting the deployment's own value
+    changes nothing and is accepted; any other value is refused with 409, as
+    the LLM settings routes do. The refusal names every setting the
+    deployment owns here, so a client can show them read-only.
+    """
+    environment = deployment_environment()
+    unchanged: set[str] = set()
+    conflicts: list[dict[str, str]] = []
+    for key, value in requested.items():
+        env_var = runtime_setting_lock(key)
+        if env_var is None:
+            continue
+        if str(value).strip() == environment[env_var].strip():
+            unchanged.add(key)
+        else:
+            conflicts.append({"field": key, "env_var": env_var})
+    if conflicts:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "LOCKED_BY_ENV",
+                "fields": conflicts,
+                "deployment_owned": _deployment_owned_settings(),
+            },
+        )
+    return unchanged
 
 
 async def _apply_runtime_settings(keys: list[str]) -> None:
@@ -64,6 +92,13 @@ class SettingInfo(BaseModel):
     is_secret: bool = Field(description="True if this is a sensitive value")
     masked: str | None = Field(default=None, description="Masked value for display (secrets only)")
     value: str | None = Field(default=None, description="Plain value for non-secret settings")
+    locked_by_env: bool = Field(
+        default=False,
+        description="True when the deployment environment owns this setting; it is read-only here",
+    )
+    env_var: str | None = Field(
+        default=None, description="The deployment variable that owns this setting, if any"
+    )
 
 
 class SettingsResponse(BaseModel):
@@ -210,18 +245,33 @@ async def get_settings(
     service = get_settings_service()
     all_settings = await service.get_all(include_secrets=False)
 
-    return SettingsResponse(
-        settings={
-            key: SettingInfo(
-                configured=info["configured"],
-                source=info["source"],
-                is_secret=info["is_secret"],
-                masked=info["masked"],
-                value=info.get("value"),
-            )
-            for key, info in all_settings.items()
-        }
-    )
+    settings = {
+        key: SettingInfo(
+            configured=info["configured"],
+            source=info["source"],
+            is_secret=info["is_secret"],
+            masked=info["masked"],
+            value=info.get("value"),
+        )
+        for key, info in all_settings.items()
+    }
+    # What is in effect: a setting the deployment owns reports the
+    # deployment's value, whatever is stored.
+    environment = deployment_environment()
+    for owned in _deployment_owned_settings():
+        key, env_var = owned["field"], owned["env_var"]
+        value = environment[env_var]
+        is_secret = key in SECRET_SETTINGS
+        settings[key] = SettingInfo(
+            configured=True,
+            source="environment",
+            is_secret=is_secret,
+            masked=mask_secret(value) if is_secret else None,
+            value=None if is_secret else value,
+            locked_by_env=True,
+            env_var=env_var,
+        )
+    return SettingsResponse(settings=settings)
 
 
 @router.patch("", response_model=UpdateSettingsResponse)
@@ -240,9 +290,15 @@ async def update_settings(
 
     service = get_settings_service()
     # Before anything is saved, so a refused update leaves every setting as it was.
-    _reject_env_locked_settings(
-        [key for key in RUNTIME_SETTING_ENV_VARS if getattr(body, key, None) is not None]
+    unchanged = _unchanged_deployment_settings(
+        {
+            key: getattr(body, key)
+            for key in RUNTIME_SETTING_ENV_VARS
+            if getattr(body, key, None) is not None
+        }
     )
+    if unchanged:
+        body = body.model_copy(update=dict.fromkeys(unchanged))
     await _reject_unservable_bedrock_dimensions(body)
     updated: list[str] = []
     validation: dict[str, dict] = {}

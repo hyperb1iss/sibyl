@@ -698,8 +698,9 @@ and whenever the setting changes on any replica:
 
 1. **Deployment environment** - when the deployment sets any variable a setting is read from
    (`SIBYL_OPENAI_API_KEY` or `OPENAI_API_KEY`, `SIBYL_GRAPH_EMBEDDING_PROVIDER`, and so on), that
-   value wins. The settings API refuses to store a different one with `409 LOCKED_BY_ENV`, as the
-   LLM settings already do.
+   value wins. The AI Services settings page shows the setting read-only and names the variable. The
+   settings API accepts the deployment's own value unchanged and refuses any other with
+   `409 LOCKED_BY_ENV`, as the LLM settings already do.
 2. **Database** - otherwise the stored value applies, on every API replica and worker, moments after
    it is saved, and the graph and embedding runtimes rebuild around it.
 
