@@ -149,6 +149,11 @@ sibyl docker init
 # Optional: run a separate worker with Redis/Valkey coordination
 sibyl docker init --force --with-worker
 
+# Or run the repo production compose with its worker: the backend and worker
+# then share the redis service for jobs, locks, events and rate limits
+SIBYL_COORDINATION_BACKEND=redis docker compose --env-file ~/.sibyl/prod.env \
+  -f docker-compose.prod.yml --profile redis up -d
+
 # Start, follow logs, and stop
 sibyl docker up
 sibyl docker logs
@@ -270,9 +275,10 @@ Differences from the production compose:
 
 - Pulls `ghcr.io/hyperb1iss/sibyl-api` and `sibyl-web` images instead of building locally
 - `SIBYL_JWT_SECRET` and `SIBYL_SETTINGS_KEY` auto-generate when unset (persisted in the
-  `sibyl_secrets` volume mounted at `/home/sibyl/.sibyl`). A process on Redis coordination never
-  generates the settings key: it reads the one in that shared volume, or `SIBYL_SETTINGS_KEY`, and
-  refuses to start with neither
+  `sibyl_secrets` volume mounted at `/home/sibyl/.sibyl`). The `secrets-init` service writes the
+  settings key once, before the api and worker start, because a process on Redis coordination never
+  generates its own: it reads that shared key, or `SIBYL_SETTINGS_KEY`, and refuses to start with
+  neither
 - Runs with `SIBYL_ENVIRONMENT=development` and a `sibyl_quickstart` default Surreal password
 - The backend service is named `api` and the frontend `web`
 

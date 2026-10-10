@@ -69,12 +69,14 @@ def test_quickstart_compose_persists_generated_runtime_secrets() -> None:
     assert "SIBYL_JWT_SECRET" not in services["api"]["environment"]
     assert secret_mount in services["api"]["volumes"]
     assert secret_mount in services["worker"]["volumes"]
-    assert services["secrets-init"]["command"] == [
-        "chown",
-        "-R",
-        "${SIBYL_API_UID:-10001}:${SIBYL_API_GID:-10001}",
-        "/home/sibyl/.sibyl",
-    ]
+    init_script = services["secrets-init"]["command"][-1]
+    assert services["secrets-init"]["command"][:2] == ["sh", "-c"]
+    assert 'chown -R "${SIBYL_API_UID:-10001}:${SIBYL_API_GID:-10001}" /home/sibyl/.sibyl' in (
+        init_script
+    )
+    # One settings key in the shared volume, written once, for api and worker.
+    assert "key=/home/sibyl/.sibyl/settings.key" in init_script
+    assert 'if [ ! -s "$$key" ]' in init_script
     assert secret_mount in services["secrets-init"]["volumes"]
     assert services["api"]["depends_on"]["secrets-init"] == {
         "condition": "service_completed_successfully",
