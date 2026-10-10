@@ -79,7 +79,7 @@ data:
   {{- if .Values.backend.redis.rateLimitStorage }}
   SIBYL_RATE_LIMIT_STORAGE: {{ .Values.backend.redis.rateLimitStorage | quote }}
   {{- else }}
-  SIBYL_RATE_LIMIT_STORAGE: {{ printf "redis://%s:%s/%s" .Values.backend.redis.host .Values.backend.redis.port .Values.backend.redis.rateLimitDb | quote }}
+  SIBYL_RATE_LIMIT_STORAGE: {{ printf "redis://%s:%s/%s" .Values.backend.redis.host (toString .Values.backend.redis.port) (toString .Values.backend.redis.rateLimitDb) | quote }}
   {{- end }}
   {{- end }}
   # SurrealDB connection

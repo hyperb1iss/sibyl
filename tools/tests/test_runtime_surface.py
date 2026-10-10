@@ -444,6 +444,39 @@ def test_helm_production_redis_render_includes_the_worker() -> None:
     assert 'SIBYL_COORDINATION_BACKEND: "redis"' in result.stdout
 
 
+@pytest.mark.parametrize(
+    "port_override",
+    [
+        # --set parses digits as an integer, and a values file or --set-json as a
+        # float; printf %s would render either as "%!s(...)" and the API's rate
+        # limiter refuses the URL at import.
+        ("--set", "backend.redis.port=6379", "--set", "backend.redis.rateLimitDb=4"),
+        ("--set-json", "backend.redis.port=6379", "--set-json", "backend.redis.rateLimitDb=4"),
+        ("--set-string", "backend.redis.port=6379", "--set-string", "backend.redis.rateLimitDb=4"),
+    ],
+)
+@requires_helm
+def test_helm_redis_rate_limit_url_accepts_numeric_port_and_db(
+    port_override: tuple[str, ...],
+) -> None:
+    result = _helm_template(
+        "--set",
+        "backend.existingSecret=sibyl-secrets",
+        "--set",
+        "coordinationBackend=redis",
+        "--set",
+        "backend.redis.password=ci-only",
+        "--set",
+        "backend.redis.host=sibyl-valkey",
+        *port_override,
+    )
+
+    assert result.returncode == 0, result.stderr
+    config = _rendered_config_data(result.stdout)
+    assert config["SIBYL_RATE_LIMIT_STORAGE"] == "redis://sibyl-valkey:6379/4"
+    assert config["SIBYL_REDIS_PORT"] == "6379"
+
+
 @requires_helm
 def test_helm_production_render_rejects_a_configmap_resident_jwt_secret() -> None:
     """An inline env secret satisfies neither guard, with or without a Secret alongside it."""
