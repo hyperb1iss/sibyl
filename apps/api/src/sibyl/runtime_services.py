@@ -27,6 +27,7 @@ class RuntimeServices:
     async def startup(self) -> None:
         self._coordination_backend = settings.resolved_coordination_backend
 
+        require_shared_settings_key()
         await bootstrap_surreal_runtime_schemas()
         await load_runtime_settings_from_db()
         install_llm_db_config_source()
@@ -261,6 +262,12 @@ class RuntimeServices:
             await shutdown_locks()
         except Exception as e:
             self._log.debug("Lock shutdown error", error=str(e))
+
+
+def require_shared_settings_key() -> None:
+    from sibyl.crypto import require_shared_settings_key as require_key
+
+    require_key()
 
 
 async def bootstrap_surreal_runtime_schemas() -> bool:

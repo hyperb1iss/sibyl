@@ -270,7 +270,9 @@ Differences from the production compose:
 
 - Pulls `ghcr.io/hyperb1iss/sibyl-api` and `sibyl-web` images instead of building locally
 - `SIBYL_JWT_SECRET` and `SIBYL_SETTINGS_KEY` auto-generate when unset (persisted in the
-  `sibyl_secrets` volume mounted at `/home/sibyl/.sibyl`)
+  `sibyl_secrets` volume mounted at `/home/sibyl/.sibyl`). A process on Redis coordination never
+  generates the settings key: it reads the one in that shared volume, or `SIBYL_SETTINGS_KEY`, and
+  refuses to start with neither
 - Runs with `SIBYL_ENVIRONMENT=development` and a `sibyl_quickstart` default Surreal password
 - The backend service is named `api` and the frontend `web`
 

@@ -178,7 +178,9 @@ Claude and Cohere embeddings through the service account's IAM role and needs no
 admin can also enter keys in the web app, which stores them encrypted with `SIBYL_SETTINGS_KEY`.
 
 Use a generated 32-byte or stronger `SIBYL_JWT_SECRET`. Keep `SIBYL_SETTINGS_KEY` stable so
-encrypted settings can be read after a restart.
+encrypted settings can be read after a restart. With Redis coordination, every API replica and
+worker must carry the same `SIBYL_SETTINGS_KEY` (or mount one shared key file), and sibyld refuses
+to start without one rather than encrypt with a key no other process holds.
 
 ### Transactional Email
 
