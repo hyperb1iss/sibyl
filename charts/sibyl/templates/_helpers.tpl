@@ -92,6 +92,19 @@ Create the name of the service account to use
 {{- end }}
 
 {{/*
+Service account for frontend pods, kept apart from the backend account so a
+cloud role bound to the backend (IRSA for Bedrock or S3 receipts) never
+reaches the web tier.
+*/}}
+{{- define "sibyl.frontendServiceAccountName" -}}
+{{- if .Values.frontend.serviceAccount.create }}
+{{- default (printf "%s-frontend" (include "sibyl.fullname" .) | trunc 63 | trimSuffix "-") .Values.frontend.serviceAccount.name }}
+{{- else }}
+{{- default "default" .Values.frontend.serviceAccount.name }}
+{{- end }}
+{{- end }}
+
+{{/*
 Backend image
 */}}
 {{- define "sibyl.backend.image" -}}

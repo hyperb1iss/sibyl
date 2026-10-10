@@ -253,7 +253,11 @@ def test_helm_bedrock_render_needs_irsa_and_a_region_not_provider_keys() -> None
 
     assert result.returncode == 0, result.stderr
     documents = [doc for doc in yaml.safe_load_all(result.stdout) if doc]
-    account = next(doc for doc in documents if doc["kind"] == "ServiceAccount")
+    account = next(
+        doc
+        for doc in documents
+        if doc["kind"] == "ServiceAccount" and doc["metadata"]["name"] == "sibyl"
+    )
     assert account["metadata"]["annotations"] == {"eks.amazonaws.com/role-arn": role}
     config = next(doc for doc in documents if doc["kind"] == "ConfigMap")
     assert config["data"]["SIBYL_LLM_PROVIDER"] == "bedrock"
@@ -276,6 +280,50 @@ def test_helm_bedrock_render_needs_irsa_and_a_region_not_provider_keys() -> None
         # Bedrock signs with the IRSA role, so provider API keys stay optional.
         assert provider_keys
         assert all(env["valueFrom"]["secretKeyRef"]["optional"] is True for env in provider_keys)
+
+
+@requires_helm
+def test_helm_frontend_never_shares_the_backend_cloud_role() -> None:
+    """The web tier calls only the Sibyl API, so an IRSA role bound to the
+    backend (Bedrock, S3 receipts) must not reach frontend pods."""
+    role = "arn:aws:iam::123456789012:role/sibyl"
+    irsa = ("--set-string", f"serviceAccount.annotations.eks\\.amazonaws\\.com/role-arn={role}")
+
+    def documents(*overrides: str) -> list[dict]:
+        result = _helm_template("--set", "backend.existingSecret=sibyl-secrets", *irsa, *overrides)
+        assert result.returncode == 0, result.stderr
+        return [doc for doc in yaml.safe_load_all(result.stdout) if doc]
+
+    rendered = documents()
+    accounts = {d["metadata"]["name"]: d for d in rendered if d["kind"] == "ServiceAccount"}
+    assert accounts["sibyl"]["metadata"]["annotations"] == {"eks.amazonaws.com/role-arn": role}
+    assert "annotations" not in accounts["sibyl-frontend"]["metadata"]
+    assert accounts["sibyl-frontend"]["automountServiceAccountToken"] is False
+    pods = {
+        d["metadata"]["name"]: d["spec"]["template"]["spec"]
+        for d in rendered
+        if d["kind"] == "Deployment"
+    }
+    assert pods["sibyl-frontend"]["serviceAccountName"] == "sibyl-frontend"
+    assert pods["sibyl-frontend"]["automountServiceAccountToken"] is False
+    assert pods["sibyl-backend"]["serviceAccountName"] == "sibyl"
+
+    shared = documents(
+        "--set",
+        "frontend.serviceAccount.create=false",
+        "--set",
+        "frontend.serviceAccount.name=sibyl",
+    )
+    assert [d["metadata"]["name"] for d in shared if d["kind"] == "ServiceAccount"] == ["sibyl"]
+    frontend = next(
+        d for d in shared if d["kind"] == "Deployment" and d["metadata"]["name"] == "sibyl-frontend"
+    )
+    assert frontend["spec"]["template"]["spec"]["serviceAccountName"] == "sibyl"
+
+    without_frontend = documents("--set", "frontend.enabled=false")
+    assert [d["metadata"]["name"] for d in without_frontend if d["kind"] == "ServiceAccount"] == [
+        "sibyl"
+    ]
 
 
 @requires_helm

@@ -304,6 +304,22 @@ frontend:
   # -- Enable frontend deployment
   enabled: true
 
+  # -- Service account for frontend pods. The web frontend calls only the
+  # Sibyl API, never a cloud provider, so by default it gets its own account
+  # with no annotations and no API token instead of sharing the backend's
+  # (which may carry an IRSA role for Bedrock or S3 receipts).
+  serviceAccount:
+    # -- Create a dedicated frontend service account
+    create: true
+    # -- Account name; defaults to <fullname>-frontend when created, and to
+    # "default" otherwise. Set create=false and the backend account's name to
+    # share it as before.
+    name: ""
+    # -- Annotations for the frontend account
+    annotations: {}
+    # -- Mount a Kubernetes API token into frontend pods
+    automountServiceAccountToken: false
+
   # -- Number of replicas (ignored if autoscaling is enabled)
   replicaCount: 1
 

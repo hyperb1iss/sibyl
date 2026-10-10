@@ -25,7 +25,8 @@ spec:
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}
       {{- end }}
-      serviceAccountName: {{ include "sibyl.serviceAccountName" . }}
+      serviceAccountName: {{ include "sibyl.frontendServiceAccountName" . }}
+      automountServiceAccountToken: {{ .Values.frontend.serviceAccount.automountServiceAccountToken }}
       securityContext:
         {{- toYaml .Values.frontend.podSecurityContext | nindent 8 }}
       {{- if .Values.frontend.podAntiAffinity.enabled }}
