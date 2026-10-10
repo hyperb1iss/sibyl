@@ -1,18 +1,32 @@
 """Tests for rate limiting configuration.
 
-The cross-replica proof at the end runs against a real Redis/Valkey when
-SIBYL_LIVE_REDIS_HOST and SIBYL_LIVE_REDIS_PORT are set.
+The cross-replica and frozen-Redis proofs run against a real Redis/Valkey
+when SIBYL_LIVE_REDIS_HOST and SIBYL_LIVE_REDIS_PORT are set.
 """
 
+import asyncio
 import os
+import socket
+import time
 from uuid import uuid4
 
+import httpx
 import pytest
+from fastapi import FastAPI, Request
 from limits import parse
 from limits.storage import storage_from_string
 from limits.strategies import FixedWindowRateLimiter
+from slowapi import _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
 
-from sibyl.api.rate_limit import RATE_LIMITS, get_rate_limit, limiter
+from sibyl.api.rate_limit import (
+    RATE_LIMITS,
+    REDIS_STORAGE_SOCKET_TIMEOUT_SECONDS,
+    build_limiter,
+    get_rate_limit,
+    limiter,
+    storage_options,
+)
 from sibyl.config import Settings
 
 
@@ -146,3 +160,97 @@ class TestRateLimitsAcrossReplicas:
 
         assert admitted == 5
         assert storage == f"redis://{host}:{port}/4"
+
+
+def _closed_port() -> int:
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+        probe.bind(("127.0.0.1", 0))
+        return probe.getsockname()[1]
+
+
+async def _limited_logins(storage_uri: str, *, attempts: int) -> tuple[list[int], float]:
+    """POST a 5/minute login ``attempts`` times; return the statuses and the
+    longest the event loop went without running another task meanwhile."""
+    limiter = build_limiter(storage_uri)
+    app = FastAPI()
+    app.state.limiter = limiter
+    app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)  # type: ignore[arg-type]
+
+    @app.post("/login")
+    @limiter.limit(RATE_LIMITS["auth"])
+    async def login(request: Request) -> dict[str, bool]:
+        return {"ok": True}
+
+    last_beat = time.monotonic()
+    longest_stall = 0.0
+
+    async def heartbeat() -> None:
+        nonlocal last_beat, longest_stall
+        while True:
+            now = time.monotonic()
+            longest_stall = max(longest_stall, now - last_beat)
+            last_beat = now
+            await asyncio.sleep(0.02)
+
+    beat = asyncio.create_task(heartbeat())
+    await asyncio.sleep(0.05)
+    transport = httpx.ASGITransport(app=app, raise_app_exceptions=False)
+    statuses: list[int] = []
+    try:
+        async with httpx.AsyncClient(transport=transport, base_url="http://replica") as client:
+            for _ in range(attempts):
+                statuses.append((await client.post("/login")).status_code)
+                await asyncio.sleep(0.05)
+    finally:
+        beat.cancel()
+    return statuses, longest_stall
+
+
+class TestRateLimitsWhenRedisFails:
+    """An outage degrades to per-replica limits, never to errors or a stalled loop."""
+
+    def test_redis_storages_get_bounded_sockets_and_others_none(self) -> None:
+        bounded = {
+            "socket_connect_timeout": REDIS_STORAGE_SOCKET_TIMEOUT_SECONDS,
+            "socket_timeout": REDIS_STORAGE_SOCKET_TIMEOUT_SECONDS,
+        }
+        for uri in (
+            "redis://valkey:6379/4",
+            "rediss://:pw@valkey:6380/4",
+            "redis+sentinel://sentinel:26379/main",
+            "valkey://valkey:6379/4",
+        ):
+            assert storage_options(uri) == bounded, uri
+        assert storage_options("memory://") == {}
+        assert limiter._in_memory_fallback_enabled is True
+
+    async def test_refused_redis_still_limits_and_never_errors(self) -> None:
+        statuses, stall = await _limited_logins(f"redis://127.0.0.1:{_closed_port()}/4", attempts=7)
+
+        assert statuses == [200] * 5 + [429] * 2
+        assert stall < 1.0
+
+    async def test_silent_redis_host_cannot_stall_the_event_loop(self) -> None:
+        # 10.255.255.1 is unroutable: a connect there gets no answer at all,
+        # which without a connect timeout blocks on the kernel's SYN retries.
+        statuses, stall = await _limited_logins("redis://10.255.255.1:6379/4", attempts=7)
+
+        assert statuses == [200] * 5 + [429] * 2
+        assert stall < 2 * REDIS_STORAGE_SOCKET_TIMEOUT_SECONDS + 0.5
+
+    async def test_frozen_redis_cannot_stall_the_event_loop(self) -> None:
+        """A Redis that accepts connections and then answers nothing."""
+        import redis
+
+        host, port = _live_redis()
+        admin = redis.Redis(host=host, port=port, socket_timeout=5)
+        # Every client's commands wait out the pause, the limiter's included.
+        admin.execute_command("CLIENT", "PAUSE", 4000, "ALL")
+        try:
+            statuses, stall = await _limited_logins(f"redis://{host}:{port}/4", attempts=7)
+        finally:
+            admin.execute_command("CLIENT", "UNPAUSE")
+            admin.close()
+
+        assert statuses == [200] * 5 + [429] * 2
+        assert stall < 2 * REDIS_STORAGE_SOCKET_TIMEOUT_SECONDS + 0.5
