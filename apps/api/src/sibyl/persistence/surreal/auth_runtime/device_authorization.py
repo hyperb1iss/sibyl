@@ -139,6 +139,27 @@ async def exchange_device_code(*, device_code: str) -> dict[str, object]:
 
         if request_row.user_id is None:
             raise DeviceTokenError("server_error", "Approved request missing user_id")
+        # The conditional UPDATE is the whole claim: when exchanges race on
+        # different replicas, the row goes to whichever commits first and
+        # every other exchange matches nothing, so only one mints a session.
+        claimed = _normalize_records(
+            await client.execute_query(
+                """
+                    UPDATE device_authorization_requests
+                    SET status = $status,
+                        consumed_at = $consumed_at,
+                        updated_at = $updated_at
+                    WHERE uuid = $uuid AND status = 'approved' AND expires_at > $consumed_at
+                    RETURN BEFORE;
+                """,
+                uuid=str(request_row.id),
+                status="consumed",
+                consumed_at=now,
+                updated_at=now,
+            )
+        )
+        if not claimed:
+            raise DeviceTokenError("invalid_grant", "Device code already used")
         session_id = uuid4()
         access_token = create_access_token(
             user_id=request_row.user_id,
@@ -162,19 +183,6 @@ async def exchange_device_code(*, device_code: str) -> dict[str, object]:
             refresh_token_expires_at=refresh_expires,
             device_name=request_row.client_name,
             device_type="device",
-        )
-        await client.execute_query(
-            """
-                UPDATE device_authorization_requests
-                SET status = $status,
-                    consumed_at = $consumed_at,
-                    updated_at = $updated_at
-                WHERE uuid = $uuid;
-            """,
-            uuid=str(request_row.id),
-            status="consumed",
-            consumed_at=now,
-            updated_at=now,
         )
         return {
             "access_token": access_token,
