@@ -96,6 +96,13 @@ def _targets(version: str) -> dict[str, list[_Sub]]:
         "docker-compose.quickstart.yml": [
             (rf"(\$\{{SIBYL_IMAGE_TAG:-){_VER}(\}})", rf"\g<1>{v}\g<2>"),
         ],
+        # The Ansible collection, pinned by release tag from deployment repos.
+        "infra/ansible/galaxy.yml": [
+            (rf"(?m)^(version: ){_VER}$", rf"\g<1>{v}"),
+        ],
+        "infra/ansible/README.md": [
+            (rf"(?m)^(    version: v){_VER}$", rf"\g<1>{v}"),
+        ],
         "infra/ansible/roles/sibyl/defaults/main.yml": [
             (rf'(?m)^(sibyl_version: "){_VER}(")$', rf"\g<1>{v}\g<2>"),
         ],
@@ -111,6 +118,7 @@ def _targets(version: str) -> dict[str, list[_Sub]]:
         ],
         "docs/deployment/ansible.md": [
             (rf"(`sibyl_version`\s*\|\s*`)({_VER})(`)( +)(\|)", _table_cell(v)),
+            (rf"(?m)^(      version: v){_VER}$", rf"\g<1>{v}"),
         ],
         "docs/deployment/helm-chart.md": [
             (rf"(?m)^(version: ){_VER}$", rf"\g<1>{v}"),
