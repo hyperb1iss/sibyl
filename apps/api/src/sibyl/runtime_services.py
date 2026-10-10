@@ -20,6 +20,7 @@ class RuntimeServices:
         self._broker_initialized = False
         self._scheduler_initialized = False
         self._pubsub_initialized = False
+        self._cache_invalidation_initialized = False
         self._locks_initialized = False
         self._live_queries_initialized = False
 
@@ -37,6 +38,7 @@ class RuntimeServices:
         await self._startup_broker()
         await self._startup_scheduler()
         await self._startup_pubsub()
+        await self._startup_cache_invalidation()
         await self._startup_locks()
         await self._startup_live_queries()
         await self._recover_stuck_sources()
@@ -51,6 +53,7 @@ class RuntimeServices:
         await self._stop_surreal_connectivity()
         await self._close_shared_surreal_clients()
         await self._shutdown_pubsub()
+        await self._shutdown_cache_invalidation()
         await self._shutdown_locks()
 
     async def _drain_deferred_usage_stamps(self) -> None:
@@ -111,6 +114,24 @@ class RuntimeServices:
         except Exception as e:
             self._log.warning(
                 "Coordination event bus unavailable",
+                backend=self._coordination_backend,
+                error=str(e),
+            )
+
+    async def _startup_cache_invalidation(self) -> None:
+        try:
+            from sibyl.cache_invalidation import start_cache_invalidation
+
+            broadcasting = await start_cache_invalidation()
+            self._cache_invalidation_initialized = broadcasting
+            self._log.info(
+                "Cache invalidation ready",
+                backend=self._coordination_backend,
+                cross_replica=broadcasting,
+            )
+        except Exception as e:
+            self._log.warning(
+                "Cross-replica cache invalidation unavailable",
                 backend=self._coordination_backend,
                 error=str(e),
             )
@@ -207,6 +228,17 @@ class RuntimeServices:
             await shutdown_pubsub()
         except Exception as e:
             self._log.debug("Pub/sub shutdown error", error=str(e))
+
+    async def _shutdown_cache_invalidation(self) -> None:
+        if not self._cache_invalidation_initialized:
+            return
+
+        try:
+            from sibyl.cache_invalidation import stop_cache_invalidation
+
+            await stop_cache_invalidation()
+        except Exception as e:
+            self._log.debug("Cache invalidation shutdown error", error=str(e))
 
     async def _shutdown_live_queries(self) -> None:
         if not self._live_queries_initialized:

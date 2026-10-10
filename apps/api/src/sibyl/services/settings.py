@@ -10,11 +10,14 @@ from __future__ import annotations
 
 import asyncio
 import os
+from collections.abc import Mapping
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
 
 import structlog
 
+from sibyl.cache_invalidation import announce_settings_changed
 from sibyl.crypto import decrypt_value, encrypt_value, mask_secret
 from sibyl.persistence.settings_runtime import (
     delete_system_setting,
@@ -53,6 +56,34 @@ _SETTING_ENV_VARS: dict[str, list[str]] = {
 
 # Settings that should be encrypted
 _SECRET_SETTINGS = {"openai_api_key", "anthropic_api_key", "gemini_api_key"}
+SECRET_SETTINGS = frozenset(_SECRET_SETTINGS)
+
+# Settings mirrored into the process environment, where the graph and
+# embedding runtimes read them. See ``sync_runtime_settings`` for the rule.
+RUNTIME_SETTING_ENV_VARS: dict[str, tuple[str, ...]] = {
+    "openai_api_key": ("OPENAI_API_KEY",),
+    "anthropic_api_key": ("ANTHROPIC_API_KEY",),
+    "gemini_api_key": ("GEMINI_API_KEY", "GOOGLE_API_KEY"),
+    "embedding_provider": ("SIBYL_EMBEDDING_PROVIDER",),
+    "embedding_model": ("SIBYL_EMBEDDING_MODEL",),
+    "embedding_dimensions": ("SIBYL_EMBEDDING_DIMENSIONS",),
+    "graph_embedding_provider": ("SIBYL_GRAPH_EMBEDDING_PROVIDER",),
+    "graph_embedding_model": ("SIBYL_GRAPH_EMBEDDING_MODEL",),
+    "graph_embedding_dimensions": ("SIBYL_GRAPH_EMBEDDING_DIMENSIONS",),
+}
+
+# Every variable a consumer reads for each runtime setting. When the deployment
+# sets any of them, the deployment owns that setting on this process.
+RUNTIME_SETTING_LOCK_ENV_VARS: dict[str, tuple[str, ...]] = {
+    "openai_api_key": ("SIBYL_OPENAI_API_KEY", "OPENAI_API_KEY"),
+    "anthropic_api_key": ("SIBYL_ANTHROPIC_API_KEY", "ANTHROPIC_API_KEY"),
+    "gemini_api_key": ("SIBYL_GEMINI_API_KEY", "GEMINI_API_KEY", "GOOGLE_API_KEY"),
+    **{
+        key: env_vars
+        for key, env_vars in RUNTIME_SETTING_ENV_VARS.items()
+        if key not in {"openai_api_key", "anthropic_api_key", "gemini_api_key"}
+    },
+}
 
 
 class _CacheEntry:
@@ -269,6 +300,7 @@ class SettingsService:
             # Invalidate cache
             self._cache.pop(key, None)
 
+        await announce_settings_changed([key])
         log.info("Setting updated", key=key, is_secret=is_secret)
 
     async def delete(self, key: str) -> bool:
@@ -284,10 +316,11 @@ class SettingsService:
             deleted = await delete_system_setting(session, key=key)
             if deleted:
                 self._cache.pop(key, None)
-                log.info("Setting deleted", key=key)
-                return True
-
-        return False
+        if not deleted:
+            return False
+        await announce_settings_changed([key])
+        log.info("Setting deleted", key=key)
+        return True
 
     async def get_all(self, *, include_secrets: bool = False) -> dict[str, dict]:
         """Get all settings with their metadata.
@@ -360,6 +393,11 @@ class SettingsService:
         """Clear the settings cache."""
         self._cache.clear()
 
+    def forget(self, keys: list[str]) -> None:
+        """Drop cached values for keys another process changed."""
+        for key in keys:
+            self._cache.pop(key, None)
+
     # Convenience methods for common settings
 
     async def get_openai_key(self) -> str | None:
@@ -394,25 +432,24 @@ def get_settings_service() -> SettingsService:
 async def load_runtime_settings_from_db() -> list[str]:
     """Load runtime settings from database into environment variables.
 
-    Only loads values that are not already set in the environment.
-    This should be called at startup before the graph runtime is initialized.
+    Runtime settings follow ``sync_runtime_settings``: the deployment's own
+    variables win, and stored values fill in the rest. This should be called
+    at startup before the graph runtime is initialized.
 
     Returns:
         List of settings that were loaded from the database.
     """
     loaded: list[str] = []
     settings_svc = get_settings_service()
+    # Snapshot what the deployment set before any stored value is mirrored in.
+    deployment_environment()
+    try:
+        synced = await sync_runtime_settings(rebuild=False, reason="startup")
+        loaded.extend(key for key in synced.stored_keys if runtime_setting_lock(key) is None)
+    except Exception as e:
+        log.warning("Failed to load runtime settings from database", error=str(e))
 
     for setting_key, env_vars in [
-        ("openai_api_key", ["OPENAI_API_KEY"]),
-        ("anthropic_api_key", ["ANTHROPIC_API_KEY"]),
-        ("gemini_api_key", ["GEMINI_API_KEY", "GOOGLE_API_KEY"]),
-        ("embedding_provider", ["SIBYL_EMBEDDING_PROVIDER"]),
-        ("embedding_model", ["SIBYL_EMBEDDING_MODEL"]),
-        ("embedding_dimensions", ["SIBYL_EMBEDDING_DIMENSIONS"]),
-        ("graph_embedding_provider", ["SIBYL_GRAPH_EMBEDDING_PROVIDER"]),
-        ("graph_embedding_model", ["SIBYL_GRAPH_EMBEDDING_MODEL"]),
-        ("graph_embedding_dimensions", ["SIBYL_GRAPH_EMBEDDING_DIMENSIONS"]),
         ("graph_embedding_timeout_seconds", ["SIBYL_GRAPH_EMBEDDING_TIMEOUT_SECONDS"]),
         (
             "graph_search_embedding_timeout_seconds",
@@ -431,6 +468,122 @@ async def load_runtime_settings_from_db() -> list[str]:
             log.warning(f"Failed to load {setting_key} from database", error=str(e))
 
     return loaded
+
+
+async def reset_settings_dependent_runtimes() -> None:
+    """Rebuild the graph and embedding runtimes around the current environment."""
+    from sibyl.persistence.graph_runtime import reset_graph_runtime
+    from sibyl_core.services.document_search import reset_document_embedding_provider_cache
+    from sibyl_core.services.surreal_content import reset_raw_memory_embedding_provider_cache
+
+    await reset_graph_runtime()
+    reset_document_embedding_provider_cache()
+    reset_raw_memory_embedding_provider_cache()
+
+
+_deployment_environment: dict[str, str] | None = None
+_sync_lock: tuple[asyncio.AbstractEventLoop, asyncio.Lock] | None = None
+
+
+def deployment_environment() -> Mapping[str, str]:
+    """The runtime-setting variables the deployment set, as this process first saw them.
+
+    Captured once, before stored settings are mirrored into the environment,
+    so a value this process wrote itself is never mistaken for the
+    deployment's.
+    """
+    global _deployment_environment  # noqa: PLW0603
+    if _deployment_environment is None:
+        names = {name for names in RUNTIME_SETTING_LOCK_ENV_VARS.values() for name in names}
+        _deployment_environment = {
+            name: os.environ[name] for name in sorted(names) if os.environ.get(name, "").strip()
+        }
+    return _deployment_environment
+
+
+def runtime_setting_lock(key: str) -> str | None:
+    """The deployment variable that owns ``key`` on this process, if any."""
+    environment = deployment_environment()
+    return next(
+        (name for name in RUNTIME_SETTING_LOCK_ENV_VARS.get(key, ()) if name in environment), None
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class RuntimeSettingsSync:
+    """What one sync did: variables it changed, and stored values it set aside."""
+
+    changed_env_vars: tuple[str, ...]
+    stored_keys: tuple[str, ...]
+    overridden_keys: tuple[str, ...]
+
+
+def _runtime_sync_lock() -> asyncio.Lock:
+    global _sync_lock  # noqa: PLW0603
+    loop = asyncio.get_running_loop()
+    if _sync_lock is None or _sync_lock[0] is not loop:
+        _sync_lock = (loop, asyncio.Lock())
+    return _sync_lock[1]
+
+
+async def sync_runtime_settings(*, rebuild: bool = True, reason: str) -> RuntimeSettingsSync:
+    """Make this process's environment match the stored runtime settings.
+
+    The same rule applies at startup, after a change on any replica, and after
+    a resubscription that may have missed one: a setting whose variables the
+    deployment set keeps the deployment's value, and every other setting
+    mirrors the stored value, or is cleared when nothing is stored. Every
+    replica and worker given the same deployment environment therefore ends
+    up with the same provider keys and embedding provider, model and size.
+
+    All stored values are read before the environment changes, so a failed
+    read leaves it untouched. When any variable changed, the graph and
+    embedding runtimes are rebuilt, even if the swap stopped partway.
+    """
+    service = get_settings_service()
+    keys = list(RUNTIME_SETTING_ENV_VARS)
+    async with _runtime_sync_lock():
+        stored = {key: await service.get_database_value(key) for key in keys}
+        service.forget(keys)
+        environment = deployment_environment()
+        target: dict[str, str | None] = {}
+        overridden: list[str] = []
+        for key in keys:
+            lock = runtime_setting_lock(key)
+            for name in RUNTIME_SETTING_ENV_VARS[key]:
+                if lock is None:
+                    target[name] = stored[key] or None
+                elif name not in environment:
+                    # Mirror the deployment's value into the aliases it left unset.
+                    target[name] = environment[lock]
+            if lock is not None and stored[key] and stored[key] != environment[lock]:
+                overridden.append(key)
+        changed = tuple(name for name, value in target.items() if os.environ.get(name) != value)
+        try:
+            for name in changed:
+                value = target[name]
+                if value is None:
+                    os.environ.pop(name, None)
+                else:
+                    os.environ[name] = value
+        finally:
+            if changed and rebuild:
+                try:
+                    await reset_settings_dependent_runtimes()
+                except Exception as e:
+                    log.warning("Failed to reset graph and embedding runtimes", error=str(e))
+    if overridden:
+        log.warning(
+            "Stored runtime settings are overridden by the deployment environment",
+            keys=overridden,
+        )
+    if changed:
+        log.info("Runtime settings applied", reason=reason, env_vars=list(changed))
+    return RuntimeSettingsSync(
+        changed_env_vars=changed,
+        stored_keys=tuple(key for key in keys if stored[key]),
+        overridden_keys=tuple(overridden),
+    )
 
 
 async def load_api_keys_from_db() -> list[str]:

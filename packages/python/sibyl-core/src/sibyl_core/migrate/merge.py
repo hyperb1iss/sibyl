@@ -56,6 +56,7 @@ SCOPED_USER_KEY_FIELDS = {
 VOLATILE_AUTH_TABLES = {
     "device_authorization_requests",
     "login_history",
+    "oauth_authorization_requests",
     "password_reset_tokens",
     "user_sessions",
 }

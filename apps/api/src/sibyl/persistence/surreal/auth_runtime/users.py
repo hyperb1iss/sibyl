@@ -17,6 +17,7 @@ from sibyl.auth.passwords import (
     verify_password_timing_floor,
 )
 from sibyl.auth.session_cache import access_session_cache
+from sibyl.cache_invalidation import announce_sessions_invalidated
 from sibyl.persistence.auth_common import UserNotFoundError
 from sibyl.persistence.content_runtime import soft_delete_private_raw_captures_for_user
 from sibyl.persistence.surreal.auth import (
@@ -252,6 +253,7 @@ async def request_user_deletion(
             now=now,
         )
         access_session_cache.invalidate_user(user_id)
+        await announce_sessions_invalidated(user_ids=[user_id])
         await _log_audit_event(
             client,
             action="auth.user.delete_requested",

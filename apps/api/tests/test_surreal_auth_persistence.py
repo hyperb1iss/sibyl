@@ -319,7 +319,10 @@ async def test_auth_archive_export_reads_from_surreal_backend(
 
 def test_auth_archive_tables_cover_auth_schema_tables() -> None:
     # The singleton is archive metadata, not a UUID-keyed user/auth record.
-    assert set(auth_archive.AUTH_ARCHIVE_TABLES) | {"server_identity"} == set(AUTH_TABLES)
+    # An OAuth authorization lives for minutes and only its hashes are stored,
+    # so a restored row could never complete; backups leave the table out.
+    excluded = {"server_identity", "oauth_authorization_requests"}
+    assert set(auth_archive.AUTH_ARCHIVE_TABLES) | excluded == set(AUTH_TABLES)
 
 
 @pytest.mark.asyncio

@@ -18,12 +18,13 @@ from fastapi import APIRouter, Depends
 from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel, Field
 
+from sibyl.cache_invalidation import announce_runtime_settings_changed
 from sibyl.config import settings
 from sibyl.persistence.operations_runtime import (
     get_setup_status as get_runtime_setup_status,
     require_setup_mode_or_admin,
 )
-from sibyl.services.settings import get_settings_service
+from sibyl.services.settings import get_settings_service, sync_runtime_settings
 from sibyl_core.ai.bedrock import (
     API_KEY_ENV_VARS as BEDROCK_API_KEY_ENV_VARS,
     BedrockConfigError,
@@ -590,6 +591,23 @@ async def update_config(
             description="Gemini API key for Google embeddings",
         )
         log.info("Gemini API key updated", valid=gemini_valid)
+
+    saved = [
+        key
+        for key, value in (
+            ("openai_api_key", body.openai_api_key),
+            ("anthropic_api_key", body.anthropic_api_key),
+            ("gemini_api_key", body.gemini_api_key),
+        )
+        if value is not None
+    ]
+    if saved:
+        # Stored keys take effect now, on this replica and every other one,
+        # instead of only on processes that restart.
+        try:
+            await sync_runtime_settings(reason="setup keys saved")
+        finally:
+            await announce_runtime_settings_changed(saved)
 
     # Get current config state
     openai_key = await service.get_openai_key()

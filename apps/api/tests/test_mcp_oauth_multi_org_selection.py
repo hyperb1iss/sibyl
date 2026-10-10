@@ -1,18 +1,60 @@
 from __future__ import annotations
 
-import time
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
+from datetime import timedelta
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 from urllib.parse import parse_qs, urlencode, urlsplit
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
-from mcp.server.auth.provider import AuthorizationParams
 from mcp.shared.auth import OAuthClientInformationFull
-from pydantic.networks import AnyUrl
 from starlette.requests import Request
 
-from sibyl.auth.mcp_oauth import SibylMcpOAuthProvider, _AuthedUser, _PendingAuth
+from sibyl.auth.mcp_oauth import SibylMcpOAuthProvider
+from sibyl.persistence.surreal.auth_runtime.oauth_authorization import (
+    SurrealOAuthAuthorizationStore,
+)
+from sibyl_core.backends.surreal import SurrealAuthClient, bootstrap_auth_schema
+from sibyl_core.backends.surreal.records import utcnow
+
+
+@pytest.fixture
+async def store() -> AsyncIterator[SurrealOAuthAuthorizationStore]:
+    client = SurrealAuthClient(url="memory://", namespace=f"oauth_ui_{uuid4().hex}")
+    await bootstrap_auth_schema(client)
+
+    @asynccontextmanager
+    async def scope() -> AsyncIterator[SurrealAuthClient]:
+        yield client
+
+    try:
+        yield SurrealOAuthAuthorizationStore(scope)
+    finally:
+        await client.close()
+
+
+async def _pending(
+    store: SurrealOAuthAuthorizationStore, request_id: str, *, authed_user: UUID | None = None
+) -> None:
+    await store.create_request(
+        request_key=request_id,
+        client_id="client1",
+        state="state123",
+        scopes=["mcp"],
+        code_challenge="challenge",
+        redirect_uri="http://client.local/cb",
+        redirect_uri_provided_explicitly=True,
+        resource="http://localhost:3334/mcp",
+        expires_at=utcnow() + timedelta(minutes=10),
+    )
+    if authed_user is not None:
+        assert await store.mark_authenticated(
+            request_id,
+            user_id=authed_user,
+            authenticated_expires_at=utcnow() + timedelta(minutes=5),
+        )
 
 
 def _make_get_request(*, path: str, query: dict[str, str]) -> Request:
@@ -52,24 +94,16 @@ def _make_form_post_request(*, path: str, data: dict[str, str]) -> Request:
 
 
 @pytest.mark.asyncio
-async def test_mcp_oauth_login_redirects_to_org_selection_for_multi_org_user(monkeypatch) -> None:
-    provider = SibylMcpOAuthProvider()
+async def test_mcp_oauth_login_redirects_to_org_selection_for_multi_org_user(
+    monkeypatch, store: SurrealOAuthAuthorizationStore
+) -> None:
+    provider = SibylMcpOAuthProvider(authorization_store=store)
 
     user = SimpleNamespace(id=uuid4(), name="Test User")
     org1 = SimpleNamespace(id=uuid4(), name="Org One", slug="org-one", is_personal=False)
     org2 = SimpleNamespace(id=uuid4(), name="Org Two", slug="org-two", is_personal=True)
 
-    params = AuthorizationParams(
-        state="state123",
-        scopes=["mcp"],
-        code_challenge="challenge",
-        redirect_uri=AnyUrl("http://client.local/cb"),
-        redirect_uri_provided_explicitly=True,
-        resource="http://localhost:3334/mcp",
-    )
-    provider._pending["req123"] = _PendingAuth(
-        client_id="client1", expires_at=time.time() + 600, params=params
-    )
+    await _pending(store, "req123")
 
     monkeypatch.setattr(
         provider,
@@ -90,31 +124,22 @@ async def test_mcp_oauth_login_redirects_to_org_selection_for_multi_org_user(mon
 
     assert resp.status_code == 302
     assert resp.headers["location"] == "/_oauth/org?req=req123"
-    authed = provider._get_authed_user("req123")
-    assert authed is not None
-    assert authed.user_id == user.id
+    pending = await store.load_request("req123")
+    assert pending is not None
+    assert pending.authenticated_user(now=utcnow()) == user.id
 
 
 @pytest.mark.asyncio
-async def test_mcp_oauth_org_selection_issues_code(monkeypatch) -> None:
-    provider = SibylMcpOAuthProvider()
+async def test_mcp_oauth_org_selection_issues_code(
+    monkeypatch, store: SurrealOAuthAuthorizationStore
+) -> None:
+    provider = SibylMcpOAuthProvider(authorization_store=store)
 
     user = SimpleNamespace(id=uuid4(), name="Test User")
     org1 = SimpleNamespace(id=uuid4(), name="Org One", slug="org-one", is_personal=False)
     org2 = SimpleNamespace(id=uuid4(), name="Org Two", slug="org-two", is_personal=True)
 
-    params = AuthorizationParams(
-        state="state123",
-        scopes=["mcp"],
-        code_challenge="challenge",
-        redirect_uri=AnyUrl("http://client.local/cb"),
-        redirect_uri_provided_explicitly=True,
-        resource="http://localhost:3334/mcp",
-    )
-    provider._pending["req123"] = _PendingAuth(
-        client_id="client1", expires_at=time.time() + 600, params=params
-    )
-    provider._authed["req123"] = _AuthedUser(user_id=user.id, expires_at=time.time() + 300)
+    await _pending(store, "req123", authed_user=user.id)
 
     monkeypatch.setattr(
         provider,
@@ -137,13 +162,18 @@ async def test_mcp_oauth_org_selection_issues_code(monkeypatch) -> None:
     qs = parse_qs(parsed.query)
     assert qs["code"] == ["code_abc"]
     assert qs["state"] == ["state123"]
-    assert "req123" not in provider._pending
-    assert "req123" not in provider._authed
+    assert await store.load_request("req123") is None
+    code = await store.load_code("code_abc")
+    assert code is not None
+    assert code.organization_id == org2.id
+    assert code.user_id == user.id
 
 
 @pytest.mark.asyncio
-async def test_mcp_oauth_org_page_escapes_org_name(monkeypatch) -> None:
-    provider = SibylMcpOAuthProvider()
+async def test_mcp_oauth_org_page_escapes_org_name(
+    monkeypatch, store: SurrealOAuthAuthorizationStore
+) -> None:
+    provider = SibylMcpOAuthProvider(authorization_store=store)
 
     user = SimpleNamespace(id=uuid4(), name="Test User")
     hostile_org = SimpleNamespace(
@@ -153,10 +183,7 @@ async def test_mcp_oauth_org_page_escapes_org_name(monkeypatch) -> None:
         is_personal=False,
     )
 
-    provider._pending["req123"] = _PendingAuth(
-        client_id="client1", expires_at=time.time() + 600, params=None
-    )
-    provider._authed["req123"] = _AuthedUser(user_id=user.id, expires_at=time.time() + 300)
+    await _pending(store, "req123", authed_user=user.id)
 
     monkeypatch.setattr(
         provider,
@@ -174,11 +201,12 @@ async def test_mcp_oauth_org_page_escapes_org_name(monkeypatch) -> None:
 
 
 @pytest.mark.asyncio
-async def test_mcp_oauth_login_page_escapes_client_name() -> None:
-    provider = SibylMcpOAuthProvider()
-    provider._pending["req123"] = _PendingAuth(
-        client_id="client1", expires_at=time.time() + 600, params=None
-    )
+async def test_mcp_oauth_login_page_escapes_client_name(
+    monkeypatch, store: SurrealOAuthAuthorizationStore
+) -> None:
+    provider = SibylMcpOAuthProvider(authorization_store=store)
+    monkeypatch.setattr(provider, "_save_oauth_client_registration", AsyncMock())
+    await _pending(store, "req123")
     await provider.register_client(
         OAuthClientInformationFull(
             client_id="client1",

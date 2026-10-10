@@ -16,6 +16,7 @@ from surrealdb import AsyncSurreal
 from sibyl_core.backends.surreal.auth_schema import (
     AUTH_ENUM_ASSERTION_MIGRATION_DEFINITIONS,
     AUTH_INVITATION_TOKEN_MIGRATION_DEFINITIONS,
+    AUTH_OAUTH_AUTHORIZATION_MIGRATION_DEFINITIONS,
     AUTH_PERMISSION_MIGRATION_DEFINITIONS,
     AUTH_PROJECT_SLUG_MIGRATION_DEFINITIONS,
     AUTH_REPLAY_IDENTITY_MIGRATION_DEFINITIONS,
@@ -254,6 +255,7 @@ def test_runtime_schemafull_tables_pair_define_with_alter() -> None:
         (
             AUTH_SCHEMA_DEFINITIONS,
             AUTH_REPLAY_IDENTITY_MIGRATION_DEFINITIONS,
+            AUTH_OAUTH_AUTHORIZATION_MIGRATION_DEFINITIONS,
             CONTENT_SCHEMA_DEFINITIONS,
             *(
                 statement + ";"

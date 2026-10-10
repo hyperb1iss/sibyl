@@ -34,6 +34,10 @@ async def test_worker_startup_installs_core_runtime_ports(
         MagicMock(side_effect=lambda: startup_events.append("core_ports")),
     )
     monkeypatch.setattr(
+        "sibyl.cache_invalidation.start_cache_invalidation",
+        AsyncMock(side_effect=lambda: startup_events.append("cache_invalidation")),
+    )
+    monkeypatch.setattr(
         "sibyl.services.surreal_connectivity.start_surreal_connectivity_monitor",
         MagicMock(side_effect=lambda: startup_events.append("pool_sweep")),
     )
@@ -44,8 +48,9 @@ async def test_worker_startup_installs_core_runtime_ports(
 
     assert "start_time" in ctx
     # The worker runs the same pool health sweep as the API, so dead sockets
-    # and retired org clients are handled there too.
-    assert startup_events == ["settings", "llm", "core_ports", "pool_sweep"]
+    # and retired org clients are handled there too. It also follows settings
+    # and LLM config changes made through any API replica.
+    assert startup_events == ["settings", "llm", "core_ports", "cache_invalidation", "pool_sweep"]
 
 
 @pytest.mark.asyncio
@@ -55,6 +60,10 @@ async def test_worker_shutdown_stops_the_pool_sweep(monkeypatch: pytest.MonkeyPa
         "sibyl.services.surreal_connectivity.stop_surreal_connectivity_monitor", stopped
     )
 
+    left = AsyncMock()
+    monkeypatch.setattr("sibyl.cache_invalidation.stop_cache_invalidation", left)
+
     await worker_module.shutdown({})
 
     stopped.assert_awaited_once()
+    left.assert_awaited_once()

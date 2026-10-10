@@ -119,6 +119,15 @@ async def startup(ctx: dict[str, Any]) -> None:
     install_db_config_source()
     install_core_runtime_ports()
 
+    # Settings and LLM configuration changed through any API replica reach
+    # this worker's caches too.
+    from sibyl.cache_invalidation import start_cache_invalidation
+
+    try:
+        await start_cache_invalidation()
+    except Exception as e:
+        log.warning("Cross-replica cache invalidation unavailable", error=str(e))
+
     # The worker holds the same shared pools and per-org graph clients as the
     # API, so it runs the same health sweep: dead sockets are dropped between
     # jobs and evicted org clients are closed once idle.
@@ -136,6 +145,10 @@ async def shutdown(ctx: dict[str, Any]) -> None:  # noqa: ARG001
     from sibyl.services.surreal_connectivity import stop_surreal_connectivity_monitor
 
     await stop_surreal_connectivity_monitor()
+
+    from sibyl.cache_invalidation import stop_cache_invalidation
+
+    await stop_cache_invalidation()
     log.info("Job worker shutting down")
 
 

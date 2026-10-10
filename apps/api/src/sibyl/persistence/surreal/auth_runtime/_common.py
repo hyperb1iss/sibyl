@@ -30,6 +30,7 @@ from sibyl.auth.jwt import (
     decode_token_unverified,
 )
 from sibyl.auth.session_cache import access_session_cache
+from sibyl.cache_invalidation import announce_sessions_invalidated
 from sibyl.persistence.surreal.auth import (
     SurrealAuthContextResolver,
     surreal_auth_client_scope,
@@ -624,14 +625,16 @@ class SurrealSessionRepository(_SurrealRepository):
             return None
         return self._auth_session_from_record(record)
 
-    async def get_session_by_id(self, session_id: UUID) -> AuthSession | None:
+    async def get_session_by_id(
+        self, session_id: UUID, *, include_inactive: bool = False
+    ) -> AuthSession | None:
         record = await self.select_one(
             "SELECT * FROM user_sessions WHERE uuid = $uuid LIMIT 1;",
             uuid=str(session_id),
         )
         if record is None:
             return None
-        if not self._is_session_active(record):
+        if not include_inactive and not self._is_session_active(record):
             return None
         return self._auth_session_from_record(record)
 
@@ -765,10 +768,14 @@ class SurrealSessionRepository(_SurrealRepository):
         revoked = bool(_normalize_records(result))
         if revoked:
             access_session_cache.mark_revoked(session_id, user_id=user_id)
+        # Announced even when nothing changed: revoking again is how a peer
+        # that missed the first announcement gets healed.
+        await announce_sessions_invalidated(session_ids=[session_id])
         return revoked
 
     async def revoke_loaded_session(self, session: AuthSession) -> bool:
         if session.revoked_at is not None:
+            await announce_sessions_invalidated(session_ids=[session.id])
             return False
         now = _utcnow()
         result = await self._client.execute_query(
@@ -787,6 +794,7 @@ class SurrealSessionRepository(_SurrealRepository):
             organization_id=session.organization_id,
             expires_at=session.refresh_token_expires_at or session.expires_at,
         )
+        await announce_sessions_invalidated(session_ids=[session.id])
         return True
 
     async def revoke_all_sessions(
@@ -811,6 +819,7 @@ class SurrealSessionRepository(_SurrealRepository):
             raise RuntimeError(error)
         records = _normalize_records(result)
         access_session_cache.invalidate_user(user_id)
+        await announce_sessions_invalidated(user_ids=[user_id])
         return len(records)
 
     async def cleanup_expired(self, *, older_than_days: int = 30) -> int:
@@ -1160,7 +1169,12 @@ async def _ensure_personal_org_membership_record(
 
 
 def _session_id_from_access_token(token: str) -> UUID | None:
-    sid = decode_token_unverified(token).get("sid")
+    """The sid claim, unverified: only for tokens already verified upstream."""
+    return _session_id_from_claims(decode_token_unverified(token))
+
+
+def _session_id_from_claims(claims: Mapping[str, object]) -> UUID | None:
+    sid = claims.get("sid")
     if not isinstance(sid, str) or not sid:
         return None
     try:

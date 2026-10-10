@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from sibyl.ai.llm.budget import DBLLMBudgetEnforcer
 from sibyl.ai.llm.config_source import DBSettingsConfigSource
+from sibyl.cache_invalidation import announce_llm_runtime_invalidated
 from sibyl.services.settings import SettingsService, get_settings_service
 from sibyl_core.ai.clients import invalidate_agent_cache
 from sibyl_core.ai.llm.budget import set_budget_enforcer
@@ -22,5 +23,11 @@ def install_db_config_source(
 
 
 async def invalidate_llm_runtime(surface: LLMSurface | None = None) -> None:
+    """Forget resolved LLM config here and in every other API replica and worker."""
+    await invalidate_local_llm_runtime(surface)
+    await announce_llm_runtime_invalidated(surface.value if surface is not None else None)
+
+
+async def invalidate_local_llm_runtime(surface: LLMSurface | None = None) -> None:
     await get_config_source().invalidate(surface)
     invalidate_agent_cache(surface)

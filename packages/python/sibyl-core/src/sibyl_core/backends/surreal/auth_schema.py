@@ -49,9 +49,10 @@ EXTENDED_AUTH_TABLES = (
     "memory_space_members",
     "llm_usage_buckets",
     "server_identity",
+    "oauth_authorization_requests",
 )
 AUTH_TABLES = (*CORE_AUTH_TABLES, *EXTENDED_AUTH_TABLES)
-AUTH_SCHEMA_CURRENT_VERSION = 8
+AUTH_SCHEMA_CURRENT_VERSION = 9
 AUTH_SCHEMA_NAME = "auth"
 _AUTH_ORGANIZATION_ROLE_VALUES = tuple(role.value for role in OrganizationRole)
 _AUTH_PROJECT_ROLE_VALUES = tuple(role.value for role in ProjectRole)
@@ -59,6 +60,7 @@ _AUTH_PROJECT_VISIBILITY_VALUES = tuple(visibility.value for visibility in Proje
 _AUTH_MEMORY_SCOPE_VALUES = tuple(scope.value for scope in MemoryScope)
 _AUTH_MEMORY_SPACE_STATE_VALUES = ("active", "disabled")
 _AUTH_DEVICE_AUTHORIZATION_STATUS_VALUES = ("pending", "approved", "denied", "consumed")
+_AUTH_OAUTH_AUTHORIZATION_STATUS_VALUES = ("pending", "authenticated", "code_issued")
 
 
 def _surql_string_array(values: tuple[str, ...]) -> str:
@@ -681,6 +683,46 @@ UPDATE api_keys SET memory_scope_restricted = true WHERE (uuid IN
      AND type::is::int(details.memory_space_scope_count) AND details.memory_space_scope_count > 0));
 """
 
+# One row carries an MCP OAuth authorization from /authorize through login,
+# organization choice and the code exchange, so any replica can serve any step.
+# Keys are stored as hashes: a row read back is never a usable request or code.
+AUTH_OAUTH_AUTHORIZATION_MIGRATION_DEFINITIONS = f"""
+DEFINE TABLE IF NOT EXISTS oauth_authorization_requests SCHEMAFULL;
+ALTER TABLE IF EXISTS oauth_authorization_requests SCHEMAFULL;
+DEFINE FIELD IF NOT EXISTS uuid ON oauth_authorization_requests TYPE string;
+DEFINE FIELD IF NOT EXISTS request_key_hash ON oauth_authorization_requests TYPE string;
+DEFINE FIELD IF NOT EXISTS code_hash ON oauth_authorization_requests TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS client_id ON oauth_authorization_requests TYPE string;
+DEFINE FIELD IF NOT EXISTS status ON oauth_authorization_requests TYPE string DEFAULT 'pending'
+    ASSERT $value IN {_surql_string_array(_AUTH_OAUTH_AUTHORIZATION_STATUS_VALUES)};
+DEFINE FIELD IF NOT EXISTS state ON oauth_authorization_requests TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS scopes ON oauth_authorization_requests TYPE option<array<string>>;
+DEFINE FIELD IF NOT EXISTS code_challenge ON oauth_authorization_requests TYPE string;
+DEFINE FIELD IF NOT EXISTS redirect_uri ON oauth_authorization_requests TYPE string;
+DEFINE FIELD IF NOT EXISTS redirect_uri_provided_explicitly
+    ON oauth_authorization_requests TYPE bool DEFAULT true;
+DEFINE FIELD IF NOT EXISTS resource ON oauth_authorization_requests TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS user_id ON oauth_authorization_requests TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS organization_id ON oauth_authorization_requests TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS authenticated_expires_at
+    ON oauth_authorization_requests TYPE option<datetime>;
+DEFINE FIELD IF NOT EXISTS expires_at ON oauth_authorization_requests TYPE datetime;
+DEFINE FIELD IF NOT EXISTS created_at
+    ON oauth_authorization_requests TYPE datetime DEFAULT time::now();
+DEFINE FIELD IF NOT EXISTS updated_at
+    ON oauth_authorization_requests TYPE datetime DEFAULT time::now();
+
+DEFINE INDEX IF NOT EXISTS idx_oauth_authorization_requests_uuid
+    ON oauth_authorization_requests FIELDS uuid UNIQUE;
+DEFINE INDEX IF NOT EXISTS idx_oauth_authorization_requests_request_key
+    ON oauth_authorization_requests FIELDS request_key_hash UNIQUE;
+DEFINE INDEX IF NOT EXISTS idx_oauth_authorization_requests_code
+    ON oauth_authorization_requests FIELDS code_hash UNIQUE;
+DEFINE INDEX IF NOT EXISTS idx_oauth_authorization_requests_expires
+    ON oauth_authorization_requests FIELDS expires_at;
+ALTER TABLE IF EXISTS oauth_authorization_requests PERMISSIONS NONE;
+"""
+
 AUTH_SCHEMA_MIGRATIONS = (
     SchemaMigration(
         version=1,
@@ -725,6 +767,11 @@ AUTH_SCHEMA_MIGRATIONS = (
                 AUTH_KEY_SCOPE_RETENTION_DEFINITIONS + AUTH_KEY_SCOPE_BACKFILL_DEFINITIONS
             )
         ),
+    ),
+    SchemaMigration(
+        version=9,
+        name="auth_oauth_authorization_requests",
+        statements=tuple(split_statements(AUTH_OAUTH_AUTHORIZATION_MIGRATION_DEFINITIONS)),
     ),
 )
 
@@ -911,6 +958,7 @@ def _coerce_int(value: object) -> int:
 __all__ = [
     "AUTH_ENUM_ASSERTION_MIGRATION_DEFINITIONS",
     "AUTH_INVITATION_TOKEN_MIGRATION_DEFINITIONS",
+    "AUTH_OAUTH_AUTHORIZATION_MIGRATION_DEFINITIONS",
     "AUTH_PERMISSION_MIGRATION_DEFINITIONS",
     "AUTH_PROJECT_SLUG_MIGRATION_DEFINITIONS",
     "AUTH_SCHEMAFULL_REPAIR_DEFINITIONS",

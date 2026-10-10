@@ -185,6 +185,10 @@ export interface SettingInfo {
   is_secret: boolean;
   masked: string | null;
   value: string | null;
+  /** The deployment environment owns this setting; it is read-only here. */
+  locked_by_env?: boolean;
+  /** The deployment variable that owns the setting, when locked. */
+  env_var?: string | null;
 }
 
 export interface SettingsResponse {

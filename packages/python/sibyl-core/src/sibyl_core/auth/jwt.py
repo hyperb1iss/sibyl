@@ -91,8 +91,14 @@ def create_access_token(
         raise JwtError(f"Failed to sign JWT: {e}") from e
 
 
-def verify_access_token(token: str) -> dict[str, Any]:
-    """Verify token signature + expiry and return claims."""
+def verify_access_token(token: str, *, verify_expiry: bool = True) -> dict[str, Any]:
+    """Verify token signature + expiry and return claims.
+
+    Args:
+        token: The access token to verify
+        verify_expiry: If False, accept an expired token whose signature and
+            type still check out (logout ends the session it names).
+    """
     settings = _settings()
     secret = _require_secret()
     try:
@@ -100,7 +106,7 @@ def verify_access_token(token: str) -> dict[str, Any]:
             token,
             secret,
             algorithms=[settings.jwt_algorithm],
-            options={"require": ["sub", "iat", "exp"]},
+            options={"require": ["sub", "iat", "exp"], "verify_exp": verify_expiry},
         )
     except jwt.PyJWTError as e:
         raise JwtError(str(e)) from e
