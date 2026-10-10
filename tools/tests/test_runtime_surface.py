@@ -1089,6 +1089,11 @@ def test_helm_receipt_pods_keep_claim_private_and_attachable() -> None:
     assert "may not be set when strategy.type is Recreate" in invalid.stderr
 
 
+# With receipts in S3 there is no claim for archives to share, so every S3
+# receipts render also names an archive location.
+S3_ARCHIVES = ("--set", "backend.backupArchives.url=s3://sibyl-backups/prod")
+
+
 @requires_helm
 def test_helm_s3_receipts_need_no_claim_and_keep_the_default_rollout() -> None:
     url = "s3://sibyl-receipts/prod?region=us-west-2"
@@ -1097,6 +1102,7 @@ def test_helm_s3_receipts_need_no_claim_and_keep_the_default_rollout() -> None:
         "backend.validationReceipts.existingClaim=",
         "--set",
         f"backend.validationReceipts.url={url}",
+        *S3_ARCHIVES,
     )
     deployments = _receipt_deployments(*s3)
     for name in ("sibyl-backend", "sibyl-worker"):
@@ -1107,6 +1113,7 @@ def test_helm_s3_receipts_need_no_claim_and_keep_the_default_rollout() -> None:
         for container in pod["containers"]:
             assert all(m["name"] != "validation-receipts" for m in container["volumeMounts"])
             assert all(e["name"] != "SIBYL_VALIDATION_RECEIPT_DIR" for e in container["env"])
+            assert all(e["name"] != "SIBYL_BACKUP_DIR" for e in container["env"])
             assert {"configMapRef": {"name": "sibyl-config"}} in container["envFrom"]
     rendered = _helm_template("--set", "backend.existingSecret=runtime-secret", *s3)
     assert rendered.returncode == 0, rendered.stderr
@@ -1175,6 +1182,7 @@ def test_helm_s3_receipts_need_no_claim_and_keep_the_default_rollout() -> None:
             "backend.validationReceipts.existingClaim=",
             "--set",
             f"backend.validationReceipts.url={valid}",
+            *S3_ARCHIVES,
         )
         assert rendered.returncode == 0, rendered.stderr
     bypass = _helm_template(
@@ -1208,11 +1216,165 @@ def test_helm_receipt_strategy_leaves_no_whitespace_lines() -> None:
     assert blank_with_spaces == []
 
 
+def _pod_env(container: dict) -> dict[str, str | None]:
+    return {item["name"]: item.get("value") for item in container.get("env") or []}
+
+
+@requires_helm
+def test_helm_backup_archives_default_to_the_shared_receipts_claim() -> None:
+    """A default install keeps archives durable and readable by every pod.
+
+    API and worker run with a read-only root filesystem, so the image's
+    working directory can never hold archives; the receipts claim both
+    workloads already mount can.
+    """
+    deployments = _receipt_deployments()
+    for name in ("sibyl-backend", "sibyl-worker"):
+        pod = deployments[name]["spec"]["template"]["spec"]
+        (container,) = pod["containers"]
+        assert container["securityContext"]["readOnlyRootFilesystem"] is True
+        assert _pod_env(container)["SIBYL_BACKUP_DIR"] == "/var/lib/sibyl-receipts/backups"
+        mount = next(m for m in container["volumeMounts"] if m["name"] == "validation-receipts")
+        assert mount["mountPath"] == "/var/lib/sibyl-receipts"
+        assert all(volume["name"] != "backup-archives" for volume in pod["volumes"])
+    rendered = _helm_template("--set", "backend.existingSecret=runtime-secret")
+    assert rendered.returncode == 0, rendered.stderr
+    assert "SIBYL_BACKUP_ARCHIVE_URL" not in _rendered_config_data(rendered.stdout)
+
+
+@requires_helm
+def test_helm_backup_archives_claim_is_mounted_by_api_and_worker() -> None:
+    deployments = _receipt_deployments(
+        "--set",
+        "backend.validationReceipts.existingClaim=",
+        "--set",
+        "backend.validationReceipts.url=s3://sibyl-receipts/prod",
+        "--set",
+        "backend.backupArchives.existingClaim=sibyl-backups",
+    )
+    for name in ("sibyl-backend", "sibyl-worker"):
+        spec = deployments[name]["spec"]
+        pod = spec["template"]["spec"]
+        (container,) = pod["containers"]
+        assert _pod_env(container)["SIBYL_BACKUP_DIR"] == "/var/lib/sibyl-backups/archives"
+        mount = next(m for m in container["volumeMounts"] if m["name"] == "backup-archives")
+        assert mount["mountPath"] == "/var/lib/sibyl-backups"
+        volume = next(v for v in pod["volumes"] if v["name"] == "backup-archives")
+        assert volume["persistentVolumeClaim"]["claimName"] == "sibyl-backups"
+        # An RWO archives claim constrains rollouts just as the receipts claim does.
+        assert spec["strategy"]["rollingUpdate"] == {"maxSurge": 0, "maxUnavailable": 1}
+
+
+@requires_helm
+def test_helm_s3_backup_archives_reach_api_and_worker_without_a_volume() -> None:
+    url = "s3://sibyl-backups/prod/archives?region=us-west-2"
+    overrides = (
+        "--set",
+        "backend.validationReceipts.existingClaim=",
+        "--set",
+        "backend.validationReceipts.url=s3://sibyl-receipts/prod",
+        "--set",
+        f"backend.backupArchives.url={url}",
+    )
+    deployments = _receipt_deployments(*overrides)
+    for name in ("sibyl-backend", "sibyl-worker"):
+        spec = deployments[name]["spec"]
+        pod = spec["template"]["spec"]
+        (container,) = pod["containers"]
+        assert "strategy" not in spec, "no claim to compete for, so no maxSurge 0 rollout"
+        assert "SIBYL_BACKUP_DIR" not in _pod_env(container)
+        assert all(volume["name"] != "backup-archives" for volume in pod["volumes"])
+        assert {"configMapRef": {"name": "sibyl-config"}} in container["envFrom"]
+    rendered = _helm_template("--set", "backend.existingSecret=runtime-secret", *overrides)
+    assert rendered.returncode == 0, rendered.stderr
+    assert _rendered_config_data(rendered.stdout)["SIBYL_BACKUP_ARCHIVE_URL"] == url
+
+    # Archives may live in S3 while receipts stay on their claim.
+    mixed = _receipt_deployments("--set", f"backend.backupArchives.url={url}")
+    for name in ("sibyl-backend", "sibyl-worker"):
+        (container,) = mixed[name]["spec"]["template"]["spec"]["containers"]
+        assert "SIBYL_BACKUP_DIR" not in _pod_env(container)
+
+
+@requires_helm
+@pytest.mark.parametrize(
+    ("overrides", "message"),
+    [
+        (
+            (
+                "backend.validationReceipts.existingClaim=",
+                "backend.validationReceipts.url=s3://rcpt/p",
+            ),
+            "backend.backupArchives.url or backend.backupArchives.existingClaim is required",
+        ),
+        (
+            ("backend.backupArchives.url=s3://bkt/p", "backend.backupArchives.existingClaim=c"),
+            "Set only one of backend.backupArchives.url",
+        ),
+        (
+            (
+                "backend.validationReceipts.existingClaim=",
+                "backend.validationReceipts.url=s3://shared/sibyl",
+                "backend.backupArchives.url=s3://shared/sibyl/backups",
+            ),
+            "need separate S3 prefixes",
+        ),
+        (
+            (
+                "backend.validationReceipts.existingClaim=",
+                "backend.validationReceipts.url=s3://shared",
+                "backend.backupArchives.url=s3://shared/backups",
+            ),
+            "need separate S3 prefixes",
+        ),
+        (("backend.backupArchives.url=https://bkt.s3.amazonaws.com/p",), "must be an s3://"),
+        (("backend.backupArchives.url=s3://Backups/p",), "must name a valid S3 bucket"),
+        (("backend.backupArchives.url=s3://backups/p?endpoint=minio",), "only a ?region=name"),
+        (("backend.backupArchives.url=s3://backups/a/../b",), "may not contain empty, . or .."),
+        (("backend.env.SIBYL_BACKUP_DIR=/tmp/backups",), "instead of backend.env.SIBYL_BACKUP_DIR"),
+        (
+            ("backend.env.SIBYL_BACKUP_ARCHIVE_URL=s3://backups/p",),
+            "instead of backend.env.SIBYL_BACKUP_ARCHIVE_URL",
+        ),
+    ],
+)
+def test_helm_backup_archives_refuse_unshared_or_malformed_stores(
+    overrides: tuple[str, ...], message: str
+) -> None:
+    args = [item for override in overrides for item in ("--set", override)]
+    refused = _helm_template("--set", "backend.existingSecret=runtime-secret", *args)
+    assert refused.returncode != 0, overrides
+    assert message in refused.stderr, refused.stderr
+
+
+@requires_helm
+def test_helm_backup_archive_prefixes_beside_receipts_render() -> None:
+    for receipts, archives in (
+        ("s3://shared/sibyl/receipts", "s3://shared/sibyl/backups"),
+        ("s3://shared/sib", "s3://shared/sibyl"),
+        ("s3://receipts-bucket", "s3://backups-bucket"),
+    ):
+        rendered = _helm_template(
+            "--set",
+            "backend.existingSecret=runtime-secret",
+            "--set",
+            "backend.validationReceipts.existingClaim=",
+            "--set",
+            f"backend.validationReceipts.url={receipts}",
+            "--set",
+            f"backend.backupArchives.url={archives}",
+        )
+        assert rendered.returncode == 0, (receipts, archives, rendered.stderr)
+
+
 def test_production_compose_validation_receipts_share_durable_state() -> None:
     compose = yaml.safe_load((REPO_ROOT / "docker-compose.prod.yml").read_text())
     for owner in ("backend", "worker"):
         service = compose["services"][owner]
         assert "validation_receipts:/home/sibyl/.sibyl" in service["volumes"]
+        # Backup archives default to ~/.sibyl/backups, on this same shared
+        # volume, so a worker's archive downloads through the backend.
+        assert "SIBYL_BACKUP_DIR" not in service["environment"]
         assert (
             service["depends_on"]["receipts-init"]["condition"] == "service_completed_successfully"
         )
@@ -1257,11 +1419,16 @@ def test_helm_ci_profile_renders_exact_workflow_arguments(profile: str) -> None:
     assert backend_pods
     for pod in backend_pods:
         volumes = {item["name"]: item for item in pod["volumes"]}
+        env = {item["name"]: item.get("value") for item in pod["containers"][0]["env"]}
         if profile == "s3-receipts":
             assert "validation-receipts" not in volumes
+            assert "SIBYL_BACKUP_DIR" not in env
         else:
             claim = volumes["validation-receipts"]["persistentVolumeClaim"]["claimName"]
             assert claim == "ci-validation-receipts"
+            assert env["SIBYL_BACKUP_DIR"] == "/var/lib/sibyl-receipts/backups"
     receipt_url = 'SIBYL_VALIDATION_RECEIPT_URL: "s3://ci-validation-receipts/sibyl"'
     assert (receipt_url in result.stdout) == (profile == "s3-receipts")
+    archive_url = 'SIBYL_BACKUP_ARCHIVE_URL: "s3://ci-backup-archives/sibyl"'
+    assert (archive_url in result.stdout) == (profile == "s3-receipts")
     assert ("name: sibyl-worker" in result.stdout) == (selected["worker"] == "present")
