@@ -125,6 +125,8 @@ async def test_oauth_issuance_and_refresh_keep_first_party_session_credentials(
     user_id, organization_id = uuid4(), uuid4()
     persist = AsyncMock()
     monkeypatch.setattr(provider, "_create_session_record", persist)
+    # The code below was never stored; this test is about what gets issued.
+    monkeypatch.setattr(provider, "_claim_authorization_code", AsyncMock(return_value=True))
     monkeypatch.setattr(
         "sibyl.auth.mcp_oauth.validate_access_session", AsyncMock(return_value=True)
     )

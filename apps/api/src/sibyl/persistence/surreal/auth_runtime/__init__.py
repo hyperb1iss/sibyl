@@ -68,6 +68,10 @@ from sibyl.persistence.surreal.auth_runtime.login import (
     login_oidc_identity,
     signup_local_user,
 )
+from sibyl.persistence.surreal.auth_runtime.oauth_authorization import (
+    OAuthAuthorizationRecord,
+    SurrealOAuthAuthorizationStore,
+)
 from sibyl.persistence.surreal.auth_runtime.password_reset import (
     confirm_password_reset,
     request_password_reset,
@@ -139,11 +143,14 @@ __all__ = [
     "DeviceBrowserLogin",
     "IssuedAuthSession",
     "IssuedOidcSession",
+    "OAuthAuthorizationRecord",
+    "OAuthAuthorizationStore",
     "OrganizationMembershipRepository",
     "OrganizationRepository",
     "RefreshRotation",
     "SessionRepository",
     "SurrealAuthContextResolver",
+    "SurrealOAuthAuthorizationStore",
     "SurrealOrganizationMembershipRepository",
     "SurrealOrganizationRepository",
     "SurrealSessionRepository",
@@ -227,6 +234,7 @@ __all__ = [
 
 
 AuthContextResolver = SurrealAuthContextResolver
+OAuthAuthorizationStore = SurrealOAuthAuthorizationStore
 OrganizationMembershipRepository = SurrealOrganizationMembershipRepository
 OrganizationRepository = SurrealOrganizationRepository
 SessionRepository = SurrealSessionRepository

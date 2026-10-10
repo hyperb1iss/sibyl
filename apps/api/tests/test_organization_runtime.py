@@ -176,6 +176,8 @@ async def test_surreal_delete_org_batches_authorization_and_deletes_directly(
         auth_sweep_query
     )
     assert "DELETE FROM projects WHERE organization_id = $organization_id;" in auth_sweep_query
+    # A code issued for the org minutes before it was deleted must not mint a session.
+    assert "DELETE FROM oauth_authorization_requests" in auth_sweep_query
     assert "DELETE FROM organizations WHERE uuid = $organization_id;" in auth_sweep_query
     assert auth_sweep_params == {"organization_id": str(org_id)}
     delete_auth_children.assert_awaited_once_with(fake_client, organization_id=org_id)

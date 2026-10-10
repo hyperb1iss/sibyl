@@ -1034,6 +1034,8 @@ async def delete_org(*, request: Request, slug: str, user_id: UUID) -> None:
                 DELETE FROM user_sessions WHERE organization_id = $organization_id;
                 DELETE FROM device_authorization_requests
                     WHERE organization_id = $organization_id;
+                DELETE FROM oauth_authorization_requests
+                    WHERE organization_id = $organization_id;
                 DELETE FROM organizations WHERE uuid = $organization_id;
                 COMMIT TRANSACTION;
             """,

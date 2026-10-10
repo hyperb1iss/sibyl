@@ -9,7 +9,10 @@ served by MCPServer when `auth_server_provider` is configured:
 
 Implementation notes:
 - Dynamic clients are cached in-memory and persisted in auth storage.
-- Authorization codes are short-lived, in-memory, single-use.
+- Authorization flow state (pending login, chosen organization, issued code)
+  lives in auth storage, so every step of one authorization can be served by
+  a different API replica. Codes are short-lived and claimed atomically, so
+  each one is exchanged at most once however many replicas race for it.
 - Access tokens are Sibyl JWT access tokens (Bearer).
 - Refresh tokens are JWT refresh tokens tracked through the active auth runtime.
 """
@@ -17,8 +20,6 @@ Implementation notes:
 from __future__ import annotations
 
 import secrets
-import time
-from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from html import escape
 from typing import Protocol, cast
@@ -35,7 +36,7 @@ from mcp.server.auth.provider import (
     TokenError,
 )
 from mcp.shared.auth import OAuthClientInformationFull, OAuthToken
-from pydantic import SkipValidation
+from pydantic import AnyUrl, SkipValidation
 from starlette.requests import Request
 from starlette.responses import HTMLResponse, RedirectResponse, Response
 
@@ -44,6 +45,8 @@ from sibyl.auth.api_key_common import ApiKeyAuth
 from sibyl.auth.jwt import JwtError, create_access_token, verify_access_token
 from sibyl.auth.mcp_auth import effective_api_key_scopes
 from sibyl.persistence.auth_runtime import (
+    OAuthAuthorizationRecord,
+    OAuthAuthorizationStore,
     authenticate_api_key,
     authenticate_local_user,
     create_session_record,
@@ -61,6 +64,12 @@ from sibyl.persistence.auth_runtime import (
 type JwtClaims = dict[str, object]
 
 OAUTH_SCOPE = "mcp"
+# How long a login request, a fresh login awaiting an organization choice, and
+# an issued authorization code each stay usable.
+AUTHORIZATION_REQUEST_TTL = timedelta(minutes=10)
+AUTHENTICATED_LOGIN_TTL = timedelta(minutes=5)
+AUTHORIZATION_CODE_TTL = timedelta(minutes=10)
+_INVALID_LOGIN_REQUEST_HTML = "<h1>OAuth Login</h1><p>Invalid or expired login request.</p>"
 
 
 class SibylAccessToken(AccessToken):
@@ -146,22 +155,36 @@ def _create_refresh_token(
     return _jwt_encode(payload), expires_at
 
 
+def _utcnow() -> datetime:
+    # Auth storage compares naive UTC datetimes.
+    return datetime.now(UTC).replace(tzinfo=None)
+
+
 class SibylAuthorizationCode(AuthorizationCode):
     user_id: str
     organization_id: str | None = None
 
+    @classmethod
+    def from_record(cls, code: str, record: OAuthAuthorizationRecord) -> SibylAuthorizationCode:
+        return cls(
+            code=code,
+            client_id=record.client_id,
+            expires_at=record.expires_at.replace(tzinfo=UTC).timestamp(),
+            scopes=record.scopes or [OAUTH_SCOPE],
+            code_challenge=record.code_challenge,
+            redirect_uri=AnyUrl(record.redirect_uri),
+            redirect_uri_provided_explicitly=record.redirect_uri_provided_explicitly,
+            resource=record.resource,
+            user_id=str(record.user_id),
+            organization_id=str(record.organization_id) if record.organization_id else None,
+        )
 
-@dataclass(frozen=True)
-class _PendingAuth:
-    client_id: str
-    expires_at: float
-    params: AuthorizationParams
 
-
-@dataclass(frozen=True)
-class _AuthedUser:
-    user_id: UUID
-    expires_at: float
+def _code_redirect(record: OAuthAuthorizationRecord, code: str) -> RedirectResponse:
+    params: dict[str, str] = {"code": code}
+    if record.state:
+        params["state"] = record.state
+    return RedirectResponse(url=_add_query_params(record.redirect_uri, params), status_code=302)
 
 
 class _OAuthUser(Protocol):
@@ -185,11 +208,9 @@ class SibylMcpOAuthProvider(
 ):
     """OAuth provider for MCPServer auth routes."""
 
-    def __init__(self) -> None:
+    def __init__(self, *, authorization_store: OAuthAuthorizationStore | None = None) -> None:
         self._clients: dict[str, OAuthClientInformationFull] = {}
-        self._pending: dict[str, _PendingAuth] = {}
-        self._authed: dict[str, _AuthedUser] = {}
-        self._codes: dict[str, SibylAuthorizationCode] = {}
+        self._authorizations = authorization_store or OAuthAuthorizationStore()
 
     async def get_client(self, client_id: str) -> OAuthClientInformationFull | None:
         cached = self._clients.get(client_id)
@@ -221,10 +242,16 @@ class SibylMcpOAuthProvider(
         self, client: OAuthClientInformationFull, params: AuthorizationParams
     ) -> str:
         request_id = secrets.token_urlsafe(24)
-        self._pending[request_id] = _PendingAuth(
+        await self._authorizations.create_request(
+            request_key=request_id,
             client_id=str(client.client_id),
-            expires_at=time.time() + 10 * 60,
-            params=params,
+            state=params.state,
+            scopes=params.scopes,
+            code_challenge=params.code_challenge,
+            redirect_uri=str(params.redirect_uri),
+            redirect_uri_provided_explicitly=params.redirect_uri_provided_explicitly,
+            resource=params.resource,
+            expires_at=_utcnow() + AUTHORIZATION_REQUEST_TTL,
         )
         issuer = str(config_module.settings.server_url).rstrip("/")
         return _add_query_params(f"{issuer}/_oauth/login", {"req": request_id})
@@ -232,17 +259,23 @@ class SibylMcpOAuthProvider(
     async def load_authorization_code(
         self, client: OAuthClientInformationFull, authorization_code: str
     ) -> SibylAuthorizationCode | None:
-        code = self._codes.get(authorization_code)
-        if code is None:
+        if not authorization_code:
             return None
-        if str(code.client_id) != str(client.client_id):
+        record = await self._authorizations.load_code(authorization_code)
+        if record is None or record.client_id != str(client.client_id):
             return None
-        return code
+        return SibylAuthorizationCode.from_record(authorization_code, record)
 
     async def exchange_authorization_code(
         self, client: OAuthClientInformationFull, authorization_code: SibylAuthorizationCode
     ) -> OAuthToken:
-        self._codes.pop(authorization_code.code, None)
+        if not await self._claim_authorization_code(
+            client_id=str(client.client_id), code=authorization_code.code
+        ):
+            raise TokenError(
+                error="invalid_grant",
+                error_description="authorization code was already used or has expired",
+            )
 
         user_id = UUID(authorization_code.user_id)
         org_id = (
@@ -454,24 +487,37 @@ class SibylMcpOAuthProvider(
     # UI helpers (custom routes)
     # ---------------------------------------------------------------------
 
-    def _get_pending(self, request_id: str) -> _PendingAuth | None:
-        pending = self._pending.get(request_id)
-        if pending is None:
+    async def _get_pending(self, request_id: str) -> OAuthAuthorizationRecord | None:
+        if not request_id:
             return None
-        if pending.expires_at < time.time():
-            self._pending.pop(request_id, None)
-            self._authed.pop(request_id, None)
-            return None
-        return pending
+        return await self._authorizations.load_request(request_id)
 
-    def _get_authed_user(self, request_id: str) -> _AuthedUser | None:
-        authed = self._authed.get(request_id)
-        if authed is None:
-            return None
-        if authed.expires_at < time.time():
-            self._authed.pop(request_id, None)
-            return None
-        return authed
+    async def _claim_authorization_code(self, *, client_id: str, code: str) -> bool:
+        """Consume a code for this client; only one exchange of a code can win."""
+        claimed = await self._authorizations.consume_code(code)
+        return claimed is not None and claimed.client_id == client_id
+
+    async def _issue_code(
+        self,
+        request_id: str,
+        *,
+        user_id: UUID,
+        organization_id: UUID,
+        require_authenticated: bool,
+    ) -> Response:
+        code = secrets.token_urlsafe(32)
+        issued = await self._authorizations.issue_code(
+            request_id,
+            code=code,
+            user_id=user_id,
+            organization_id=organization_id,
+            code_expires_at=_utcnow() + AUTHORIZATION_CODE_TTL,
+            require_authenticated=require_authenticated,
+        )
+        if issued is None:
+            # The flow expired or another request already completed it.
+            return HTMLResponse(_INVALID_LOGIN_REQUEST_HTML, status_code=400)
+        return _code_redirect(issued, code)
 
     async def _create_session_record(self, **kwargs: object) -> object:
         return await create_session_record(**kwargs)
@@ -525,12 +571,9 @@ class SibylMcpOAuthProvider(
 
     async def ui_login_get(self, request: Request) -> Response:
         request_id = (request.query_params.get("req") or "").strip()
-        pending = self._get_pending(request_id)
+        pending = await self._get_pending(request_id)
         if pending is None:
-            return HTMLResponse(
-                "<h1>OAuth Login</h1><p>Invalid or expired login request.</p>",
-                status_code=400,
-            )
+            return HTMLResponse(_INVALID_LOGIN_REQUEST_HTML, status_code=400)
 
         client = await self.get_client(pending.client_id)
         client_name = escape((client.client_name if client else None) or "MCP Client", quote=True)
@@ -580,12 +623,9 @@ class SibylMcpOAuthProvider(
         email = str(form.get("email", "")).strip()
         password = str(form.get("password", "")).strip()
 
-        pending = self._get_pending(request_id)
+        pending = await self._get_pending(request_id)
         if pending is None:
-            return HTMLResponse(
-                "<h1>OAuth Login</h1><p>Invalid or expired login request.</p>",
-                status_code=400,
-            )
+            return HTMLResponse(_INVALID_LOGIN_REQUEST_HTML, status_code=400)
 
         user = await self._authenticate_local_user(email=email, password=password)
         if user is None:
@@ -601,34 +641,19 @@ class SibylMcpOAuthProvider(
                 orgs = [org]
 
         if len(orgs) == 1:
-            org = orgs[0]
-            code = secrets.token_urlsafe(32)
-            auth_code = SibylAuthorizationCode(
-                code=code,
-                client_id=pending.client_id,
-                expires_at=time.time() + 10 * 60,
-                scopes=pending.params.scopes or [OAUTH_SCOPE],
-                code_challenge=pending.params.code_challenge,
-                redirect_uri=pending.params.redirect_uri,
-                redirect_uri_provided_explicitly=pending.params.redirect_uri_provided_explicitly,
-                resource=pending.params.resource,
-                user_id=str(user.id),
-                organization_id=str(org.id),
-            )
-            self._codes[code] = auth_code
-            self._pending.pop(request_id, None)
-
-            params: dict[str, str] = {"code": code}
-            if pending.params.state:
-                params["state"] = pending.params.state
-            return RedirectResponse(
-                url=_add_query_params(str(pending.params.redirect_uri), params), status_code=302
+            return await self._issue_code(
+                request_id,
+                user_id=user.id,
+                organization_id=orgs[0].id,
+                require_authenticated=False,
             )
 
-        self._authed[request_id] = _AuthedUser(
+        if not await self._authorizations.mark_authenticated(
+            request_id,
             user_id=user.id,
-            expires_at=time.time() + 5 * 60,
-        )
+            authenticated_expires_at=_utcnow() + AUTHENTICATED_LOGIN_TTL,
+        ):
+            return HTMLResponse(_INVALID_LOGIN_REQUEST_HTML, status_code=400)
 
         return RedirectResponse(
             url=_add_query_params("/_oauth/org", {"req": request_id}), status_code=302
@@ -636,20 +661,17 @@ class SibylMcpOAuthProvider(
 
     async def ui_org_get(self, request: Request) -> Response:
         request_id = (request.query_params.get("req") or "").strip()
-        pending = self._get_pending(request_id)
+        pending = await self._get_pending(request_id)
         if pending is None:
-            return HTMLResponse(
-                "<h1>OAuth Login</h1><p>Invalid or expired login request.</p>",
-                status_code=400,
-            )
+            return HTMLResponse(_INVALID_LOGIN_REQUEST_HTML, status_code=400)
 
-        authed = self._get_authed_user(request_id)
-        if authed is None:
+        authed_user_id = pending.authenticated_user(now=_utcnow())
+        if authed_user_id is None:
             return RedirectResponse(
                 url=_add_query_params("/_oauth/login", {"req": request_id}), status_code=302
             )
 
-        orgs = await self._list_user_orgs(user_id=authed.user_id)
+        orgs = await self._list_user_orgs(user_id=authed_user_id)
 
         if not orgs:
             return RedirectResponse(
@@ -710,27 +732,24 @@ class SibylMcpOAuthProvider(
         selected_org_id = str(form.get("org_id", "")).strip()
         create_personal = str(form.get("create_personal", "")).strip() == "1"
 
-        pending = self._get_pending(request_id)
+        pending = await self._get_pending(request_id)
         if pending is None:
-            return HTMLResponse(
-                "<h1>OAuth Login</h1><p>Invalid or expired login request.</p>",
-                status_code=400,
-            )
+            return HTMLResponse(_INVALID_LOGIN_REQUEST_HTML, status_code=400)
 
-        authed = self._get_authed_user(request_id)
-        if authed is None:
+        authed_user_id = pending.authenticated_user(now=_utcnow())
+        if authed_user_id is None:
             return RedirectResponse(
                 url=_add_query_params("/_oauth/login", {"req": request_id}), status_code=302
             )
 
         if create_personal:
-            org = await self._ensure_personal_org(user_id=authed.user_id)
+            org = await self._ensure_personal_org(user_id=authed_user_id)
             if org is None:
                 return RedirectResponse(
                     url=_add_query_params("/_oauth/login", {"req": request_id}), status_code=302
                 )
         else:
-            orgs = await self._list_user_orgs(user_id=authed.user_id)
+            orgs = await self._list_user_orgs(user_id=authed_user_id)
             org = next((o for o in orgs if str(o.id) == selected_org_id), None)
             if org is None:
                 return HTMLResponse(
@@ -738,27 +757,9 @@ class SibylMcpOAuthProvider(
                     status_code=400,
                 )
 
-        # Issue code outside the DB session; pending/auth mappings are in-memory.
-        code = secrets.token_urlsafe(32)
-        auth_code = SibylAuthorizationCode(
-            code=code,
-            client_id=pending.client_id,
-            expires_at=time.time() + 10 * 60,
-            scopes=pending.params.scopes or [OAUTH_SCOPE],
-            code_challenge=pending.params.code_challenge,
-            redirect_uri=pending.params.redirect_uri,
-            redirect_uri_provided_explicitly=pending.params.redirect_uri_provided_explicitly,
-            resource=pending.params.resource,
-            user_id=str(authed.user_id),
-            organization_id=str(org.id),
-        )
-        self._codes[code] = auth_code
-        self._pending.pop(request_id, None)
-        self._authed.pop(request_id, None)
-
-        params: dict[str, str] = {"code": code}
-        if pending.params.state:
-            params["state"] = pending.params.state
-        return RedirectResponse(
-            url=_add_query_params(str(pending.params.redirect_uri), params), status_code=302
+        return await self._issue_code(
+            request_id,
+            user_id=authed_user_id,
+            organization_id=org.id,
+            require_authenticated=True,
         )
