@@ -1,6 +1,19 @@
-"""Tests for rate limiting configuration."""
+"""Tests for rate limiting configuration.
+
+The cross-replica proof at the end runs against a real Redis/Valkey when
+SIBYL_LIVE_REDIS_HOST and SIBYL_LIVE_REDIS_PORT are set.
+"""
+
+import os
+from uuid import uuid4
+
+import pytest
+from limits import parse
+from limits.storage import storage_from_string
+from limits.strategies import FixedWindowRateLimiter
 
 from sibyl.api.rate_limit import RATE_LIMITS, get_rate_limit, limiter
+from sibyl.config import Settings
 
 
 class TestRateLimitConfiguration:
@@ -95,3 +108,41 @@ class TestRateLimitValues:
 
         # Auth should allow fewer requests
         assert auth_num < api_num
+
+
+def _live_redis() -> tuple[str, int]:
+    host = os.environ.get("SIBYL_LIVE_REDIS_HOST", "")
+    port = os.environ.get("SIBYL_LIVE_REDIS_PORT", "")
+    if not host or not port:
+        pytest.skip("Redis-backed rate-limit tests need SIBYL_LIVE_REDIS_HOST/PORT")
+    return host, int(port)
+
+
+def _admitted(storage_uri: str, *, replicas: int, requests_per_replica: int, key: str) -> int:
+    """Requests the replicas admit together, each with its own limiter storage."""
+    limit = parse(RATE_LIMITS["auth"])
+    limiters = [FixedWindowRateLimiter(storage_from_string(storage_uri)) for _ in range(replicas)]
+    return sum(limiter.hit(limit, key) for limiter in limiters for _ in range(requests_per_replica))
+
+
+class TestRateLimitsAcrossReplicas:
+    """Every replica counts against one limit once coordination is Redis."""
+
+    def test_in_memory_counters_admit_the_limit_once_per_replica(self) -> None:
+        storage = Settings(_env_file=None, coordination_backend="local").rate_limit_storage
+
+        admitted = _admitted(storage, replicas=3, requests_per_replica=5, key=uuid4().hex)
+
+        assert admitted == 15
+        assert storage == "memory://"
+
+    def test_derived_redis_storage_admits_the_limit_once_across_replicas(self) -> None:
+        host, port = _live_redis()
+        storage = Settings(
+            _env_file=None, coordination_backend="redis", redis_host=host, redis_port=port
+        ).rate_limit_storage
+
+        admitted = _admitted(storage, replicas=3, requests_per_replica=5, key=uuid4().hex)
+
+        assert admitted == 5
+        assert storage == f"redis://{host}:{port}/4"

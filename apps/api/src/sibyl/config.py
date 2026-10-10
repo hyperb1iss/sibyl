@@ -31,6 +31,9 @@ DEFAULT_LOCAL_EMBEDDING_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
 DEFAULT_LOCAL_EMBEDDING_DIMENSIONS = 384
 # Matches the HS256 output width, and what `openssl rand -hex 32` produces.
 MINIMUM_PRODUCTION_JWT_SECRET_BYTES = 32
+# Redis database that holds rate-limit counters when the storage URL is
+# derived from the coordination settings; the Helm chart's rateLimitDb default.
+RATE_LIMIT_REDIS_DB = 4
 _OPENAI_GRAPH_EMBEDDING_MODEL = "text-embedding-3-small"
 _OPENAI_GRAPH_EMBEDDING_DIMENSIONS = 1024
 _LOCAL_EMBEDDING_MODEL_DIMENSIONS = {
@@ -506,7 +509,11 @@ class Settings(BaseSettings):
     )
     rate_limit_storage: str = Field(
         default="memory://",
-        description="Rate limit storage backend (memory://, redis://host:port)",
+        description=(
+            "Rate limit storage backend (memory://, redis://host:port/db). Unset under Redis "
+            "coordination, it derives redis://<redis_host>:<redis_port>/4 so every replica "
+            "counts against one limit; unset otherwise, it is memory://."
+        ),
     )
     forwarded_allow_ips: Annotated[list[str], NoDecode] = Field(
         default_factory=_default_forwarded_allow_ips,
@@ -747,6 +754,9 @@ class Settings(BaseSettings):
                 dimensions = _local_embedding_dimensions(self.graph_embedding_model)
                 if dimensions is not None:
                     object.__setattr__(self, "graph_embedding_dimensions", dimensions)
+
+        if "rate_limit_storage" not in self.model_fields_set or not self.rate_limit_storage.strip():
+            object.__setattr__(self, "rate_limit_storage", self._default_rate_limit_storage())
 
         if self.rate_limit_storage.startswith("redis://"):
             storage_url = _redis_url_with_password(
@@ -1029,6 +1039,20 @@ class Settings(BaseSettings):
 
         redis_fields = {"redis_host", "redis_port", "redis_password", "redis_jobs_db"}
         return "redis" if self.model_fields_set & redis_fields else "local"
+
+    def _default_rate_limit_storage(self) -> str:
+        """Where rate-limit counters live when no storage is configured.
+
+        A single process counts in memory. Under Redis coordination there may
+        be several API replicas, and in-memory counters would let every one of
+        them admit the full limit, so they share the coordination Redis.
+        """
+        if self.resolved_coordination_backend != "redis":
+            return "memory://"
+        host = self.redis_host
+        if ":" in host and not host.startswith("["):
+            host = f"[{host}]"
+        return f"redis://{host}:{self.redis_port}/{RATE_LIMIT_REDIS_DB}"
 
 
 # Global settings instance
