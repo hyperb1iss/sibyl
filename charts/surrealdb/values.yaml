@@ -122,18 +122,26 @@ export:
   destination:
     # Local staging path. Deployment overlays can mount blob/object storage here.
     path: /backups
-    # Informational URI for overlays that sync to object/blob storage.
+    # Where syncCommand copies runs, such as s3://bucket/prefix. Exposed
+    # as $SIBYL_EXPORT_DESTINATION_URI to syncCommand.
     uri: ""
   # Each run writes <destination.path>/<filePrefix>-<UTC timestamp>/ with
   # one <namespace>.<database>.surql per database and a manifest.json
   # written last; the restore drill reads the newest directory that has
-  # one. encryption.command runs once per file, manifest included, with
-  # the path in $SIBYL_EXPORT_FILE; syncCommand runs once at the end with
-  # the run directory in $SIBYL_EXPORT_RUN_DIR.
+  # one. The manifest's sizes and sha256 describe the plaintext.
   filePrefix: sibyl
   encryption:
     enabled: false
+    # Runs in its own `sh -ec` once per file, manifest last. It reads
+    # $SIBYL_EXPORT_FILE and writes the ciphertext to
+    # $SIBYL_EXPORT_ENCRYPTED_FILE; the job then moves the ciphertext over
+    # the original, so file names never change. Writing nothing, or the
+    # plaintext unchanged, fails the export. Example:
+    #   age -r "$AGE_RECIPIENT" -o "$SIBYL_EXPORT_ENCRYPTED_FILE" "$SIBYL_EXPORT_FILE"
     command: ""
+  # Runs once after the manifest, with the run directory in
+  # $SIBYL_EXPORT_RUN_DIR. Upload the manifest last so a reader never sees
+  # a manifest before its files (see docs/admin/backup-restore.md).
   syncCommand: ""
   extraEnv: []
   extraEnvFrom: []

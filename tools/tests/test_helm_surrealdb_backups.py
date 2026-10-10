@@ -11,6 +11,7 @@ v3.2.4 server.
 from __future__ import annotations
 
 import hashlib
+import itertools
 import json
 import os
 import shutil
@@ -78,6 +79,7 @@ class OpsHarness:
         shim.chmod(0o755)
         self.state_path = root / "surreal-state.json"
         self.receipt_path = root / "receipt.json"
+        self._values_counter = itertools.count()
 
     def serve(
         self,
@@ -108,6 +110,14 @@ class OpsHarness:
                 }
             )
         )
+
+    def values(self, values: dict[str, Any]) -> tuple[str, str]:
+        """Write chart values to a file and return the helm arguments for it.
+        Multi-line shell hooks survive a values file intact, where --set
+        would split them on commas and braces."""
+        path = self.root / f"values-{next(self._values_counter)}.yaml"
+        path.write_text(yaml.safe_dump(values))
+        return "-f", str(path)
 
     def server(self, endpoint: str) -> dict[str, Any]:
         return json.loads(self.state_path.read_text())["servers"][endpoint]
@@ -233,26 +243,71 @@ def test_helm_export_and_drill_scripts_ignore_the_bootstrap_list() -> None:
     assert _render_job("restore-drill", *custom)[0] == default_drill
 
 
+# A reversible stand-in for a real cipher: a header line plus rot13. The
+# output is not JSON, so a drill that skips decryption cannot read it.
+CIPHER_HEADER = "SIBYL-TEST-CIPHER"
+ENCRYPT = (
+    f'( echo {CIPHER_HEADER}; tr "A-Za-z" "N-ZA-Mn-za-m" < "$SIBYL_EXPORT_FILE" )'
+    ' > "$SIBYL_EXPORT_ENCRYPTED_FILE"'
+)
+
+
+def _stored_files(run_dir: Path) -> dict[str, bytes]:
+    return {path.name: path.read_bytes() for path in sorted(run_dir.iterdir())}
+
+
 def test_helm_export_hooks_cover_every_file_and_the_manifest(harness: OpsHarness) -> None:
     harness.serve(source=_source())
     result = harness.run(
         "export",
-        "--set",
-        "export.encryption.enabled=true",
-        "--set-string",
-        'export.encryption.command=echo "$SIBYL_EXPORT_FILE" >> "$HOME/encrypted.log"',
-        "--set-string",
-        'export.syncCommand=echo "$SIBYL_EXPORT_RUN_DIR" >> "$HOME/synced.log"',
+        *harness.values(
+            {
+                "export": {
+                    "encryption": {
+                        "enabled": True,
+                        "command": f'echo "$SIBYL_EXPORT_FILE" >> "$HOME/encrypted.log"\n{ENCRYPT}',
+                    },
+                    "syncCommand": 'echo "$SIBYL_EXPORT_RUN_DIR" >> "$HOME/synced.log"',
+                }
+            }
+        ),
     )
     assert result.returncode == 0, result.stderr
 
     (run_dir,) = _run_dirs(harness)
+    stored = _stored_files(run_dir)
+    files = sorted(name for name in stored if name.endswith(".surql"))
+    assert set(stored) == {*files, "manifest.json"}
+    assert len(files) == SOURCE_DATABASES
     encrypted = (harness.root / "encrypted.log").read_text().splitlines()
-    files = sorted(path.name for path in run_dir.glob("*.surql"))
-    assert len(files) == len(_manifest(harness)["databases"]) == SOURCE_DATABASES
     assert sorted(Path(line).name for line in encrypted[:-1]) == files
     assert encrypted[-1] == str(run_dir / "manifest.json")
+    for name, data in stored.items():
+        assert data.startswith(CIPHER_HEADER.encode()), name
     assert (harness.root / "synced.log").read_text().splitlines() == [str(run_dir)]
+
+
+@pytest.mark.parametrize(
+    ("command", "message"),
+    [
+        ("true", "wrote nothing to $SIBYL_EXPORT_ENCRYPTED_FILE"),
+        ('mv "$SIBYL_EXPORT_FILE" "$SIBYL_EXPORT_FILE.enc"', "wrote nothing"),
+        ('cp "$SIBYL_EXPORT_FILE" "$SIBYL_EXPORT_ENCRYPTED_FILE"', "without encrypting it"),
+        ("echo cipher-tool-missing >&2; false", "cipher-tool-missing"),
+    ],
+    ids=["writes-nothing", "renames", "copies-plaintext", "fails"],
+)
+def test_helm_export_refuses_encryption_that_does_not_encrypt(
+    harness: OpsHarness, command: str, message: str
+) -> None:
+    harness.serve(source=_source())
+    result = harness.run(
+        "export", *harness.values({"export": {"encryption": {"enabled": True, "command": command}}})
+    )
+
+    assert result.returncode != 0
+    assert message in result.stderr
+    assert not list(harness.backups.glob("*/manifest.json"))
 
 
 @pytest.mark.parametrize(

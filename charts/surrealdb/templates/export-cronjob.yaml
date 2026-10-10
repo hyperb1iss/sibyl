@@ -89,14 +89,28 @@ spec:
                         then error("cannot back up \($key) \($refused | map(@json) | join(", ")): not a plain SurrealDB identifier")
                         else $names[] end'
                   }
+                  # The hook writes ciphertext to a second path and the job
+                  # moves it over the original, so every name the manifest
+                  # and the drill rely on survives encryption. A hook that
+                  # writes nothing, or copies the plaintext, stops the run
+                  # rather than shipping an unencrypted backup.
                   encrypt_export_file() {
-                    {{- if .Values.export.encryption.enabled }}
-                    SIBYL_EXPORT_FILE="$1"
-                    export SIBYL_EXPORT_FILE
-                    {{ .Values.export.encryption.command | nindent 20 }}
-                    {{- else }}
-                    return 0
-                    {{- end }}
+                    if [ -z "${SIBYL_EXPORT_ENCRYPTION_COMMAND:-}" ]; then
+                      return 0
+                    fi
+                    encrypted="$1.encrypting"
+                    rm -f "$encrypted"
+                    SIBYL_EXPORT_FILE="$1" SIBYL_EXPORT_ENCRYPTED_FILE="$encrypted" \
+                      sh -ec "$SIBYL_EXPORT_ENCRYPTION_COMMAND"
+                    if [ ! -s "$encrypted" ]; then
+                      echo "export.encryption.command wrote nothing to \$SIBYL_EXPORT_ENCRYPTED_FILE for $1" >&2
+                      exit 1
+                    fi
+                    if cmp -s "$1" "$encrypted"; then
+                      echo "export.encryption.command copied $1 without encrypting it" >&2
+                      exit 1
+                    fi
+                    mv "$encrypted" "$1"
                   }
 
                   timestamp="$(date -u +%Y%m%d%H%M%S)"
@@ -175,6 +189,10 @@ spec:
                   value: {{ .Values.export.destination.uri | quote }}
                 - name: SIBYL_EXPORT_FILE_PREFIX
                   value: {{ .Values.export.filePrefix | quote }}
+                {{- if .Values.export.encryption.enabled }}
+                - name: SIBYL_EXPORT_ENCRYPTION_COMMAND
+                  value: {{ .Values.export.encryption.command | quote }}
+                {{- end }}
                 {{- include "sibyl-surrealdb.surrealEnv" . | nindent 16 }}
                 {{- with .Values.export.extraEnv }}
                 {{- toYaml . | nindent 16 }}
