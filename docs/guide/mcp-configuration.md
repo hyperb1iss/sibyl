@@ -218,7 +218,7 @@ mcp = MCPServer(
     auth_server_provider=auth_server_provider,
 )
 
-mcp_app = mcp.streamable_http_app(host=host, stateless_http=True)
+mcp_app = mcp_http_app(mcp, host, port)  # stateless, POST-only /mcp
 
 @mcp.tool()
 async def search(...) -> dict:

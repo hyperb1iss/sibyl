@@ -11,11 +11,15 @@ API key.
 
 from __future__ import annotations
 
+import asyncio
+import json
 from unittest.mock import AsyncMock
 from uuid import UUID, uuid4
 
+import anyio
 import httpx2
 import pytest
+from mcp.server.auth.middleware.auth_context import get_access_token
 from mcp.server.auth.provider import principal_components
 from pydantic import SecretStr
 
@@ -165,6 +169,45 @@ async def test_no_request_inherits_an_earlier_credential() -> None:
     assert owner.status_code == 200
     assert other.status_code == 200
     assert anonymous.status_code == 401
+
+
+def _tool_text(response: httpx2.Response) -> str:
+    body = response.text
+    if response.headers.get("content-type", "").startswith("text/event-stream"):
+        body = next(line[5:] for line in body.splitlines() if line.startswith("data:"))
+    return json.loads(body)["result"]["content"][0]["text"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("active_sessions")
+async def test_concurrent_calls_each_run_as_their_own_caller() -> None:
+    users = [uuid4() for _ in range(4)]
+    mcp = create_mcp_server()
+
+    @mcp.tool()
+    async def whoami() -> str:
+        before = get_access_token()
+        await anyio.sleep(0.01)
+        after = get_access_token()
+        assert before is not None
+        assert after is not None
+        assert before.client_id == after.client_id
+        return before.client_id
+
+    call = {"jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": {"name": "whoami"}}
+    callers = [users[index % len(users)] for index in range(16)]
+    app = mcp_http_app(mcp, "127.0.0.1", 3334)
+    async with (
+        mcp.session_manager.run(),
+        httpx2.AsyncClient(
+            transport=httpx2.ASGITransport(app=app), base_url=settings.server_url
+        ) as client,
+    ):
+        responses = await asyncio.gather(
+            *(_post(client, _session_token(user), call) for user in callers)
+        )
+
+    assert [_tool_text(response) for response in responses] == [f"user:{user}" for user in callers]
 
 
 # ---------------------------------------------------------------------------

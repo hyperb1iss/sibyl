@@ -118,11 +118,11 @@ def _mcp_transport_security(bind_host: str, bind_port: int) -> TransportSecurity
     )
 
 
-_NO_STANDALONE_STREAM = JSONResponse(
+_POST_ONLY = JSONResponse(
     {
         "jsonrpc": "2.0",
         "id": None,
-        "error": {"code": -32600, "message": "Method Not Allowed: no server-initiated stream"},
+        "error": {"code": -32600, "message": "Method Not Allowed: this endpoint takes POST"},
     },
     status_code=405,
     headers={"Allow": "POST"},
@@ -135,11 +135,13 @@ def mcp_http_app(mcp: "MCPServer", host: str, port: int) -> ASGIApp:
     Every request carries its own credential and protocol version, so any
     replica can answer any request and a load balancer needs no affinity.
     Sibyl's tools never call back into the client (no sampling, elicitation
-    or server-initiated requests), which is all a stateful session would add.
+    or server-initiated requests). A call lives only as long as its response
+    stream, so write tools are marked uninterruptible and land whole even
+    when the caller disconnects.
 
-    With nothing to push, the server offers no standalone GET stream. The SDK
-    would otherwise hold one open, idle, per connected client; the spec's
-    answer for a server without one is 405.
+    With no session there is no standalone GET stream to offer and no session
+    to DELETE, so the endpoint takes POST only. The SDK would otherwise park an
+    idle stream and task per client on GET; the spec's answer is 405.
     """
     app = mcp.streamable_http_app(
         host=host,
@@ -148,8 +150,12 @@ def mcp_http_app(mcp: "MCPServer", host: str, port: int) -> ASGIApp:
     )
 
     async def serve(scope: Scope, receive: Receive, send: Send) -> None:
-        if scope["type"] == "http" and scope["method"] == "GET" and get_route_path(scope) == "/mcp":
-            await _NO_STANDALONE_STREAM(scope, receive, send)
+        if (
+            scope["type"] == "http"
+            and scope["method"] not in ("POST", "OPTIONS")
+            and get_route_path(scope) == "/mcp"
+        ):
+            await _POST_ONLY(scope, receive, send)
             return
         await app(scope, receive, send)
 
