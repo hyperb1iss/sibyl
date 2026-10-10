@@ -128,7 +128,9 @@ export:
   failedJobsHistoryLimit: 3
   concurrencyPolicy: Forbid
   startingDeadlineSeconds: 900
-  # Retries rerun the whole export into a new run directory.
+  # Retries rerun the whole export into a new run directory. A run that
+  # recorded databases it could not export exits 111 and is not retried
+  # (podFailurePolicy, Kubernetes 1.26+): it would fail the same way again.
   backoffLimit: 2
   # Kill a run that has not finished in 6 hours, well before the next
   # daily schedule.

@@ -21,6 +21,16 @@ spec:
     spec:
       backoffLimit: {{ .Values.export.backoffLimit }}
       activeDeadlineSeconds: {{ .Values.export.activeDeadlineSeconds }}
+      # A run that recorded databases it could not export (exit 111) fails
+      # the same way on every retry, so it fails the Job at once instead of
+      # rerunning the whole export. Any other failure is retried.
+      podFailurePolicy:
+        rules:
+          - action: FailJob
+            onExitCodes:
+              containerName: export
+              operator: In
+              values: [111]
       template:
         metadata:
           labels:
@@ -31,7 +41,9 @@ spec:
             {{- toYaml . | nindent 12 }}
           {{- end }}
         spec:
-          restartPolicy: OnFailure
+          # Never, not OnFailure: podFailurePolicy needs it, and each retry
+          # then starts from a fresh pod.
+          restartPolicy: Never
           serviceAccountName: {{ include "sibyl-surrealdb.serviceAccountName" . }}
           {{- with .Values.global.imagePullSecrets }}
           imagePullSecrets:
@@ -296,7 +308,10 @@ spec:
                   {{- end }}
                   if [ -s "$work/failures.jsonl" ]; then
                     echo "export finished with $(wc -l < "$work/failures.jsonl" | tr -d ' ') failures recorded in $SIBYL_EXPORT_RUN_DIR/manifest.json" >&2
-                    exit 1
+                    # Distinct from curl, jq and shell codes, so the Job's
+                    # podFailurePolicy can tell a deterministic, recorded
+                    # failure from a transient one worth retrying.
+                    exit 111
                   fi
                   echo "export complete: $SIBYL_EXPORT_RUN_DIR"
               env:

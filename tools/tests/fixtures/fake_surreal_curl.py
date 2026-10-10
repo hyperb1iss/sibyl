@@ -12,7 +12,8 @@ work, against servers described in a JSON state file
      "empty_exports": ["ns/db"], "drop_on_import": ["ns/db"],
      "sql_errors": ["ns/db"], "refuse_import": ["ns/db"],
      "drop_tables_on_import": ["ns/db/table"],
-     "shrink_on_import": {"ns/db/table": rows}}
+     "shrink_on_import": {"ns/db/table": rows},
+     "ns_info_errors": ["ns"]}
 
 Response shapes mirror a real v3.2.4 server: ``/sql`` answers HTTP 200
 with one ``{"status", "result"}`` entry per statement, ``/import`` answers
@@ -166,6 +167,8 @@ def _sql(
     body = (request.body or "").strip()
     if body.startswith(TABLE_ROWS_QUERY_PREFIX) and f"{ns}/{db}" in state.get("sql_errors", []):
         return [_err("fake surreal: the query was refused")]
+    if body == "INFO FOR NS;" and ns in state.get("ns_info_errors", []):
+        return [_err("fake surreal: INFO FOR NS was refused")]
     if body.startswith(TABLE_ROWS_QUERY_PREFIX):
         tables = namespaces.get(ns, {}).get(db)
         if tables is None:

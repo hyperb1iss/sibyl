@@ -129,12 +129,14 @@ class OpsHarness:
         refuse_import: tuple[str, ...] = (),
         drop_tables_on_import: tuple[str, ...] = (),
         shrink_on_import: dict[str, int] | None = None,
+        ns_info_errors: tuple[str, ...] = (),
     ) -> None:
         """Describe the fake servers and the faults they inject. Each fault
         names ``ns/db`` pairs (``ns/db/table`` for the table faults): an
         empty export, an import that zeroes every row, a refused row count,
         a refused import, a table that vanishes on import, or one that comes
-        back with the given number of rows."""
+        back with the given number of rows. ``ns_info_errors`` refuses INFO
+        FOR NS for whole namespaces."""
         servers: dict[str, object] = {
             "http://restore": {"user": "drill:drill", "namespaces": restore or {}},
         }
@@ -154,6 +156,7 @@ class OpsHarness:
                     "refuse_import": list(refuse_import),
                     "drop_tables_on_import": list(drop_tables_on_import),
                     "shrink_on_import": shrink_on_import or {},
+                    "ns_info_errors": list(ns_info_errors),
                 }
             )
         )
@@ -237,6 +240,7 @@ def _source() -> dict[str, dict[str, dict[str, int]]]:
 
 SOURCE_DATABASES = sum(len(databases) for databases in _source().values())
 MANIFEST_VERSION = 2
+RECORDED_FAILURE_EXIT = 111
 DEFAULT_DEADLINE_SECONDS = 21600
 CUSTOM_BACKOFF = 2
 CUSTOM_DEADLINE_SECONDS = 600
@@ -834,7 +838,7 @@ def test_helm_export_records_what_it_cannot_export_and_keeps_the_rest(
         *harness.values({"export": {"syncCommand": 'echo synced >> "$HOME/synced.log"'}}),
     )
 
-    assert result.returncode != 0
+    assert result.returncode == RECORDED_FAILURE_EXIT
     assert "failures recorded in" in result.stderr
     assert (harness.root / "synced.log").read_text() == "synced\n", "the partial run still syncs"
     manifest = _manifest(harness)
@@ -1088,3 +1092,47 @@ def test_helm_restore_drill_fails_when_a_tiny_table_empties(harness: OpsHarness)
         "restore failed for sibyl_auth/auth: tables short after import: users (0 of 2, emptied)"
         in result.stderr
     )
+
+
+def test_helm_export_exit_codes_tell_recorded_failures_from_transient_ones(
+    harness: OpsHarness,
+) -> None:
+    """Recorded failures exit 111, which podFailurePolicy fails at once;
+    anything else keeps a normal non-zero code and is retried."""
+    harness.serve(source=_source(), ns_info_errors=(ORG_B,))
+    recorded = harness.run("export")
+    assert recorded.returncode == RECORDED_FAILURE_EXIT, recorded.stderr
+    failures = _manifest(harness)["failures"]
+    assert failures == [
+        {
+            "namespace": ORG_B,
+            "database": None,
+            "reason": failures[0]["reason"],
+        }
+    ]
+    assert failures[0]["reason"].startswith("INFO FOR NS failed: SurrealQL failed in")
+
+    for run_dir in _run_dirs(harness):
+        shutil.rmtree(run_dir)
+    harness.serve()  # no source server: every request fails to connect
+    transient = harness.run("export")
+    assert transient.returncode not in (0, RECORDED_FAILURE_EXIT), transient.stderr
+
+
+def test_helm_export_job_fails_fast_only_on_recorded_failures() -> None:
+    spec, _ = _raw_env("export")
+    pod = spec["template"]["spec"]
+    (container,) = pod["containers"]
+    assert pod["restartPolicy"] == "Never", "podFailurePolicy requires restartPolicy Never"
+    assert spec["podFailurePolicy"] == {
+        "rules": [
+            {
+                "action": "FailJob",
+                "onExitCodes": {
+                    "containerName": container["name"],
+                    "operator": "In",
+                    "values": [RECORDED_FAILURE_EXIT],
+                },
+            }
+        ]
+    }
