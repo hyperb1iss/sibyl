@@ -1,0 +1,38 @@
+name: Start Valkey
+description: >-
+  Start the repo's Valkey compose service on the host port SIBYL_REDIS_PORT (6381 by default) for
+  tests that need a real Redis.
+
+runs:
+  using: composite
+  steps:
+    - name: Pull the Valkey image through a mirror
+      shell: bash
+      run: |
+        set -uo pipefail
+        # Same reasoning as start-surrealdb: Google's mirror keeps serving
+        # Docker Hub images when Docker Hub's token service fails runners.
+        image="$(docker compose --env-file /dev/null --profile redis config --images redis)"
+        path="$image"
+        [[ "$image" == */* ]] || path="library/$image"
+        if docker pull "mirror.gcr.io/$path"; then
+          docker tag "mirror.gcr.io/$path" "$image"
+        else
+          echo "::warning::mirror.gcr.io has no $image; compose pulls it from Docker Hub."
+        fi
+
+    - name: Start Valkey service
+      shell: bash
+      run: |
+        set -euo pipefail
+        docker compose --env-file /dev/null --profile redis up -d redis
+        for attempt in {1..30}; do
+          if docker compose --env-file /dev/null --profile redis \
+            exec -T redis valkey-cli ping | grep -qx PONG; then
+            exit 0
+          fi
+          echo "Attempt $attempt: Valkey is not ready yet."
+          sleep 1
+        done
+        docker compose --env-file /dev/null --profile redis logs redis
+        exit 1

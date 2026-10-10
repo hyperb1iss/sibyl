@@ -717,6 +717,10 @@ jobs:
       - name: Start SurrealDB
         uses: ./.github/actions/start-surrealdb
 
+      # The cross-replica invalidation tests need a real Redis to partition.
+      - name: Start Valkey
+        uses: ./.github/actions/start-valkey
+
       - name: Install system dependencies
         run: |
           sudo apt-get update
@@ -755,6 +759,9 @@ jobs:
             uv-live-${{ runner.os }}-
 
       - name: Run live ingestion primitives
+        env:
+          SIBYL_LIVE_REDIS_HOST: 127.0.0.1
+          SIBYL_LIVE_REDIS_PORT: "6381"
         run: moon run api:test-live
 
       - name: Run local embedding dimension backfill
