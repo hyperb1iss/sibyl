@@ -112,10 +112,25 @@ a file-safe spelling plus a digest, for example `legacy_tenant.graph.53081ce2391
 drill restores it with the identifier escaped.
 
 One database the job cannot export does not cost the others. A name outside printable ASCII (which
-the `surreal-ns` and `surreal-db` headers cannot carry), a refused row count, a failed or empty
-`/export`: each is recorded in the manifest's `failures` with a reason, the rest of the run is
-exported and synced, and the job then exits non-zero so it pages. The restore drill fails on a run
-with recorded failures as well, after restoring everything else.
+the `surreal-ns` and `surreal-db` headers cannot carry), a refused namespace listing or row count, a
+failed or empty `/export`: each is recorded in the manifest's `failures` with a reason, the rest of
+the run is exported and synced, and the job then exits 111 so it pages. The restore drill fails on a
+run with recorded failures as well, after restoring everything else.
+
+A run with recorded failures would fail the same way again, so it is not retried: the export Job's
+`podFailurePolicy` fails the Job at once on exit code 111, while any other failure (an unreachable
+server, a timeout) is retried up to `export.backoffLimit`. `podFailurePolicy` needs Kubernetes 1.26
+or later (GA in 1.31) and requires the export pod's `restartPolicy: Never`, so each retry starts
+from a fresh pod.
+
+The manifest's `organizations` entry lists organizations in the auth database that have no graph
+database at export time, by organization ID and the `org_<uuid>/graph` it would live in. It never
+fails the run, because a new organization has no graph until it first uses one. An organization that
+had a graph and lost it appears there too, so compare the list with the previous run's: an
+organization that newly appears, especially an active one, is worth a look. The restore drill copies
+the entry into its receipt. Set `export.organizationCheck` to match Sibyl's
+`SIBYL_SURREAL_NAMESPACE_PREFIX` and `SIBYL_SURREAL_DATABASE` if you changed them; if the query
+fails, the entry records the error instead.
 
 ### Encryption and sync hooks
 
@@ -186,10 +201,11 @@ refused, when a table the export saw is missing, or when any table restores more
 `max(restoreDrill.rowDrift.rows, restoreDrill.rowDrift.percent% of its exported count)` fewer rows
 than the export counted (2 rows and 1% by default). The allowance exists because the export counts
 rows just before it exports, in a separate read, so writes in between can move them; it applies to
-each table on its own, so one emptied table cannot hide behind the others. The drill reports every
-failing database and every failure the export recorded, runs `failureNotification.command`, and
-exits non-zero. It makes one attempt (`restoreDrill.backoffLimit: 0`), so one failing drill sends
-one notification.
+each table on its own, so one emptied table cannot hide behind the others. A table that exported
+rows and restored none fails whatever its size, because drift does not empty a table. The drill
+reports every failing database and every failure the export recorded, runs
+`failureNotification.command`, and exits non-zero. It makes one attempt
+(`restoreDrill.backoffLimit: 0`), so one failing drill sends one notification.
 
 After the databases pass, the drill runs the configured fixture checks and the optional recall
 check. It writes a structured receipt to disk and emits the same JSON between
