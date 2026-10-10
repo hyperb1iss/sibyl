@@ -189,13 +189,13 @@ def main(argv: list[str]) -> int:
     route = f"/{path}"
     if route == "/health":
         body: object = ""
+    elif route == "/version":
+        body = server.get("version", "surrealdb-3.2.4")
     elif request.user != server.get("user"):
         body = {"code": 401, "information": "There was a problem with authentication"}
         if request.fail:
             sys.stderr.write("curl: (22) The requested URL returned error: 401\n")
             return 22
-    elif route == "/version":
-        body = server.get("version", "surrealdb-3.2.4")
     elif route == "/sql":
         body = _sql(server, request)
     elif route == "/export":
