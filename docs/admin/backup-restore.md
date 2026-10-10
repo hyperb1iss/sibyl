@@ -119,18 +119,26 @@ run with recorded failures as well, after restoring everything else.
 
 A run with recorded failures would fail the same way again, so it is not retried: the export Job's
 `podFailurePolicy` fails the Job at once on exit code 111, while any other failure (an unreachable
-server, a timeout) is retried up to `export.backoffLimit`. `podFailurePolicy` needs Kubernetes 1.26
-or later (GA in 1.31) and requires the export pod's `restartPolicy: Never`, so each retry starts
-from a fresh pod.
+server, a timeout) is retried up to `export.backoffLimit`. A pod lost to a node drain or eviction
+(the `DisruptionTarget` condition) is replaced without spending a retry, for the export and for the
+restore drill. `podFailurePolicy` requires `restartPolicy: Never`, so each retry starts from a fresh
+pod.
+
+The chart requires Kubernetes 1.29 or later (`kubeVersion: ">=1.29.0-0"` in `Chart.yaml`): the
+restore drill runs its scratch SurrealDB as a native sidecar, on by default from 1.29, and
+`podFailurePolicy` needs 1.26. On an older cluster Helm refuses the install with that requirement
+instead of failing later on a schema error.
 
 The manifest's `organizations` entry lists organizations in the auth database that have no graph
 database at export time, by organization ID and the `org_<uuid>/graph` it would live in. It never
 fails the run, because a new organization has no graph until it first uses one. An organization that
 had a graph and lost it appears there too, so compare the list with the previous run's: an
-organization that newly appears, especially an active one, is worth a look. The restore drill copies
-the entry into its receipt. Set `export.organizationCheck` to match Sibyl's
-`SIBYL_SURREAL_NAMESPACE_PREFIX` and `SIBYL_SURREAL_DATABASE` if you changed them; if the query
-fails, the entry records the error instead.
+organization that newly appears, especially an active one, is worth a look. Only the expected
+database counts, so an org namespace holding some other database is still listed. The job log names
+the first ten and the count; the manifest and the restore drill's receipt carry the full list. Set
+`export.organizationCheck` to match Sibyl's `SIBYL_SURREAL_NAMESPACE_PREFIX` and
+`SIBYL_SURREAL_DATABASE` if you changed them; if the query fails, the entry records the error
+instead.
 
 ### Encryption and sync hooks
 
@@ -196,14 +204,26 @@ file into scratch space, one file at a time, and never modifies the files under 
 The drill checks every plaintext file's size and sha256 against the manifest and imports every
 database into a scratch SurrealDB sidecar, the `databases` entries STRICT as the bootstrap Job
 defines them in production. It then counts the rows in every table and compares them with the counts
-the export recorded. A database fails when its file is missing or altered, when the import is
-refused, when a table the export saw is missing, or when any table restores more than
-`max(restoreDrill.rowDrift.rows, restoreDrill.rowDrift.percent% of its exported count)` fewer rows
-than the export counted (2 rows and 1% by default). The allowance exists because the export counts
-rows just before it exports, in a separate read, so writes in between can move them; it applies to
-each table on its own, so one emptied table cannot hide behind the others. A table that exported
-rows and restored none fails whatever its size, because drift does not empty a table. The drill
-reports every failing database and every failure the export recorded, runs
+the export recorded.
+
+The export counts each table twice, just before and just after its `/export` streams, and records
+both (`tables` and `tables_after` in the manifest, `exported` and `exported_after` in the receipt).
+The snapshot lies between the two counts, so the drill judges each table against the lower one. A
+database fails when its file is missing or altered, when the import is refused, when a table that
+still existed after the export is missing, or when any table restores more than
+`max(restoreDrill.rowDrift.rows, restoreDrill.rowDrift.percent% of the lower count)` fewer rows (2
+rows and 1% by default). The allowance applies to each table on its own, so one emptied table cannot
+hide behind the others.
+
+A table restored empty fails whatever its size when both counts saw rows. Sibyl hard-deletes rows
+from small tables such as `user_sessions`, `device_authorization_requests`,
+`organization_invitations` and `telemetry_rollups`, and a long content export can stream for minutes
+after its first count, so a table can legitimately empty during the export window; then the second
+count is zero and the drill does not page. A row that is deleted and re-created while its own
+database streams can still make a table look emptied. Manifests written before the second count
+existed are judged by the first count alone.
+
+The drill reports every failing database and every failure the export recorded, runs
 `failureNotification.command`, and exits non-zero. It makes one attempt
 (`restoreDrill.backoffLimit: 0`), so one failing drill sends one notification.
 
