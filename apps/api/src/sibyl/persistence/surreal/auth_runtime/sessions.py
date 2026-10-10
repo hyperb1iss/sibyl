@@ -9,11 +9,12 @@ from uuid import UUID, uuid4
 
 from sibyl import config as config_module
 from sibyl.auth.jwt import (
+    JwtError,
     create_access_token,
     create_refresh_token,
+    verify_access_token,
 )
 from sibyl.auth.session_cache import access_session_cache
-from sibyl.cache_invalidation import announce_sessions_invalidated
 from sibyl.persistence.surreal.auth_runtime._common import (
     RefreshRotation,
     SurrealRecord,
@@ -23,6 +24,7 @@ from sibyl.persistence.surreal.auth_runtime._common import (
     _log_audit_event,
     _resolve_auth_context_from_claims,
     _session_id_from_access_token,
+    _session_id_from_claims,
     _session_namespace,
     _SurrealRepository,
 )
@@ -261,18 +263,28 @@ async def rotate_refresh_exchange(
 
 
 async def revoke_access_session(token: str) -> None:
+    """End the session behind a validly signed access token.
+
+    Logout is reachable without authentication, so nothing happens until the
+    token's signature and type check out; its expiry is not required, since
+    an expired access token still names a session worth ending. A forged
+    token, or one naming no session, touches no cache and announces nothing.
+    A session that is already revoked is revoked again, which re-announces it
+    to heal any replica that missed the first announcement.
+    """
+    try:
+        claims = verify_access_token(token, verify_expiry=False)
+    except JwtError:
+        return
+    session_id = _session_id_from_claims(claims)
     async with _auth_client_scope() as client:
         sessions = SurrealSessionRepository.from_client(client)
-        session_id = _session_id_from_access_token(token)
         existing = (
-            await sessions.get_session_by_id(session_id)
+            await sessions.get_session_by_id(session_id, include_inactive=True)
             if session_id is not None
             else await sessions.get_session_by_token(token)
         )
-        if existing is None:
-            if session_id is not None:
-                access_session_cache.mark_revoked(session_id)
-                await announce_sessions_invalidated(session_ids=[session_id])
+        if existing is None or str(existing.user_id) != str(claims.get("sub")):
             return
         await sessions.revoke_loaded_session(existing)
         access_session_cache.mark_revoked(

@@ -348,6 +348,11 @@ async def test_token_revoke_helpers_revoke_loaded_session_without_reload(
         lambda client: sessions,
     )
     monkeypatch.setattr(surreal_auth_runtime._SurrealRepository, "select_one", select_one)
+    monkeypatch.setattr(
+        surreal_auth_runtime,
+        "verify_access_token",
+        lambda token, **kwargs: {"sub": str(session.user_id)},
+    )
 
     await surreal_auth_runtime.revoke_access_session("access-token")
     await surreal_auth_runtime.revoke_refresh_session_record("refresh-token")
@@ -419,13 +424,13 @@ async def test_revoke_access_session_uses_sid_when_present(
     )
     monkeypatch.setattr(
         surreal_auth_runtime,
-        "decode_token_unverified",
-        lambda token: {"sid": str(session.id)},
+        "verify_access_token",
+        lambda token, **kwargs: {"sid": str(session.id), "sub": str(session.user_id)},
     )
 
     await surreal_auth_runtime.revoke_access_session("access-token")
 
-    sessions.get_session_by_id.assert_awaited_once_with(session.id)
+    sessions.get_session_by_id.assert_awaited_once_with(session.id, include_inactive=True)
     sessions.get_session_by_token.assert_not_awaited()
     sessions.revoke_loaded_session.assert_awaited_once_with(session)
     assert access_session_cache.get(session.id) is False

@@ -625,14 +625,16 @@ class SurrealSessionRepository(_SurrealRepository):
             return None
         return self._auth_session_from_record(record)
 
-    async def get_session_by_id(self, session_id: UUID) -> AuthSession | None:
+    async def get_session_by_id(
+        self, session_id: UUID, *, include_inactive: bool = False
+    ) -> AuthSession | None:
         record = await self.select_one(
             "SELECT * FROM user_sessions WHERE uuid = $uuid LIMIT 1;",
             uuid=str(session_id),
         )
         if record is None:
             return None
-        if not self._is_session_active(record):
+        if not include_inactive and not self._is_session_active(record):
             return None
         return self._auth_session_from_record(record)
 
@@ -1167,7 +1169,12 @@ async def _ensure_personal_org_membership_record(
 
 
 def _session_id_from_access_token(token: str) -> UUID | None:
-    sid = decode_token_unverified(token).get("sid")
+    """The sid claim, unverified: only for tokens already verified upstream."""
+    return _session_id_from_claims(decode_token_unverified(token))
+
+
+def _session_id_from_claims(claims: Mapping[str, object]) -> UUID | None:
+    sid = claims.get("sid")
     if not isinstance(sid, str) or not sid:
         return None
     try:

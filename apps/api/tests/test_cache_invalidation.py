@@ -478,6 +478,197 @@ async def test_revoking_again_reannounces_to_heal_a_peer_that_missed_it(
     ]
 
 
+def _forged_tokens(real: AuthSession) -> list[str]:
+    """Tokens an unauthenticated caller can send to logout, all naming a real session."""
+    import base64
+    import json
+
+    import jwt as pyjwt
+
+    from sibyl.auth.jwt import create_refresh_token
+
+    def b64(obj: dict[str, object]) -> str:
+        return base64.urlsafe_b64encode(json.dumps(obj).encode()).rstrip(b"=").decode()
+
+    claims = {"sub": str(real.user_id), "sid": str(real.id), "typ": "access"}
+    now = int(time.time())
+    timed = {**claims, "iat": now, "exp": now + 600}
+    refresh, _expires = create_refresh_token(
+        user_id=real.user_id, organization_id=real.organization_id, session_id=real.id
+    )
+    return [
+        f"{b64({'alg': 'HS256', 'typ': 'JWT'})}.{b64(claims)}.c2lnbmF0dXJl",  # bad signature
+        pyjwt.encode(timed, "someone-elses-secret-" * 3, algorithm="HS256"),  # wrong key
+        f"{b64({'alg': 'none', 'typ': 'JWT'})}.{b64(timed)}.",  # unsigned
+        refresh,  # validly signed, but a refresh token
+        "not-a-token",
+    ]
+
+
+@pytest.fixture
+def jwt_secret(monkeypatch: pytest.MonkeyPatch) -> None:
+    from pydantic import SecretStr
+
+    from sibyl.config import settings
+
+    monkeypatch.setattr(settings, "jwt_secret", SecretStr("logout-verification-proof-" * 3))
+
+
+class _OneSessionStore:
+    """The store as revoke_access_session sees it: one session, maybe already revoked."""
+
+    def __init__(self, session: AuthSession | None) -> None:
+        self.session = session
+        self.revoked: list[AuthSession] = []
+
+    async def get_session_by_id(
+        self, session_id: UUID, *, include_inactive: bool = False
+    ) -> AuthSession | None:
+        assert include_inactive, "a revoked session must still be found to re-announce it"
+        if self.session is not None and self.session.id == session_id:
+            return self.session
+        return None
+
+    async def get_session_by_token(self, token: str) -> AuthSession | None:
+        return None
+
+    async def revoke_loaded_session(self, session: AuthSession) -> bool:
+        self.revoked.append(session)
+        await auth_common.announce_sessions_invalidated(session_ids=[session.id])
+        return session.revoked_at is None
+
+
+def _use_store(monkeypatch: pytest.MonkeyPatch, store: _OneSessionStore) -> None:
+    from sibyl.persistence.surreal.auth_runtime import sessions as session_runtime
+
+    class _Scope:
+        async def __aenter__(self) -> object:
+            return object()
+
+        async def __aexit__(self, *exc: object) -> bool:
+            return False
+
+    monkeypatch.setattr(session_runtime, "_auth_client_scope", _Scope)
+    monkeypatch.setattr(
+        session_runtime.SurrealSessionRepository, "from_client", lambda client: store
+    )
+
+
+async def test_a_forged_logout_touches_no_cache_and_announces_nothing(
+    monkeypatch: pytest.MonkeyPatch, jwt_secret: None
+) -> None:
+    from sibyl.persistence.surreal.auth_runtime import sessions as session_runtime
+
+    announced = AsyncMock()
+    monkeypatch.setattr(auth_common, "announce_sessions_invalidated", announced)
+    real = _session()
+
+    def no_store() -> object:
+        raise AssertionError("a forged token must not reach the session store")
+
+    monkeypatch.setattr(session_runtime, "_auth_client_scope", no_store)
+    generation = access_session_cache.generation
+
+    for token in _forged_tokens(real) * 40:
+        await session_runtime.revoke_access_session(token)
+
+    assert access_session_cache.generation == generation
+    announced.assert_not_awaited()
+
+
+async def test_a_forged_logout_through_the_route_announces_nothing(
+    monkeypatch: pytest.MonkeyPatch, jwt_secret: None
+) -> None:
+    from starlette.requests import Request
+
+    from sibyl.api.routes import auth as auth_routes
+
+    announced = AsyncMock()
+    monkeypatch.setattr(auth_common, "announce_sessions_invalidated", announced)
+    monkeypatch.setattr(auth_routes, "log_audit_event", AsyncMock())
+    generation = access_session_cache.generation
+    for token in _forged_tokens(_session()):
+        request = Request(
+            {
+                "type": "http",
+                "method": "POST",
+                "path": "/auth/logout",
+                "headers": [(b"authorization", f"Bearer {token}".encode())],
+            }
+        )
+        response = await auth_routes.logout(request=request)
+        assert response.status_code == 204
+
+    assert access_session_cache.generation == generation
+    announced.assert_not_awaited()
+
+
+async def test_a_signed_logout_for_a_session_that_does_not_exist_announces_nothing(
+    monkeypatch: pytest.MonkeyPatch, jwt_secret: None
+) -> None:
+    from sibyl.persistence.surreal.auth_runtime import sessions as session_runtime
+
+    announced = AsyncMock()
+    monkeypatch.setattr(auth_common, "announce_sessions_invalidated", announced)
+    _use_store(monkeypatch, _OneSessionStore(None))
+    ghost = _session()
+    token = create_access_token(
+        user_id=ghost.user_id, organization_id=ghost.organization_id, session_id=ghost.id
+    )
+    generation = access_session_cache.generation
+
+    await session_runtime.revoke_access_session(token)
+
+    assert access_session_cache.generation == generation
+    announced.assert_not_awaited()
+
+
+async def test_a_signed_logout_cannot_end_another_users_session(
+    monkeypatch: pytest.MonkeyPatch, jwt_secret: None
+) -> None:
+    from sibyl.persistence.surreal.auth_runtime import sessions as session_runtime
+
+    announced = AsyncMock()
+    monkeypatch.setattr(auth_common, "announce_sessions_invalidated", announced)
+    victim = _session()
+    store = _OneSessionStore(victim)
+    _use_store(monkeypatch, store)
+    token = create_access_token(user_id=uuid4(), organization_id=None, session_id=victim.id)
+
+    await session_runtime.revoke_access_session(token)
+
+    assert store.revoked == []
+    announced.assert_not_awaited()
+
+
+@pytest.mark.parametrize("already_revoked", [False, True], ids=["active", "already-revoked"])
+async def test_a_signed_logout_for_a_real_session_revokes_and_announces(
+    monkeypatch: pytest.MonkeyPatch, jwt_secret: None, already_revoked: bool
+) -> None:
+    from sibyl.persistence.surreal.auth_runtime import sessions as session_runtime
+
+    announced = AsyncMock()
+    monkeypatch.setattr(auth_common, "announce_sessions_invalidated", announced)
+    session = _session()
+    if already_revoked:
+        session = session.model_copy(update={"revoked_at": datetime.now(UTC)})
+    store = _OneSessionStore(session)
+    _use_store(monkeypatch, store)
+    # Expired tokens still end their session: logout must not need a refresh first.
+    token = create_access_token(
+        user_id=session.user_id,
+        organization_id=session.organization_id,
+        session_id=session.id,
+        expires_in=timedelta(seconds=-60),
+    )
+
+    await session_runtime.revoke_access_session(token)
+
+    assert store.revoked == [session]
+    announced.assert_awaited_once_with(session_ids=[session.id])
+    assert access_session_cache.get(session.id) is False
+
+
 # --- Redis -------------------------------------------------------------------
 
 
