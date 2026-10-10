@@ -90,10 +90,13 @@ replacing it, so list that proxy's address as well. The
 [environment reference](./environment.md#trusted-proxies) explains how the address resolves.
 
 When Caddy listens on a Tailscale address, turn off Tailscale's subnet-router SNAT on that node
-(`tailscale set --snat-subnet-routes=false`). Docker forwards published ports through the kernel, so
-Tailscale treats tailnet traffic to Caddy as routed traffic and masquerades it to the bridge gateway
-by default. Caddy then sees every client as `.1`, and the per-address limit collapses back into one
-shared bucket. A node that advertises no subnet routes loses nothing by turning it off.
+(`tailscale set --snat-subnet-routes=false`). Docker publishes the port by rewriting the destination
+to Caddy's container address, so a tailnet request is forwarded through the kernel rather than
+delivered locally. Tailscale's netfilter rules mark every packet forwarded in from `tailscale0`, not
+only traffic for advertised routes, and masquerade it on the way out, so Caddy sees every client as
+the bridge gateway (`.1`) and the per-address limit collapses back into one shared bucket. Replies
+need no extra route, because they return through the host, which already routes `100.64.0.0/10` over
+Tailscale. A node that advertises no subnet routes loses nothing by turning it off.
 
 ## Deploying
 
