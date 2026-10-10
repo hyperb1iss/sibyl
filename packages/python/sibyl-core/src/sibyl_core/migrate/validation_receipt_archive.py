@@ -98,13 +98,21 @@ def _status(
 
 
 def capture(rows: list[dict[str, Any]]) -> dict[str, Any]:
-    """Capture only files named by this authorized execution snapshot."""
+    """Capture only receipts named by this authorized execution snapshot."""
     entries = []
     records = _rows(rows)
+    keyed = {
+        identity
+        for identity, row in records.items()
+        if not row["purged"] and row.get("recovery_key") is not None
+    }
+    # One batched read keeps the caller's snapshot-compare window short: the
+    # S3 store lists its prefix once instead of a GetObject per execution.
+    found = validation_receipts.capture_many(
+        records[identity]["request_json"] for identity in keyed
+    )
     for identity, row in sorted(records.items()):
-        ciphertext = None
-        if not row["purged"] and row.get("recovery_key") is not None:
-            ciphertext = validation_receipts.capture(row["request_json"])
+        ciphertext = found[row["request_json"]] if identity in keyed else None
         entry = {"execution_id": identity, "status": _status(row, ciphertext, records)}
         if ciphertext is not None:
             entry.update(

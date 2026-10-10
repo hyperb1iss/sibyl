@@ -2,6 +2,7 @@
 
 import io
 import json
+import threading
 from collections.abc import Callable
 from unittest.mock import AsyncMock
 
@@ -59,6 +60,10 @@ class FakeS3:
         self.conflicts = 0
         self.refuse: dict[str, ClientError] = {}
         self.before_put: Callable[[str], None] | None = None
+        self.before_get: Callable[[str], None] | None = None
+        self.page_size = 1000
+        self.listings = 0
+        self.gets: list[str] = []
         self.anonymous = FakeAnonymous(self)
 
     def put_object(self, *, Bucket, Key, Body, IfNoneMatch=None, ContentType=None):
@@ -81,8 +86,11 @@ class FakeS3:
         return {"ETag": '"etag"'}
 
     def get_object(self, *, Bucket, Key):
+        self.gets.append(Key)
         if "get_object" in self.refuse:
             raise self.refuse["get_object"]
+        if self.before_get is not None:
+            self.before_get(Key)
         if (Bucket, Key) not in self.objects:
             # Without s3:ListBucket, S3 answers a missing key with 403, not 404,
             # unless a delete marker is the key's current version.
@@ -96,6 +104,18 @@ class FakeS3:
         if self.versioned:
             self.delete_markers.add((Bucket, Key))
         return {}
+
+    def list_objects_v2(self, *, Bucket, Prefix, ContinuationToken=None):
+        self.listings += 1
+        keys = sorted(key for bucket, key in self.objects if bucket == Bucket)
+        keys = [key for key in keys if key.startswith(Prefix)]
+        start = int(ContinuationToken or 0)
+        page = keys[start : start + self.page_size]
+        more = start + self.page_size < len(keys)
+        result = {"Contents": [{"Key": key} for key in page], "IsTruncated": more}
+        if more:
+            result["NextContinuationToken"] = str(start + self.page_size)
+        return result
 
 
 class FakeAnonymous:
@@ -227,6 +247,71 @@ def test_discard_removes_only_the_named_receipt(bucket):
     receipts.discard(first)
     assert receipts.capture(first) is None
     assert receipts.read(second, key) == {"n": 2}
+
+
+def test_capture_many_lists_once_and_reads_only_present_receipts_concurrently(bucket):
+    key = Fernet.generate_key().decode()
+    requests = [canonical({"org": "org", "principal": f"p{n}"}) for n in range(40)]
+    for request in requests[:12]:
+        receipts.retain(request, key, {"request": request})
+    bucket.objects[(BUCKET, f"{PREFIX}/.probe-leftover")] = b"probe"
+    bucket.objects[(BUCKET, "elsewhere/unrelated.receipt")] = b"other"
+    bucket.page_size = 5
+    bucket.listings = 0
+    bucket.gets.clear()
+    # The first eight reads must be in flight together, or the barrier breaks.
+    together, arrivals, lock = threading.Barrier(8, timeout=10), [], threading.Lock()
+
+    def rendezvous(object_key):
+        with lock:
+            arrivals.append(object_key)
+            first = len(arrivals) <= 8
+        if first:
+            together.wait()
+
+    bucket.before_get = rendezvous
+
+    found = receipts.capture_many(requests)
+
+    assert bucket.listings == 3, "13 keys under the prefix in pages of five"
+    assert sorted(bucket.gets) == sorted(_key(request)[1] for request in requests[:12])
+    assert not together.broken
+    assert set(found) == set(requests)
+    for request in requests[:12]:
+        assert receipts.decode(request, key, found[request]) == {"request": request}
+    assert all(found[request] is None for request in requests[12:])
+
+
+def test_capture_many_treats_a_receipt_removed_after_listing_as_absent(bucket):
+    key = Fernet.generate_key().decode()
+    kept, removed = (canonical({"org": "org", "principal": name}) for name in ("kept", "gone"))
+    receipts.retain(kept, key, {"n": 1})
+    receipts.retain(removed, key, {"n": 2})
+
+    def discard_after_listing(object_key):
+        if object_key == _key(removed)[1]:
+            bucket.objects.pop(_key(removed), None)
+
+    bucket.before_get = discard_after_listing
+    found = receipts.capture_many([kept, removed])
+    assert found[removed] is None
+    assert receipts.decode(kept, key, found[kept]) == {"n": 1}
+    bucket.refuse["get_object"] = _error(503, "SlowDown", "GetObject")
+    with pytest.raises(ReceiptStoreUnavailable, match="SlowDown"):
+        receipts.capture_many([kept])
+
+
+def test_capture_many_on_the_directory_keeps_per_file_privacy(tmp_path, monkeypatch):
+    monkeypatch.setattr(settings, "validation_receipt_url", "")
+    monkeypatch.setattr(settings, "validation_receipt_dir", str(tmp_path / "receipts"))
+    key = Fernet.generate_key().decode()
+    present, absent = (canonical({"org": "org", "principal": name}) for name in ("a", "b"))
+    receipts.retain(present, key, {"n": 1})
+    found = receipts.capture_many([present, absent])
+    assert found == {present: receipts.capture(present), absent: None}
+    next((tmp_path / "receipts").glob("*.receipt")).chmod(0o644)
+    with pytest.raises(ValueError, match="not private"):
+        receipts.capture_many([present])
 
 
 def test_conditional_conflict_is_retried_then_surfaced(bucket):

@@ -9,6 +9,7 @@ ever create a receipt, never replace one.
 import json
 import os
 import tempfile
+from collections.abc import Iterable
 from pathlib import Path
 from typing import Protocol
 
@@ -23,6 +24,8 @@ class _ReceiptStore(Protocol):
     def ready(self) -> None: ...
 
     def get(self, name: str) -> bytes | None: ...
+
+    def get_many(self, names: Iterable[str]) -> dict[str, bytes | None]: ...
 
     def put_new(self, name: str, ciphertext: bytes) -> bool: ...
 
@@ -72,6 +75,9 @@ class _DirectoryStore:
             return None
         return ciphertext
 
+    def get_many(self, names: Iterable[str]) -> dict[str, bytes | None]:
+        return {name: self.get(name) for name in names}
+
     def put_new(self, name: str, ciphertext: bytes) -> bool:
         path = self._directory() / name
         descriptor, temporary_name = tempfile.mkstemp(prefix=".receipt-", dir=path.parent)
@@ -118,6 +124,13 @@ def ready() -> None:
 def capture(request: str) -> bytes | None:
     """Read private ciphertext without traversing unrelated receipts."""
     return _store().get(_name(request))
+
+
+def capture_many(requests: Iterable[str]) -> dict[str, bytes | None]:
+    """Read many requests' ciphertext in one pass; absent receipts map to None."""
+    names = {request: _name(request) for request in requests}
+    found = _store().get_many(names.values())
+    return {request: found[name] for request, name in names.items()}
 
 
 def decode(request: str, key: str, ciphertext: bytes) -> dict:

@@ -17,6 +17,8 @@ import contextlib
 import re
 import secrets
 import threading
+from collections.abc import Iterable
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from typing import Any
 from urllib.parse import parse_qs, urlsplit
@@ -157,6 +159,42 @@ class S3ReceiptStore:
             raise self._unavailable("GetObject", error) from error
         except BotoCoreError as error:
             raise self._unavailable("GetObject", error) from error
+
+    def _present(self, wanted: set[str]) -> set[str]:
+        """Names in ``wanted`` that exist under the prefix, from one paged listing."""
+        from botocore.exceptions import BotoCoreError, ClientError
+
+        base = f"{self.location.prefix}/" if self.location.prefix else ""
+        present: set[str] = set()
+        params: dict[str, Any] = {"Bucket": self.location.bucket, "Prefix": base}
+        while True:
+            try:
+                page = self._client.list_objects_v2(**params)
+            except (BotoCoreError, ClientError) as error:
+                raise self._unavailable("ListObjectsV2", error) from error
+            for item in page.get("Contents", ()):
+                name = item["Key"][len(base) :]
+                if name in wanted:
+                    present.add(name)
+            if not page.get("IsTruncated"):
+                return present
+            params["ContinuationToken"] = page["NextContinuationToken"]
+
+    def get_many(self, names: Iterable[str]) -> dict[str, bytes | None]:
+        """Fetch many receipts: list the prefix once, then read present keys concurrently.
+
+        Most executions keep their key long after their receipt was discarded,
+        so a backup asks about far more receipts than exist. Listing first turns
+        a GetObject per execution into one request per thousand keys, and the
+        remaining reads share the client's whole connection pool.
+        """
+        wanted = set(names)
+        found: dict[str, bytes | None] = dict.fromkeys(wanted)
+        present = sorted(self._present(wanted)) if wanted else []
+        if present:
+            with ThreadPoolExecutor(max_workers=min(_MAX_POOL_CONNECTIONS, len(present))) as pool:
+                found.update(zip(present, pool.map(self.get, present), strict=True))
+        return found
 
     def put_new(self, name: str, ciphertext: bytes) -> bool:
         """Create the object unless the key exists; False means it already did."""

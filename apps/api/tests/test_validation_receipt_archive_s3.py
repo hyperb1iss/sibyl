@@ -29,6 +29,8 @@ class Bucket:
 
     def __init__(self) -> None:
         self.objects: dict[str, bytes] = {}
+        self.listings = 0
+        self.gets = 0
 
     def put_object(self, *, Bucket, Key, Body, IfNoneMatch=None, ContentType=None):  # noqa: N803
         assert IfNoneMatch == "*"
@@ -37,12 +39,18 @@ class Bucket:
         self.objects[Key] = bytes(Body)
 
     def get_object(self, *, Bucket, Key):  # noqa: N803
+        self.gets += 1
         if Key not in self.objects:
             raise _error(404, "NoSuchKey")
         return {"Body": io.BytesIO(self.objects[Key])}
 
     def delete_object(self, *, Bucket, Key):  # noqa: N803
         self.objects.pop(Key, None)
+
+    def list_objects_v2(self, *, Bucket, Prefix, ContinuationToken=None):  # noqa: N803
+        self.listings += 1
+        keys = sorted(key for key in self.objects if key.startswith(Prefix))
+        return {"Contents": [{"Key": key} for key in keys], "IsTruncated": False}
 
 
 class Anonymous:
@@ -85,6 +93,12 @@ async def test_content_archive_moves_pending_receipt_from_volume_to_bucket(
         again = await content_archive.restore_content_archive_payload(archive, clean=True)
         assert again.success, again.errors
         assert bucket.objects == {f"team/{execution.id}.receipt": ciphertext}
+
+        # Exporting from the bucket lists the prefix once and reads only what exists.
+        bucket.listings = bucket.gets = 0
+        exported = await content_archive.export_content_archive_payload("org")
+        assert exported["validation_receipts"] == archive["validation_receipts"]
+        assert (bucket.listings, bucket.gets) == (1, 1)
 
         fresh = ValidationExecution(execution.id, "org", "owner")
         row = await fresh.load()
