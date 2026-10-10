@@ -47,9 +47,14 @@ ENTITIES = 1200
 # the build's per-row work is measurable at a size CI runs in seconds.
 WIDTH = 10
 TICK = 0.005
-# The loop must answer within this much of its schedule throughout the
-# build. Run on the loop, the build's longest step overshoots it many times.
-LAG_LIMIT = 0.1
+# The loop's worst stall during the build, as a share of the build's own
+# wall time. Run on the loop, the build's longest step grows with the graph
+# and so does the build, so main stalls for 15 to 33 percent of it whatever
+# the runner's speed. Off the loop what is left is a GIL handoff of a few
+# switch intervals, a shrinking share on a slower or busier runner.
+LAG_SHARE = 0.08
+# Below this a stall is GIL and scheduler noise on any machine.
+LAG_FLOOR = 0.05
 
 
 _DECODER = ThreadPoolExecutor(max_workers=1, thread_name_prefix="memory-graph-decode")
@@ -260,8 +265,10 @@ async def test_cold_build_keeps_the_event_loop_answering(memory_graph) -> None:
     assert data.total_nodes == ENTITIES
     assert data.total_edges == len(memory_graph.edge_rows)
     assert data.displayed_nodes == 1000
-    assert worst < LAG_LIMIT, (
+    limit = max(LAG_FLOOR, LAG_SHARE * elapsed)
+    assert worst < limit, (
         f"the event loop stalled {worst * 1000:.0f} ms during a {elapsed:.2f} s cold build"
+        f" (limit {limit * 1000:.0f} ms)"
     )
 
 
