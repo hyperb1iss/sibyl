@@ -20,6 +20,7 @@ from sibyl.api.idempotency import (
     reserve_idempotency_record,
 )
 from sibyl.mcp_tools import serialization
+from sibyl.mcp_tools.completion import uninterruptible
 from sibyl.mcp_tools.contracts import DeclaredRelatedTo, MemoryKind
 from sibyl.persistence import content_runtime
 from sibyl.persistence.auth_runtime import create_project_record, resolve_accessible_team_scope_keys
@@ -539,6 +540,7 @@ def register_memory_tools(mcp: MCPServer) -> None:
     """Register graph and durable-memory write tools."""
 
     @mcp.tool()
+    @uninterruptible
     async def add(
         title: str,
         content: str,
@@ -653,6 +655,7 @@ def register_memory_tools(mcp: MCPServer) -> None:
     # =========================================================================
 
     @mcp.tool()
+    @uninterruptible
     async def remember(
         title: str,
         content: str,
@@ -748,6 +751,7 @@ def register_memory_tools(mcp: MCPServer) -> None:
     # =========================================================================
 
     @mcp.tool()
+    @uninterruptible
     async def reflect(
         content: str,
         source_title: str = "Session reflection",

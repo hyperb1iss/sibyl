@@ -18,6 +18,7 @@ from sibyl.api.idempotency import (
 )
 from sibyl.auth.authorization import ProjectAuthorizationError
 from sibyl.mcp_tools import serialization
+from sibyl.mcp_tools.completion import uninterruptible
 from sibyl.persistence.auth_runtime import (
     log_memory_audit_event,
     resolve_accessible_team_scope_keys,
@@ -703,6 +704,7 @@ def register_management_tools(mcp: MCPServer) -> None:
     """Register the unified state-management tool."""
 
     @mcp.tool()
+    @uninterruptible
     async def manage(
         action: str,
         entity_id: str | None = None,
