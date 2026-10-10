@@ -6,6 +6,7 @@ from mcp.server import MCPServer
 
 import sibyl.mcp_tools.context as mcp_context
 import sibyl.mcp_tools.policy as mcp_policy
+from sibyl.mcp_tools.completion import uninterruptible
 from sibyl.mcp_tools.contracts import (
     SynthesisArtifactKind,
     SynthesisDepthKind,
@@ -248,7 +249,9 @@ def register_synthesis_tools(mcp: MCPServer) -> None:
         tags: list[str] | None = None,
     ) -> dict[str, Any]:
         """Draft, verify, and optionally remember a source-grounded artifact."""
-        return await _synthesis_mcp_draft(
+        # Only a remembering draft writes, so only that one must land whole.
+        draft = uninterruptible(_synthesis_mcp_draft) if remember else _synthesis_mcp_draft
+        return await draft(
             goal=goal,
             output_type=output_type,
             audience=audience,

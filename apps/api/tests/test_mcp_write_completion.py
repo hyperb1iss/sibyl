@@ -12,14 +12,31 @@ import asyncio
 import anyio
 import httpx2
 import pytest
+from structlog.testing import capture_logs
 
 from sibyl.config import settings
 from sibyl.main import mcp_http_app
+from sibyl.mcp_tools import synthesis as synthesis_tools
 from sibyl.mcp_tools.completion import uninterruptible
 from sibyl.server import create_mcp_server
+from tests.test_mcp_entry_point_scope_coverage import WRITE_TOOLS
 
-WRITE_TOOLS = {"add", "remember", "reflect", "manage"}
+# synthesis_draft writes only when asked to remember, so it shields per call.
+ALWAYS_WRITING = WRITE_TOOLS - {"synthesis_draft"}
 ACCEPT = "application/json, text/event-stream"
+HEADERS = {"Accept": ACCEPT, "mcp-protocol-version": "2025-06-18"}
+
+
+async def _drop_call(client: httpx2.AsyncClient, name: str, arguments: dict[str, object]) -> None:
+    """Give up on a tool call mid-flight, as a client that disconnects does."""
+    call = {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "tools/call",
+        "params": {"name": name, "arguments": arguments},
+    }
+    with pytest.raises(TimeoutError):
+        await asyncio.wait_for(client.post("/mcp", headers=HEADERS, json=call), 0.1)
 
 
 @pytest.mark.asyncio
@@ -33,7 +50,7 @@ async def test_every_write_tool_is_uninterruptible_and_reads_are_not() -> None:
 
     assert names >= WRITE_TOOLS
     # Reads stay cancellable so an abandoned search stops spending work.
-    assert wrapped == WRITE_TOOLS
+    assert wrapped == ALWAYS_WRITING
 
 
 @pytest.mark.asyncio
@@ -62,23 +79,14 @@ async def test_a_dropped_call_still_lands_its_write(monkeypatch: pytest.MonkeyPa
         return await slow("read")
 
     app = mcp_http_app(mcp, "127.0.0.1", 3334)
-    headers = {"Accept": ACCEPT, "mcp-protocol-version": "2025-06-18"}
     async with (
         mcp.session_manager.run(),
         httpx2.AsyncClient(
             transport=httpx2.ASGITransport(app=app), base_url=settings.server_url
         ) as client,
     ):
-        for request_id, name in enumerate(("probe_write", "probe_read"), start=1):
-            call = {
-                "jsonrpc": "2.0",
-                "id": request_id,
-                "method": "tools/call",
-                "params": {"name": name, "arguments": {}},
-            }
-            # Give up on the response mid-call, as a client that disconnects does.
-            with pytest.raises(TimeoutError):
-                await asyncio.wait_for(client.post("/mcp", headers=headers, json=call), 0.1)
+        for name in ("probe_write", "probe_read"):
+            await _drop_call(client, name, {})
         await anyio.sleep(1.0)
 
     assert outcomes == {"write": "finished", "read": "cancelled"}
@@ -101,3 +109,55 @@ async def test_task_cancel_waits_for_the_write_then_cancels_the_caller() -> None
     with pytest.raises(asyncio.CancelledError):
         await caller
     assert landed.is_set()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("remember", "outcome"), [(True, "finished"), (False, "cancelled")])
+async def test_a_dropped_draft_lands_only_when_it_remembers(
+    monkeypatch: pytest.MonkeyPatch, remember: bool, outcome: str
+) -> None:
+    monkeypatch.setattr(settings, "mcp_auth_mode", "off")
+    monkeypatch.setattr(settings, "server_url", "http://127.0.0.1:3334")
+    outcomes: list[str] = []
+
+    async def draft(**_kwargs: object) -> dict[str, object]:
+        try:
+            await anyio.sleep(0.5)
+        except BaseException:
+            outcomes.append("cancelled")
+            raise
+        outcomes.append("finished")
+        return {}
+
+    monkeypatch.setattr(synthesis_tools, "_synthesis_mcp_draft", draft)
+    mcp = create_mcp_server()
+    app = mcp_http_app(mcp, "127.0.0.1", 3334)
+    async with (
+        mcp.session_manager.run(),
+        httpx2.AsyncClient(
+            transport=httpx2.ASGITransport(app=app), base_url=settings.server_url
+        ) as client,
+    ):
+        await _drop_call(client, "synthesis_draft", {"goal": "probe", "remember": remember})
+        await anyio.sleep(1.0)
+
+    assert outcomes == [outcome]
+
+
+@pytest.mark.asyncio
+async def test_a_write_that_fails_after_the_caller_left_is_logged() -> None:
+    @uninterruptible
+    async def write() -> None:
+        await asyncio.sleep(0.1)
+        raise RuntimeError("store unavailable")
+
+    caller = asyncio.ensure_future(write())
+    await asyncio.sleep(0.02)
+    caller.cancel()
+    with capture_logs() as logs, pytest.raises(asyncio.CancelledError) as cancelled:
+        await caller
+
+    assert isinstance(cancelled.value.__cause__, RuntimeError)
+    assert [(entry["event"], entry["log_level"], entry["error"]) for entry in logs] == [
+        ("mcp_write_failed_after_caller_left", "error", "store unavailable")
+    ]

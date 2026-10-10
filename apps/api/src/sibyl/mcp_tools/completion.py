@@ -5,6 +5,9 @@ from collections.abc import Awaitable, Callable
 from functools import wraps
 
 import anyio
+import structlog
+
+log = structlog.get_logger()
 
 
 def uninterruptible[**P, R](tool: Callable[P, Awaitable[R]]) -> Callable[P, Awaitable[R]]:
@@ -34,6 +37,14 @@ def uninterruptible[**P, R](tool: Callable[P, Awaitable[R]]) -> Callable[P, Awai
                     except Exception:
                         break
             cause = None if write.cancelled() else write.exception()
+            if cause is not None:
+                # Nobody is left to receive this error, so record it here.
+                log.exception(
+                    "mcp_write_failed_after_caller_left",
+                    tool=getattr(tool, "__name__", repr(tool)),
+                    error=str(cause),
+                    exc_info=(type(cause), cause, cause.__traceback__),
+                )
             raise cancellation from cause
 
     return run
