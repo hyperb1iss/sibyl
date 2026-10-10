@@ -6,6 +6,7 @@ from typing import Any, Literal
 
 from sibyl import gc_tuning
 from sibyl.config import settings
+from sibyl_core.services.graph_compute import shutdown_compute_pools
 
 
 class RuntimeServices:
@@ -59,6 +60,8 @@ class RuntimeServices:
         await self._shutdown_pubsub()
         await self._shutdown_cache_invalidation()
         await self._shutdown_locks()
+        # Last: queued graph steps belong to requests that are shutting down.
+        shutdown_compute_pools()
 
     async def _drain_deferred_usage_stamps(self) -> None:
         """Let scheduled exposure stamps land before their clients close."""

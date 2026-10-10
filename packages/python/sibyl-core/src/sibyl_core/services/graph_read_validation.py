@@ -8,8 +8,8 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
-from collections.abc import Callable, Coroutine, Hashable, Sequence
-from dataclasses import asdict
+from collections.abc import Callable, Coroutine, Hashable, Iterable, Mapping, Sequence
+from dataclasses import asdict, dataclass
 from typing import TYPE_CHECKING, Any, TypedDict
 
 from sibyl_core.backends.surreal.schema_version import SurrealExecute
@@ -22,6 +22,105 @@ from sibyl_core.services.source_observations import SourceUnavailableError
 
 if TYPE_CHECKING:
     from sibyl_core.services.graph_publication_fence import _PublicationCollector
+
+
+# Marks evidence the caller did not compute, since None is a valid evidence.
+_UNCOMPUTED: Any = object()
+
+
+@dataclass(frozen=True, slots=True)
+class GraphReadFootprint:
+    """A frozen copy of one validation pass's recorded reads.
+
+    A worker thread compares final snapshots against the footprint while
+    the pass's own tasks may still record on the loop; the copy is what it
+    reads, so no dictionary changes under it.
+    """
+
+    organization_id: str
+    graph_rows: Mapping[SourceIdentity, object]
+    graph_ancestry: Mapping[SourceIdentity, object]
+    raw_rows: Mapping[SourceIdentity, object]
+    raw_content_digests: Mapping[SourceIdentity, object]
+    associations: Mapping[SourceIdentity, object]
+    observations: Mapping[SourceIdentity, Any]
+    dependencies: Mapping[SourceIdentity, frozenset[SourceIdentity]]
+    conflicts: frozenset[SourceIdentity]
+
+    def affected(self, source: SourceIdentity, changed: set[SourceIdentity]) -> bool:
+        return _affected(self.dependencies, source, changed)
+
+
+def _affected(
+    dependencies: Mapping[SourceIdentity, Iterable[SourceIdentity]],
+    source: SourceIdentity,
+    changed: set[SourceIdentity],
+) -> bool:
+    pending = [source]
+    seen = set()
+    while pending:
+        current = pending.pop()
+        if current in changed:
+            return True
+        if current not in seen:
+            seen.add(current)
+            pending.extend(dependencies.get(current, ()))
+    return False
+
+
+def entity_evidence_values(entities: Sequence[Any], *, ancestry: bool = False) -> list[Any]:
+    """Each entity's recorded evidence, or None where computing it raised.
+
+    Pure, so a worker thread can run it. record_entity_evidence recomputes
+    a None on the loop, where the error raises exactly as record_entity's.
+    """
+    from sibyl_core.services.graph_records import _jsonable
+
+    values: list[Any] = []
+    for entity in entities:
+        try:
+            values.append(_jsonable(entity_read_evidence(entity, ancestry=ancestry)))
+        except Exception:
+            values.append(None)
+    return values
+
+
+@dataclass(frozen=True, slots=True)
+class AssociationProofInputs:
+    """The CPU-heavy parts of association_proof, computed off the loop."""
+
+    entity_evidence: Any
+    association_evidence: Any
+    identity: str
+
+
+def association_proof_inputs(entity, association) -> AssociationProofInputs | None:
+    """What association_proof derives from its row pair, or None where that raised.
+
+    Pure, so a worker thread can run it; a None proof takes the loop path,
+    which raises where association_proof always has.
+    """
+    from sibyl_core.memory_pipeline.observations import evidence_hash
+    from sibyl_core.services.graph_records import _jsonable
+
+    try:
+        association_evidence = association_read_evidence(association)
+        return AssociationProofInputs(
+            entity_evidence=_jsonable(entity_read_evidence(entity)),
+            association_evidence=_jsonable(association_evidence),
+            identity=evidence_hash(
+                _jsonable(
+                    {
+                        "entity": entity.model_dump(mode="json"),
+                        "derivation_required": entity.derivation_required,
+                        "observed_revision": entity.observed_revision,
+                        "association": association_evidence,
+                    }
+                )
+            ),
+        )
+    except Exception:
+        return None
 
 
 class _PublicationExecutionKwargs(TypedDict, total=False):
@@ -217,29 +316,41 @@ class GraphReadValidation:
         await self.prepare_graph([entity_id])
         return self._validated_graph[entity_id]
 
-    async def association_proof(self, entity, association, ancestors, check):
+    async def association_proof(
+        self,
+        entity,
+        association,
+        ancestors,
+        check,
+        *,
+        inputs: AssociationProofInputs | None = None,
+    ):
         from sibyl_core.backends.surreal.records import normalize_record
         from sibyl_core.memory_pipeline.observations import evidence_hash
         from sibyl_core.services.graph_records import _jsonable
 
         self._check_org(entity.organization_id)
-        self.record_entity(entity)
-        self.record_association(
-            SourceIdentity(self.organization_id, SourceKind.GRAPH_ENTITY, entity.id), association
-        )
-        normalized = normalize_record(association) if association is not None else None
-        if normalized is not None:
-            normalized.pop("validation_write_witness", None)
-        identity = evidence_hash(
-            _jsonable(
-                {
-                    "entity": entity.model_dump(mode="json"),
-                    "derivation_required": entity.derivation_required,
-                    "observed_revision": entity.observed_revision,
-                    "association": normalized,
-                }
+        source = SourceIdentity(self.organization_id, SourceKind.GRAPH_ENTITY, entity.id)
+        if inputs is not None:
+            self.record_entity_evidence(entity, inputs.entity_evidence)
+            self.record_association(source, association, evidence=inputs.association_evidence)
+            identity = inputs.identity
+        else:
+            self.record_entity(entity)
+            self.record_association(source, association)
+            normalized = normalize_record(association) if association is not None else None
+            if normalized is not None:
+                normalized.pop("validation_write_witness", None)
+            identity = evidence_hash(
+                _jsonable(
+                    {
+                        "entity": entity.model_dump(mode="json"),
+                        "derivation_required": entity.derivation_required,
+                        "observed_revision": entity.observed_revision,
+                        "association": normalized,
+                    }
+                )
             )
-        )
         return await self._once(("association_proof", identity, ancestors), check)
 
     async def observation_proof(self, observations, authority, ancestors, check):
@@ -253,7 +364,9 @@ class GraphReadValidation:
         from sibyl_core.services.graph_records import _jsonable
 
         self._check_org(source.organization_id)
-        value = _jsonable(evidence)
+        self._remember_value(records, source, _jsonable(evidence))
+
+    def _remember_value(self, records, source: SourceIdentity, value) -> None:
         if source in records and records[source] != value:
             self.conflicts.add(source)
         else:
@@ -274,6 +387,33 @@ class GraphReadValidation:
         evidence = entity_read_evidence(entity, ancestry=ancestry)
         self._remember(self.graph_ancestry if ancestry else self.graph_rows, source, evidence)
 
+    def record_entity_evidence(self, entity, evidence: Any, *, ancestry: bool = False) -> None:
+        """record_entity with its evidence from entity_evidence_values."""
+        if evidence is None:
+            self.record_entity(entity, ancestry=ancestry)
+            return
+        self._check_org(entity.organization_id)
+        source = SourceIdentity(self.organization_id, SourceKind.GRAPH_ENTITY, entity.id)
+        if self._publication_collector is not None:
+            self._publication_collector.register_source(source)
+        self._remember_value(self.graph_ancestry if ancestry else self.graph_rows, source, evidence)
+
+    async def record_entities(self, entities: Sequence[Any], *, ancestry: bool = False) -> None:
+        """record_entity for each row, with the evidence computed off the loop.
+
+        Rows are recorded in order, and a row that would have raised raises
+        at the same position, after the rows before it are recorded.
+        """
+        from sibyl_core.services.graph_compute import compute_rows
+
+        if not entities:
+            return
+        values = await compute_rows(
+            len(entities), entity_evidence_values, list(entities), ancestry=ancestry
+        )
+        for entity, evidence in zip(entities, values, strict=True):
+            self.record_entity_evidence(entity, evidence, ancestry=ancestry)
+
     def record_capture(self, memory) -> None:
         self._check_org(memory.organization_id)
         source = SourceIdentity(self.organization_id, SourceKind.RAW_CAPTURE, memory.id)
@@ -281,12 +421,18 @@ class GraphReadValidation:
             self._publication_collector.register_source(source)
         self._remember(self.raw_rows, source, capture_read_evidence(memory))
 
-    def record_association(self, source: SourceIdentity, association) -> None:
+    def record_association(
+        self, source: SourceIdentity, association, *, evidence: Any = _UNCOMPUTED
+    ) -> None:
         from sibyl_core.services.memory_derivations import observation_from_record
 
         if self._publication_collector is not None:
             self._publication_collector.register_source(source)
-        self._remember(self.associations, source, association_read_evidence(association))
+        if evidence is _UNCOMPUTED:
+            self._remember(self.associations, source, association_read_evidence(association))
+        else:
+            self._check_org(source.organization_id)
+            self._remember_value(self.associations, source, evidence)
         if association is not None:
             for value in association.get("observations", []):
                 try:
@@ -306,16 +452,23 @@ class GraphReadValidation:
 
     def affected(self, source: SourceIdentity, changed: set[SourceIdentity]) -> bool:
         """Walk only this source's closure; a peer failure does not deny it."""
-        pending = [source]
-        seen = set()
-        while pending:
-            current = pending.pop()
-            if current in changed:
-                return True
-            if current not in seen:
-                seen.add(current)
-                pending.extend(self.dependencies.get(current, ()))
-        return False
+        return _affected(self.dependencies, source, changed)
+
+    def footprint(self) -> GraphReadFootprint:
+        """Freeze what this pass has recorded so far, for a worker thread."""
+        return GraphReadFootprint(
+            organization_id=self.organization_id,
+            graph_rows=dict(self.graph_rows),
+            graph_ancestry=dict(self.graph_ancestry),
+            raw_rows=dict(self.raw_rows),
+            raw_content_digests=dict(self.raw_content_digests),
+            associations=dict(self.associations),
+            observations=dict(self.observations),
+            dependencies={
+                source: frozenset(values) for source, values in self.dependencies.items()
+            },
+            conflicts=frozenset(self.conflicts),
+        )
 
 
 def _semantic_metadata(metadata):

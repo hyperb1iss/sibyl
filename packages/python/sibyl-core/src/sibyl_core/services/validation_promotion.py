@@ -390,17 +390,14 @@ async def validated_graph_currents(
             )
     captures = {row["uuid"]: row for row in rows[0]["captures"]}
     associations = {row["target_id"]: row for row in rows[0]["associations"]}
+    references: dict[object, set[str]] = {}
+    for r in rows[0]["direct"]:
+        references.setdefault(r.get("validation_entity_id"), set()).add(r["target_id"])
+    for r in rows[0]["published"]:
+        references.setdefault(r.get("promoted_entity_id"), set()).add(r["candidate_id"])
 
     async def current(entity_id: str) -> bool:
-        ids = {
-            r["target_id"] for r in rows[0]["direct"] if r.get("validation_entity_id") == entity_id
-        }
-        ids.update(
-            r["candidate_id"]
-            for r in rows[0]["published"]
-            if r.get("promoted_entity_id") == entity_id
-        )
-        for identifier in ids:
+        for identifier in references[entity_id]:
             record = captures.get(identifier)
             if record is None:
                 return False
@@ -431,5 +428,16 @@ async def validated_graph_currents(
         return True
 
     ids = list(dict.fromkeys(entity_ids))
-    results = await asyncio.gather(*(current(identifier) for identifier in ids))
-    return dict(zip(ids, results, strict=True))
+    # An entity no validation references is current as it stands; only the
+    # referenced ones read their captures, so a whole-graph batch does not
+    # schedule one task per row.
+    referenced = [identifier for identifier in ids if identifier in references]
+    results = dict.fromkeys(ids, True)
+    results.update(
+        zip(
+            referenced,
+            await asyncio.gather(*(current(identifier) for identifier in referenced)),
+            strict=True,
+        )
+    )
+    return results

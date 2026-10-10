@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Awaitable, Callable, Coroutine, Hashable, Mapping, Sequence
+from collections.abc import Awaitable, Callable, Coroutine, Hashable, Mapping, Sequence, Set
 from typing import Any
 
 from pydantic import ValidationError
@@ -311,15 +311,11 @@ async def _load_available_graph_relationships(
     proven_endpoints: Mapping[str, Entity] | None = None,
 ) -> dict[str, Relationship]:
     from sibyl_core.backends.surreal.records import normalize_records
-    from sibyl_core.services.graph_records import (
-        entity_from_surreal_row,
-        readable_relationship_from_surreal_row,
-    )
+    from sibyl_core.services.graph_compute import compute_rows
     from sibyl_core.services.operational_relationships import (
         _snapshot,
-        operational_relationship_current,
+        operational_relationship_binding_current,
         org_lookup_clumps,
-        relationship_body_digest,
     )
 
     graph = runtime or await get_surreal_graph_runtime(organization_id, ensure_schema=False)
@@ -353,17 +349,7 @@ async def _load_available_graph_relationships(
     )
     all_endpoints: set[str] = set().union(*(endpoints for _, endpoints, _ in captured))
 
-    def endpoint_evidence(entity: Entity) -> tuple[Any, ...]:
-        # Vectors are storage, not evidence: entity_read_evidence leaves them
-        # out, and neither side was read with them.
-        return (
-            entity.model_dump(mode="json", exclude={"embedding"}),
-            entity.derivation_required,
-            entity.observed_revision,
-        )
-
     async def validate(snapshots, read):
-        result = {}
         current = (
             proven_endpoints
             if proven_endpoints is not None
@@ -377,18 +363,104 @@ async def _load_available_graph_relationships(
                 include_embeddings=False,
             )
         )
-        # Each side is decoded once per snapshot, however many edges share it.
-        current_evidence: dict[str, tuple[Any, ...]] = {}
-
-        def unchanged(endpoint: str, targets, stored_evidence) -> bool:
-            if endpoint not in current_evidence:
-                current_evidence[endpoint] = endpoint_evidence(current[endpoint])
-            if endpoint not in stored_evidence:
-                stored_evidence[endpoint] = endpoint_evidence(
-                    entity_from_surreal_row(targets[endpoint])
+        result = {}
+        # Decoding, endpoint comparison and the row-only operational verdict
+        # run off the loop; only bound rows come back for their async proof.
+        rows = sum(len(snapshot["relationships"]) for snapshot in snapshots)
+        for candidate in await compute_rows(rows, _edge_candidates, snapshots, current):
+            if isinstance(candidate, BaseException):
+                raise candidate
+            row, relationship, verdict, (targets, states, associations) = candidate
+            if verdict is None:
+                verdict = await operational_relationship_binding_current(
+                    row,
+                    targets=targets,
+                    states=states,
+                    associations=associations,
+                    organization_id=organization_id,
+                    read=read,
                 )
-            return current_evidence[endpoint] == stored_evidence[endpoint]
+            if verdict:
+                result[row["uuid"]] = relationship
+        return result
 
+    first = frozenset(
+        await validate(
+            [snapshot for _, _, snapshot in captured], GraphReadValidation(organization_id)
+        )
+    )
+
+    async def recapture(
+        entry: tuple[list[str], set[str], dict[str, Any]],
+    ) -> dict[str, Any]:
+        batch, endpoints, snapshot = entry
+        fresh = await _snapshot(
+            graph.client,
+            organization_id=organization_id,
+            ids=endpoints,
+            relationship_ids=batch,
+            include_embeddings=False,
+        )
+        fresh["relationships"] = await compute_rows(
+            len(fresh["relationships"]), _unchanged_rows, fresh, snapshot, first
+        )
+        return fresh
+
+    final_snapshots = await _each_batch(graph.client, recapture, captured)
+    return await validate(
+        final_snapshots, read if read is not None else GraphReadValidation(organization_id)
+    )
+
+
+def _endpoint_evidence(entity: Entity) -> tuple[Any, ...]:
+    # Vectors are storage, not evidence: entity_read_evidence leaves them
+    # out, and neither side was read with them.
+    return (
+        entity.model_dump(mode="json", exclude={"embedding"}),
+        entity.derivation_required,
+        entity.observed_revision,
+    )
+
+
+type _EdgeCandidate = tuple[
+    dict[str, Any],
+    Relationship,
+    bool | None,
+    tuple[dict[str, Any], dict[str, Any], dict[str, Any]],
+]
+
+
+def _edge_candidates(
+    snapshots: Sequence[dict[str, Any]], current: Mapping[str, Entity]
+) -> list[_EdgeCandidate | BaseException]:
+    """Each readable edge whose endpoints still match ``current``, in snapshot order.
+
+    Each carries the verdict its stored row decides alone (None when its
+    binding needs the async proof) and the lookups that proof reads. An
+    error a row raises ends the list where the loop would have raised it.
+    """
+    from sibyl_core.services.graph_records import (
+        entity_from_surreal_row,
+        readable_relationship_from_surreal_row,
+    )
+    from sibyl_core.services.operational_relationships import (
+        operational_relationship_row_verdict,
+    )
+
+    candidates: list[_EdgeCandidate | BaseException] = []
+    # Each side is decoded once per snapshot, however many edges share it.
+    current_evidence: dict[str, tuple[Any, ...]] = {}
+
+    def unchanged(endpoint: str, targets, stored_evidence) -> bool:
+        if endpoint not in current_evidence:
+            current_evidence[endpoint] = _endpoint_evidence(current[endpoint])
+        if endpoint not in stored_evidence:
+            stored_evidence[endpoint] = _endpoint_evidence(
+                entity_from_surreal_row(targets[endpoint])
+            )
+        return current_evidence[endpoint] == stored_evidence[endpoint]
+
+    try:
         for snapshot in snapshots:
             targets = {r["uuid"]: r for r in snapshot["targets"]}
             states = {r["source_id"]: r for r in snapshot["states"]}
@@ -408,70 +480,56 @@ async def _load_available_graph_relationships(
                 relationship = readable_relationship_from_surreal_row(row)
                 if relationship is None:
                     continue
-                if await operational_relationship_current(
-                    row,
-                    targets=targets,
-                    states=states,
-                    associations=associations,
-                    organization_id=organization_id,
-                    read=read,
-                ):
-                    result[row["uuid"]] = relationship
-        return result
+                candidates.append(
+                    (
+                        row,
+                        relationship,
+                        operational_relationship_row_verdict(row),
+                        (targets, states, associations),
+                    )
+                )
+    except Exception as error:
+        candidates.append(error)
+    return candidates
 
-    first = await validate(
-        [snapshot for _, _, snapshot in captured], GraphReadValidation(organization_id)
+
+def _unchanged_rows(
+    fresh: dict[str, Any], snapshot: dict[str, Any], proven: Set[str]
+) -> list[dict[str, Any]]:
+    """Fresh edge rows a recapture keeps: proven first, body and binding unmoved."""
+    from sibyl_core.services.operational_relationships import relationship_body_digest
+
+    originals = {row["uuid"]: row for row in snapshot["relationships"]}
+    original_associations = {row["target_id"]: row for row in snapshot["associations"]}
+    changed_associations = {
+        row["target_id"]
+        for row in fresh["associations"]
+        if row != original_associations.get(row["target_id"])
+    }
+    changed_associations.update(
+        original_associations.keys() - {row["target_id"] for row in fresh["associations"]}
     )
-
-    async def recapture(
-        entry: tuple[list[str], set[str], dict[str, Any]],
-    ) -> dict[str, Any]:
-        batch, endpoints, snapshot = entry
-        fresh = await _snapshot(
-            graph.client,
-            organization_id=organization_id,
-            ids=endpoints,
-            relationship_ids=batch,
-            include_embeddings=False,
-        )
-        originals = {row["uuid"]: row for row in snapshot["relationships"]}
-        original_associations = {row["target_id"]: row for row in snapshot["associations"]}
-        changed_associations = {
-            row["target_id"]
-            for row in fresh["associations"]
-            if row != original_associations.get(row["target_id"])
-        }
-        changed_associations.update(
-            original_associations.keys() - {row["target_id"] for row in fresh["associations"]}
-        )
-        # Compare semantic bodies and protected bindings, not write witnesses.
-        unchanged_rows = []
-        for row in fresh["relationships"]:
-            if (
-                row["uuid"] not in first
-                or {row.get("source_uuid"), row.get("target_uuid")} & changed_associations
-            ):
-                continue
-            original = originals[row["uuid"]]
-            try:
-                same_body = relationship_body_digest(row) == relationship_body_digest(original)
-            except ValidationError:
-                continue
-            if (
-                same_body
-                and row.get("operational_source_binding")
-                == original.get("operational_source_binding")
-                and row.get("operational_derivation_required")
-                == original.get("operational_derivation_required")
-            ):
-                unchanged_rows.append(row)
-        fresh["relationships"] = unchanged_rows
-        return fresh
-
-    final_snapshots = await _each_batch(graph.client, recapture, captured)
-    return await validate(
-        final_snapshots, read if read is not None else GraphReadValidation(organization_id)
-    )
+    # Compare semantic bodies and protected bindings, not write witnesses.
+    unchanged_rows = []
+    for row in fresh["relationships"]:
+        if (
+            row["uuid"] not in proven
+            or {row.get("source_uuid"), row.get("target_uuid")} & changed_associations
+        ):
+            continue
+        original = originals[row["uuid"]]
+        try:
+            same_body = relationship_body_digest(row) == relationship_body_digest(original)
+        except ValidationError:
+            continue
+        if (
+            same_body
+            and row.get("operational_source_binding") == original.get("operational_source_binding")
+            and row.get("operational_derivation_required")
+            == original.get("operational_derivation_required")
+        ):
+            unchanged_rows.append(row)
+    return unchanged_rows
 
 
 async def unchanged_graph_relationships(

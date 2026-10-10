@@ -25,6 +25,7 @@ from sibyl_core.services.graph_community_managers import (
     _list_all_relationships,
 )
 from sibyl_core.services.graph_community_models import GraphSnapshot
+from sibyl_core.services.graph_compute import compute_rows, graph_build, off_loop
 from sibyl_core.services.graph_visibility import graph_row_read_allowed
 
 log = structlog.get_logger()
@@ -208,6 +209,7 @@ async def _get_graph_snapshot(
     )
 
 
+@graph_build
 async def _load_graph_snapshot(
     client: Any,
     organization_id: str,
@@ -230,17 +232,10 @@ async def _load_graph_snapshot(
             max_items=max_relationships,
         ),
     )
-    # Enumerated rows are already body-free by projection; compacting here
-    # keeps that true for any loader, since every reader snapshot of this
-    # organization will reference these same objects.
-    entities = [_compact_entity(entity) for entity in entities]
-    entity_by_id = _entity_index(entities)
-    snapshot = GraphSnapshot(
-        entities=entities,
-        relationships=relationships,
-        entity_by_id=entity_by_id,
-        relationship_by_id={edge.id: edge for edge in relationships if edge.id},
+    snapshot = await compute_rows(
+        len(entities) + len(relationships), _enumerated_snapshot, entities, relationships
     )
+    entities = snapshot.entities
     if graph_generation(organization_id) != generation:
         # A write landed while the pages were read. The callers that waited
         # get this snapshot; the next one re-enumerates.
@@ -259,6 +254,21 @@ async def _load_graph_snapshot(
         max_relationships=max_relationships,
     )
     return snapshot
+
+
+def _enumerated_snapshot(
+    entities: list[Entity], relationships: list[Relationship]
+) -> GraphSnapshot:
+    # Enumerated rows are already body-free by projection; compacting here
+    # keeps that true for any loader, since every reader snapshot of this
+    # organization will reference these same objects.
+    entities = [_compact_entity(entity) for entity in entities]
+    return GraphSnapshot(
+        entities=entities,
+        relationships=relationships,
+        entity_by_id=_entity_index(entities),
+        relationship_by_id={edge.id: edge for edge in relationships if edge.id},
+    )
 
 
 def _entity_index(entities: list[Entity]) -> dict[str, Entity]:
@@ -387,6 +397,7 @@ async def _get_visible_graph_snapshot(
     )
 
 
+@graph_build
 async def _load_visible_graph_snapshot(
     client: Any,
     organization_id: str,
@@ -419,6 +430,39 @@ async def _load_visible_graph_snapshot(
             accessible_delegations=accessible_delegations,
         ),
     )
+    # Narrowing to the reader and binding the fingerprint both run off the
+    # loop; the derived caches then never serialize the whole graph again
+    # on a warm request.
+    visible = await off_loop(
+        _fingerprinted_visible_snapshot,
+        base,
+        proven,
+        principal_id=principal_id,
+        accessible_projects=accessible_projects,
+        allowed_memory_scope_keys=allowed_memory_scope_keys,
+        accessible_teams=accessible_teams,
+        accessible_delegations=accessible_delegations,
+    )
+    GRAPH_VISIBLE_SNAPSHOT_CACHE[cache_key] = (base, visible)
+    log.info(
+        "graph_visible_snapshot_cache_updated",
+        org_id=organization_id,
+        entity_count=len(visible.entities),
+        relationship_count=len(visible.relationships),
+    )
+    return visible
+
+
+def _fingerprinted_visible_snapshot(
+    base: GraphSnapshot,
+    proven: GraphSnapshot,
+    *,
+    principal_id: str | None,
+    accessible_projects: set[str] | None,
+    allowed_memory_scope_keys: set[str] | None,
+    accessible_teams: set[str] | None,
+    accessible_delegations: set[str] | None,
+) -> GraphSnapshot:
     visible = _reader_visible_snapshot(
         _shared_rows(base, proven),
         principal_id=principal_id,
@@ -427,16 +471,7 @@ async def _load_visible_graph_snapshot(
         accessible_teams=accessible_teams,
         accessible_delegations=accessible_delegations,
     )
-    # Bind the fingerprint off the loop, so the derived caches never serialize
-    # the whole graph again on a warm request.
-    await asyncio.to_thread(_snapshot_fingerprint, visible)
-    GRAPH_VISIBLE_SNAPSHOT_CACHE[cache_key] = (base, visible)
-    log.info(
-        "graph_visible_snapshot_cache_updated",
-        org_id=organization_id,
-        entity_count=len(visible.entities),
-        relationship_count=len(visible.relationships),
-    )
+    _snapshot_fingerprint(visible)
     return visible
 
 
@@ -500,8 +535,22 @@ async def _current_graph_snapshot(
         runtime=_runtime_for_client(client, organization_id),
         source_visible=source_visible,
     )
+    return await compute_rows(
+        len(snapshot.relationships),
+        _proven_snapshot,
+        snapshot.relationships,
+        entities,
+        current_relationships,
+    )
+
+
+def _proven_snapshot(
+    enumerated: list[Relationship],
+    entities: dict[str, Entity],
+    current_relationships: dict[str, Relationship],
+) -> GraphSnapshot:
     relationships = [
-        current_relationships[r.id] for r in snapshot.relationships if r.id in current_relationships
+        current_relationships[r.id] for r in enumerated if r.id in current_relationships
     ]
     return GraphSnapshot(
         entities=list(entities.values()),

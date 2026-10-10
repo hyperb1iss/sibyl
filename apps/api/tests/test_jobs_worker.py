@@ -56,9 +56,11 @@ async def test_worker_startup_installs_core_runtime_ports(
 @pytest.mark.asyncio
 async def test_worker_shutdown_stops_the_pool_sweep(monkeypatch: pytest.MonkeyPatch) -> None:
     stopped = AsyncMock()
+    pools = MagicMock()
     monkeypatch.setattr(
         "sibyl.services.surreal_connectivity.stop_surreal_connectivity_monitor", stopped
     )
+    monkeypatch.setattr("sibyl_core.services.graph_compute.shutdown_compute_pools", pools)
 
     left = AsyncMock()
     monkeypatch.setattr("sibyl.cache_invalidation.stop_cache_invalidation", left)
@@ -67,3 +69,25 @@ async def test_worker_shutdown_stops_the_pool_sweep(monkeypatch: pytest.MonkeyPa
 
     stopped.assert_awaited_once()
     left.assert_awaited_once()
+    # Queued graph compute steps die with the worker instead of outliving it.
+    pools.assert_called_once_with()
+
+
+@pytest.mark.asyncio
+async def test_worker_shutdown_stops_the_compute_pools_when_a_stop_step_raises(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    pools = MagicMock()
+    monkeypatch.setattr(
+        "sibyl.services.surreal_connectivity.stop_surreal_connectivity_monitor", AsyncMock()
+    )
+    monkeypatch.setattr(
+        "sibyl.cache_invalidation.stop_cache_invalidation",
+        AsyncMock(side_effect=RuntimeError("bus already closed")),
+    )
+    monkeypatch.setattr("sibyl_core.services.graph_compute.shutdown_compute_pools", pools)
+
+    with pytest.raises(RuntimeError, match="bus already closed"):
+        await worker_module.shutdown({})
+
+    pools.assert_called_once_with()

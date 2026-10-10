@@ -357,10 +357,12 @@ async def publish_operational_relationships(
     return relationship_ids
 
 
-async def operational_relationship_current(
-    row, *, targets, states, associations, organization_id, read=None
-) -> bool:
-    """Validate native provenance without accepting caller metadata as authority."""
+def operational_relationship_row_verdict(row) -> bool | None:
+    """The verdict the stored row decides alone, or None when its binding must be proven.
+
+    Pure: it reads only the row, so a worker thread can settle every
+    unbound or malformed edge before the loop proves the bound ones.
+    """
     binding = row.get("operational_source_binding")
     required = row.get("operational_derivation_required") is True
     attributes = row.get("attributes") or {}
@@ -377,6 +379,31 @@ async def operational_relationship_current(
         or binding.get("body_sha256") != relationship_body_digest(row)
     ):
         return False
+    return None
+
+
+async def operational_relationship_current(
+    row, *, targets, states, associations, organization_id, read=None
+) -> bool:
+    """Validate native provenance without accepting caller metadata as authority."""
+    verdict = operational_relationship_row_verdict(row)
+    if verdict is not None:
+        return verdict
+    return await operational_relationship_binding_current(
+        row,
+        targets=targets,
+        states=states,
+        associations=associations,
+        organization_id=organization_id,
+        read=read,
+    )
+
+
+async def operational_relationship_binding_current(
+    row, *, targets, states, associations, organization_id, read=None
+) -> bool:
+    """The binding proof for a row operational_relationship_row_verdict left open."""
+    binding = row["operational_source_binding"]
     principal = binding.get("principal_id")
     ceiling = source_authority_ceiling(binding.get("authority_ceiling"), principal)
     if ceiling is None:

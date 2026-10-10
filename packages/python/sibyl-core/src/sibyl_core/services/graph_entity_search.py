@@ -27,6 +27,7 @@ from sibyl_core.query_anchors import (
 from sibyl_core.services.graph_client import SurrealGraphClient
 from sibyl_core.services.graph_common import normalize_graph_records as normalize_records
 from sibyl_core.services.graph_common import select_one as _select_one
+from sibyl_core.services.graph_compute import compute_rows
 from sibyl_core.services.graph_embeddings import (
     _embed_texts_with_timeout,
     _embedding_vector_from_batch,
@@ -34,6 +35,7 @@ from sibyl_core.services.graph_embeddings import (
 from sibyl_core.services.graph_records import (
     _ENTITY_SEARCH_FIELDS,
     _entity_from_row,
+    entities_from_rows,
     entity_type_literal,
 )
 from sibyl_core.services.graph_search import (
@@ -161,10 +163,8 @@ class _EntitySearchManager:
     async def get_many(
         self, entity_ids: Sequence[str], *, include_embeddings: bool = True
     ) -> list[Entity]:
-        return [
-            _entity_from_row(row)
-            for row in await self._get_many_rows(entity_ids, include_embeddings=include_embeddings)
-        ]
+        rows = await self._get_many_rows(entity_ids, include_embeddings=include_embeddings)
+        return await compute_rows(len(rows), entities_from_rows, rows)
 
     async def _get_many_rows(
         self, entity_ids: Sequence[str], *, include_embeddings: bool = True

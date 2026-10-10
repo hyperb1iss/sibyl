@@ -7,11 +7,13 @@ from typing import Any
 
 import structlog
 
+from sibyl_core.models.entities import Entity, Relationship
 from sibyl_core.services.graph_community_detection import _detect_communities_from_graph
 from sibyl_core.services.graph_community_models import (
     GRAPH_RESOLUTION_DETAIL,
     GRAPH_RESOLUTION_OVERVIEW,
     CommunityConfig,
+    GraphSnapshot,
     HierarchicalGraphData,
     OverviewLevel,
 )
@@ -32,6 +34,7 @@ from sibyl_core.services.graph_community_snapshot import (
     _ReaderCacheKey,
     _snapshot_fingerprint,
 )
+from sibyl_core.services.graph_compute import compute_rows, graph_build, off_loop
 
 log = structlog.get_logger()
 
@@ -48,6 +51,7 @@ GRAPH_LOD_CACHE: BoundedTTLCache[tuple[Any, ...], tuple[datetime, str, Hierarchi
 )
 
 
+@graph_build
 async def get_hierarchical_graph(
     client: Any,
     organization_id: str,
@@ -120,7 +124,8 @@ async def get_hierarchical_graph(
         max_entities=DETECTION_MAX_ENTITIES,
         max_relationships=DETECTION_MAX_RELATIONSHIPS,
     )
-    fingerprint = _snapshot_fingerprint(snapshot)
+    # A built reader snapshot already carries its fingerprint.
+    fingerprint = snapshot.fingerprint or await off_loop(_snapshot_fingerprint, snapshot)
     cached_lod = GRAPH_LOD_CACHE.get(cache_key)
     if cached_lod is not None:
         cached_at, cached_fingerprint, data = cached_lod
@@ -137,28 +142,10 @@ async def get_hierarchical_graph(
             return data
 
     entities = snapshot.entities
-    # Build from structural edges only — drop the MENTIONS hairball so projects
-    # and their tasks/memory are the visible structure. Totals reflect this
-    # focused graph, not the raw edge count.
-    relationships = [
-        relationship
-        for relationship in snapshot.relationships
-        if relationship.relationship_type not in _NOISE_RELATIONSHIP_TYPES
-    ]
-    totals_focused = _focused_entity_ids(
-        entities,
-        relationships,
-        project_ids=project_ids,
-        entity_types=entity_types,
+    rows = len(entities) + len(snapshot.relationships)
+    relationships, total_node_count, total_edge_count = await compute_rows(
+        rows, _structural_totals, snapshot, project_ids=project_ids, entity_types=entity_types
     )
-    structural_endpoints: set[str] = set()
-    total_edge_count = 0
-    for relationship in relationships:
-        if relationship.source_id in totals_focused and relationship.target_id in totals_focused:
-            total_edge_count += 1
-            structural_endpoints.add(relationship.source_id)
-            structural_endpoints.add(relationship.target_id)
-    total_node_count = len(structural_endpoints)
     log.info(
         "graph_totals_queried",
         total_nodes=total_node_count,
@@ -198,12 +185,7 @@ async def get_hierarchical_graph(
     # Run community detection if not cached
     if not node_to_cluster:
         try:
-            detected = _detect_communities_from_graph(
-                _snapshot_to_networkx(entities, relationships),
-                config=CommunityConfig(
-                    resolutions=[1.0], min_community_size=2, max_levels=1, store_in_graph=False
-                ),
-            )
+            detected = await compute_rows(rows, _detect_clusters, entities, relationships)
             if detected:
                 for community in detected:
                     for member_id in community.member_ids:
@@ -230,49 +212,20 @@ async def get_hierarchical_graph(
         except Exception as e:
             log.warning("community_detection_failed", error=str(e))
 
-    if resolution == GRAPH_RESOLUTION_OVERVIEW:
-        data = _build_overview_graph_from_snapshot(
-            entities,
-            relationships,
-            node_to_cluster,
-            clusters_meta,
-            project_ids=project_ids,
-            entity_types=entity_types,
-            max_nodes=max_nodes,
-            max_edges=max_edges,
-        )
-    else:
-        data = _build_cluster_detail_graph_from_snapshot(
-            entities,
-            relationships,
-            node_to_cluster,
-            clusters_meta,
-            cluster_id=cluster_id,
-            project_ids=project_ids,
-            entity_types=entity_types,
-            max_nodes=max_nodes,
-            max_edges=max_edges,
-        )
-        # Semantic zoom composes the domain map with this sample. Built here
-        # from the same snapshot and clustering, the two levels share cluster
-        # ids by construction; fetched separately they can straddle a cache
-        # refresh and describe two different runs.
-        if cluster_id is None:
-            overview = _build_overview_graph_from_snapshot(
-                entities,
-                relationships,
-                node_to_cluster,
-                clusters_meta,
-                project_ids=project_ids,
-                entity_types=entity_types,
-                max_nodes=max_nodes,
-                max_edges=max_edges,
-            )
-            data.overview = OverviewLevel(
-                nodes=overview.nodes,
-                edges=overview.edges,
-                clusters=overview.clusters,
-            )
+    data = await compute_rows(
+        rows,
+        _render_levels,
+        entities,
+        relationships,
+        node_to_cluster,
+        clusters_meta,
+        resolution=resolution,
+        cluster_id=cluster_id,
+        project_ids=project_ids,
+        entity_types=entity_types,
+        max_nodes=max_nodes,
+        max_edges=max_edges,
+    )
 
     if (project_ids or entity_types) and total_node_count == 0 and data.displayed_nodes > 0:
         total_node_count = data.displayed_nodes
@@ -296,4 +249,102 @@ async def get_hierarchical_graph(
     )
 
     GRAPH_LOD_CACHE[cache_key] = (datetime.now(UTC), fingerprint, data)
+    return data
+
+
+def _structural_totals(
+    snapshot: GraphSnapshot,
+    *,
+    project_ids: list[str] | None,
+    entity_types: list[str] | None,
+) -> tuple[list[Relationship], int, int]:
+    """The structural edges, and the focused node and edge totals they span."""
+    # Build from structural edges only — drop the MENTIONS hairball so projects
+    # and their tasks/memory are the visible structure. Totals reflect this
+    # focused graph, not the raw edge count.
+    relationships = [
+        relationship
+        for relationship in snapshot.relationships
+        if relationship.relationship_type not in _NOISE_RELATIONSHIP_TYPES
+    ]
+    totals_focused = _focused_entity_ids(
+        snapshot.entities,
+        relationships,
+        project_ids=project_ids,
+        entity_types=entity_types,
+    )
+    structural_endpoints: set[str] = set()
+    total_edge_count = 0
+    for relationship in relationships:
+        if relationship.source_id in totals_focused and relationship.target_id in totals_focused:
+            total_edge_count += 1
+            structural_endpoints.add(relationship.source_id)
+            structural_endpoints.add(relationship.target_id)
+    return relationships, len(structural_endpoints), total_edge_count
+
+
+def _detect_clusters(entities: list[Entity], relationships: list[Relationship]):
+    return _detect_communities_from_graph(
+        _snapshot_to_networkx(entities, relationships),
+        config=CommunityConfig(
+            resolutions=[1.0], min_community_size=2, max_levels=1, store_in_graph=False
+        ),
+    )
+
+
+def _render_levels(
+    entities: list[Entity],
+    relationships: list[Relationship],
+    node_to_cluster: dict[str, str],
+    clusters_meta: list[dict[str, Any]],
+    *,
+    resolution: str,
+    cluster_id: str | None,
+    project_ids: list[str] | None,
+    entity_types: list[str] | None,
+    max_nodes: int,
+    max_edges: int,
+) -> HierarchicalGraphData:
+    if resolution == GRAPH_RESOLUTION_OVERVIEW:
+        return _build_overview_graph_from_snapshot(
+            entities,
+            relationships,
+            node_to_cluster,
+            clusters_meta,
+            project_ids=project_ids,
+            entity_types=entity_types,
+            max_nodes=max_nodes,
+            max_edges=max_edges,
+        )
+    data = _build_cluster_detail_graph_from_snapshot(
+        entities,
+        relationships,
+        node_to_cluster,
+        clusters_meta,
+        cluster_id=cluster_id,
+        project_ids=project_ids,
+        entity_types=entity_types,
+        max_nodes=max_nodes,
+        max_edges=max_edges,
+    )
+    # Semantic zoom composes the domain map with this sample. Built here
+    # from the same snapshot and clustering, the two levels share cluster
+    # ids by construction; fetched separately they can straddle a cache
+    # refresh and describe two different runs.
+    if cluster_id is None:
+        overview = _build_overview_graph_from_snapshot(
+            entities,
+            relationships,
+            node_to_cluster,
+            clusters_meta,
+            project_ids=project_ids,
+            entity_types=entity_types,
+            max_nodes=max_nodes,
+            max_edges=max_edges,
+        )
+        data.overview = OverviewLevel(
+            nodes=overview.nodes,
+            edges=overview.edges,
+            clusters=overview.clusters,
+        )
     return data

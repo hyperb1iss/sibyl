@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import re
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Set
 from contextlib import AsyncExitStack
 from dataclasses import replace
 from typing import Any
@@ -23,6 +23,8 @@ from sibyl_core.memory_pipeline.source_lifecycle import (
 )
 from sibyl_core.models.entities import Entity
 from sibyl_core.services import content_client, content_models
+from sibyl_core.services.graph_compute import compute_rows
+from sibyl_core.services.graph_read_validation import entity_evidence_values
 from sibyl_core.services.memory_source_validation import _stored_source_ids
 
 log = structlog.get_logger()
@@ -74,28 +76,8 @@ async def available_capture_projection_rows[T](
     """
     if read is not None:
         read._check_org(organization_id)
-        for row in rows.values():
-            if isinstance(row, Entity):
-                read.record_entity(row)
-    candidates: dict[str, T] = {}
-    dependent_ids: set[str] = set()
-    for identifier, row in rows.items():
-        try:
-            metadata = getattr(row, "metadata", None)
-            metadata = {} if metadata is None else metadata
-            if not isinstance(metadata, Mapping):
-                raise ValueError("graph metadata must be a mapping")
-            if (
-                _projection_row(row)
-                or _parent_ids(row)
-                or _capture_ids(metadata)
-                or metadata.get(SOURCE_BINDINGS_KEY)
-                or getattr(row, "derivation_required", False)
-            ):
-                dependent_ids.add(identifier)
-            candidates[identifier] = row
-        except (TypeError, ValueError):
-            continue
+        await read.record_entities([row for row in rows.values() if isinstance(row, Entity)])
+    candidates, dependent_ids = await compute_rows(len(rows), _dependent_rows, rows)
     verdicts = (
         await _publication_verdicts(
             organization_id,
@@ -127,36 +109,22 @@ async def available_capture_projection_rows[T](
         refresh_ids=dependent_ids & legacy_rows.keys(),
         read=read,
     )
-    references: dict[str, set[str]] = {}
-    for identifier in legacy_rows:
-        try:
-            ancestry = _ancestry(identifier, parents, graph_rows)
-            roots: set[str] = set()
-            for ancestor in ancestry:
-                row = graph_rows[ancestor]
-                if (
-                    (
-                        ancestor != identifier
-                        and getattr(row, "organization_id", None) != organization_id
-                    )
-                    or not graph_metadata_recallable(getattr(row, "metadata", None))
-                    or (source_visible is not None and not source_visible(row))
-                ):
-                    raise ValueError("graph source is unavailable")
-                roots.update(_capture_ids(getattr(row, "metadata", None) or {}))
-            if identifier in dependent_ids and not roots and not parents.get(identifier):
-                raise ValueError("projection ancestry is unavailable")
-            references[identifier] = roots
-            if read is not None:
-                read.depend_on(
-                    SourceIdentity(organization_id, SourceKind.GRAPH_ENTITY, identifier),
-                    [
-                        SourceIdentity(organization_id, SourceKind.RAW_CAPTURE, root)
-                        for root in roots
-                    ],
-                )
-        except (TypeError, ValueError):
-            continue
+    references: dict[str, set[str]] = await compute_rows(
+        len(legacy_rows),
+        _legacy_references,
+        organization_id,
+        legacy_rows,
+        parents,
+        graph_rows,
+        dependent_ids,
+        source_visible,
+    )
+    if read is not None:
+        for identifier, roots in references.items():
+            read.depend_on(
+                SourceIdentity(organization_id, SourceKind.GRAPH_ENTITY, identifier),
+                [SourceIdentity(organization_id, SourceKind.RAW_CAPTURE, root) for root in roots],
+            )
     frontier = set().union(*references.values()) if references else set()
     captures: dict[str, content_models.RawMemory | None] = {}
     dependencies: dict[str, set[str]] = {}
@@ -238,6 +206,90 @@ async def available_capture_projection_rows[T](
                 error_type=type(exc).__name__,
             )
         frontier = set().union(*(dependencies.get(key, set()) for key in requested))
+    available.update(
+        await compute_rows(
+            len(references),
+            _capture_available_rows,
+            references,
+            legacy_rows,
+            dependencies,
+            captures,
+            source_visible,
+        )
+    )
+    return available
+
+
+def _dependent_rows(rows: Mapping[str, Any]) -> tuple[dict[str, Any], set[str]]:
+    """The rows with readable metadata, and those whose availability rests on a source."""
+    candidates: dict[str, Any] = {}
+    dependent_ids: set[str] = set()
+    for identifier, row in rows.items():
+        try:
+            metadata = getattr(row, "metadata", None)
+            metadata = {} if metadata is None else metadata
+            if not isinstance(metadata, Mapping):
+                raise ValueError("graph metadata must be a mapping")
+            if (
+                _projection_row(row)
+                or _parent_ids(row)
+                or _capture_ids(metadata)
+                or metadata.get(SOURCE_BINDINGS_KEY)
+                or getattr(row, "derivation_required", False)
+            ):
+                dependent_ids.add(identifier)
+            candidates[identifier] = row
+        except (TypeError, ValueError):
+            continue
+    return candidates, dependent_ids
+
+
+def _legacy_references(
+    organization_id: str,
+    legacy_rows: Mapping[str, Any],
+    parents: Mapping[str, set[str] | None],
+    graph_rows: Mapping[str, Any],
+    dependent_ids: Set[str],
+    source_visible: Callable[[Any], bool] | None,
+) -> dict[str, set[str]]:
+    """The capture roots each legacy row's graph ancestry stands on.
+
+    A row whose ancestry is unavailable, unreadable or cyclic is left out.
+    """
+    references: dict[str, set[str]] = {}
+    for identifier in legacy_rows:
+        try:
+            ancestry = _ancestry(identifier, parents, graph_rows)
+            roots: set[str] = set()
+            for ancestor in ancestry:
+                row = graph_rows[ancestor]
+                if (
+                    (
+                        ancestor != identifier
+                        and getattr(row, "organization_id", None) != organization_id
+                    )
+                    or not graph_metadata_recallable(getattr(row, "metadata", None))
+                    or (source_visible is not None and not source_visible(row))
+                ):
+                    raise ValueError("graph source is unavailable")
+                roots.update(_capture_ids(getattr(row, "metadata", None) or {}))
+            if identifier in dependent_ids and not roots and not parents.get(identifier):
+                raise ValueError("projection ancestry is unavailable")
+            references[identifier] = roots
+        except (TypeError, ValueError):
+            continue
+    return references
+
+
+def _capture_available_rows(
+    references: Mapping[str, set[str]],
+    legacy_rows: Mapping[str, Any],
+    dependencies: Mapping[str, set[str]],
+    captures: Mapping[str, content_models.RawMemory | None],
+    source_visible: Callable[[Any], bool] | None,
+) -> dict[str, Any]:
+    """The legacy rows whose every capture root is current and readable."""
+    available: dict[str, Any] = {}
     for identifier, roots in references.items():
         row = legacy_rows[identifier]
         metadata: dict[str, Any] = dict(getattr(row, "metadata", None) or {})
@@ -403,16 +455,19 @@ async def _graph_ancestry(organization_id, rows, graph_client, *, refresh_ids, r
             )
         frontier = requested
     if read is not None:
-        for identifier, row in current.items():
-            if isinstance(row, Entity):
-                read.record_entity(row, ancestry=True)
-                read.depend_on(
-                    SourceIdentity(organization_id, SourceKind.GRAPH_ENTITY, identifier),
-                    [
-                        SourceIdentity(organization_id, SourceKind.GRAPH_ENTITY, parent)
-                        for parent in parents.get(identifier) or ()
-                    ],
-                )
+        recorded = [(key, row) for key, row in current.items() if isinstance(row, Entity)]
+        evidence = await compute_rows(
+            len(recorded), entity_evidence_values, [row for _, row in recorded], ancestry=True
+        )
+        for (identifier, row), row_evidence in zip(recorded, evidence, strict=True):
+            read.record_entity_evidence(row, row_evidence, ancestry=True)
+            read.depend_on(
+                SourceIdentity(organization_id, SourceKind.GRAPH_ENTITY, identifier),
+                [
+                    SourceIdentity(organization_id, SourceKind.GRAPH_ENTITY, parent)
+                    for parent in parents.get(identifier) or ()
+                ],
+            )
     return current, parents
 
 

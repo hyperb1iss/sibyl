@@ -173,3 +173,35 @@ async def test_runtime_services_reports_all_shared_pool_close_failures(
             "content": "content close failed",
         },
     )
+
+
+@pytest.mark.asyncio
+async def test_runtime_services_shut_the_compute_pools_down_last(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    events: list[str] = []
+    services = runtime_services_module.RuntimeServices(log=MagicMock())
+    for step in (
+        "_drain_deferred_usage_stamps",
+        "_shutdown_live_queries",
+        "_shutdown_scheduler",
+        "_shutdown_broker",
+        "_stop_surreal_connectivity",
+        "_close_shared_surreal_clients",
+        "_shutdown_pubsub",
+        "_shutdown_cache_invalidation",
+        "_shutdown_locks",
+    ):
+        monkeypatch.setattr(
+            services, step, AsyncMock(side_effect=lambda step=step: events.append(step))
+        )
+    monkeypatch.setattr(
+        runtime_services_module,
+        "shutdown_compute_pools",
+        MagicMock(side_effect=lambda: events.append("compute_pools")),
+    )
+
+    await services.shutdown()
+
+    assert events[-1] == "compute_pools"
+    assert events.count("compute_pools") == 1

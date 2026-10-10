@@ -151,12 +151,17 @@ async def startup(ctx: dict[str, Any]) -> None:
 async def shutdown(ctx: dict[str, Any]) -> None:  # noqa: ARG001
     """Worker shutdown - cleanup resources."""
     from sibyl.services.surreal_connectivity import stop_surreal_connectivity_monitor
+    from sibyl_core.services.graph_compute import shutdown_compute_pools
 
-    await stop_surreal_connectivity_monitor()
+    try:
+        await stop_surreal_connectivity_monitor()
 
-    from sibyl.cache_invalidation import stop_cache_invalidation
+        from sibyl.cache_invalidation import stop_cache_invalidation
 
-    await stop_cache_invalidation()
+        await stop_cache_invalidation()
+    finally:
+        # Even when a stop step raises, queued compute steps die with the worker.
+        shutdown_compute_pools()
     log.info("Job worker shutting down")
 
 
