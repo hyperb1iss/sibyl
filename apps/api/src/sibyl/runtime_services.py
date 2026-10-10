@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
+from sibyl import gc_tuning
 from sibyl.config import settings
 
 
@@ -39,6 +40,8 @@ class RuntimeServices:
         await self._startup_locks()
         await self._startup_live_queries()
         await self._recover_stuck_sources()
+        # Last, so the frozen heap is everything startup built and nothing more.
+        gc_tuning.tune_gc_for_long_running_process()
 
     async def shutdown(self) -> None:
         await self._drain_deferred_usage_stamps()

@@ -8,6 +8,13 @@ import pytest
 
 
 @pytest.fixture(autouse=True)
+def keep_test_process_gc_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Lifespan tests run the server's startup in this process; freezing the
+    # test heap there would keep every later test's garbage for good.
+    monkeypatch.setattr("sibyl.gc_tuning.tune_gc_for_long_running_process", lambda: None)
+
+
+@pytest.fixture(autouse=True)
 def disable_raw_memory_auto_embedding(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         "sibyl_core.services.content_models.configured_raw_memory_embedding_provider",
