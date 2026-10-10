@@ -25,6 +25,7 @@ if TYPE_CHECKING:
     from collections.abc import AsyncGenerator
 
     import uvicorn
+    from mcp.server import MCPServer
 
 
 def _enable_dev_signal_diagnostics() -> None:
@@ -116,6 +117,21 @@ def _mcp_transport_security(bind_host: str, bind_port: int) -> TransportSecurity
     )
 
 
+def mcp_http_app(mcp: "MCPServer", host: str, port: int) -> Starlette:
+    """Serve MCP over streamable HTTP with no per-process session state.
+
+    Every request carries its own credential and protocol version, so any
+    replica can answer any request and a load balancer needs no affinity.
+    Sibyl's tools never call back into the client (no sampling, elicitation
+    or server-initiated requests), which is all a stateful session would add.
+    """
+    return mcp.streamable_http_app(
+        host=host,
+        stateless_http=True,
+        transport_security=_mcp_transport_security(host, port),
+    )
+
+
 def create_combined_app(host: str | None = None, port: int | None = None) -> Starlette:
     """Create a combined Starlette app with MCP and REST API.
 
@@ -144,15 +160,7 @@ def create_combined_app(host: str | None = None, port: int | None = None) -> Sta
     # Create MCP server
     mcp = create_mcp_server()
 
-    # Get the MCP ASGI app (streamable HTTP transport)
-    mcp_app = mcp.streamable_http_app(
-        host=host,
-        stateless_http=False,
-        transport_security=_mcp_transport_security(host, port),
-        # Keep paused agents attached and admit sessions without a fixed quota.
-        session_idle_timeout=None,
-        max_sessions=None,
-    )
+    mcp_app = mcp_http_app(mcp, host, port)
 
     @asynccontextmanager
     async def lifespan(_app: Starlette) -> "AsyncGenerator[None]":
@@ -187,7 +195,7 @@ def create_combined_app(host: str | None = None, port: int | None = None) -> Sta
         runtime_services = RuntimeServices(log=log)
         await runtime_services.startup()
 
-        # The MCP session manager needs to be started for streamable HTTP
+        # The session manager owns the task group that serves each MCP request.
         try:
             async with mcp.session_manager.run():
                 yield

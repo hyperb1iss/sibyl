@@ -22,6 +22,7 @@ from pydantic import SecretStr
 from sibyl.auth.api_key_common import ApiKeyAuth
 from sibyl.auth.mcp_oauth import SibylAccessToken, SibylMcpOAuthProvider
 from sibyl.config import settings
+from sibyl.main import mcp_http_app
 from sibyl.mcp_tools import context as mcp_context
 from sibyl.persistence.surreal.auth_runtime import projects as project_runtime
 from sibyl.server import create_mcp_server
@@ -221,13 +222,12 @@ def first_party_auth(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("sibyl_core.auth.jwt._settings_provider", lambda: settings)
 
 
-async def _post(
-    client: httpx2.AsyncClient, payload: dict[str, object], session_id: str | None
-) -> httpx2.Response:
-    headers = {"Authorization": f"Bearer {RAW_KEY}", "Accept": ACCEPT}
-    if session_id is not None:
-        headers["mcp-session-id"] = session_id
-        headers["mcp-protocol-version"] = PROTOCOL_VERSION
+async def _post(client: httpx2.AsyncClient, payload: dict[str, object]) -> httpx2.Response:
+    headers = {
+        "Authorization": f"Bearer {RAW_KEY}",
+        "Accept": ACCEPT,
+        "mcp-protocol-version": PROTOCOL_VERSION,
+    }
     return await client.post("/mcp", headers=headers, json=payload)
 
 
@@ -268,17 +268,6 @@ async def test_a_tool_call_authenticates_the_api_key_once(
     search = AsyncMock(return_value={"filters": {}, "results": []})
     monkeypatch.setattr("sibyl_core.tools.core.search", search)
 
-    initialize = {
-        "jsonrpc": "2.0",
-        "id": 1,
-        "method": "initialize",
-        "params": {
-            "protocolVersion": PROTOCOL_VERSION,
-            "capabilities": {},
-            "clientInfo": {"name": "auth-once-test", "version": "1"},
-        },
-    }
-    initialized = {"jsonrpc": "2.0", "method": "notifications/initialized"}
     call = {
         "jsonrpc": "2.0",
         "id": 2,
@@ -286,20 +275,14 @@ async def test_a_tool_call_authenticates_the_api_key_once(
         "params": {"name": "search", "arguments": {"query": "probe", "project": "project-a"}},
     }
     mcp = create_mcp_server()
-    app = mcp.streamable_http_app(host="127.0.0.1", stateless_http=False)
+    app = mcp_http_app(mcp, "127.0.0.1", 3334)
     async with (
         mcp.session_manager.run(),
         httpx2.AsyncClient(
             transport=httpx2.ASGITransport(app=app), base_url=settings.server_url
         ) as client,
     ):
-        opened = await _post(client, initialize, None)
-        assert opened.status_code == 200
-        session_id = opened.headers["mcp-session-id"]
-        assert (await _post(client, initialized, session_id)).status_code == 202
-
-        verified_before = len(provider_calls)
-        response = await _post(client, call, session_id)
+        response = await _post(client, call)
 
     assert response.status_code == 200
     result = _jsonrpc_result(response)
@@ -309,7 +292,7 @@ async def test_a_tool_call_authenticates_the_api_key_once(
 
     # The HTTP request that carried the tool call authenticated the key once,
     # in the SDK's bearer backend, and nothing downstream did it again.
-    assert len(provider_calls) - verified_before == 1
+    assert len(provider_calls) == 1
     context_authenticate.assert_not_awaited()
     resolve_principal.assert_awaited_once()
     resolve_from_claims.assert_not_awaited()
