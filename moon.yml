@@ -926,7 +926,10 @@ tasks:
       expected_core = f"=={version}"
       expected_requirements = {
           "sibyl_dev-*.whl": (expected_core, set()),
-          "sibyld-*.whl": (expected_core, {"bedrock", "embeddings", "graph", "graphrag", "llm"}),
+          "sibyld-*.whl": (
+              expected_core,
+              {"bedrock", "embeddings", "graph", "graphrag", "llm", "s3"},
+          ),
       }
       core_requirement = re.compile(
           r"^sibyl-core(?:\[(?P<extras>[^\]]+)\])?\s*(?P<specifier>==\s*[^;,\s]+)"
