@@ -306,9 +306,14 @@ spec:
                     # lies between the two counts, so the drill can tell rows
                     # that left during the export window (an expired session,
                     # a released lease) from rows lost on the way back.
+                    # Without it the drill would judge this database by one
+                    # count and could page on a table that emptied during the
+                    # window, so a failed recount fails the database like a
+                    # failed first count.
                     if ! tables_after="$(sql_result "$namespace" "$database" "$table_rows" 2>"$work/error")"; then
-                      echo "recounting $namespace/$database after its export failed; the drill falls back to the earlier count: $(head -c 300 "$work/error")" >&2
-                      tables_after=null
+                      rm -f "$output"
+                      record_failure "$target" "recounting rows after the export failed: $(head -c 500 "$work/error")"
+                      continue
                     fi
                     bytes="$(wc -c < "$output" | tr -d ' ')"
                     sha256="$(sha256sum "$output")"
@@ -321,8 +326,8 @@ spec:
                       --argjson after "$tables_after" \
                       '$target + {file: $file, bytes: $bytes, sha256: $sha256, rows: (map(.rows) | add // 0),
                         tables: (map({key: .table, value: .rows}) | from_entries),
-                        rows_after: (if $after == null then null else ($after | map(.rows) | add // 0) end),
-                        tables_after: (if $after == null then null else ($after | map({key: .table, value: .rows}) | from_entries) end)}' \
+                        rows_after: ($after | map(.rows) | add // 0),
+                        tables_after: ($after | map({key: .table, value: .rows}) | from_entries)}' \
                       >> "$work/databases.jsonl"
                     if [ -n "${SIBYL_EXPORT_ENCRYPTION_COMMAND:-}" ]; then
                       encrypt_export_file "$output" "$SIBYL_EXPORT_RUN_DIR/$file"

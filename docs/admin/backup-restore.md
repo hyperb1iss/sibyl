@@ -112,10 +112,11 @@ a file-safe spelling plus a digest, for example `legacy_tenant.graph.53081ce2391
 drill restores it with the identifier escaped.
 
 One database the job cannot export does not cost the others. A name outside printable ASCII (which
-the `surreal-ns` and `surreal-db` headers cannot carry), a refused namespace listing or row count, a
-failed or empty `/export`: each is recorded in the manifest's `failures` with a reason, the rest of
-the run is exported and synced, and the job then exits 111 so it pages. The restore drill fails on a
-run with recorded failures as well, after restoring everything else.
+the `surreal-ns` and `surreal-db` headers cannot carry), a refused namespace listing, a refused row
+count before or after the export, a failed or empty `/export`: each is recorded in the manifest's
+`failures` with a reason, the rest of the run is exported and synced, and the job then exits 111 so
+it pages. The restore drill fails on a run with recorded failures as well, after restoring
+everything else.
 
 A run with recorded failures would fail the same way again, so it is not retried: the export Job's
 `podFailurePolicy` fails the Job at once on exit code 111, while any other failure (an unreachable

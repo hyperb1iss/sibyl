@@ -133,6 +133,7 @@ class OpsHarness:
         org_uuids: tuple[str, ...] = (),
         org_check_error: bool = False,
         change_before_export: dict[str, int | None] | None = None,
+        recount_errors: tuple[str, ...] = (),
     ) -> None:
         """Describe the fake servers and the faults they inject. Each fault
         names ``ns/db`` pairs (``ns/db/table`` for the table faults): an
@@ -142,7 +143,8 @@ class OpsHarness:
         FOR NS for whole namespaces; ``org_uuids`` are the organizations the
         auth database holds, and ``org_check_error`` refuses that query.
         ``change_before_export`` sets a table's rows (None drops it) between
-        the export's first count and its snapshot."""
+        the export's first count and its snapshot; ``recount_errors`` refuses
+        only the export's second count."""
         servers: dict[str, object] = {
             "http://restore": {"user": "drill:drill", "namespaces": restore or {}},
         }
@@ -166,6 +168,7 @@ class OpsHarness:
                     "ns_info_errors": list(ns_info_errors),
                     "org_check_error": org_check_error,
                     "change_before_export": change_before_export or {},
+                    "recount_errors": list(recount_errors),
                 }
             )
         )
@@ -1463,3 +1466,20 @@ def test_helm_pod_condition_rules_carry_status() -> None:
     assert entries, "the chart renders onPodConditions rules"
     for entry in entries:
         assert entry.get("status") in {"True", "False", "Unknown"}, entry
+
+
+def test_helm_export_records_a_failed_recount(harness: OpsHarness) -> None:
+    """Without the second count the drill could page on a table that
+    emptied during the window, so a failed recount fails that database."""
+    harness.serve(source=_source(), recount_errors=(f"{ORG_B}/graph",))
+    result = harness.run("export")
+
+    assert result.returncode == RECORDED_FAILURE_EXIT, result.stderr
+    manifest = _manifest(harness)
+    (failure,) = manifest["failures"]
+    assert (failure["namespace"], failure["database"]) == (ORG_B, "graph")
+    assert failure["reason"].startswith("recounting rows after the export failed: SurrealQL failed")
+    assert ORG_B not in {entry["namespace"] for entry in manifest["databases"]}
+    (run_dir,) = _run_dirs(harness)
+    assert not (run_dir / f"{ORG_B}.graph.surql").exists()
+    assert all(entry["tables_after"] is not None for entry in manifest["databases"])
