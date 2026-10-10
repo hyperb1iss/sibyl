@@ -14,8 +14,9 @@ import structlog
 from mcp.server.transport_security import TransportSecuritySettings
 from starlette.applications import Starlette
 from starlette.requests import Request
-from starlette.responses import PlainTextResponse
-from starlette.routing import Mount, Route
+from starlette.responses import JSONResponse, PlainTextResponse
+from starlette.routing import Mount, Route, get_route_path
+from starlette.types import ASGIApp, Receive, Scope, Send
 
 from sibyl.config import settings
 from sibyl.runtime_services import RuntimeServices
@@ -25,6 +26,7 @@ if TYPE_CHECKING:
     from collections.abc import AsyncGenerator
 
     import uvicorn
+    from mcp.server import MCPServer
 
 
 def _enable_dev_signal_diagnostics() -> None:
@@ -116,6 +118,50 @@ def _mcp_transport_security(bind_host: str, bind_port: int) -> TransportSecurity
     )
 
 
+_POST_ONLY = JSONResponse(
+    {
+        "jsonrpc": "2.0",
+        "id": None,
+        "error": {"code": -32600, "message": "Method Not Allowed: this endpoint takes POST"},
+    },
+    status_code=405,
+    headers={"Allow": "POST"},
+)
+
+
+def mcp_http_app(mcp: "MCPServer", host: str, port: int) -> ASGIApp:
+    """Serve MCP over streamable HTTP with no per-process session state.
+
+    Every request carries its own credential and protocol version, so any
+    replica can answer any request and a load balancer needs no affinity.
+    Sibyl's tools never call back into the client (no sampling, elicitation
+    or server-initiated requests). A call lives only as long as its response
+    stream, so write tools are marked uninterruptible and land whole even
+    when the caller disconnects.
+
+    With no session there is no standalone GET stream to offer and no session
+    to DELETE, so the endpoint takes POST only. The SDK would otherwise park an
+    idle stream and task per client on GET; the spec's answer is 405.
+    """
+    app = mcp.streamable_http_app(
+        host=host,
+        stateless_http=True,
+        transport_security=_mcp_transport_security(host, port),
+    )
+
+    async def serve(scope: Scope, receive: Receive, send: Send) -> None:
+        if (
+            scope["type"] == "http"
+            and scope["method"] not in ("POST", "OPTIONS")
+            and get_route_path(scope) == "/mcp"
+        ):
+            await _POST_ONLY(scope, receive, send)
+            return
+        await app(scope, receive, send)
+
+    return serve
+
+
 def create_combined_app(host: str | None = None, port: int | None = None) -> Starlette:
     """Create a combined Starlette app with MCP and REST API.
 
@@ -144,15 +190,7 @@ def create_combined_app(host: str | None = None, port: int | None = None) -> Sta
     # Create MCP server
     mcp = create_mcp_server()
 
-    # Get the MCP ASGI app (streamable HTTP transport)
-    mcp_app = mcp.streamable_http_app(
-        host=host,
-        stateless_http=False,
-        transport_security=_mcp_transport_security(host, port),
-        # Keep paused agents attached and admit sessions without a fixed quota.
-        session_idle_timeout=None,
-        max_sessions=None,
-    )
+    mcp_app = mcp_http_app(mcp, host, port)
 
     @asynccontextmanager
     async def lifespan(_app: Starlette) -> "AsyncGenerator[None]":
@@ -187,7 +225,7 @@ def create_combined_app(host: str | None = None, port: int | None = None) -> Sta
         runtime_services = RuntimeServices(log=log)
         await runtime_services.startup()
 
-        # The MCP session manager needs to be started for streamable HTTP
+        # The session manager owns the task group that serves each MCP request.
         try:
             async with mcp.session_manager.run():
                 yield

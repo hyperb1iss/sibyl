@@ -218,7 +218,7 @@ mcp = MCPServer(
     auth_server_provider=auth_server_provider,
 )
 
-mcp_app = mcp.streamable_http_app(host=host, stateless_http=False)
+mcp_app = mcp_http_app(mcp, host, port)  # stateless, POST-only /mcp
 
 @mcp.tool()
 async def search(...) -> dict:
@@ -283,27 +283,24 @@ sibyl auth api-key create --name "Admin" --scopes mcp,api:write
 
 ## Load Balancing
 
-For production deployments with multiple instances:
-
-### Sticky Sessions
-
-MCP sessions maintain state. Use sticky sessions if load balancing:
+Sibyl serves MCP statelessly. Each request carries its own bearer credential and protocol version,
+the server mints no `Mcp-Session-Id`, and any instance can answer any request. Put instances behind
+a plain round-robin load balancer with no session affinity:
 
 ```nginx
 upstream sibyl {
-    ip_hash;  # Sticky sessions
     server sibyl1:3334;
     server sibyl2:3334;
 }
 ```
 
-### Shared State
+Clients on the 2026-07-28 protocol send self-contained requests. Clients on the earlier `initialize`
+handshake still connect and run without a session id.
 
-For stateless scaling:
+For several instances:
 
 1. Use Redis/Valkey for shared coordination
-2. Ensure all instances share the same SurrealDB service
-3. Use sticky sessions for stateful MCP connections
+2. Point every instance at the same SurrealDB service
 
 ## Monitoring
 

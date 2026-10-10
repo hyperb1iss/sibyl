@@ -2,14 +2,17 @@
 
 from __future__ import annotations
 
+from collections import Counter
+
 import httpx2
 import pytest
 from mcp import Client, ClientSession
 from mcp.client.streamable_http import streamable_http_client
 from mcp.server.auth.provider import AccessToken
+from pydantic import SecretStr
 
 from sibyl.config import settings
-from sibyl.main import _mcp_transport_security, create_combined_app
+from sibyl.main import create_combined_app, mcp_http_app
 from sibyl.server import create_mcp_server
 
 
@@ -35,7 +38,7 @@ async def test_streamable_http_app_serves_the_legacy_handshake(
 ) -> None:
     monkeypatch.setattr(settings, "mcp_auth_mode", "off")
     mcp = create_mcp_server()
-    app = mcp.streamable_http_app(host="testserver", stateless_http=False)
+    app = mcp_http_app(mcp, "testserver", 80)
     transport = httpx2.ASGITransport(app=app)
 
     async with (
@@ -60,11 +63,7 @@ async def test_streamable_http_app_serves_modern_client_at_configured_proxy_orig
     monkeypatch.setattr(settings, "server_url", "https://sibyl.example.com")
     monkeypatch.setattr(settings, "frontend_url", "https://memory.example.com/")
     mcp = create_mcp_server()
-    app = mcp.streamable_http_app(
-        host="127.0.0.1",
-        stateless_http=False,
-        transport_security=_mcp_transport_security("127.0.0.1", 3334),
-    )
+    app = mcp_http_app(mcp, "127.0.0.1", 3334)
     http_client = httpx2.AsyncClient(
         transport=httpx2.ASGITransport(app=app),
         base_url="https://sibyl.example.com",
@@ -121,7 +120,7 @@ async def test_streamable_http_auth_uses_the_oauth_provider(
         load_access_token,
     )
     mcp = create_mcp_server()
-    app = mcp.streamable_http_app(host="testserver", stateless_http=False)
+    app = mcp_http_app(mcp, "testserver", 80)
     transport = httpx2.ASGITransport(app=app)
 
     async with (
@@ -158,11 +157,7 @@ async def test_streamable_http_auth_rejects_missing_invalid_and_unscoped_tokens(
         load_access_token,
     )
     mcp = create_mcp_server()
-    app = mcp.streamable_http_app(
-        host="127.0.0.1",
-        stateless_http=False,
-        transport_security=_mcp_transport_security("127.0.0.1", 3334),
-    )
+    app = mcp_http_app(mcp, "127.0.0.1", 3334)
     request = {
         "jsonrpc": "2.0",
         "id": 1,
@@ -198,23 +193,74 @@ async def test_streamable_http_auth_rejects_missing_invalid_and_unscoped_tokens(
     assert unscoped.status_code == 403
 
 
+class _RoundRobin(httpx2.AsyncBaseTransport):
+    """Send each request to the next replica, like a load balancer without affinity."""
+
+    def __init__(self, *apps: object) -> None:
+        self._replicas = [httpx2.ASGITransport(app=app) for app in apps]
+        self._next = 0
+        self.served: Counter[int] = Counter()
+
+    async def handle_async_request(self, request: httpx2.Request) -> httpx2.Response:
+        replica = self._next % len(self._replicas)
+        self._next += 1
+        self.served[replica] += 1
+        return await self._replicas[replica].handle_async_request(request)
+
+
 @pytest.mark.asyncio
-async def test_combined_app_preserves_session_capacity_and_releases_closed_sessions(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+async def test_combined_app_serves_mcp_statelessly(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(settings, "mcp_auth_mode", "off")
+    mcp = create_mcp_server()
+    monkeypatch.setattr("sibyl.server.create_mcp_server", lambda: mcp)
+
+    create_combined_app(host="127.0.0.1", port=3334)
+
+    assert mcp.session_manager.stateless is True
+
+
+@pytest.mark.asyncio
+# "legacy" is the case stateless serving fixes; "auto" negotiates 2026-07-28,
+# which the SDK always served per request, and guards it from regressing.
+@pytest.mark.parametrize("mode", ["auto", "legacy"])
+async def test_clients_need_no_replica_affinity(monkeypatch: pytest.MonkeyPatch, mode: str) -> None:
+    monkeypatch.setattr(settings, "mcp_auth_mode", "off")
+    monkeypatch.setattr(settings, "server_url", "http://127.0.0.1:3334")
+    replicas = [create_mcp_server(), create_mcp_server()]
+    balancer = _RoundRobin(*(mcp_http_app(mcp, "127.0.0.1", 3334) for mcp in replicas))
+    monkeypatch.setattr(
+        "mcp.client.streamable_http.create_mcp_http_client",
+        lambda: httpx2.AsyncClient(transport=balancer, base_url=settings.server_url),
+    )
+
+    async with (
+        replicas[0].session_manager.run(),
+        replicas[1].session_manager.run(),
+        Client(f"{settings.server_url}/mcp", mode=mode) as client,
+    ):
+        tools = await client.list_tools()
+        resources = await client.list_resources()
+        again = await client.list_tools()
+
+    assert {tool.name for tool in tools.tools} >= {"search", "add", "manage"}
+    assert {resource.uri for resource in resources.resources} == {
+        "sibyl://health",
+        "sibyl://stats",
+    }
+    assert again.tools == tools.tools
+    assert balancer.served[0] > 0
+    assert balancer.served[1] > 0
+
+
+@pytest.mark.asyncio
+async def test_stateless_transport_mints_no_session(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(settings, "mcp_auth_mode", "off")
     monkeypatch.setattr(settings, "server_url", "http://127.0.0.1:3334")
     mcp = create_mcp_server()
-    monkeypatch.setattr("sibyl.server.create_mcp_server", lambda: mcp)
-    app = create_combined_app(host="127.0.0.1", port=3334)
-    manager = mcp.session_manager
-
-    assert manager.session_idle_timeout is None
-    assert manager.max_sessions is None
-    assert manager.stateless is False
+    app = mcp_http_app(mcp, "127.0.0.1", 3334)
 
     async with (
-        manager.run(),
+        mcp.session_manager.run(),
         httpx2.AsyncClient(
             transport=httpx2.ASGITransport(app=app),
             base_url=settings.server_url,
@@ -222,9 +268,6 @@ async def test_combined_app_preserves_session_capacity_and_releases_closed_sessi
         ) as client,
     ):
         refused = await client.post("/mcp", content="{")
-        assert refused.status_code == 400
-        assert not manager._server_instances
-
         initialized = await client.post(
             "/mcp",
             json={
@@ -234,32 +277,53 @@ async def test_combined_app_preserves_session_capacity_and_releases_closed_sessi
                 "params": {
                     "protocolVersion": "2025-06-18",
                     "capabilities": {},
-                    "clientInfo": {"name": "session-lifecycle-test", "version": "1"},
+                    "clientInfo": {"name": "stateless-test", "version": "1"},
                 },
             },
         )
-        assert initialized.status_code == 200
-        session_id = initialized.headers["mcp-session-id"]
-        transport = manager._server_instances[session_id]
-        assert transport.idle_scope is None
-        session_headers = {
-            "mcp-session-id": session_id,
-            "mcp-protocol-version": "2025-06-18",
-        }
-        notified = await client.post(
+        # A session id left over from a stateful server is ignored, not a 404.
+        ping = await client.post(
             "/mcp",
-            json={"jsonrpc": "2.0", "method": "notifications/initialized"},
-            headers=session_headers,
+            json={"jsonrpc": "2.0", "id": 2, "method": "ping"},
+            headers={"mcp-session-id": "left-over", "mcp-protocol-version": "2025-06-18"},
         )
-        assert notified.status_code == 202
-        ping = {"jsonrpc": "2.0", "id": 2, "method": "ping"}
-        resumed = await client.post("/mcp", json=ping, headers=session_headers)
-        assert resumed.status_code == 200
 
-        deleted = await client.delete("/mcp", headers=session_headers)
-        assert deleted.status_code == 200
-        assert not manager._server_instances
-        assert not manager._session_owners
-        assert transport.is_terminated
-        stale = await client.post("/mcp", json=ping, headers=session_headers)
-        assert stale.status_code == 404
+    assert refused.status_code == 400
+    assert initialized.status_code == 200
+    assert "mcp-session-id" not in initialized.headers
+    assert ping.status_code == 200
+    assert not mcp.session_manager._server_instances
+
+
+@pytest.mark.asyncio
+async def test_combined_app_takes_only_post_on_mcp(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(settings, "mcp_auth_mode", "on")
+    monkeypatch.setattr(settings, "server_url", "http://127.0.0.1:3334")
+    monkeypatch.setattr(settings, "jwt_secret", SecretStr("mcp-post-only-test-secret-at-least-32"))
+    monkeypatch.setattr("sibyl_core.auth.jwt._settings_provider", lambda: settings)
+    mcp = create_mcp_server()
+    monkeypatch.setattr("sibyl.server.create_mcp_server", lambda: mcp)
+    app = create_combined_app(host="127.0.0.1", port=3334)
+
+    async with (
+        mcp.session_manager.run(),
+        httpx2.AsyncClient(
+            transport=httpx2.ASGITransport(app=app), base_url=settings.server_url
+        ) as client,
+    ):
+        refused = {
+            method: await client.request(method, "/mcp", headers={"Accept": "text/event-stream"})
+            for method in ("GET", "HEAD", "DELETE", "PUT")
+        }
+        unauthenticated = await client.post(
+            "/mcp", json={"jsonrpc": "2.0", "id": 1, "method": "ping"}
+        )
+        discovery = await client.get("/.well-known/oauth-authorization-server")
+
+    # No session means no server-initiated stream to open and nothing to
+    # delete, so every method but POST is refused rather than parked open.
+    for method, response in refused.items():
+        assert response.status_code == 405, method
+        assert response.headers["allow"] == "POST", method
+    assert unauthenticated.status_code == 401
+    assert discovery.status_code == 200

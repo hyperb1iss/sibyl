@@ -1,21 +1,25 @@
 """Pin the principal identity MCP bearer tokens resolve to.
 
-MCP SDK 2 binds each streamable-HTTP session to the principal that opened it,
-compared as ``principal_components(token)``: the token's ``client_id``, issuer
-and subject. Sibyl's provider sets no issuer or subject, so ``client_id`` is
-the only component that tells one principal from another. If it stopped
-naming the user or API key, any authenticated caller could drive any other
-caller's MCP session.
+MCP SDK 2 identifies the caller behind each request as
+``principal_components(token)``: the token's ``client_id``, issuer and
+subject. The bearer middleware publishes it as the request's authorization
+context, and the 2026-07-28 protocol binds sealed ``requestState`` to it.
+Sibyl's provider sets no issuer or subject, so ``client_id`` is the only
+component that tells one principal from another and must name the user or
+API key.
 """
 
 from __future__ import annotations
 
-from collections.abc import Callable
+import asyncio
+import json
 from unittest.mock import AsyncMock
 from uuid import UUID, uuid4
 
+import anyio
 import httpx2
 import pytest
+from mcp.server.auth.middleware.auth_context import get_access_token
 from mcp.server.auth.provider import principal_components
 from pydantic import SecretStr
 
@@ -23,6 +27,7 @@ from sibyl.auth.api_key_common import ApiKeyAuth
 from sibyl.auth.jwt import create_access_token
 from sibyl.auth.mcp_oauth import SibylMcpOAuthProvider
 from sibyl.config import settings
+from sibyl.main import mcp_http_app
 from sibyl.server import create_mcp_server
 
 PROTOCOL_VERSION = "2025-06-18"
@@ -117,22 +122,23 @@ async def test_distinct_credentials_resolve_to_distinct_principals(
 
 
 # ---------------------------------------------------------------------------
-# Session ownership over the real streamable-HTTP boundary
+# Each request answers to its own credential
 # ---------------------------------------------------------------------------
 
 
 async def _post(
-    client: httpx2.AsyncClient, token: str, payload: dict[str, object], session_id: str | None
+    client: httpx2.AsyncClient, token: str | None, payload: dict[str, object]
 ) -> httpx2.Response:
-    headers = {"Authorization": f"Bearer {token}", "Accept": ACCEPT}
-    if session_id is not None:
-        headers["mcp-session-id"] = session_id
-        headers["mcp-protocol-version"] = PROTOCOL_VERSION
+    headers = {"Accept": ACCEPT, "mcp-protocol-version": PROTOCOL_VERSION}
+    if token is not None:
+        headers["Authorization"] = f"Bearer {token}"
     return await client.post("/mcp", headers=headers, json=payload)
 
 
-async def _reuse_session(owner_token: str, other_token: str) -> tuple[int, int]:
-    """Open a session as the owner, then list tools as the owner and as the other caller."""
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("active_sessions")
+async def test_no_request_inherits_an_earlier_credential() -> None:
+    owner_token, other_token = _session_token(uuid4()), _session_token(uuid4())
     initialize = {
         "jsonrpc": "2.0",
         "id": 1,
@@ -145,60 +151,63 @@ async def _reuse_session(owner_token: str, other_token: str) -> tuple[int, int]:
     }
     list_tools = {"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {}}
     mcp = create_mcp_server()
-    app = mcp.streamable_http_app(host="127.0.0.1", stateless_http=False)
+    app = mcp_http_app(mcp, "127.0.0.1", 3334)
     async with (
         mcp.session_manager.run(),
         httpx2.AsyncClient(
             transport=httpx2.ASGITransport(app=app), base_url=settings.server_url
         ) as client,
     ):
-        opened = await _post(client, owner_token, initialize, None)
-        assert opened.status_code == 200
-        session_id = opened.headers["mcp-session-id"]
-        owner = await _post(client, owner_token, list_tools, session_id)
-        other = await _post(client, other_token, list_tools, session_id)
-    return owner.status_code, other.status_code
+        opened = await _post(client, owner_token, initialize)
+        owner = await _post(client, owner_token, list_tools)
+        other = await _post(client, other_token, list_tools)
+        anonymous = await _post(client, None, list_tools)
+
+    assert opened.status_code == 200
+    # No session is minted, so there is nothing for a later caller to ride on.
+    assert "mcp-session-id" not in opened.headers
+    assert owner.status_code == 200
+    assert other.status_code == 200
+    assert anonymous.status_code == 401
 
 
-def _two_users(_monkeypatch: pytest.MonkeyPatch) -> tuple[str, str]:
-    return _session_token(uuid4()), _session_token(uuid4())
-
-
-def _two_keys_of_one_user(monkeypatch: pytest.MonkeyPatch) -> tuple[str, str]:
-    owner = uuid4()
-    _serve_api_keys(
-        monkeypatch, {"sk_live_owner": _api_key(owner), "sk_live_sibling": _api_key(owner)}
-    )
-    return "sk_live_owner", "sk_live_sibling"
-
-
-def _session_then_own_key(monkeypatch: pytest.MonkeyPatch) -> tuple[str, str]:
-    owner = uuid4()
-    _serve_api_keys(monkeypatch, {"sk_live_own": _api_key(owner)})
-    return _session_token(owner), "sk_live_own"
+def _tool_text(response: httpx2.Response) -> str:
+    body = response.text
+    if response.headers.get("content-type", "").startswith("text/event-stream"):
+        body = next(line[5:] for line in body.splitlines() if line.startswith("data:"))
+    return json.loads(body)["result"]["content"][0]["text"]
 
 
 @pytest.mark.asyncio
 @pytest.mark.usefixtures("active_sessions")
-@pytest.mark.parametrize(
-    "credentials",
-    [
-        pytest.param(_two_users, id="another-user"),
-        pytest.param(_two_keys_of_one_user, id="another-key-of-the-same-user"),
-        pytest.param(_session_then_own_key, id="the-same-user-through-an-api-key"),
-    ],
-)
-async def test_a_session_answers_only_the_credential_that_opened_it(
-    monkeypatch: pytest.MonkeyPatch,
-    credentials: Callable[[pytest.MonkeyPatch], tuple[str, str]],
-) -> None:
-    owner_token, other_token = credentials(monkeypatch)
+async def test_concurrent_calls_each_run_as_their_own_caller() -> None:
+    users = [uuid4() for _ in range(4)]
+    mcp = create_mcp_server()
 
-    owner_status, other_status = await _reuse_session(owner_token, other_token)
+    @mcp.tool()
+    async def whoami() -> str:
+        before = get_access_token()
+        await anyio.sleep(0.01)
+        after = get_access_token()
+        assert before is not None
+        assert after is not None
+        assert before.client_id == after.client_id
+        return before.client_id
 
-    assert owner_status == 200
-    # The SDK answers a foreign credential exactly as it answers an unknown session.
-    assert other_status == 404
+    call = {"jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": {"name": "whoami"}}
+    callers = [users[index % len(users)] for index in range(16)]
+    app = mcp_http_app(mcp, "127.0.0.1", 3334)
+    async with (
+        mcp.session_manager.run(),
+        httpx2.AsyncClient(
+            transport=httpx2.ASGITransport(app=app), base_url=settings.server_url
+        ) as client,
+    ):
+        responses = await asyncio.gather(
+            *(_post(client, _session_token(user), call) for user in callers)
+        )
+
+    assert [_tool_text(response) for response in responses] == [f"user:{user}" for user in callers]
 
 
 # ---------------------------------------------------------------------------

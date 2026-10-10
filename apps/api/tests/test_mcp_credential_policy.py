@@ -14,6 +14,7 @@ from sibyl.auth.api_key_common import ApiKeyAuth
 from sibyl.auth.jwt import create_access_token, verify_access_token
 from sibyl.auth.mcp_oauth import SibylAuthorizationCode, SibylMcpOAuthProvider
 from sibyl.config import settings
+from sibyl.main import mcp_http_app
 from sibyl.server import create_mcp_server
 
 
@@ -27,7 +28,7 @@ def first_party_auth(monkeypatch: pytest.MonkeyPatch) -> None:
 
 async def _initialize(token: str) -> int:
     mcp = create_mcp_server()
-    app = mcp.streamable_http_app(host="127.0.0.1", stateless_http=False)
+    app = mcp_http_app(mcp, "127.0.0.1", 3334)
     async with (
         mcp.session_manager.run(),
         httpx2.AsyncClient(
