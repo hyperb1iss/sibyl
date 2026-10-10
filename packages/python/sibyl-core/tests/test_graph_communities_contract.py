@@ -16,6 +16,7 @@ from sibyl_core.services import (
     graph_community_managers,
     graph_community_membership,
     graph_community_models,
+    graph_community_sampling,
     graph_community_selection,
     graph_community_snapshot,
 )
@@ -64,6 +65,7 @@ MODULES: dict[str, ModuleType] = {
     "graph_community_managers": graph_community_managers,
     "graph_community_membership": graph_community_membership,
     "graph_community_models": graph_community_models,
+    "graph_community_sampling": graph_community_sampling,
     "graph_community_selection": graph_community_selection,
     "graph_community_snapshot": graph_community_snapshot,
 }
@@ -94,9 +96,11 @@ ALLOWED_IMPORTS = {
         "graph_community_models",
     },
     "graph_community_models": set(),
+    "graph_community_sampling": set(),
     "graph_community_selection": {
         "graph_community_managers",
         "graph_community_models",
+        "graph_community_sampling",
         "graph_community_snapshot",
     },
     "graph_community_snapshot": {
