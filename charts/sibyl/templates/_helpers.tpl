@@ -94,11 +94,12 @@ Create the name of the service account to use
 {{/*
 Service account for frontend pods, kept apart from the backend account so a
 cloud role bound to the backend (IRSA for Bedrock or S3 receipts) never
-reaches the web tier.
+reaches the web tier. Not truncated to 63: ServiceAccount names allow 253
+characters, and cutting "-frontend" off could collide with the backend's.
 */}}
 {{- define "sibyl.frontendServiceAccountName" -}}
 {{- if .Values.frontend.serviceAccount.create }}
-{{- default (printf "%s-frontend" (include "sibyl.fullname" .) | trunc 63 | trimSuffix "-") .Values.frontend.serviceAccount.name }}
+{{- default (printf "%s-frontend" (include "sibyl.fullname" .)) .Values.frontend.serviceAccount.name }}
 {{- else }}
 {{- default "default" .Values.frontend.serviceAccount.name }}
 {{- end }}

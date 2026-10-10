@@ -320,6 +320,14 @@ def test_helm_frontend_never_shares_the_backend_cloud_role() -> None:
     )
     assert frontend["spec"]["template"]["spec"]["serviceAccountName"] == "sibyl"
 
+    long_name = "s" * 62
+    long_accounts = [
+        d["metadata"]["name"]
+        for d in documents("--set", f"fullnameOverride={long_name}")
+        if d["kind"] == "ServiceAccount"
+    ]
+    assert long_accounts == [long_name, f"{long_name}-frontend"]
+
     without_frontend = documents("--set", "frontend.enabled=false")
     assert [d["metadata"]["name"] for d in without_frontend if d["kind"] == "ServiceAccount"] == [
         "sibyl"
@@ -1138,7 +1146,28 @@ def test_helm_s3_receipts_need_no_claim_and_keep_the_default_rollout() -> None:
         )
         assert invalid.returncode != 0, bucket
         assert "must name a valid S3 bucket" in invalid.stderr, bucket
-    for valid in ("s3://r2-receipts?region=auto", "s3://my.receipts-1"):
+    for url_problem, message in (
+        ("s3://receipts/prod?region=US_WEST", "accepts only a ?region=name query"),
+        ("s3://receipts/prod?endpoint=minio", "accepts only a ?region=name query"),
+        ("s3://receipts/prod#fragment", "accepts only a ?region=name query"),
+        ("s3://receipts/a/../b", "may not contain empty, . or .. segments"),
+        ("s3://receipts/a//b", "may not contain empty, . or .. segments"),
+    ):
+        refused = _helm_template(
+            "--set",
+            "backend.existingSecret=runtime-secret",
+            "--set",
+            "backend.validationReceipts.existingClaim=",
+            "--set",
+            f"backend.validationReceipts.url={url_problem}",
+        )
+        assert refused.returncode != 0, url_problem
+        assert message in refused.stderr, url_problem
+    for valid in (
+        "s3://r2-receipts?region=auto",
+        "s3://my.receipts-1",
+        "s3://receipts/team/prod/?region=us-gov-west-1",
+    ):
         rendered = _helm_template(
             "--set",
             "backend.existingSecret=runtime-secret",

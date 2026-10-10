@@ -1000,16 +1000,17 @@ backend:
 ```
 
 The URL names a bucket, an optional key prefix, and an optional `region` query parameter (`auto` is
-accepted for endpoints such as Cloudflare R2). The chart refuses a bucket name that breaks the S3
-naming rules at render time, so a typo fails the install rather than crashlooping the pods. Without
-a region, the standard `AWS_REGION` and `AWS_DEFAULT_REGION` resolution applies (the EKS IRSA
-webhook sets `AWS_REGION`). Credentials come from the default AWS chain: IRSA, EKS Pod Identity, or
-an instance role, as described under [Amazon Bedrock](#amazon-bedrock). The chart passes the URL to
-API and worker as `SIBYL_VALIDATION_RECEIPT_URL` through its ConfigMap and mounts no receipts
-volume, so pods may run on any node and single-replica rollouts use the Kubernetes `RollingUpdate`
-default. The frontend runs under its own service account (see [Service Account](#service-account)),
-so the receipts role never reaches it. Give receipts a dedicated prefix, since backup export lists
-it.
+accepted for endpoints such as Cloudflare R2). The chart checks the URL's shape at render time (a
+3-63 character bucket of lowercase letters, digits, dots and hyphens, no empty or dot segments in
+the prefix, and no query other than `region`), so a typo fails the install rather than crashlooping
+the pods. Without a region, the standard `AWS_REGION` and `AWS_DEFAULT_REGION` resolution applies
+(the EKS IRSA webhook sets `AWS_REGION`). Credentials come from the default AWS chain: IRSA, EKS Pod
+Identity, or an instance role, as described under [Amazon Bedrock](#amazon-bedrock). The chart
+passes the URL to API and worker as `SIBYL_VALIDATION_RECEIPT_URL` through its ConfigMap and mounts
+no receipts volume, so pods may run on any node and single-replica rollouts use the Kubernetes
+`RollingUpdate` default. The frontend runs under its own service account (see
+[Service Account](#service-account)), so the receipts role never reaches it. Give receipts a
+dedicated prefix, since backup export lists it.
 
 Grant the pod role access to the prefix:
 
@@ -1052,7 +1053,9 @@ The volume guarantees carry over:
   before its first model call, not before every call. It deletes a never-written key (proving
   `s3:DeleteObject` without creating anything), confirms a second never-written key reads as absent,
   then creates a probe object under the prefix, confirms a second create is refused, reads it back,
-  deletes it, and confirms it reads as absent. A bucket that fails any step stops the execution
+  finds it in a listing, deletes it, and confirms it reads as absent. The listing check matters
+  because backup export finds receipts by listing the prefix, so a store whose listings lag its
+  writes would record a pending receipt as missing. A bucket that fails any step stops the execution
   before a provider is paid, including an S3-compatible store that ignores `If-None-Match`.
 - **Unsigned reads refused, best effort.** The check also asks for the probe without credentials and
   stops validation if that read succeeds. A timeout, redirect, or any other non-success answer
@@ -1097,7 +1100,10 @@ result.
 
 To move an existing release from a claim to S3, stop validation work (scale the worker and backend
 to zero), then copy any remaining receipts from the claim's `private` directory into the prefix
-under the same names. Use a create-only upload so a receipt already in the bucket is never replaced:
+under the same names. Run the copy from a temporary pod that mounts the claim at
+`/var/lib/sibyl-receipts` and has the pod role's credentials and an AWS CLI whose `s3api put-object`
+accepts `--if-none-match`. Use that create-only upload so a receipt already in the bucket is never
+replaced:
 
 ```bash
 for receipt in /var/lib/sibyl-receipts/private/*.receipt; do
