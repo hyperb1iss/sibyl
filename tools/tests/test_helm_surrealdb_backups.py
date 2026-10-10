@@ -17,6 +17,7 @@ import os
 import shutil
 import subprocess
 import sys
+from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -34,8 +35,40 @@ pytestmark = pytest.mark.skipif(
 )
 
 
+def kubelet_expand(text: str, env: dict[str, str]) -> str:
+    """Expand a container env value or arg the way the kubelet does:
+    $$ becomes $, $(NAME) becomes NAME's value when NAME is defined and is
+    left alone otherwise, and any other $ is literal."""
+    out: list[str] = []
+    index = 0
+    while index < len(text):
+        if text[index] == "$" and index + 1 < len(text):
+            following = text[index + 1]
+            if following == "$":
+                out.append("$")
+                index += 2
+                continue
+            if following == "(":
+                close = text.find(")", index + 2)
+                if close != -1:
+                    name = text[index + 2 : close]
+                    out.append(env.get(name, f"$({name})"))
+                    index = close + 1
+                    continue
+                out.append("$(")
+                index += 2
+                continue
+            out.append("$" + following)
+            index += 2
+            continue
+        out.append(text[index])
+        index += 1
+    return "".join(out)
+
+
 def _render_job(job: str, *overrides: str) -> tuple[str, dict[str, str]]:
-    """Return one ops CronJob's shell script and its literal env values."""
+    """Return one ops CronJob's shell script and its literal env values,
+    both as the container would see them after kubelet expansion."""
     assert _HELM is not None
     rendered = subprocess.run(  # noqa: S603
         [
@@ -60,8 +93,11 @@ def _render_job(job: str, *overrides: str) -> tuple[str, dict[str, str]]:
         if not document["metadata"]["name"].endswith(f"-{job}"):
             continue
         container = document["spec"]["jobTemplate"]["spec"]["template"]["spec"]["containers"][0]
-        env = {item["name"]: item["value"] for item in container["env"] if "value" in item}
-        return container["args"][0], env
+        env: dict[str, str] = {}
+        for item in container["env"]:
+            if "value" in item:
+                env[item["name"]] = kubelet_expand(item["value"], env)
+        return kubelet_expand(container["args"][0], env), env
     pytest.fail(f"{job} CronJob not rendered")
 
 
@@ -89,10 +125,16 @@ class OpsHarness:
         restore: dict[str, dict[str, dict[str, int]]] | None = None,
         empty_exports: tuple[str, ...] = (),
         drop_on_import: tuple[str, ...] = (),
+        sql_errors: tuple[str, ...] = (),
+        refuse_import: tuple[str, ...] = (),
+        drop_tables_on_import: tuple[str, ...] = (),
+        shrink_on_import: dict[str, int] | None = None,
     ) -> None:
-        """Describe the fake servers. ``empty_exports`` and ``drop_on_import``
-        name ``ns/db`` pairs whose export comes back empty or whose import
-        silently loses every row."""
+        """Describe the fake servers and the faults they inject. Each fault
+        names ``ns/db`` pairs (``ns/db/table`` for the table faults): an
+        empty export, an import that zeroes every row, a refused row count,
+        a refused import, a table that vanishes on import, or one that comes
+        back with the given number of rows."""
         servers: dict[str, object] = {
             "http://restore": {"user": "drill:drill", "namespaces": restore or {}},
         }
@@ -108,6 +150,10 @@ class OpsHarness:
                     "servers": servers,
                     "empty_exports": list(empty_exports),
                     "drop_on_import": list(drop_on_import),
+                    "sql_errors": list(sql_errors),
+                    "refuse_import": list(refuse_import),
+                    "drop_tables_on_import": list(drop_tables_on_import),
+                    "shrink_on_import": shrink_on_import or {},
                 }
             )
         )
@@ -122,6 +168,9 @@ class OpsHarness:
 
     def server(self, endpoint: str) -> dict[str, Any]:
         return json.loads(self.state_path.read_text())["servers"][endpoint]
+
+    def state(self) -> dict[str, Any]:
+        return json.loads(self.state_path.read_text())
 
     def run(self, job: str, *overrides: str) -> subprocess.CompletedProcess[str]:
         script, rendered_env = _render_job(job, *overrides)
@@ -187,6 +236,10 @@ def _source() -> dict[str, dict[str, dict[str, int]]]:
 
 
 SOURCE_DATABASES = sum(len(databases) for databases in _source().values())
+MANIFEST_VERSION = 2
+DEFAULT_DEADLINE_SECONDS = 21600
+CUSTOM_BACKOFF = 2
+CUSTOM_DEADLINE_SECONDS = 600
 DEFAULT_MAX_AGE_HOURS = 36
 FRESH_SECONDS = 600
 
@@ -217,7 +270,8 @@ def test_helm_export_discovers_every_namespace_without_a_list(harness: OpsHarnes
     (run_dir,) = _run_dirs(harness)
     assert run_dir.name.startswith("sibyl-")
     assert manifest["format"] == "sibyl-surrealdb-export"
-    assert manifest["version"] == 1
+    assert manifest["version"] == MANIFEST_VERSION
+    assert manifest["failures"] == []
     assert manifest["server_version"] == "surrealdb-3.2.4"
     assert manifest["created_at"].endswith("Z")
     exported = {(entry["namespace"], entry["database"]): entry for entry in manifest["databases"]}
@@ -237,13 +291,20 @@ def test_helm_export_discovers_every_namespace_without_a_list(harness: OpsHarnes
         assert entry["rows"] == sum(_source()[namespace][database].values())
 
 
-def test_helm_export_and_drill_scripts_ignore_the_bootstrap_list() -> None:
+def test_helm_bootstrap_list_is_required_but_never_iterated() -> None:
+    """The scripts do not loop over `databases`; the list reaches them
+    only as the set of databases every backup must contain."""
     default_export, _ = _render_job("export")
     default_drill, _ = _render_job("restore-drill")
     custom = ("--set", "databases[0].namespace=only_this", "--set", "databases[0].database=db")
 
-    assert _render_job("export", *custom)[0] == default_export
-    assert _render_job("restore-drill", *custom)[0] == default_drill
+    export_script, export_env = _render_job("export", *custom)
+    drill_script, drill_env = _render_job("restore-drill", *custom)
+    assert export_script == default_export
+    assert drill_script == default_drill
+    required = [{"namespace": "only_this", "database": "db"}]
+    assert json.loads(export_env["SIBYL_EXPORT_REQUIRED_DATABASES"]) == required
+    assert json.loads(drill_env["SIBYL_RESTORE_REQUIRED_DATABASES"]) == required
 
 
 # A reversible stand-in for a real cipher: a header line plus rot13. The
@@ -302,7 +363,12 @@ def test_helm_export_hooks_cover_every_file_and_the_manifest(harness: OpsHarness
     assert len(files) == SOURCE_DATABASES
     encrypted = (harness.root / "encrypted.log").read_text().splitlines()
     assert sorted(Path(line).name for line in encrypted[:-1]) == files
-    assert encrypted[-1] == str(run_dir / "manifest.json")
+    assert Path(encrypted[-1]).name == "manifest.json"
+    for line in encrypted:
+        assert not line.startswith(str(harness.backups)), "plaintext must stay in scratch"
+    assert list((harness.root / "tmp").iterdir()) == [], (
+        "scratch plaintext must not outlive the job"
+    )
     for name, data in stored.items():
         assert data.startswith(CIPHER_HEADER.encode()), name
     assert (harness.root / "synced.log").read_text().splitlines() == [str(run_dir)]
@@ -312,11 +378,12 @@ def test_helm_export_hooks_cover_every_file_and_the_manifest(harness: OpsHarness
     ("command", "message"),
     [
         ("true", "wrote nothing to $SIBYL_EXPORT_ENCRYPTED_FILE"),
+        (': > "$SIBYL_EXPORT_ENCRYPTED_FILE"', "wrote nothing to $SIBYL_EXPORT_ENCRYPTED_FILE"),
         ('mv "$SIBYL_EXPORT_FILE" "$SIBYL_EXPORT_FILE.enc"', "wrote nothing"),
         ('cp "$SIBYL_EXPORT_FILE" "$SIBYL_EXPORT_ENCRYPTED_FILE"', "without encrypting it"),
         ("echo cipher-tool-missing >&2; false", "cipher-tool-missing"),
     ],
-    ids=["writes-nothing", "renames", "copies-plaintext", "fails"],
+    ids=["writes-nothing", "writes-empty-file", "renames", "copies-plaintext", "fails"],
 )
 def test_helm_export_refuses_encryption_that_does_not_encrypt(
     harness: OpsHarness, command: str, message: str
@@ -328,39 +395,53 @@ def test_helm_export_refuses_encryption_that_does_not_encrypt(
 
     assert result.returncode != 0
     assert message in result.stderr
-    assert not list(harness.backups.glob("*/manifest.json"))
+    assert list(harness.backups.iterdir()) == [], "a failed run removes its own directory"
+    assert list((harness.root / "tmp").iterdir()) == [], "and its scratch plaintext"
 
 
 @pytest.mark.parametrize(
-    ("source", "empty_exports", "message"),
+    ("source", "message"),
     [
-        ({}, (), "discovery found no databases"),
-        ({"ns_only": {}}, (), "discovery found no databases"),
-        (_source(), (f"{ORG_B}/graph",), f"empty export for {ORG_B}/graph"),
-        ({"bad name": {"db": {"t": 1}}}, (), "not a plain SurrealDB identifier"),
-        ({"ok": {"bad-db": {"t": 1}}}, (), "not a plain SurrealDB identifier"),
+        ({}, "discovery found no databases"),
+        ({"ns_only": {}}, "discovery found no databases"),
+        ({"main": {"main": {}}}, "besides SurrealDB's default main/main"),
+        (
+            {"main": {"main": {}}, "other_app": {"data": {"t": 5}}},
+            "required databases missing at http://source: sibyl_auth/auth, sibyl_content/content",
+        ),
+        (
+            {key: value for key, value in _source().items() if key != "sibyl_content"},
+            "required databases missing at http://source: sibyl_content/content",
+        ),
     ],
-    ids=["no-namespaces", "no-databases", "empty-file", "unsafe-namespace", "unsafe-database"],
+    ids=["no-namespaces", "no-databases", "only-default-main", "wrong-server", "missing-content"],
 )
-def test_helm_export_fails_loudly_instead_of_recording_a_partial_backup(
-    harness: OpsHarness,
-    source: dict[str, dict[str, dict[str, int]]],
-    empty_exports: tuple[str, ...],
-    message: str,
+def test_helm_export_refuses_an_empty_or_wrong_server(
+    harness: OpsHarness, source: dict[str, dict[str, dict[str, int]]], message: str
 ) -> None:
-    harness.serve(source=source, empty_exports=empty_exports)
+    """SurrealDB always has main/main, so finding it proves nothing, and a
+    server without the bootstrap databases is not the Sibyl server."""
+    harness.serve(source=source)
     result = harness.run("export")
 
     assert result.returncode != 0
     assert message in result.stderr
-    assert not list(harness.backups.glob("*/manifest.json"))
+    assert list(harness.backups.iterdir()) == []
 
 
-def _export_then_reset(harness: OpsHarness, drop_on_import: tuple[str, ...] = ()) -> Path:
+Configure = Callable[[OpsHarness], None]
+
+
+def _export_then_reset(harness: OpsHarness, configure: Configure | None = None) -> Path:
+    """Export the standard source, then give the drill an empty restore
+    server, optionally with faults."""
     harness.serve(source=_source())
     exported = harness.run("export")
     assert exported.returncode == 0, exported.stderr
-    harness.serve(drop_on_import=drop_on_import)
+    if configure is None:
+        harness.serve()
+    else:
+        configure(harness)
     (run_dir,) = _run_dirs(harness)
     return run_dir
 
@@ -373,9 +454,14 @@ def test_helm_restore_drill_restores_every_database_in_the_newest_manifest(
     stale.mkdir()
     (stale / "manifest.json").write_text("not json: an older run the drill must not read")
     (harness.backups / "sibyl-99991231235959").mkdir()  # newer, but never completed
+    staging = harness.backups / "sibyl-staging-99991231235959"  # another prefix's run
+    staging.mkdir()
+    (staging / "manifest.json").write_text("not json: a sibling prefix the drill must not read")
 
     result = harness.run("restore-drill")
     assert result.returncode == 0, result.stderr
+    assert "skipping incomplete run sibyl-99991231235959 (no manifest.json)" in result.stdout
+    assert "sibyl-staging" not in result.stdout + result.stderr
 
     receipt = json.loads(harness.receipt_path.read_text())
     assert receipt["status"] == "PASS"
@@ -394,28 +480,67 @@ def test_helm_restore_drill_restores_every_database_in_the_newest_manifest(
             table: {"exported": rows, "restored": rows} for table, rows in expected.items()
         }
     assert receipt["row_counts"] == {"sibyl_auth.auth.users": {"expected": 2, "actual": 2}}
-    assert harness.server("http://restore")["namespaces"] == _source()
+    restore = harness.server("http://restore")
+    assert restore["namespaces"] == _source()
+    assert restore["strict"] == ["sibyl_auth/auth", "sibyl_content/content"]
+
+
+def _flip_letters(path: Path) -> None:
+    """Change content without changing size, so only sha256 can tell."""
+    text = path.read_text()
+    assert "a" in text
+    path.write_text(text.replace("a", "\0").replace("b", "a").replace("\0", "b"))
 
 
 @pytest.mark.parametrize(
-    ("damage", "drop_on_import", "message"),
+    ("damage", "configure", "message"),
     [
-        ("tamper", (), "does not match the manifest's size and sha256"),
-        ("delete", (), "is missing"),
-        (None, (f"{ORG_A}/graph",), "restored no rows; the export counted 14"),
+        ("tamper", None, "does not match the manifest's size and sha256"),
+        ("same-size", None, "does not match the manifest's size and sha256"),
+        ("delete", None, "is missing"),
+        (
+            None,
+            lambda h: h.serve(drop_on_import=(f"{ORG_A}/graph",)),
+            "tables short after import: entity (0 of 7, allowed shortfall 2), relates_to (0 of 6",
+        ),
+        (
+            None,
+            lambda h: h.serve(shrink_on_import={f"{ORG_A}/graph/entity": 0}),
+            "tables short after import: entity (0 of 7, allowed shortfall 2)",
+        ),
+        (
+            None,
+            lambda h: h.serve(drop_tables_on_import=(f"{ORG_A}/graph/relates_to",)),
+            "tables missing after import: relates_to",
+        ),
+        (
+            None,
+            lambda h: h.serve(refuse_import=(f"{ORG_A}/graph",)),
+            "import failed: ",
+        ),
     ],
-    ids=["checksum", "missing-file", "empty-restore"],
+    ids=[
+        "checksum",
+        "same-size-tamper",
+        "missing-file",
+        "empty-restore",
+        "one-empty-table",
+        "missing-table",
+        "refused-import",
+    ],
 )
 def test_helm_restore_drill_fails_and_notifies_on_a_bad_database(
     harness: OpsHarness,
     damage: str | None,
-    drop_on_import: tuple[str, ...],
+    configure: Configure | None,
     message: str,
 ) -> None:
-    run_dir = _export_then_reset(harness, drop_on_import)
+    run_dir = _export_then_reset(harness, configure)
     target = run_dir / f"{ORG_A}.graph.surql"
     if damage == "tamper":
         target.write_text(target.read_text() + "\n-- tampered\n")
+    elif damage == "same-size":
+        _flip_letters(target)
     elif damage == "delete":
         target.unlink()
 
@@ -479,6 +604,10 @@ def test_helm_restore_drill_decrypts_into_scratch_and_checks_the_plaintext(
     assert {item["status"] for item in receipt["databases"]} == {"PASS"}
     assert harness.server("http://restore")["namespaces"] == _source()
     assert _stored_files(run_dir) == before, "the drill must never rewrite the backup it reads"
+    assert harness.state()["max_import_siblings"] == 1, "one decrypted file at a time"
+    assert list((harness.root / "tmp").iterdir()) == [], (
+        "decrypted copies must not outlive the drill"
+    )
 
 
 @pytest.mark.parametrize(
@@ -498,12 +627,20 @@ def test_helm_restore_drill_decrypts_into_scratch_and_checks_the_plaintext(
         ),
         (
             _decrypting_drill_values(
+                DECRYPT
+                + '\ncase "$SIBYL_RESTORE_FILE" in *.surql) tr ab ba < "$SIBYL_RESTORE_FILE"'
+                ' > "$SIBYL_RESTORE_FILE.x"; mv "$SIBYL_RESTORE_FILE.x" "$SIBYL_RESTORE_FILE";; esac'
+            ),
+            f"restore failed for {ORG_A}/graph: export file",
+        ),
+        (
+            _decrypting_drill_values(
                 'case "$SIBYL_RESTORE_FILE" in *.surql) exit 4;; esac\n' + DECRYPT
             ),
             f"restore failed for {ORG_A}/graph: decryption failed",
         ),
     ],
-    ids=["no-decryption", "wrong-key", "wrong-plaintext", "decrypt-error"],
+    ids=["no-decryption", "wrong-key", "wrong-plaintext", "same-size-plaintext", "decrypt-error"],
 )
 def test_helm_restore_drill_fails_when_decryption_is_missing_or_wrong(
     harness: OpsHarness, drill_values: dict[str, Any], message: str
@@ -528,7 +665,7 @@ def test_helm_restore_drill_fails_when_decryption_is_missing_or_wrong(
 # The `exit 0` also proves the hook cannot end the drill early.
 FETCH = """\
 remote="$SIBYL_EXPORT_DESTINATION_URI"
-for run in $(ls -1 "$remote" | grep "^$SIBYL_EXPORT_FILE_PREFIX-" | sort -r); do
+for run in $(ls -1 "$remote" | grep -E "^$SIBYL_EXPORT_FILE_PREFIX-[0-9]{14}$" | sort -r); do
   if [ -f "$remote/$run/manifest.json" ]; then
     mkdir -p "$SIBYL_RESTORE_SOURCE_PATH/$run"
     for file in "$remote/$run"/*.surql; do cp "$file" "$SIBYL_RESTORE_SOURCE_PATH/$run/"; done
@@ -549,6 +686,9 @@ def test_helm_restore_drill_fetches_the_newest_complete_run(harness: OpsHarness)
     unfinished = remote / "sibyl-99991231235959"
     unfinished.mkdir()
     (unfinished / f"{ORG_A}.graph.surql").write_text("-- upload still running\n")
+    staging = remote / "sibyl-staging-99991231235959"
+    shutil.copytree(remote / run_dir.name, staging)
+    (staging / "manifest.json").write_text("not json: a sibling prefix the fetch must not take")
 
     result = harness.run(
         "restore-drill",
@@ -627,6 +767,303 @@ def test_helm_restore_drill_rejects_unusable_hook_values(
             "template",
             "drill",
             "charts/surrealdb",
+            "--set",
+            "restoreDrill.enabled=true",
+            *override,
+        ],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert rendered.returncode != 0
+    assert message in rendered.stderr
+
+
+# Names SurrealDB accepts but a plain identifier would not: they must be
+# exported (headers carry printable ASCII) and restored with escaping.
+ODD_NAMES: dict[str, dict[str, dict[str, int]]] = {
+    "legacy-tenant": {"graph": {"entity": 3}},
+    "odd ns": {"odd db": {"thing": 2}},
+    "back`tick\\slash": {"graph": {"entity": 1}},
+}
+
+
+def _odd_file(namespace: str, database: str) -> str:
+    def safe(name: str) -> str:
+        return "".join(ch if ch.isascii() and (ch.isalnum() or ch == "_") else "_" for ch in name)
+
+    digest = hashlib.sha256(f"{namespace}\n{database}".encode()).hexdigest()[:12]
+    return f"{safe(namespace)}.{safe(database)}.{digest}.surql"
+
+
+def test_helm_odd_names_export_and_restore_with_escaping(harness: OpsHarness) -> None:
+    harness.serve(source={**_source(), **ODD_NAMES})
+    exported = harness.run("export")
+    assert exported.returncode == 0, exported.stderr
+
+    manifest = _manifest(harness)
+    files = {
+        (entry["namespace"], entry["database"]): entry["file"] for entry in manifest["databases"]
+    }
+    for namespace, databases in ODD_NAMES.items():
+        for database in databases:
+            assert files[(namespace, database)] == _odd_file(namespace, database)
+    assert manifest["failures"] == []
+
+    harness.serve()
+    drilled = harness.run("restore-drill")
+    assert drilled.returncode == 0, drilled.stderr
+    assert harness.server("http://restore")["namespaces"] == {**_source(), **ODD_NAMES}
+
+
+def test_helm_export_records_what_it_cannot_export_and_keeps_the_rest(
+    harness: OpsHarness,
+) -> None:
+    """One unusable name or one failing database must not cost every other
+    backup: the run exports the rest, records each failure in the manifest,
+    syncs, and then fails so it pages."""
+    unsafe = {"tenant-ü": {"graph": {"entity": 1}}, "bad\nline": {"graph": {"entity": 1}}}
+    harness.serve(
+        source={**_source(), **ODD_NAMES, **unsafe, "ok_ns": {"weird\tdb": {"t": 1}}},
+        empty_exports=(f"{ORG_B}/graph",),
+        sql_errors=("legacy-tenant/graph",),
+    )
+    result = harness.run(
+        "export",
+        *harness.values({"export": {"syncCommand": 'echo synced >> "$HOME/synced.log"'}}),
+    )
+
+    assert result.returncode != 0
+    assert "failures recorded in" in result.stderr
+    assert (harness.root / "synced.log").read_text() == "synced\n", "the partial run still syncs"
+    manifest = _manifest(harness)
+    exported = {(entry["namespace"], entry["database"]) for entry in manifest["databases"]}
+    assert ("sibyl_auth", "auth") in exported
+    assert (ORG_A, "graph") in exported
+    assert ("odd ns", "odd db") in exported
+    reasons = {(f["namespace"], f["database"]): f["reason"] for f in manifest["failures"]}
+    assert set(reasons) == {
+        ("tenant-ü", None),
+        ("bad\nline", None),
+        ("ok_ns", "weird\tdb"),
+        (ORG_B, "graph"),
+        ("legacy-tenant", "graph"),
+    }
+    assert "surreal-ns header" in reasons[("tenant-ü", None)]
+    assert "surreal-db header" in reasons[("ok_ns", "weird\tdb")]
+    assert reasons[(ORG_B, "graph")] == "the export came back empty"
+    assert "SurrealQL failed in legacy-tenant/graph" in reasons[("legacy-tenant", "graph")]
+
+    harness.serve()
+    drilled = harness.run(
+        "restore-drill",
+        *harness.values({"restoreDrill": {"failureNotification": {"command": NOTIFY}}}),
+    )
+    assert drilled.returncode != 0
+    assert 'export recorded a failure for "tenant-ü"/"*"' in drilled.stderr
+    assert (harness.root / "notified.log").read_text() == "notified\n"
+    restored = harness.server("http://restore")["namespaces"]
+    assert restored[ORG_A] == _source()[ORG_A], "the rest of the backup still restores"
+
+
+def test_helm_restore_drill_requires_the_bootstrap_databases(harness: OpsHarness) -> None:
+    run_dir = _export_then_reset(harness)
+    manifest_path = run_dir / "manifest.json"
+    manifest = json.loads(manifest_path.read_text())
+    manifest["databases"] = [e for e in manifest["databases"] if e["namespace"] != "sibyl_content"]
+    manifest_path.write_text(json.dumps(manifest))
+
+    result = harness.run("restore-drill")
+
+    assert result.returncode != 0
+    assert "is missing required databases: sibyl_content/content" in result.stderr
+
+
+@pytest.mark.parametrize(
+    ("entity_rows", "passes"),
+    [(5, True), (4, False)],
+    ids=["within-drift", "beyond-drift"],
+)
+def test_helm_restore_drill_allows_drift_per_table(
+    harness: OpsHarness, entity_rows: int, *, passes: bool
+) -> None:
+    """entity exports 7 rows; the default allowance is max(2 rows, 1%)."""
+    _export_then_reset(
+        harness, lambda h: h.serve(shrink_on_import={f"{ORG_A}/graph/entity": entity_rows})
+    )
+
+    result = harness.run("restore-drill")
+
+    assert (result.returncode == 0) is passes, result.stderr
+    if not passes:
+        assert f"entity ({entity_rows} of 7, allowed shortfall 2)" in result.stderr
+
+
+def test_helm_export_prunes_only_its_own_stale_incomplete_runs(harness: OpsHarness) -> None:
+    recent = (datetime.now(UTC) - timedelta(hours=1)).strftime("%Y%m%d%H%M%S")
+    layout = {
+        "sibyl-20000101000000": False,  # incomplete, old: pruned
+        f"sibyl-{recent}": False,  # incomplete, recent: may still be running
+        "sibyl-20000101000001": True,  # complete, old: retention's business
+        "sibyl-staging-20000101000000": False,  # another prefix
+    }
+    for name, complete in layout.items():
+        (harness.backups / name).mkdir()
+        (harness.backups / name / "partial.surql").write_text("-- partial\n")
+        if complete:
+            (harness.backups / name / "manifest.json").write_text("{}")
+    harness.serve(source=_source())
+
+    result = harness.run("export")
+
+    assert result.returncode == 0, result.stderr
+    assert "pruned incomplete run sibyl-20000101000000" in result.stdout
+    remaining = {path.name for path in harness.backups.iterdir()}
+    assert "sibyl-20000101000000" not in remaining
+    assert {f"sibyl-{recent}", "sibyl-20000101000001", "sibyl-staging-20000101000000"} <= remaining
+
+
+@pytest.mark.parametrize(
+    ("text", "env", "expected"),
+    [
+        ("$$", {}, "$"),
+        ("$$$$", {}, "$$"),
+        ("$(HOME)", {"HOME": "/home/ops"}, "/home/ops"),
+        ("$(UNSET)", {}, "$(UNSET)"),
+        ("$(date -u +%s)", {}, "$(date -u +%s)"),
+        ("$((1 + 2))", {}, "$((1 + 2))"),
+        ("${x:-y} $x", {}, "${x:-y} $x"),
+        ("tail$", {}, "tail$"),
+    ],
+)
+def test_helm_harness_expands_like_the_kubelet(
+    text: str, env: dict[str, str], expected: str
+) -> None:
+    assert kubelet_expand(text, env) == expected
+
+
+def test_helm_hooks_survive_kubelet_expansion(harness: OpsHarness) -> None:
+    """The kubelet collapses $$ and expands $(NAME) in env values and args.
+    Hooks are escaped at render time so they reach the shell as written."""
+    hook = '[ "$$" -gt 0 ]; echo "pid ok $(echo HOME)" >> "$HOME/hooks.log"'
+    _, raw_env = _raw_env(
+        "export",
+        "--set",
+        "export.encryption.enabled=true",
+        "--set-string",
+        f"export.encryption.command={hook}",
+    )
+    assert raw_env["SIBYL_EXPORT_ENCRYPTION_COMMAND"] == hook.replace("$", "$$")
+
+    harness.serve(source=_source())
+    result = harness.run(
+        "export",
+        *harness.values(
+            {
+                "export": {
+                    "encryption": {"enabled": True, "command": f"{hook}\n{ENCRYPT}"},
+                    "syncCommand": hook,
+                }
+            }
+        ),
+    )
+    assert result.returncode == 0, result.stderr
+    lines = (harness.root / "hooks.log").read_text().splitlines()
+    assert lines == ["pid ok HOME"] * (SOURCE_DATABASES + 2)
+
+
+def _raw_env(job: str, *overrides: str) -> tuple[dict[str, Any], dict[str, str]]:
+    """The rendered job spec and env exactly as written to the manifest,
+    before the kubelet touches them."""
+    assert _HELM is not None
+    rendered = subprocess.run(  # noqa: S603
+        [
+            _HELM,
+            "template",
+            "drill",
+            "charts/surrealdb",
+            "--set",
+            "export.enabled=true",
+            "--set",
+            "restoreDrill.enabled=true",
+            *overrides,
+        ],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    for document in yaml.safe_load_all(rendered.stdout):
+        if (
+            document
+            and document.get("kind") == "CronJob"
+            and document["metadata"]["name"].endswith(f"-{job}")
+        ):
+            container = document["spec"]["jobTemplate"]["spec"]["template"]["spec"]["containers"][0]
+            env = {item["name"]: item["value"] for item in container["env"] if "value" in item}
+            return document["spec"]["jobTemplate"]["spec"], env
+    pytest.fail(f"{job} CronJob not rendered")
+
+
+def test_helm_jobs_are_bounded_and_the_drill_pages_once() -> None:
+    export_spec, export_env = _raw_env("export")
+    drill_spec, drill_env = _raw_env("restore-drill")
+
+    assert drill_spec["backoffLimit"] == 0
+    assert (
+        export_spec["activeDeadlineSeconds"]
+        == drill_spec["activeDeadlineSeconds"]
+        == DEFAULT_DEADLINE_SECONDS
+    )
+    for env in (export_env, drill_env):
+        assert env["SIBYL_HTTP_CONNECT_TIMEOUT"] == "10"
+        assert env["SIBYL_HTTP_MAX_TIME"] == "3600"
+
+    custom, _ = _raw_env(
+        "restore-drill",
+        "--set",
+        f"restoreDrill.backoffLimit={CUSTOM_BACKOFF}",
+        "--set",
+        f"restoreDrill.activeDeadlineSeconds={CUSTOM_DEADLINE_SECONDS}",
+    )
+    assert custom["backoffLimit"] == CUSTOM_BACKOFF
+    assert custom["activeDeadlineSeconds"] == CUSTOM_DEADLINE_SECONDS
+
+
+@pytest.mark.parametrize(
+    ("override", "message"),
+    [
+        (("--set-string", "export.filePrefix=sibyl.prod"), "export.filePrefix must match"),
+        (
+            ("--set-string", "jobDefaults.http.maxTimeSeconds=1h"),
+            "jobDefaults.http.maxTimeSeconds must be a whole number",
+        ),
+        (
+            ("--set", "restoreDrill.backoffLimit=-1"),
+            "restoreDrill.backoffLimit must be a whole number",
+        ),
+        (
+            ("--set", "restoreDrill.rowDrift.percent=101"),
+            "restoreDrill.rowDrift.percent must be a number from 0 to 100",
+        ),
+        (
+            ("--set-string", "restoreDrill.rowDrift.rows=two"),
+            "restoreDrill.rowDrift.rows must be a whole number",
+        ),
+    ],
+    ids=["prefix-with-dot", "timeout-text", "negative-backoff", "percent-over-100", "rows-text"],
+)
+def test_helm_ops_values_are_validated_at_render(override: tuple[str, str], message: str) -> None:
+    assert _HELM is not None
+    rendered = subprocess.run(  # noqa: S603
+        [
+            _HELM,
+            "template",
+            "drill",
+            "charts/surrealdb",
+            "--set",
+            "export.enabled=true",
             "--set",
             "restoreDrill.enabled=true",
             *override,

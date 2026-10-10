@@ -1,5 +1,6 @@
 {{- if .Values.restoreDrill.enabled -}}
 {{- include "sibyl-surrealdb.validateDatabases" . -}}
+{{- include "sibyl-surrealdb.validateOps" . -}}
 {{- if and .Values.restoreDrill.recallCheck.enabled (not .Values.restoreDrill.recallCheck.command) -}}
 {{- fail "restoreDrill.recallCheck.command is required when restoreDrill.recallCheck.enabled=true" -}}
 {{- end -}}
@@ -24,6 +25,10 @@ spec:
   startingDeadlineSeconds: {{ .Values.restoreDrill.startingDeadlineSeconds }}
   jobTemplate:
     spec:
+      # Every failed attempt pages through failureNotification, so retries
+      # default to none; a drill failure wants a person, not a loop.
+      backoffLimit: {{ .Values.restoreDrill.backoffLimit }}
+      activeDeadlineSeconds: {{ .Values.restoreDrill.activeDeadlineSeconds }}
       template:
         metadata:
           labels:
@@ -97,7 +102,7 @@ spec:
                 - |
                   notify_failure() {
                     {{- if .Values.restoreDrill.failureNotification.command }}
-                    {{ .Values.restoreDrill.failureNotification.command | nindent 20 }}
+                    {{ .Values.restoreDrill.failureNotification.command | replace "$" "$$" | nindent 20 }}
                     {{- else }}
                     return 0
                     {{- end }}
@@ -105,18 +110,30 @@ spec:
                   # EXIT, not ERR: busybox ash skips an ERR trap on an
                   # explicit `exit 1` and on failures inside functions,
                   # which are exactly the drill's validation failures.
+                  # Decrypted scratch copies go with it either way.
                   on_exit() {
                     status=$?
                     trap - EXIT
+                    if [ -n "${work:-}" ]; then
+                      rm -rf "$work"
+                    fi
                     if [ "$status" -ne 0 ]; then
                       notify_failure || echo "restore drill failure notification failed" >&2
                     fi
                     exit "$status"
                   }
                   trap on_exit EXIT
-                  identifier='^[A-Za-z_][A-Za-z0-9_]*$'
                   table_rows='RETURN object::keys((INFO FOR DB).tables).map(|$t| { table: $t, rows: (SELECT count() FROM type::table($t) GROUP ALL)[0].count ?? 0 });'
+                  # header_safe mirrors the export. ident quotes any name
+                  # for SurrealQL, escaping backslashes and backticks.
+                  jq_defs='def header_safe: type == "string" and test("^[ -~]+$") and (test("^ | $") | not);
+                    def ident: "`" + (gsub("\\\\"; "\\\\") | gsub("`"; "\\`")) + "`";'
                   work="$(mktemp -d)"
+                  # Bounded requests, as in the export.
+                  http() {
+                    curl --connect-timeout "$SIBYL_HTTP_CONNECT_TIMEOUT" \
+                      --max-time "$SIBYL_HTTP_MAX_TIME" "$@"
+                  }
                   # Same gate as the export: /sql answers HTTP 200 with a
                   # status per statement. Prints the last statement's result.
                   restore_sql() {
@@ -127,7 +144,7 @@ spec:
                       -H "Accept: application/json" -H "Content-Type: text/plain"
                     if [ -n "$scope_ns" ]; then set -- "$@" -H "surreal-ns: $scope_ns"; fi
                     if [ -n "$scope_db" ]; then set -- "$@" -H "surreal-db: $scope_db"; fi
-                    response="$(curl "$@" --data-binary "$statement" "$SURREAL_RESTORE_ENDPOINT/sql")" || exit 1
+                    response="$(http "$@" --data-binary "$statement" "$SURREAL_RESTORE_ENDPOINT/sql")" || exit 1
                     if ! printf '%s\n' "$response" \
                       | jq -e 'type == "array" and length > 0 and all(.[]; .status == "OK")' >/dev/null 2>&1; then
                       printf 'SurrealQL failed in %s/%s: %s\n%s\n' \
@@ -150,7 +167,7 @@ spec:
                   fi
                   ready=""
                   for _ in $(seq 1 30); do
-                    if curl -fsS "$SURREAL_RESTORE_ENDPOINT/health" >/dev/null 2>&1; then
+                    if http -fsS "$SURREAL_RESTORE_ENDPOINT/health" >/dev/null 2>&1; then
                       ready=1
                       break
                     fi
@@ -160,13 +177,23 @@ spec:
                     echo "restore server never became healthy at $SURREAL_RESTORE_ENDPOINT" >&2
                     exit 1
                   fi
-                  # The export writes manifest.json last, so only run
-                  # directories that have one are complete. The glob sorts
-                  # by the UTC timestamp in the name; the last match wins.
+                  # Only exact <filePrefix>-<14 digits> directories are runs,
+                  # so a sibling prefix such as sibyl-staging never matches.
+                  # The export writes manifest.json last, so a run without
+                  # one is incomplete. The glob sorts by the UTC timestamp in
+                  # the name; the last complete match wins.
                   manifest=""
-                  for candidate in "$SIBYL_RESTORE_SOURCE_PATH/$SIBYL_EXPORT_FILE_PREFIX"-*/manifest.json; do
-                    if [ -f "$candidate" ]; then
-                      manifest="$candidate"
+                  for candidate in "$SIBYL_RESTORE_SOURCE_PATH/$SIBYL_EXPORT_FILE_PREFIX"-*; do
+                    stamp="${candidate##*/}"
+                    stamp="${stamp#"$SIBYL_EXPORT_FILE_PREFIX"-}"
+                    case "$stamp" in
+                      [0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]) ;;
+                      *) continue ;;
+                    esac
+                    if [ -f "$candidate/manifest.json" ]; then
+                      manifest="$candidate/manifest.json"
+                    elif [ -d "$candidate" ]; then
+                      echo "skipping incomplete run ${candidate##*/} (no manifest.json)"
                     fi
                   done
                   if [ -z "$manifest" ]; then
@@ -187,15 +214,26 @@ spec:
                     echo "manifest $manifest is not JSON; encrypted exports need restoreDrill.decryption" >&2
                     exit 1
                   fi
-                  # Manifest names reach SurrealQL and file paths, so each
-                  # entry must name plain identifiers and its own file.
-                  if ! jq -e --arg re "$identifier" '
+                  # Names reach HTTP headers and SurrealQL, and files reach
+                  # paths: names must be header-safe and every file a plain,
+                  # distinct name inside the run directory.
+                  if ! jq -e "$jq_defs"'
                       (.databases | type == "array" and length > 0)
                       and all(.databases[];
-                        (.namespace | test($re)) and (.database | test($re))
-                        and .file == "\(.namespace).\(.database).surql")' \
+                        (.namespace | header_safe) and (.database | header_safe)
+                        and (.file | type == "string" and test("^[A-Za-z0-9_][A-Za-z0-9_.]*[.]surql$")))
+                      and ([.databases[].file] | length == (unique | length))' \
                       "$manifest_doc" >/dev/null; then
-                    echo "manifest $manifest lists no databases or names an unsafe file" >&2
+                    echo "manifest $manifest lists no databases, an unsafe name, or an unsafe or repeated file" >&2
+                    exit 1
+                  fi
+                  # A manifest without the bootstrap databases is not a Sibyl
+                  # backup, whatever else it holds.
+                  missing="$(jq -r --argjson required "$SIBYL_RESTORE_REQUIRED_DATABASES" \
+                    '$required - [.databases[] | {namespace, database}] | map("\(.namespace)/\(.database)") | join(", ")' \
+                    "$manifest_doc")"
+                  if [ -n "$missing" ]; then
+                    echo "manifest $manifest is missing required databases: $missing" >&2
                     exit 1
                   fi
                   # A stalled export pipeline must page, not leave the drill
@@ -217,14 +255,14 @@ spec:
                     index=$((index + 1))
                     namespace="$(printf '%s\n' "$expected" | jq -r '.namespace')"
                     database="$(printf '%s\n' "$expected" | jq -r '.database')"
-                    stored="$run_dir/$namespace.$database.surql"
+                    stored="$run_dir/$(printf '%s\n' "$expected" | jq -r '.file')"
                     file="$stored"
                     problem=""
                     restored='[]'
                     if [ ! -f "$stored" ]; then
                       problem="export file $stored is missing"
                     elif [ "$decrypted" = true ]; then
-                      file="$work/$namespace.$database.surql"
+                      file="$work/${stored##*/}"
                       if ! decrypt_restore_file "$stored" "$file"; then
                         problem="decryption failed for $stored"
                       fi
@@ -241,10 +279,16 @@ spec:
                       fi
                     else
                       # Export files assume their namespace and database
-                      # exist, and 3.x does not create them over HTTP.
-                      restore_sql "" "" "DEFINE NAMESPACE IF NOT EXISTS $namespace; USE NS $namespace; DEFINE DATABASE IF NOT EXISTS $database;" >/dev/null
+                      # exist, and 3.x does not create them over HTTP. The
+                      # bootstrap databases are STRICT in production, so they
+                      # are restored STRICT here too.
+                      preamble="$(printf '%s\n' "$expected" | jq -r --argjson required "$SIBYL_RESTORE_REQUIRED_DATABASES" "$jq_defs"'
+                        . as $entry
+                        | ([$required[] | select(.namespace == $entry.namespace and .database == $entry.database)] | length > 0) as $strict
+                        | "DEFINE NAMESPACE IF NOT EXISTS \(.namespace | ident); USE NS \(.namespace | ident); DEFINE DATABASE IF NOT EXISTS \(.database | ident)\(if $strict then " STRICT" else "" end);"')"
+                      restore_sql "" "" "$preamble" >/dev/null
                       # -T streams the file instead of loading it into memory.
-                      import_response="$(curl -sS -X POST -T "$file" \
+                      import_response="$(http -sS -X POST -T "$file" \
                         -u "$SURREAL_RESTORE_USER:$SURREAL_RESTORE_PASS" \
                         -H "Accept: application/json" \
                         -H "Content-Type: text/plain" \
@@ -261,28 +305,44 @@ spec:
                     if [ "$decrypted" = true ]; then
                       rm -f "$file"
                     fi
-                    # Counts come from a separate read on a live server, so
-                    # a few rows of drift is expected. A table that vanished
-                    # or a database that restored no rows at all is not.
-                    printf '%s\n' "$expected" | jq -c --argjson restored "$restored" --arg problem "$problem" '
+                    # Counts come from a separate read on a live server, so a
+                    # little drift is expected; it is allowed per table, never
+                    # pooled, so one empty table cannot hide behind others.
+                    printf '%s\n' "$expected" | jq -c \
+                      --argjson restored "$restored" \
+                      --arg problem "$problem" \
+                      --argjson drift_rows "$SIBYL_RESTORE_ROW_DRIFT_ROWS" \
+                      --argjson drift_percent "$SIBYL_RESTORE_ROW_DRIFT_PERCENT" '
                       ($restored | map({key: .table, value: .rows}) | from_entries) as $after
                       | {namespace, database, file, bytes, sha256,
                          rows_exported: .rows,
                          rows_restored: ($restored | map(.rows) | add // 0),
                          tables: (.tables | with_entries(.value = {exported: .value, restored: $after[.key]}))}
                       | ([.tables | to_entries[] | select(.value.restored == null) | .key]) as $missing
+                      | ([.tables | to_entries[] | select(.value.restored != null)
+                          | ([$drift_rows, (.value.exported * $drift_percent / 100 | ceil)] | max) as $allowed
+                          | select(.value.exported - .value.restored > $allowed)
+                          | "\(.key) (\(.value.restored) of \(.value.exported), allowed shortfall \($allowed))"]) as $short
                       | .problem = (
                           if $problem != "" then $problem
                           elif ($missing | length) > 0 then "tables missing after import: \($missing | join(", "))"
-                          elif .rows_exported > 0 and .rows_restored == 0 then "restored no rows; the export counted \(.rows_exported)"
+                          elif ($short | length) > 0 then "tables short after import: \($short | join(", "))"
                           else null end)
                       | .status = (if .problem == null then "PASS" else "FAIL" end)
                       | if .problem == null then del(.problem) else . end' \
                       >> "$work/databases.jsonl"
                   done
                   failures="$(jq -r 'select(.status == "FAIL") | "restore failed for \(.namespace)/\(.database): \(.problem)"' "$work/databases.jsonl")"
-                  if [ -n "$failures" ]; then
-                    printf '%s\n' "$failures" >&2
+                  # Databases the export itself could not capture make the
+                  # backup incomplete, however well the rest restored.
+                  export_failures="$(jq -r '.failures // [] | .[] | "export recorded a failure for \(.namespace | @json)/\(.database // "*" | @json): \(.reason)"' "$manifest_doc")"
+                  if [ -n "$failures" ] || [ -n "$export_failures" ]; then
+                    if [ -n "$failures" ]; then
+                      printf '%s\n' "$failures" >&2
+                    fi
+                    if [ -n "$export_failures" ]; then
+                      printf '%s\n' "$export_failures" >&2
+                    fi
                     exit 1
                   fi
                   jq -r '"restored \(.namespace)/\(.database): \(.rows_restored) rows (export counted \(.rows_exported))"' \
@@ -304,7 +364,7 @@ spec:
                   {{- if .Values.restoreDrill.recallCheck.enabled }}
                   recall_sample_path="$(mktemp)"
                   export SIBYL_RESTORE_RECALL_SAMPLE_PATH="$recall_sample_path"
-                  {{ .Values.restoreDrill.recallCheck.command | nindent 18 }}
+                  {{ .Values.restoreDrill.recallCheck.command | replace "$" "$$" | nindent 18 }}
                   if [ ! -s "$recall_sample_path" ]; then
                     echo "recall check did not write $recall_sample_path" >&2
                     exit 1
@@ -349,11 +409,18 @@ spec:
                 - name: SIBYL_EXPORT_DESTINATION_URI
                   value: {{ .Values.export.destination.uri | quote }}
                 - name: SIBYL_RESTORE_FETCH_COMMAND
-                  value: {{ .Values.restoreDrill.fetchCommand | quote }}
+                  value: {{ include "sibyl-surrealdb.hookEnvValue" .Values.restoreDrill.fetchCommand }}
                 {{- if .Values.restoreDrill.decryption.enabled }}
                 - name: SIBYL_RESTORE_DECRYPTION_COMMAND
-                  value: {{ .Values.restoreDrill.decryption.command | quote }}
+                  value: {{ include "sibyl-surrealdb.hookEnvValue" .Values.restoreDrill.decryption.command }}
                 {{- end }}
+                - name: SIBYL_RESTORE_REQUIRED_DATABASES
+                  value: {{ .Values.databases | toJson | quote }}
+                - name: SIBYL_RESTORE_ROW_DRIFT_ROWS
+                  value: {{ .Values.restoreDrill.rowDrift.rows | toString | quote }}
+                - name: SIBYL_RESTORE_ROW_DRIFT_PERCENT
+                  value: {{ .Values.restoreDrill.rowDrift.percent | toString | quote }}
+                {{- include "sibyl-surrealdb.httpEnv" . | nindent 16 }}
                 - name: SIBYL_RESTORE_MAX_EXPORT_AGE_HOURS
                   value: {{ .Values.restoreDrill.maxExportAgeHours | toString | quote }}
                 - name: SURREAL_RESTORE_ENDPOINT

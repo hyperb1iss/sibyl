@@ -152,3 +152,48 @@ slash) would build /rpc//sql-style URLs. */ -}}
 {{- $endpoint = regexReplaceAll "/+$" $endpoint "" -}}
 {{- $endpoint -}}
 {{- end }}
+
+{{/*
+A shell hook carried in an env value or in args. The kubelet expands
+$(NAME) references and collapses $$ to $ in both, so every $ is doubled
+here and the hook reaches the shell exactly as written in values.
+*/}}
+{{- define "sibyl-surrealdb.hookEnvValue" -}}
+{{- . | toString | replace "$" "$$" | quote -}}
+{{- end }}
+
+{{/*
+Every request the ops jobs make is bounded, so a hung server cannot hold
+a Job, and under concurrencyPolicy Forbid every later one, forever.
+*/}}
+{{- define "sibyl-surrealdb.httpEnv" -}}
+- name: SIBYL_HTTP_CONNECT_TIMEOUT
+  value: {{ .Values.jobDefaults.http.connectTimeoutSeconds | toString | quote }}
+- name: SIBYL_HTTP_MAX_TIME
+  value: {{ .Values.jobDefaults.http.maxTimeSeconds | toString | quote }}
+{{- end }}
+
+{{- define "sibyl-surrealdb.validateWholeNumber" -}}
+{{- if not (regexMatch "^[0-9]+$" (toString .value)) -}}
+{{- fail (printf "%s must be a whole number, got %q" .field (toString .value)) -}}
+{{- end -}}
+{{- end }}
+
+{{- define "sibyl-surrealdb.validateOps" -}}
+{{- if not (regexMatch "^[A-Za-z0-9][A-Za-z0-9_-]*$" (toString .Values.export.filePrefix)) -}}
+{{- fail (printf "export.filePrefix must match ^[A-Za-z0-9][A-Za-z0-9_-]*$ so run directories can be matched exactly, got %q" (toString .Values.export.filePrefix)) -}}
+{{- end -}}
+{{- include "sibyl-surrealdb.validateWholeNumber" (dict "field" "jobDefaults.http.connectTimeoutSeconds" "value" .Values.jobDefaults.http.connectTimeoutSeconds) -}}
+{{- include "sibyl-surrealdb.validateWholeNumber" (dict "field" "jobDefaults.http.maxTimeSeconds" "value" .Values.jobDefaults.http.maxTimeSeconds) -}}
+{{- include "sibyl-surrealdb.validateWholeNumber" (dict "field" "export.backoffLimit" "value" .Values.export.backoffLimit) -}}
+{{- include "sibyl-surrealdb.validateWholeNumber" (dict "field" "export.activeDeadlineSeconds" "value" .Values.export.activeDeadlineSeconds) -}}
+{{- include "sibyl-surrealdb.validateWholeNumber" (dict "field" "restoreDrill.backoffLimit" "value" .Values.restoreDrill.backoffLimit) -}}
+{{- include "sibyl-surrealdb.validateWholeNumber" (dict "field" "restoreDrill.activeDeadlineSeconds" "value" .Values.restoreDrill.activeDeadlineSeconds) -}}
+{{- include "sibyl-surrealdb.validateWholeNumber" (dict "field" "restoreDrill.rowDrift.rows" "value" .Values.restoreDrill.rowDrift.rows) -}}
+{{- if not (regexMatch "^[0-9]+(\\.[0-9]+)?$" (toString .Values.restoreDrill.rowDrift.percent)) -}}
+{{- fail (printf "restoreDrill.rowDrift.percent must be a number from 0 to 100, got %q" (toString .Values.restoreDrill.rowDrift.percent)) -}}
+{{- end -}}
+{{- if gt (float64 .Values.restoreDrill.rowDrift.percent) 100.0 -}}
+{{- fail (printf "restoreDrill.rowDrift.percent must be a number from 0 to 100, got %v" .Values.restoreDrill.rowDrift.percent) -}}
+{{- end -}}
+{{- end }}
