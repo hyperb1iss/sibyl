@@ -375,7 +375,9 @@ spec:
                     "$work/databases.jsonl"
                   jq -r '.organizations // empty
                     | if .error then "export skipped its organization check: \(.error)"
-                      else "organizations without a graph database at export: \(.without_graph | length) of \(.total)\(.without_graph | map(" " + .organization) | join(""))" end' \
+                      else "organizations without a graph database at export: \(.without_graph | length) of \(.total)"
+                        + (.without_graph[:10] | map(" " + .organization) | join(""))
+                        + (if (.without_graph | length) > 10 then " and \((.without_graph | length) - 10) more (see the receipt)" else "" end) end' \
                     "$manifest_doc"
                   row_counts_json="{"
                   row_counts_separator=""

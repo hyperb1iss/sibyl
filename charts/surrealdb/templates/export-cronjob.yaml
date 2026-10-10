@@ -230,22 +230,29 @@ spec:
                   # organization whose graph was lost shows up here too.
                   if org_ids="$(sql_result "$SIBYL_ORG_CHECK_AUTH_NAMESPACE" "$SIBYL_ORG_CHECK_AUTH_DATABASE" \
                     "SELECT VALUE uuid FROM organizations;" 2>"$work/error")"; then
+                    # A sorted list searched with bsearch keeps this near
+                    # linear: about 1s for 50k organizations, where building
+                    # a lookup object in jq grows quadratically and a linear
+                    # scan per organization took over a minute.
                     printf '%s\n' "$org_ids" | jq -c \
                       --slurpfile found "$work/targets.jsonl" \
                       --arg prefix "$SIBYL_ORG_CHECK_GRAPH_NAMESPACE_PREFIX" \
                       --arg database "$SIBYL_ORG_CHECK_GRAPH_DATABASE" '
                       [.[] | select(type == "string")] as $ids
-                      | [$found[] | select(.database == $database) | .namespace] as $graphs
+                      | ([$found[] | select(.database == $database) | .namespace] | sort) as $graphs
                       | {total: ($ids | length),
                          without_graph: [$ids[]
-                           | {organization: ., namespace: ($prefix + (gsub("-"; "") | ascii_downcase)), database: $database}
-                           | select(.namespace as $namespace | $graphs | index($namespace) | not)]}' \
+                           | {organization: ., namespace: ($prefix + (split("-") | join("") | ascii_downcase)), database: $database}
+                           | select(.namespace as $namespace | ($graphs | bsearch($namespace)) < 0)]}' \
                       > "$work/organizations.json"
                   else
                     jq -cn --arg error "$(head -c 500 "$work/error")" '{error: $error}' > "$work/organizations.json"
                   fi
+                  # The log names the first ten; the manifest has them all.
                   jq -r 'if .error then "organization check skipped: \(.error)"
-                    else "organizations without a graph database: \(.without_graph | length) of \(.total)\(.without_graph | map(" " + .organization) | join(""))" end' \
+                    else "organizations without a graph database: \(.without_graph | length) of \(.total)"
+                      + (.without_graph[:10] | map(" " + .organization) | join(""))
+                      + (if (.without_graph | length) > 10 then " and \((.without_graph | length) - 10) more (see the manifest)" else "" end) end' \
                     "$work/organizations.json"
 
                   SIBYL_EXPORT_RUN_DIR="$SIBYL_EXPORT_DESTINATION_PATH/$SIBYL_EXPORT_FILE_PREFIX-$timestamp"

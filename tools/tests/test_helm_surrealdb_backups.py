@@ -1390,3 +1390,21 @@ def test_helm_chart_states_its_kubernetes_floor(kube_version: str, *, renders: b
     assert (rendered.returncode == 0) is renders, rendered.stderr
     if not renders:
         assert "chart requires kubeVersion: >=1.29.0-0" in rendered.stderr
+
+
+def test_helm_export_keeps_the_organization_log_bounded(harness: OpsHarness) -> None:
+    orphans = tuple(f"{index:08x}-2222-4333-8444-555555555555" for index in range(25))
+    harness.serve(source=_source(), org_uuids=(_org_uuid(ORG_A), _org_uuid(ORG_B), *orphans))
+    result = harness.run("export")
+
+    assert result.returncode == 0, result.stderr
+    line = next(
+        text for text in result.stdout.splitlines() if text.startswith("organizations without")
+    )
+    assert line == (
+        "organizations without a graph database: 25 of 27 "
+        + " ".join(orphans[:10])
+        + " and 15 more (see the manifest)"
+    )
+    listed = [item["organization"] for item in _manifest(harness)["organizations"]["without_graph"]]
+    assert listed == list(orphans)
