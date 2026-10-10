@@ -160,6 +160,15 @@ sibyl docker logs
 sibyl docker down
 ```
 
+The backend and worker read the same `SIBYL_COORDINATION_BACKEND`, defaulting to `local`. Set it to
+`redis` whenever the `redis` profile runs: a worker left on `local` exits with an error instead of
+idling while the backend runs every job itself. Use `local` or `redis` in these files rather than
+`auto`, because the compose files always set the Redis address and `auto` would resolve to `redis`.
+The worker's healthcheck runs `sibyld worker --check`, which passes while a worker heartbeat is live
+in Valkey. `sibyl docker upgrade` brings an older `--with-worker` bundle up to the same wiring and
+moves its settings key into the bundle's `.env`, keeping the key the running API generated when it
+can read it.
+
 The repo's `docker-compose.prod.yml` refuses to start without both `SIBYL_OPENAI_API_KEY` and
 `SIBYL_ANTHROPIC_API_KEY`, and it pins Anthropic as the language model, so switching providers there
 means editing the file. The bundle `sibyl docker init` generates sets no provider keys: an admin

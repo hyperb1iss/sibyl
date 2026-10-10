@@ -27,6 +27,10 @@
 #                               service for jobs, locks, events and rate limits:
 #     SIBYL_COORDINATION_BACKEND=redis docker compose --env-file /dev/null \
 #       -f docker-compose.quickstart.yml --profile redis up -d
+#                               Use local or redis here, not auto: the Redis address is
+#                               always set, so auto would resolve to redis. A worker
+#                               started without redis coordination exits with an error
+#                               rather than idling while the api runs every job.
 #
 # Running alongside an existing dev setup:
 #   docker compose --env-file /dev/null \
@@ -104,7 +108,7 @@ services:
     profiles: ["redis"]
     image: ghcr.io/hyperb1iss/sibyl-api:${SIBYL_IMAGE_TAG:-1.4.9}
     container_name: sibyl-worker
-    command: ["sibyld", "worker"]
+    command: ["sibyld", "worker", "--require-redis"]
     depends_on:
       secrets-init:
         condition: service_completed_successfully
@@ -115,7 +119,9 @@ services:
     environment:
       SIBYL_STORE: ${SIBYL_STORE:-surreal}
       SIBYL_AUTH_STORE: ${SIBYL_AUTH_STORE:-surreal}
-      SIBYL_COORDINATION_BACKEND: ${SIBYL_COORDINATION_BACKEND:-redis}
+      # Same variable and default as the api, so the two cannot disagree; left
+      # unset with --profile redis, this worker refuses to start.
+      SIBYL_COORDINATION_BACKEND: ${SIBYL_COORDINATION_BACKEND:-local}
       SIBYL_REDIS_HOST: ${SIBYL_REDIS_HOST:-redis}
       SIBYL_REDIS_PORT: 6379
       SIBYL_SURREAL_URL: ws://surrealdb:8000/rpc
@@ -128,6 +134,14 @@ services:
       SIBYL_LLM_MODEL: claude-haiku-5-5
     volumes:
       - sibyl_secrets:/home/sibyl/.sibyl
+    # The image's own healthcheck asks the API port, which a worker does not
+    # serve; this asks Valkey whether a worker heartbeat is live.
+    healthcheck:
+      test: ["CMD", "sibyld", "worker", "--check"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
     restart: unless-stopped
 
   # ==========================================================================

@@ -248,6 +248,20 @@ def worker(
     burst: Annotated[
         bool, typer.Option("--burst", "-b", help="Process jobs and exit (don't run continuously)")
     ] = False,
+    require_redis: Annotated[
+        bool,
+        typer.Option(
+            "--require-redis",
+            help="Fail instead of exiting quietly when coordination is not redis",
+        ),
+    ] = False,
+    check: Annotated[
+        bool,
+        typer.Option(
+            "--check",
+            help="Exit 0 while a worker heartbeat is live in Redis, 1 otherwise",
+        ),
+    ] = False,
 ) -> None:
     """Start the background job worker.
 
@@ -255,15 +269,32 @@ def worker(
     Uses Redis/Valkey for job persistence and retries when configured.
 
     Examples:
-        sibyld worker              # Run continuously (production)
-        sibyld worker --burst      # Process pending jobs and exit
+        sibyld worker                  # Run continuously (production)
+        sibyld worker --burst          # Process pending jobs and exit
+        sibyld worker --require-redis  # In a worker-only container
+        sibyld worker --check          # Container health check
 
     For dev mode with hot reload, use arq directly:
         arq sibyl.jobs.worker.WorkerSettings --watch src
     """
     from sibyl.config import settings
 
-    if settings.resolved_coordination_backend == "local":
+    local = settings.resolved_coordination_backend == "local"
+    if check:
+        raise typer.Exit(0 if not local and _worker_heartbeat_live() else 1)
+    if local and require_redis:
+        from sibyl.cli.common import error
+
+        # A worker container next to an API on local coordination would poll
+        # an empty queue forever while the API runs every job itself.
+        error(
+            "This worker needs redis coordination, but it resolves to local here. "
+            "Set SIBYL_COORDINATION_BACKEND=redis (and the SIBYL_REDIS_* address) "
+            "on the API and on this worker, or stop the worker: under local "
+            "coordination the API runs background jobs in-process."
+        )
+        raise typer.Exit(1)
+    if local:
         console.print(
             f"[{NEON_CYAN}]Local coordination runs background jobs in-process under "
             f"[{ELECTRIC_PURPLE}]sibyld serve[/{ELECTRIC_PURPLE}].[/{NEON_CYAN}]"
@@ -284,6 +315,20 @@ def worker(
         info("Worker stopped")
     finally:
         loop.close()
+
+
+def _worker_heartbeat_live() -> bool:
+    """Whether arq's worker heartbeat key is live in the coordination Redis."""
+    from sibyl.coordination._redis.broker import RedisQueueBroker
+
+    async def heartbeat() -> bool:
+        broker = RedisQueueBroker()
+        try:
+            return bool((await broker.health())["worker_healthy"])
+        finally:
+            await broker.close_pool()
+
+    return asyncio.run(heartbeat())
 
 
 def _tcp_service_running(host: str, port: int) -> bool:

@@ -24,6 +24,10 @@
 #                               redis service for jobs, locks, events and rate limits:
 #     SIBYL_COORDINATION_BACKEND=redis docker compose --env-file ~/.sibyl/prod.env \
 #       -f docker-compose.prod.yml --profile redis up -d
+#                               Use local or redis here, not auto: the Redis address is
+#                               always set, so auto would resolve to redis. A worker
+#                               started without redis coordination exits with an error
+#                               rather than idling while the backend runs every job.
 
 services:
   # ==========================================================================
@@ -129,7 +133,7 @@ services:
       context: .
       dockerfile: apps/api/Dockerfile
     container_name: sibyl-worker
-    command: ["sibyld", "worker"]
+    command: ["sibyld", "worker", "--require-redis"]
     volumes:
       - validation_receipts:/home/sibyl/.sibyl
     depends_on:
@@ -146,7 +150,9 @@ services:
       SIBYL_LOCAL_AUTH_ENABLED: ${SIBYL_LOCAL_AUTH_ENABLED:-false}
       SIBYL_STORE: ${SIBYL_STORE:-surreal}
       SIBYL_AUTH_STORE: ${SIBYL_AUTH_STORE:-surreal}
-      SIBYL_COORDINATION_BACKEND: ${SIBYL_COORDINATION_BACKEND:-redis}
+      # Same variable and default as the backend, so the two cannot disagree; left
+      # unset with --profile redis, this worker refuses to start.
+      SIBYL_COORDINATION_BACKEND: ${SIBYL_COORDINATION_BACKEND:-local}
       SIBYL_REDIS_HOST: ${SIBYL_REDIS_HOST:-redis}
       SIBYL_REDIS_PORT: 6379
       SIBYL_SURREAL_URL: ws://surrealdb:8000/rpc
@@ -164,6 +170,14 @@ services:
         ${SIBYL_ANTHROPIC_API_KEY:?Set SIBYL_ANTHROPIC_API_KEY in the environment}
       SIBYL_LLM_PROVIDER: anthropic
       SIBYL_LLM_MODEL: claude-haiku-5-5
+    # The image's own healthcheck asks the API port, which a worker does not
+    # serve; this asks Valkey whether a worker heartbeat is live.
+    healthcheck:
+      test: ["CMD", "sibyld", "worker", "--check"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
     restart: unless-stopped
 
   # ==========================================================================
