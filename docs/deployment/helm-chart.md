@@ -762,8 +762,23 @@ serviceAccount:
   annotations: {}
 ```
 
-The backend, worker, bootstrap and frontend pods all run as this service account, so an annotation
-here reaches every pod that calls a model provider.
+The backend, worker and bootstrap pods run as this service account, so an annotation here reaches
+every pod that calls a model provider or the S3 receipt store.
+
+The frontend only calls the Sibyl API, so it runs under its own account, `<fullname>-frontend`,
+created with no annotations and no mounted API token:
+
+```yaml
+frontend:
+  serviceAccount:
+    create: true
+    name: ""
+    annotations: {}
+    automountServiceAccountToken: false
+```
+
+To keep the earlier shared account, set `frontend.serviceAccount.create: false` and
+`frontend.serviceAccount.name` to the backend account's name.
 
 ## Amazon Bedrock
 
@@ -984,12 +999,17 @@ backend:
     url: "s3://<bucket>/sibyl/receipts?region=us-west-2"
 ```
 
-The URL names a bucket, an optional key prefix, and an optional `region` query parameter. Without a
-region, the standard `AWS_REGION` and `AWS_DEFAULT_REGION` resolution applies (the EKS IRSA webhook
-sets `AWS_REGION`). Credentials come from the default AWS chain: IRSA, EKS Pod Identity, or an
-instance role, as described under [Amazon Bedrock](#amazon-bedrock). The chart passes the URL to API
-and worker as `SIBYL_VALIDATION_RECEIPT_URL` through its ConfigMap and mounts no receipts volume, so
-pods may run on any node and single-replica rollouts use the Kubernetes `RollingUpdate` default.
+The URL names a bucket, an optional key prefix, and an optional `region` query parameter (`auto` is
+accepted for endpoints such as Cloudflare R2). The chart refuses a bucket name that breaks the S3
+naming rules at render time, so a typo fails the install rather than crashlooping the pods. Without
+a region, the standard `AWS_REGION` and `AWS_DEFAULT_REGION` resolution applies (the EKS IRSA
+webhook sets `AWS_REGION`). Credentials come from the default AWS chain: IRSA, EKS Pod Identity, or
+an instance role, as described under [Amazon Bedrock](#amazon-bedrock). The chart passes the URL to
+API and worker as `SIBYL_VALIDATION_RECEIPT_URL` through its ConfigMap and mounts no receipts
+volume, so pods may run on any node and single-replica rollouts use the Kubernetes `RollingUpdate`
+default. The frontend runs under its own service account (see [Service Account](#service-account)),
+so the receipts role never reaches it. Give receipts a dedicated prefix, since backup export lists
+it.
 
 Grant the pod role access to the prefix:
 
@@ -1012,8 +1032,11 @@ Grant the pod role access to the prefix:
 ```
 
 `s3:ListBucket` makes a missing receipt answer 404 instead of 403. Sibyl must tell "absent" from
-"denied", and refuses to dispatch without it. If the bucket encrypts with a customer managed KMS
-key, also grant `kms:GenerateDataKey` and `kms:Decrypt` on that key.
+"denied", and refuses to dispatch without it. Backup export also uses it to list the prefix once
+instead of reading every execution's receipt. If the bucket encrypts with a customer managed KMS
+key, also grant `kms:GenerateDataKey` and `kms:Decrypt` on that key. Sibyl sends no
+`x-amz-server-side-encryption` header, so a bucket policy that denies uploads without one refuses
+every receipt and the readiness check stops validation; use the bucket's default encryption instead.
 
 The volume guarantees carry over:
 
@@ -1025,27 +1048,67 @@ The volume guarantees carry over:
   answer means the receipt already exists: Sibyl compares the stored bytes and refuses any
   difference, so neither validation nor backup restore ever replaces a receipt. A `409` from a
   racing delete is retried, as S3 documents.
-- **Checked before every dispatch.** Before each model call the readiness check creates a probe
-  object under the prefix, confirms a second create is refused, reads it back, confirms an unsigned
-  request cannot read it, deletes it, and confirms that it and a never-written key both read as
-  absent. A bucket that fails any step stops validation before a provider is paid, including an
-  S3-compatible store that ignores `If-None-Match` and a bucket whose policy lets unsigned requests
-  read objects.
+- **Checked when each validation execution begins.** The readiness check runs once per execution,
+  before its first model call, not before every call. It deletes a never-written key (proving
+  `s3:DeleteObject` without creating anything), confirms a second never-written key reads as absent,
+  then creates a probe object under the prefix, confirms a second create is refused, reads it back,
+  deletes it, and confirms it reads as absent. A bucket that fails any step stops the execution
+  before a provider is paid, including an S3-compatible store that ignores `If-None-Match`.
+- **Unsigned reads refused, best effort.** The check also asks for the probe without credentials and
+  stops validation if that read succeeds. A timeout, redirect, or any other non-success answer
+  counts as refused, so this catches a public bucket but is not a full audit of bucket policy.
+
+Each request has a 3 s connect and 10 s read timeout with up to three attempts, so an endpoint that
+accepts connections and never answers fails the check in about half a minute instead of holding a
+worker thread for minutes.
 
 Keep S3 Block Public Access on (the default for new buckets), and do not grant `Principal: "*"` read
-access in the bucket policy, even behind a VPC endpoint condition. Versioning is not required. If it
-is on, conditional writes still treat a delete marker as absent, but removed receipts and readiness
-probes linger as noncurrent versions, so add a lifecycle rule that expires noncurrent versions under
-the prefix. With `networkPolicy.enabled`, allow HTTPS egress to S3 and to STS (IRSA exchanges its
-token there), or to their VPC endpoints, through `networkPolicy.egress.extra`. For an S3-compatible
-endpoint, set `backend.env.AWS_ENDPOINT_URL_S3`; the readiness check verifies the store honors
-`If-None-Match`.
+access in the bucket policy, even behind a VPC endpoint condition. Versioning is not required. With
+`networkPolicy.enabled`, allow HTTPS egress to S3 and to STS (IRSA exchanges its token there), or to
+their VPC endpoints, through `networkPolicy.egress.extra`. For an S3-compatible endpoint, set
+`backend.env.AWS_ENDPOINT_URL_S3`; the readiness check verifies the store honors `If-None-Match`.
+
+A successful readiness check leaves no object behind. A probe can still be stranded when a pod dies
+mid-check or the endpoint stops answering, and on a versioned bucket every check leaves a noncurrent
+probe version and delete markers, as discarded receipts do. Add a lifecycle rule for the prefix:
+
+```json
+{
+  "Rules": [
+    {
+      "ID": "sibyl-receipt-history",
+      "Status": "Enabled",
+      "Filter": { "Prefix": "sibyl/receipts/" },
+      "NoncurrentVersionExpiration": { "NoncurrentDays": 1 },
+      "Expiration": { "ExpiredObjectDeleteMarker": true }
+    },
+    {
+      "ID": "sibyl-receipt-probes",
+      "Status": "Enabled",
+      "Filter": { "Prefix": "sibyl/receipts/.probe-" },
+      "Expiration": { "Days": 1 }
+    }
+  ]
+}
+```
+
+A noncurrent receipt version is never needed: a receipt is only removed after the database holds its
+result.
 
 To move an existing release from a claim to S3, stop validation work (scale the worker and backend
-to zero), copy any remaining `*.receipt` files from the claim's `private` directory into the empty
-prefix under the same names, then upgrade with `url` set and `existingClaim` cleared. A content
-backup taken before the switch also carries pending receipts, and restoring it publishes them into
-the bucket.
+to zero), then copy any remaining receipts from the claim's `private` directory into the prefix
+under the same names. Use a create-only upload so a receipt already in the bucket is never replaced:
+
+```bash
+for receipt in /var/lib/sibyl-receipts/private/*.receipt; do
+  aws s3api put-object --bucket <bucket> --key "sibyl/receipts/$(basename "$receipt")" \
+    --body "$receipt" --if-none-match '*'
+done
+```
+
+A `PreconditionFailed` answer means that receipt is already there. Then upgrade with `url` set and
+`existingClaim` cleared. A content backup taken before the switch also carries pending receipts, and
+restoring it publishes them into the bucket.
 
 ### Shared Volume
 
