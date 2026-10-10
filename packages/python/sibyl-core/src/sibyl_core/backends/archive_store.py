@@ -23,10 +23,12 @@ from __future__ import annotations
 
 import errno
 import hashlib
+import json
 import os
 import re
 import shutil
 import tempfile
+import time
 from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -42,8 +44,12 @@ _ARCHIVE_NAME = re.compile(r"sibyl_[A-Za-z0-9][A-Za-z0-9_-]{0,127}\.tar\.gz")
 _RETAINED_NAME = re.compile(r"sibyl_backup_[A-Za-z0-9_-]{1,120}\.tar\.gz")
 # One "bytes=first-last" range; anything else in a Range header is ignored.
 _BYTE_RANGE = re.compile(r"\s*bytes\s*=\s*(\d*)\s*-\s*(\d*)\s*")
+# A running backup's claim on a directory store's free space.
+_RESERVATION_PREFIX = ".reserve-"
 # Hidden working files a backup leaves in a directory store while it runs.
-_STAGING_PREFIXES = (".staging-", ".partial-", ".probe-")
+_STAGING_PREFIXES = (".staging-", ".partial-", ".probe-", _RESERVATION_PREFIX)
+# A reservation untouched this long belongs to a backup that died.
+_RESERVATION_LIFETIME_SECONDS = 24 * 60 * 60
 # link() answers these when the filesystem cannot make hard links at all.
 _NO_HARD_LINKS = frozenset({errno.EPERM, errno.EOPNOTSUPP, errno.ENOTSUP, errno.ENOSYS})
 CHUNK_SIZE = 1024 * 1024
@@ -159,13 +165,16 @@ class ArchiveReader(Protocol):
     """An open archive, or one byte range of it, streamed in chunks.
 
     ``size`` is how many bytes ``chunks`` yields, ``start`` where they begin
-    and ``total`` the whole archive's size. ``sha256`` is the digest the
-    store recorded at publish time, when it keeps one.
+    and ``total`` the whole archive's size. ``partial`` says whether those
+    bytes are the requested range; a store may answer a range with the
+    whole archive instead. ``sha256`` is the digest the store recorded at
+    publish time, when it keeps one.
     """
 
     size: int
     start: int
     total: int
+    partial: bool
     sha256: str | None
 
     def chunks(self) -> Iterator[bytes]: ...
@@ -177,8 +186,12 @@ class ArchiveStore(Protocol):
     def ready(self) -> None:
         """Fail now, before a backup does its work, if archives cannot be published."""
 
-    def reserve(self, estimated_bytes: int) -> None:
-        """Fail now if the next backup of about this size would not fit."""
+    def reserve(self, holder: str, estimated_bytes: int) -> Reservation:
+        """Claim room for one running backup, or fail now if it would not fit.
+
+        Backups running at the same time on the same store count each
+        other's claims. Release the reservation when the backup ends.
+        """
 
     def staging_dir(self) -> Path | None:
         """Where a backup should assemble its archive; None means the system temp dir."""
@@ -225,12 +238,109 @@ def _mebibytes(count: int) -> str:
     return f"{count / (1024 * 1024):.0f} MiB"
 
 
+class Reservation(Protocol):
+    """One running backup's claim on its store's free space."""
+
+    def track(self, staging: Path) -> None:
+        """Name the staging directory whose bytes already count against the claim."""
+
+    def require(self, additional_bytes: int) -> None:
+        """Claim this much beyond what is staged, or fail if it would not fit."""
+
+    def release(self) -> None:
+        """Give the claim back; the backup is finished either way."""
+
+
+class NoReservation:
+    """A store with no shared volume to fill claims nothing."""
+
+    def track(self, staging: Path) -> None:
+        del staging
+
+    def require(self, additional_bytes: int) -> None:
+        del additional_bytes
+
+    def release(self) -> None:
+        return None
+
+
+def _staged_bytes(directory: Path) -> int:
+    """Bytes a staging directory holds now; a missing one holds nothing."""
+    total = 0
+    try:
+        with os.scandir(directory) as entries:
+            for entry in entries:
+                try:
+                    if entry.is_file(follow_symlinks=False):
+                        total += entry.stat(follow_symlinks=False).st_size
+                except FileNotFoundError:
+                    continue
+    except (FileNotFoundError, NotADirectoryError):
+        return 0
+    return total
+
+
+class _DirectoryReservation:
+    """A reservation file beside the archives, read by every other backup.
+
+    The file names the bytes this backup will put on the volume and its
+    staging directory. What it has already staged is on the disk, so the
+    rest of the claim is the part other backups must leave free. Each
+    backup writes its claim before it checks free space, so two backups
+    starting together each see the other and neither overcommits; at worst
+    both are refused and the next run goes ahead.
+    """
+
+    def __init__(self, store: DirectoryArchiveStore, holder: str) -> None:
+        if not _BACKUP_ID.fullmatch(holder):
+            raise ValueError("Reservation holder is not a valid backup id")
+        self._store = store
+        self._path = store.staging_dir() / f"{_RESERVATION_PREFIX}{holder}"
+        self._staging: Path | None = None
+        self._bytes = 0
+
+    def _write(self) -> None:
+        payload = {"bytes": self._bytes, "staging": self._staging.name if self._staging else ""}
+        descriptor, partial = tempfile.mkstemp(
+            prefix=f"{self._path.name}.tmp-", dir=self._path.parent
+        )
+        with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+            json.dump(payload, handle)
+        os.replace(partial, self._path)
+
+    def claim(self, total_bytes: int) -> None:
+        with self._store._refusals("a free-space check"):
+            self._bytes = total_bytes
+            self._write()
+            staged = _staged_bytes(self._staging) if self._staging else 0
+            try:
+                self._store._check_room(max(total_bytes - staged, 0), own=self._path)
+            except ArchiveStoreFull:
+                self._path.unlink(missing_ok=True)
+                raise
+
+    def track(self, staging: Path) -> None:
+        with self._store._refusals("a reservation"):
+            self._staging = staging
+            self._write()
+
+    def require(self, additional_bytes: int) -> None:
+        staged = _staged_bytes(self._staging) if self._staging else 0
+        self.claim(staged + additional_bytes)
+
+    def release(self) -> None:
+        self._path.unlink(missing_ok=True)
+
+
 class _FileReader:
-    def __init__(self, handle: BinaryIO, *, start: int, size: int, total: int) -> None:
+    def __init__(
+        self, handle: BinaryIO, *, start: int, size: int, total: int, partial: bool
+    ) -> None:
         self._handle = handle
         self.start = start
         self.size = size
         self.total = total
+        self.partial = partial
         self.sha256 = None
 
     def chunks(self) -> Iterator[bytes]:
@@ -314,18 +424,52 @@ class DirectoryArchiveStore:
                 published.unlink(missing_ok=True)
                 probe.unlink(missing_ok=True)
 
-    def reserve(self, estimated_bytes: int) -> None:
-        with self._refusals("a free-space check"):
-            free = shutil.disk_usage(self._directory()).free
-        needed = estimated_bytes + self._reserve_bytes
-        if free < needed:
+    def _claimed_by_others(self, own: Path) -> int:
+        """Room other running backups have claimed and not yet staged."""
+        directory = self._directory()
+        claimed = 0
+        stale_before = time.time() - _RESERVATION_LIFETIME_SECONDS
+        with os.scandir(directory) as entries:
+            for entry in entries:
+                if not entry.name.startswith(_RESERVATION_PREFIX) or ".tmp-" in entry.name:
+                    continue
+                if entry.path == str(own):
+                    continue
+                try:
+                    if entry.stat(follow_symlinks=False).st_mtime < stale_before:
+                        continue
+                    with open(entry.path, encoding="utf-8") as handle:
+                        payload = json.load(handle)
+                    total = int(payload["bytes"])
+                    staging = str(payload.get("staging") or "")
+                except (FileNotFoundError, ValueError, KeyError, TypeError):
+                    continue
+                # Only a staging directory beside the archives counts as staged.
+                staged = (
+                    _staged_bytes(directory / staging)
+                    if staging.startswith(".staging-") and "/" not in staging
+                    else 0
+                )
+                claimed += max(total - staged, 0)
+        return claimed
+
+    def _check_room(self, needed_bytes: int, *, own: Path) -> None:
+        free = shutil.disk_usage(self._directory()).free
+        others = self._claimed_by_others(own)
+        if free < needed_bytes + others + self._reserve_bytes:
+            held = f", other running backups hold {_mebibytes(others)}," if others else ""
             raise ArchiveStoreFull(
                 f"Backup archive directory {self._root} has {_mebibytes(free)} free; this "
-                f"backup needs about {_mebibytes(estimated_bytes)} plus "
+                f"backup needs about {_mebibytes(needed_bytes)}{held} plus "
                 f"{_mebibytes(self._reserve_bytes)} kept free for other writers on the "
                 "volume. Free space, shorten retention, or move archives to a dedicated "
                 "volume or S3."
             )
+
+    def reserve(self, holder: str, estimated_bytes: int) -> Reservation:
+        reservation = _DirectoryReservation(self, holder)
+        reservation.claim(estimated_bytes)
+        return reservation
 
     def staging_dir(self) -> Path:
         with self._refusals("staging"):
@@ -389,7 +533,13 @@ class DirectoryArchiveStore:
             except BaseException:
                 handle.close()
                 raise
-            return _FileReader(handle, start=start, size=end - start + 1, total=total)
+            return _FileReader(
+                handle,
+                start=start,
+                size=end - start + 1,
+                total=total,
+                partial=byte_range is not None,
+            )
 
     def archives(self) -> list[ArchiveObject]:
         found: list[ArchiveObject] = []
@@ -460,7 +610,9 @@ __all__ = [
     "ArchiveStoreUnavailable",
     "ByteRange",
     "DirectoryArchiveStore",
+    "NoReservation",
     "RangeNotSatisfiable",
+    "Reservation",
     "archive_name",
     "backup_id_of",
     "check_name",

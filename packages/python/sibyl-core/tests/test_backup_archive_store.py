@@ -196,7 +196,12 @@ def test_directory_store_serves_byte_ranges_and_refuses_ones_past_the_end(tmp_pa
         reader = store.open(NAME, requested)
         assert reader is not None
         assert (reader.start, reader.size, reader.total) == (start, end - start + 1, len(data))
+        assert reader.partial
         assert _read(reader) == data[start : end + 1]
+    whole = store.open(NAME)
+    assert whole is not None
+    assert not whole.partial
+    whole.close()
     for refused in (ByteRange(6000, None), ByteRange(None, 0)):
         with pytest.raises(RangeNotSatisfiable) as unsatisfiable:
             store.open(NAME, refused)
@@ -253,13 +258,101 @@ def test_directory_store_refuses_a_backup_that_would_eat_the_reserve(tmp_path, m
         "disk_usage",
         lambda path: usage._replace(free=600 * 1024 * 1024),
     )
-    store.reserve(80 * 1024 * 1024)
+    store.reserve("backup_small", 80 * 1024 * 1024).release()
     with pytest.raises(ArchiveStoreFull) as full:
-        store.reserve(100 * 1024 * 1024)
+        store.reserve("backup_large", 100 * 1024 * 1024)
     message = str(full.value)
     assert "600 MiB free" in message
     assert "about 100 MiB plus 512 MiB kept free" in message
     assert isinstance(full.value, ArchiveStoreUnavailable)
+    assert _reservations(store) == [], "a refused claim leaves nothing behind"
+
+
+MIB = 1024 * 1024
+
+
+def _reservations(store: DirectoryArchiveStore) -> list[str]:
+    return sorted(
+        path.name for path in store.staging_dir().iterdir() if path.name.startswith(".reserve-")
+    )
+
+
+def _free(monkeypatch, tmp_path, free_bytes: int) -> None:
+    usage = shutil.disk_usage(tmp_path)
+    monkeypatch.setattr(
+        archive_store.shutil, "disk_usage", lambda path: usage._replace(free=free_bytes)
+    )
+
+
+def test_concurrent_backups_count_each_others_claims(tmp_path, monkeypatch):
+    """Two backups that each fit alone must not both start on a volume that fits one."""
+    root = tmp_path / "archives"
+    first_process = DirectoryArchiveStore(root)
+    second_process = DirectoryArchiveStore(root)
+    _free(monkeypatch, tmp_path, 1000 * MIB)
+
+    first = first_process.reserve("backup_first", 600 * MIB)
+    assert _reservations(first_process) == [".reserve-backup_first"]
+    with pytest.raises(ArchiveStoreFull, match="other running backups hold 600 MiB"):
+        second_process.reserve("backup_second", 600 * MIB)
+    assert _reservations(first_process) == [".reserve-backup_first"]
+
+    first.release()
+    second = second_process.reserve("backup_second", 600 * MIB)
+    assert _reservations(first_process) == [".reserve-backup_second"]
+    second.release()
+    assert _reservations(first_process) == []
+
+
+def test_staged_bytes_stop_counting_against_a_claim(tmp_path, monkeypatch):
+    root = tmp_path / "archives"
+    store = DirectoryArchiveStore(root)
+    _free(monkeypatch, tmp_path, 1000 * MIB)
+    running = store.reserve("backup_running", 600 * MIB)
+    staging = root / ".staging-running"
+    staging.mkdir()
+    running.track(staging)
+    # 500 MiB already written is already out of the free space reported, so
+    # only the remaining 100 MiB of the claim is held against others.
+    with (staging / "content.json").open("wb") as handle:
+        handle.truncate(500 * MIB)
+    store.reserve("backup_next", 900 * MIB).release()
+    with pytest.raises(ArchiveStoreFull, match="other running backups hold 100 MiB"):
+        store.reserve("backup_next", 901 * MIB)
+
+    # Before the archive is written the claim becomes what is staged plus the
+    # archive to come, and only that remainder must fit.
+    running.require(300 * MIB)
+    with pytest.raises(ArchiveStoreFull, match="other running backups hold 300 MiB"):
+        store.reserve("backup_next", 701 * MIB)
+    with pytest.raises(ArchiveStoreFull, match="needs about 1001 MiB"):
+        running.require(1001 * MIB)
+    running.release()
+
+
+def test_dead_and_unreadable_claims_are_ignored_and_swept(tmp_path, monkeypatch):
+    root = tmp_path / "archives"
+    store = DirectoryArchiveStore(root)
+    store.ready()
+    _free(monkeypatch, tmp_path, 1000 * MIB)
+    dead = root / ".reserve-backup_dead"
+    dead.write_text('{"bytes": 999999999999, "staging": ""}')
+    old = (datetime.now(UTC) - timedelta(days=2)).timestamp()
+    os.utime(dead, (old, old))
+    (root / ".reserve-backup_torn").write_text('{"bytes": 99999')
+    (root / ".reserve-backup_writing.tmp-abc").write_text('{"bytes": 999999999999}')
+
+    store.reserve("backup_live", 900 * MIB).release()
+
+    assert store.sweep_stale(datetime.now(UTC) - timedelta(days=1)) == 1
+    assert not dead.exists()
+
+
+def test_s3_store_claims_no_volume(bucket):
+    room = _store().reserve("backup_any", 10**15)
+    room.track(Path("/nonexistent"))
+    room.require(10**15)
+    room.release()
 
 
 def test_directory_store_sweeps_only_stale_staging(tmp_path):
@@ -334,6 +427,9 @@ class FakeS3:
         self.fail: dict[str, Exception] = {}
         self.before_complete = None
         self.page_size = 1000
+        # Some S3-compatible stores answer a Range they dislike with 200 and
+        # the whole object instead of 206 or 416.
+        self.ignore_ranges = False
         self.bodies: list[_Body] = []
         self.anonymous = FakeAnonymous(self)
 
@@ -399,7 +495,7 @@ class FakeS3:
             raise _error(404, "NoSuchKey", "GetObject")
         data, metadata, _ = self.objects[Key]
         answer = {"Metadata": dict(metadata)}
-        if Range is not None:
+        if Range is not None and not self.ignore_ranges:
             requested = parse_byte_range(Range)
             assert requested is not None, Range
             try:
@@ -600,10 +696,19 @@ def test_s3_serves_byte_ranges_with_the_recorded_digest(bucket, tmp_path):
         reader = store.open(NAME, requested)
         assert reader is not None
         assert (reader.start, reader.size, reader.total) == (start, end - start + 1, 1024)
+        assert reader.partial
         assert _read(reader) == data[start : end + 1]
     with pytest.raises(RangeNotSatisfiable) as unsatisfiable:
         store.open(NAME, ByteRange(5000, None))
     assert unsatisfiable.value.total == 1024, "the 416 answer still names the size"
+
+    # A store that ignores the range answers with the whole object, and the
+    # reader says so rather than passing it off as the requested part.
+    bucket.ignore_ranges = True
+    ignored = store.open(NAME, ByteRange(100, 199))
+    assert ignored is not None
+    assert (ignored.partial, ignored.start, ignored.size, ignored.total) == (False, 0, 1024, 1024)
+    assert _read(ignored) == data
 
 
 def test_s3_list_pages_and_skips_probes_partials_and_nested_keys(bucket, tmp_path):

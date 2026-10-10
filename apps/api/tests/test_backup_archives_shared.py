@@ -9,6 +9,7 @@ only thing the roles share is what a real deployment shares.
 
 from __future__ import annotations
 
+import asyncio
 import io
 import json
 import tarfile
@@ -49,6 +50,8 @@ class Bucket:
     def __init__(self) -> None:
         self.objects: dict[str, tuple[bytes, dict[str, str], datetime]] = {}
         self.uploads: dict[str, dict] = {}
+        # MinIO answers some ranges with 200 and the whole object.
+        self.ignore_ranges = False
 
     def _create(self, key, data, metadata, if_none_match):
         assert if_none_match == "*"
@@ -81,7 +84,7 @@ class Bucket:
             raise _error(404, "NoSuchKey")
         data, metadata, _ = self.objects[Key]
         answer = {"Metadata": dict(metadata)}
-        if Range is not None:
+        if Range is not None and not self.ignore_ranges:
             try:
                 start, end = parse_byte_range(Range).resolve(len(data))
             except RangeNotSatisfiable:
@@ -316,6 +319,7 @@ async def test_a_shared_directory_serves_every_replica_and_per_pod_disks_do_not(
 @pytest.fixture(params=["directory", "s3"])
 def shared_store(request, deployment, monkeypatch):
     """Point every role at one shared store of each kind; returns its archive bytes."""
+    bucket = None
     if request.param == "s3":
         bucket = Bucket()
         monkeypatch.setattr(s3_archive_store, "s3_clients", lambda region: (bucket, Anonymous()))
@@ -349,7 +353,9 @@ def shared_store(request, deployment, monkeypatch):
         def remove(name: str) -> None:
             (shared / name).unlink()
 
-    return SimpleNamespace(kind=request.param, objects=objects, plant=plant, remove=remove)
+    return SimpleNamespace(
+        kind=request.param, objects=objects, plant=plant, remove=remove, bucket=bucket
+    )
 
 
 def _sha(data: bytes) -> str:
@@ -561,3 +567,96 @@ async def test_a_failing_archive_directory_answers_503_and_keeps_the_record(
         assert unavailable.value.status_code == 503
     delete_record.assert_not_awaited()
     assert backup_id in deployment.records.rows
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("cut", [1, 8], ids=["last_byte", "gzip_trailer"])
+async def test_an_archive_with_a_damaged_gzip_end_is_not_adopted(deployment, shared_store, cut):
+    from sibyl_core.migrate.archive import load_archive, validate_archive
+
+    org = SimpleNamespace(id=uuid4())
+    backup_id = await _write_backup(deployment, org.id)
+    name = f"sibyl_{backup_id}.tar.gz"
+    damaged = shared_store.objects()[name][:-cut]
+    # The restore loader stops at the tar end marker and accepts this, which
+    # is why adoption must read the gzip stream to its end itself.
+    probe = deployment.tmp_path / f"probe-{cut}.tar.gz"
+    probe.write_bytes(damaged)
+    assert validate_archive(load_archive(probe)) == []
+
+    shared_store.remove(name)
+    shared_store.plant(name, damaged, {"sha256": _sha(damaged)})
+    record = deployment.records.rows[backup_id]
+    record.status = "in_progress"
+
+    result = await backup_jobs.run_backup({}, str(org.id), backup_id=backup_id)
+
+    assert result["success"] is False
+    assert record.status == "failed"
+    assert record.error == f"{name} is not a readable backup archive"
+    assert shared_store.objects()[name] == damaged, "the damaged archive is never touched"
+
+
+@pytest.mark.asyncio
+async def test_a_range_the_store_ignores_is_answered_with_the_whole_archive(
+    deployment, shared_store
+):
+    if shared_store.bucket is None:
+        pytest.skip("a directory store always honours a valid range")
+    org = SimpleNamespace(id=uuid4())
+    backup_id = await _write_backup(deployment, org.id)
+    archive = shared_store.objects()[f"sibyl_{backup_id}.tar.gz"]
+    shared_store.bucket.ignore_ranges = True
+
+    response, body = await _fetch(backup_id, org, "bytes=10-19")
+
+    assert response.status_code == 200
+    assert "content-range" not in response.headers
+    assert body == archive
+
+
+@pytest.mark.asyncio
+async def test_concurrent_backups_on_one_volume_leave_room_for_each_other(deployment, monkeypatch):
+    shared = deployment.tmp_path / "claim" / "backups"
+    monkeypatch.setattr(backup_jobs.settings, "backup_archive_url", "")
+    monkeypatch.setattr(backup_jobs.settings, "backup_dir", shared)
+    monkeypatch.setattr(backup_jobs.settings, "backup_free_space_reserve_mb", 1)
+    org = SimpleNamespace(id=uuid4())
+    # A completed backup gives later ones an estimate to claim.
+    await _write_backup(deployment, org.id)
+    estimate = deployment.records.rows[next(iter(deployment.records.rows))].size_bytes * 11
+    real = archive_store.shutil.disk_usage
+    # Room for the reserve and one backup's claim, not two.
+    room = 1024**2 + estimate + estimate // 2
+    monkeypatch.setattr(
+        archive_store.shutil, "disk_usage", lambda path: real(path)._replace(free=room)
+    )
+
+    exporting = asyncio.Event()
+    finish = asyncio.Event()
+    export_auth = deployment.exports.auth.side_effect
+
+    async def slow_auth_export(organization_id):
+        exporting.set()
+        await finish.wait()
+        return export_auth(organization_id)
+
+    monkeypatch.setattr(backup_jobs, "export_auth_archive_payload", slow_auth_export)
+    first_id = _new_backup(deployment, org.id)
+    first = asyncio.create_task(backup_jobs.run_backup({}, str(org.id), backup_id=first_id))
+    await exporting.wait()
+    assert [path.name for path in shared.iterdir() if path.name.startswith(".reserve-")] == [
+        f".reserve-{first_id}"
+    ]
+
+    second_id = _new_backup(deployment, org.id)
+    second = await backup_jobs.run_backup({}, str(org.id), backup_id=second_id)
+    assert second["success"] is False
+    assert "other running backups hold" in deployment.records.rows[second_id].error
+
+    finish.set()
+    assert (await first)["success"] is True
+    assert not any(path.name.startswith(".reserve-") for path in shared.iterdir())
+    # With the first finished and its claim released, the next run fits.
+    third = await backup_jobs.run_backup({}, str(org.id), backup_id=_new_backup(deployment, org.id))
+    assert third["success"] is True

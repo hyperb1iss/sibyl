@@ -37,7 +37,9 @@ from sibyl_core.backends.archive_store import (
     ArchiveReader,
     ArchiveStoreUnavailable,
     ByteRange,
+    NoReservation,
     RangeNotSatisfiable,
+    Reservation,
     check_name,
     retained_name,
 )
@@ -73,11 +75,21 @@ _CONTENT_RANGE = re.compile(r"bytes (\d+)-(\d+)/(\d+)")
 
 
 class _ObjectReader:
-    def __init__(self, body: Any, *, start: int, size: int, total: int, sha256: str | None) -> None:
+    def __init__(
+        self,
+        body: Any,
+        *,
+        start: int,
+        size: int,
+        total: int,
+        partial: bool,
+        sha256: str | None,
+    ) -> None:
         self._body = body
         self.start = start
         self.size = size
         self.total = total
+        self.partial = partial
         self.sha256 = sha256
 
     def chunks(self) -> Iterator[bytes]:
@@ -242,6 +254,8 @@ class S3ArchiveStore:
             raise self._unavailable("GetObject", error) from error
         size = int(response["ContentLength"])
         start, total = 0, size
+        # A store may ignore a Range it finds absurd and answer 200 with the
+        # whole object; only a Content-Range makes the answer partial.
         ranged = _CONTENT_RANGE.fullmatch(response.get("ContentRange") or "")
         if ranged is not None:
             start, total = int(ranged.group(1)), int(ranged.group(3))
@@ -253,6 +267,7 @@ class S3ArchiveStore:
             start=start,
             size=size,
             total=total,
+            partial=ranged is not None,
             sha256=metadata.get(_SHA256_METADATA),
         )
 
@@ -277,9 +292,10 @@ class S3ArchiveStore:
     def delete(self, name: str) -> None:
         self._call("DeleteObject", "delete_object", Key=self._key(name))
 
-    def reserve(self, estimated_bytes: int) -> None:
+    def reserve(self, holder: str, estimated_bytes: int) -> Reservation:
         """A bucket has no volume to fill; staging space is the pod's temp dir."""
-        del estimated_bytes
+        del holder, estimated_bytes
+        return NoReservation()
 
     def sweep_stale(self, older_than: datetime) -> int:
         """Nothing to sweep: stranded uploads expire under the lifecycle rule."""

@@ -426,14 +426,15 @@ async def download_backup(
         "Content-Disposition": f'attachment; filename="{name}"',
         "Content-Length": str(reader.size),
     }
-    if byte_range is not None:
+    # A store that answers a range with the whole archive gets a plain 200.
+    if reader.partial:
         last = reader.start + reader.size - 1
         headers["Content-Range"] = f"bytes {reader.start}-{last}/{reader.total}"
     # Chunks are read on the thread pool as the client consumes them; the
     # background close also releases the archive when the client goes away.
     return StreamingResponse(
         reader.chunks(),
-        status_code=206 if byte_range is not None else 200,
+        status_code=206 if reader.partial else 200,
         media_type="application/gzip",
         headers=headers,
         background=BackgroundTask(reader.close),
