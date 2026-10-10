@@ -418,6 +418,17 @@ def test_api_settings_refuse_urls_the_sdk_cannot_open(url: str) -> None:
         Settings(_env_file=None, environment="development", surreal_url=url)
 
 
+def test_api_settings_refuse_a_receipt_url_before_the_first_validation() -> None:
+    accepted = Settings(
+        _env_file=None, validation_receipt_url="s3://receipts/prod?region=us-west-2"
+    )
+    assert accepted.validation_receipt_url == "s3://receipts/prod?region=us-west-2"
+    with pytest.raises(ValueError, match="s3:// scheme"):
+        Settings(_env_file=None, validation_receipt_url="https://receipts.s3.amazonaws.com/prod")
+    with pytest.raises(ValueError, match="only one region"):
+        Settings(_env_file=None, validation_receipt_url="s3://receipts/prod?endpoint=minio")
+
+
 @pytest.mark.parametrize(
     ("overrides", "shown"),
     [

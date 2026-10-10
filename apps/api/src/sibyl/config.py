@@ -14,6 +14,7 @@ import structlog
 from pydantic import BaseModel, Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
+from sibyl_core.backends.s3_receipt_store import parse_s3_receipt_url
 from sibyl_core.backends.surreal.url_schemes import (
     is_embedded_surreal_url,
     production_surreal_url_problem,
@@ -290,6 +291,12 @@ class Settings(BaseSettings):
     coordination_backend: Literal["auto", "local", "redis"] = Field(
         default="auto",
         description="Coordination backend for jobs, locks, pub/sub, and pending state",
+    )
+    # Read at runtime through CoreConfig; declared here so a malformed URL
+    # stops the server at startup instead of at the first validation.
+    validation_receipt_url: str = Field(
+        default="",
+        description="s3://bucket[/prefix][?region=name] shared validation receipt store",
     )
 
     # Auth configuration
@@ -732,6 +739,8 @@ class Settings(BaseSettings):
             raise ValueError("Configure only one of surreal_url or surreal_data_dir")
         if self.surreal_url and (reason := unsupported_surreal_url_reason(self.surreal_url)):
             raise ValueError(reason)
+        if self.validation_receipt_url:
+            parse_s3_receipt_url(self.validation_receipt_url)
 
         if self.graph_embedding_provider == "local":
             if (

@@ -66,6 +66,13 @@ class CoreConfig(BaseSettings):
         default_factory=lambda: str(Path.home() / ".sibyl" / "validation-receipts"),
         description="Persistent private receipt directory; share across validation replicas",
     )
+    validation_receipt_url: str = Field(
+        default="",
+        description=(
+            "s3://bucket[/prefix][?region=name] receipt store shared across nodes; "
+            "replaces validation_receipt_dir when set"
+        ),
+    )
 
     # SurrealDB configuration
     surreal_url: str = Field(

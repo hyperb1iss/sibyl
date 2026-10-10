@@ -3472,10 +3472,15 @@ llm = [
 reranking = [
     { name = "sentence-transformers" },
 ]
+s3 = [
+    { name = "boto3" },
+    { name = "botocore" },
+]
 
 [package.dev-dependencies]
 dev = [
     { name = "anthropic", extra = ["bedrock"] },
+    { name = "boto3" },
     { name = "cbor2" },
     { name = "httpx2" },
     { name = "numpy" },
@@ -3494,7 +3499,9 @@ requires-dist = [
     { name = "anthropic", marker = "extra == 'llm'", specifier = ">=1.0.0,<2" },
     { name = "anthropic", extras = ["bedrock"], marker = "extra == 'bedrock'", specifier = ">=1.0.0,<2" },
     { name = "boto3", marker = "extra == 'bedrock'", specifier = ">=1.28.57,<2" },
+    { name = "boto3", marker = "extra == 's3'", specifier = ">=1.35.2,<2" },
     { name = "botocore", marker = "extra == 'bedrock'", specifier = ">=1.31.57,<2" },
+    { name = "botocore", marker = "extra == 's3'", specifier = ">=1.35.2,<2" },
     { name = "cryptography", specifier = ">=50.0.0" },
     { name = "google-genai", marker = "extra == 'embeddings'", specifier = ">=2.23.0" },
     { name = "httpx", specifier = ">=0.27" },
@@ -3511,11 +3518,12 @@ requires-dist = [
     { name = "structlog", specifier = ">=24.0" },
     { name = "surrealdb", marker = "extra == 'graph'", specifier = ">=2.0.0,<3.0" },
 ]
-provides-extras = ["bedrock", "embeddings", "graph", "graphrag", "llm", "reranking"]
+provides-extras = ["bedrock", "embeddings", "graph", "graphrag", "llm", "reranking", "s3"]
 
 [package.metadata.requires-dev]
 dev = [
     { name = "anthropic", extras = ["bedrock"], specifier = ">=1.0.0,<2" },
+    { name = "boto3", specifier = ">=1.35.2,<2" },
     { name = "cbor2", specifier = ">=6.1.5,<7" },
     { name = "httpx2", specifier = ">=2.5.0,<3" },
     { name = "numpy", specifier = ">=2.5.1" },
@@ -3594,7 +3602,7 @@ dependencies = [
     { name = "pyyaml" },
     { name = "resend" },
     { name = "rich" },
-    { name = "sibyl-core", extra = ["bedrock", "embeddings", "graph", "graphrag", "llm"] },
+    { name = "sibyl-core", extra = ["bedrock", "embeddings", "graph", "graphrag", "llm", "s3"] },
     { name = "slowapi" },
     { name = "starlette" },
     { name = "surrealdb" },
@@ -3634,7 +3642,7 @@ requires-dist = [
     { name = "pyyaml", specifier = ">=6.0" },
     { name = "resend", specifier = ">=2.47.0,<3" },
     { name = "rich", specifier = ">=13.0" },
-    { name = "sibyl-core", extras = ["bedrock", "embeddings", "graph", "graphrag", "llm"], editable = "packages/python/sibyl-core" },
+    { name = "sibyl-core", extras = ["bedrock", "embeddings", "graph", "graphrag", "llm", "s3"], editable = "packages/python/sibyl-core" },
     { name = "slowapi", specifier = ">=0.1.9" },
     { name = "starlette", specifier = ">=1.4.1" },
     { name = "surrealdb", specifier = ">=2.0.0,<3.0" },

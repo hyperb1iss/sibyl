@@ -58,6 +58,12 @@ bedrock = [
 embeddings = [
     "google-genai>=2.23.0",
 ]
+# Validation receipts in Amazon S3: create-only writes need PutObject
+# If-None-Match, which botocore models from 1.35.2.
+s3 = [
+    "boto3>=1.35.2,<2",
+    "botocore>=1.35.2,<2",
+]
 graph = [
     "surrealdb>=2.0.0,<3.0",
     # Embedding-similarity dedup in the retrieval stack
@@ -89,7 +95,8 @@ dev = [
     "pytest-xdist>=3.8.0",
     "ruff",
     # Test-only mirrors of the runtime extras the suite exercises directly:
-    # the graph backend, the numeric stack, and the pydantic-ai client layer.
+    # the graph backend, the numeric stack, the pydantic-ai client layer, and
+    # the S3 receipt store's botocore client.
     # They stay optional for the published package (graph/llm extras) but the
     # test env must install them or the graph/eval/ai modules fail collection.
     # The heavy reranking extra (sentence-transformers) is left out on purpose
@@ -99,6 +106,7 @@ dev = [
     "pydantic-ai-slim[anthropic,google,openai]>=2.54.0,<2.55",
     "ty>=0.0.84",
     "cbor2>=6.1.5,<7",
+    "boto3>=1.35.2,<2",
 ]
 
 [project.urls]

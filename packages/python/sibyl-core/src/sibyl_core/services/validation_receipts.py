@@ -1,4 +1,10 @@
-"""Private encrypted completed receipts independent of content-store availability."""
+"""Private encrypted completed receipts independent of content-store availability.
+
+Receipts live in a private directory by default (SIBYL_VALIDATION_RECEIPT_DIR)
+or in Amazon S3 when SIBYL_VALIDATION_RECEIPT_URL names a bucket. Both stores
+hold the same Fernet ciphertext under the same review-digest name and only
+ever create a receipt, never replace one.
+"""
 
 import json
 import os
@@ -93,6 +99,10 @@ class _DirectoryStore:
 
 
 def _store() -> _ReceiptStore:
+    if settings.validation_receipt_url:
+        from sibyl_core.backends.s3_receipt_store import S3ReceiptStore, parse_s3_receipt_url
+
+        return S3ReceiptStore(parse_s3_receipt_url(settings.validation_receipt_url))
     return _DirectoryStore(settings.validation_receipt_dir)
 
 

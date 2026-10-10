@@ -33,7 +33,7 @@ classifiers = [
 
 dependencies = [
     # Sibyl Core Library with daemon/runtime extras
-    "sibyl-core[bedrock,embeddings,graph,graphrag,llm]==1.4.9",
+    "sibyl-core[bedrock,embeddings,graph,graphrag,llm,s3]==1.4.9",
     # Core Framework
     "fastapi>=0.141.1",
     "mcp>=2.2.0,<3",
