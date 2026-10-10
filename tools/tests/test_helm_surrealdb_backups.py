@@ -1352,3 +1352,32 @@ def test_helm_restore_drill_falls_back_to_one_count_for_older_manifests(
 
     assert result.returncode != 0
     assert "schema_version (0 of 1, emptied)" in result.stderr
+
+
+@pytest.mark.parametrize(
+    ("kube_version", "renders"),
+    [("1.28.9", False), ("1.29.0", True), ("v1.29.3-eks-abc123", True)],
+)
+def test_helm_chart_states_its_kubernetes_floor(kube_version: str, *, renders: bool) -> None:
+    """Native sidecars (the drill's scratch server) are on by default from
+    1.29; older clusters get a clear refusal, not a schema error."""
+    assert _HELM is not None
+    rendered = subprocess.run(  # noqa: S603
+        [
+            _HELM,
+            "template",
+            "drill",
+            "charts/surrealdb",
+            "--set",
+            "restoreDrill.enabled=true",
+            "--kube-version",
+            kube_version,
+        ],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert (rendered.returncode == 0) is renders, rendered.stderr
+    if not renders:
+        assert "chart requires kubeVersion: >=1.29.0-0" in rendered.stderr
