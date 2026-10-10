@@ -307,7 +307,9 @@ spec:
                     fi
                     # Counts come from a separate read on a live server, so a
                     # little drift is expected; it is allowed per table, never
-                    # pooled, so one empty table cannot hide behind others.
+                    # pooled, so one empty table cannot hide behind others. A
+                    # table that exported rows and restored none always fails,
+                    # however small: drift does not empty a table.
                     printf '%s\n' "$expected" | jq -c \
                       --argjson restored "$restored" \
                       --arg problem "$problem" \
@@ -321,8 +323,11 @@ spec:
                       | ([.tables | to_entries[] | select(.value.restored == null) | .key]) as $missing
                       | ([.tables | to_entries[] | select(.value.restored != null)
                           | ([$drift_rows, (.value.exported * $drift_percent / 100 | ceil)] | max) as $allowed
-                          | select(.value.exported - .value.restored > $allowed)
-                          | "\(.key) (\(.value.restored) of \(.value.exported), allowed shortfall \($allowed))"]) as $short
+                          | if .value.exported > 0 and .value.restored == 0
+                            then "\(.key) (0 of \(.value.exported), emptied)"
+                            elif .value.exported - .value.restored > $allowed
+                            then "\(.key) (\(.value.restored) of \(.value.exported), allowed shortfall \($allowed))"
+                            else empty end]) as $short
                       | .problem = (
                           if $problem != "" then $problem
                           elif ($missing | length) > 0 then "tables missing after import: \($missing | join(", "))"

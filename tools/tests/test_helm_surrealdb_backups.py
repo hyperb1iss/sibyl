@@ -501,12 +501,12 @@ def _flip_letters(path: Path) -> None:
         (
             None,
             lambda h: h.serve(drop_on_import=(f"{ORG_A}/graph",)),
-            "tables short after import: entity (0 of 7, allowed shortfall 2), relates_to (0 of 6",
+            "tables short after import: entity (0 of 7, emptied), relates_to (0 of 6, emptied)",
         ),
         (
             None,
             lambda h: h.serve(shrink_on_import={f"{ORG_A}/graph/entity": 0}),
-            "tables short after import: entity (0 of 7, allowed shortfall 2)",
+            "tables short after import: entity (0 of 7, emptied)",
         ),
         (
             None,
@@ -1075,3 +1075,16 @@ def test_helm_ops_values_are_validated_at_render(override: tuple[str, str], mess
     )
     assert rendered.returncode != 0
     assert message in rendered.stderr
+
+
+def test_helm_restore_drill_fails_when_a_tiny_table_empties(harness: OpsHarness) -> None:
+    """users exports 2 rows; the 2-row allowance must not let it restore 0."""
+    _export_then_reset(harness, lambda h: h.serve(shrink_on_import={"sibyl_auth/auth/users": 0}))
+
+    result = harness.run("restore-drill")
+
+    assert result.returncode != 0
+    assert (
+        "restore failed for sibyl_auth/auth: tables short after import: users (0 of 2, emptied)"
+        in result.stderr
+    )

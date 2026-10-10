@@ -215,7 +215,8 @@ restoreDrill:
   # The export counts rows just before it exports, in a separate read, so
   # writes in between move counts a little. Per table, a restore may fall
   # short of the exported count by max(rows, percent% of that count); any
-  # larger shortfall, or a missing table, fails the drill.
+  # larger shortfall, a missing table, or a table that exported rows and
+  # restored none fails the drill.
   rowDrift:
     rows: 2
     percent: 1
