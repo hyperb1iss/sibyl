@@ -29,6 +29,7 @@ _JOB_ORG_ARGUMENT_INDEX = {
     "priority_decay": 0,
     "run_reflection_dream_cycle": 0,
     "run_backup": 0,
+    "cleanup_old_backups": 0,
 }
 
 
@@ -376,6 +377,7 @@ class QueueBroker(Protocol):
         self,
         *,
         retention_days: int | None = None,
+        organization_id: str | None = None,
     ) -> str: ...
 
     async def enqueue_consolidation(
@@ -449,6 +451,11 @@ def get_broker() -> QueueBroker:
 # or one will pick it up (arq keeps a job queued until it finishes and
 # re-runs one whose worker died mid-run).
 LIVE_JOB_STATUSES = frozenset({JobStatus.QUEUED, JobStatus.DEFERRED, JobStatus.IN_PROGRESS})
+
+
+def backup_cleanup_job_id(organization_id: str | None) -> str:
+    """One cleanup job per organization, plus one for the scheduled store sweep."""
+    return f"backup_cleanup:{organization_id}" if organization_id else "backup_cleanup"
 
 
 def crawl_job_id(source_id: str | UUID) -> str:

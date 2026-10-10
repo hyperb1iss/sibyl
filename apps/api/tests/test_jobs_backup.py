@@ -4,6 +4,7 @@ import json
 import os
 import tarfile
 from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 from uuid import uuid4
@@ -57,8 +58,16 @@ def test_create_backup_archive_requires_metadata(tmp_path) -> None:
         )
 
 
+def _publish(root, backup_id: str, data: bytes, *, age_days: float) -> None:
+    root.mkdir(parents=True, exist_ok=True)
+    archive = root / f"sibyl_{backup_id}.tar.gz"
+    archive.write_bytes(data)
+    stamp = (datetime.now(UTC) - timedelta(days=age_days)).timestamp()
+    os.utime(archive, (stamp, stamp))
+
+
 @pytest.mark.asyncio
-async def test_cleanup_old_backups_offloads_archive_scan(
+async def test_scheduled_cleanup_sweeps_old_archives_and_forgets_their_records(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path,
 ) -> None:
@@ -69,20 +78,75 @@ async def test_cleanup_old_backups_offloads_archive_scan(
         return func(*args, **kwargs)
 
     monkeypatch.setattr(backup_jobs.asyncio, "to_thread", fake_to_thread)
+    monkeypatch.setattr(backup_jobs.settings, "backup_archive_url", "")
     monkeypatch.setattr(backup_jobs.settings, "backup_dir", tmp_path)
     monkeypatch.setattr(backup_jobs.settings, "backup_retention_days", 1)
-
-    archive = tmp_path / "sibyl_backup_old.tar.gz"
-    archive.write_bytes(b"old")
-    old_timestamp = 946684800
-    os.utime(archive, (old_timestamp, old_timestamp))
+    _publish(tmp_path, "backup_old", b"old", age_days=30)
+    _publish(tmp_path, "backup_new", b"new archive", age_days=0)
+    forget = AsyncMock()
+    monkeypatch.setattr(backup_jobs, "forget_backup_record", forget)
 
     result = await backup_jobs.cleanup_old_backups({})
 
-    assert calls == ["_cleanup_old_backup_archives"]
+    # Listing and deleting run on the thread pool, never on the event loop.
+    assert calls == ["archives", "delete"]
     assert result["deleted"] == 1
     assert result["freed_bytes"] == 3
-    assert not archive.exists()
+    assert sorted(path.name for path in tmp_path.iterdir()) == ["sibyl_backup_new.tar.gz"]
+    forget.assert_awaited_once_with("backup_old")
+
+
+def _record(org_id, backup_id: str, *, status: str = "completed", age_days: float, size=10):
+    created = (datetime.now(UTC) - timedelta(days=age_days)).replace(tzinfo=None)
+    return SimpleNamespace(
+        organization_id=org_id,
+        backup_id=backup_id,
+        status=status,
+        size_bytes=size,
+        created_at=created,
+        completed_at=created if status == "completed" else None,
+    )
+
+
+@pytest.mark.asyncio
+async def test_org_cleanup_removes_only_that_orgs_expired_archives(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    from sibyl.persistence.backups_common import BackupListResult
+
+    org_id = uuid4()
+    monkeypatch.setattr(backup_jobs.settings, "backup_archive_url", "")
+    monkeypatch.setattr(backup_jobs.settings, "backup_dir", tmp_path)
+    for backup_id in ("backup_mine_old", "backup_mine_new", "backup_theirs_old"):
+        _publish(tmp_path, backup_id, b"archive", age_days=30)
+    records = [
+        _record(org_id, "backup_mine_old", age_days=30, size=7),
+        _record(org_id, "backup_mine_new", age_days=1),
+        _record(org_id, "backup_mine_failed", status="failed", age_days=30),
+    ]
+
+    async def list_records(organization_id, *, limit, offset):
+        assert organization_id == org_id
+        return BackupListResult(backups=records[offset : offset + limit], total=len(records))
+
+    delete_record = AsyncMock()
+    forget = AsyncMock()
+    monkeypatch.setattr(backup_jobs, "list_backup_records", list_records)
+    monkeypatch.setattr(backup_jobs, "delete_backup_record", delete_record)
+    monkeypatch.setattr(backup_jobs, "forget_backup_record", forget)
+
+    result = await backup_jobs.cleanup_old_backups({}, str(org_id), retention_days=7)
+
+    assert result["deleted"] == 1
+    assert result["freed_bytes"] == 7
+    delete_record.assert_awaited_once_with(org_id, "backup_mine_old")
+    forget.assert_not_awaited()
+    # Another organization's archive, however old, is not this cleanup's to remove.
+    assert sorted(path.name for path in tmp_path.iterdir()) == [
+        "sibyl_backup_mine_new.tar.gz",
+        "sibyl_backup_theirs_old.tar.gz",
+    ]
 
 
 @pytest.mark.asyncio

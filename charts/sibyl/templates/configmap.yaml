@@ -9,27 +9,31 @@ kind: ConfigMap
 {{- if and .url .existingClaim }}
 {{- fail "Set only one of backend.validationReceipts.url or backend.validationReceipts.existingClaim." }}
 {{- end }}
-{{- if and .url (not (hasPrefix "s3://" .url)) }}
-{{- fail "backend.validationReceipts.url must be an s3://bucket[/prefix][?region=name] URL." }}
-{{- end }}
-{{- if and .url (or (not (regexMatch "^s3://[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]([/?].*)?$" .url)) (contains ".." (regexFind "^s3://[^/?#]*" .url))) }}
-{{- fail "backend.validationReceipts.url must name a valid S3 bucket: 3-63 lowercase letters, digits, dots and hyphens, starting and ending with a letter or digit." }}
-{{- end }}
-{{- if .url }}
-{{- if not (regexMatch "^s3://[^/?#]+(/[^?#]*)?([?]region=(auto|[a-z0-9]+(-[a-z0-9]+)+))?$" .url) }}
-{{- fail "backend.validationReceipts.url accepts only a ?region=name query (an AWS region or auto) and no fragment." }}
-{{- end }}
-{{- $prefix := regexFind "^s3://[^?#]*" .url | trimPrefix "s3://" | regexReplaceAll "^[^/]*" "" | trimAll "/" }}
-{{- if $prefix }}
-{{- range splitList "/" $prefix }}
-{{- if or (eq . "") (eq . ".") (eq . "..") }}
-{{- fail "backend.validationReceipts.url prefix may not contain empty, . or .. segments." }}
-{{- end }}
-{{- end }}
-{{- end }}
-{{- end }}
+{{- include "sibyl.validateS3Url" (dict "url" .url "value" "backend.validationReceipts.url") }}
 {{- if not (or .url .existingClaim) }}
 {{- fail "backend.validationReceipts.existingClaim is required unless backend.validationReceipts.url names an S3 bucket. Provision a persistent claim shared by API and worker, with ReadWriteMany access for multi-node replicas, or set an s3:// URL, before installation or upgrade." }}
+{{- end }}
+{{- end }}
+{{- if hasKey .Values.backend.env "SIBYL_BACKUP_ARCHIVE_URL" }}
+{{- fail "Set backend.backupArchives.url instead of backend.env.SIBYL_BACKUP_ARCHIVE_URL, so the chart can check it against the archives claim." }}
+{{- end }}
+{{- if hasKey .Values.backend.env "SIBYL_BACKUP_DIR" }}
+{{- fail "Set backend.backupArchives.existingClaim instead of backend.env.SIBYL_BACKUP_DIR; the chart mounts the archive directory for API and worker." }}
+{{- end }}
+{{- with .Values.backend.backupArchives }}
+{{- if and .url .existingClaim }}
+{{- fail "Set only one of backend.backupArchives.url or backend.backupArchives.existingClaim." }}
+{{- end }}
+{{- include "sibyl.validateS3Url" (dict "url" .url "value" "backend.backupArchives.url") }}
+{{- if not (or .url .existingClaim $.Values.backend.validationReceipts.existingClaim) }}
+{{- fail "backend.backupArchives.url or backend.backupArchives.existingClaim is required when validation receipts live in S3: backup archives need storage that API and worker share. Set an s3:// URL (a prefix apart from receipts) or a persistent claim, with ReadWriteMany access for multi-node replicas." }}
+{{- end }}
+{{- if and .url $.Values.backend.validationReceipts.url }}
+{{- $archives := include "sibyl.s3KeyBase" .url }}
+{{- $receipts := include "sibyl.s3KeyBase" $.Values.backend.validationReceipts.url }}
+{{- if or (hasPrefix $receipts $archives) (hasPrefix $archives $receipts) }}
+{{- fail "backend.backupArchives.url and backend.validationReceipts.url need separate S3 prefixes; neither may contain the other." }}
+{{- end }}
 {{- end }}
 {{- end }}
 {{- if hasKey .Values "store" }}
@@ -58,6 +62,9 @@ data:
   SIBYL_COORDINATION_BACKEND: {{ .Values.coordinationBackend | quote }}
   {{- with .Values.backend.validationReceipts.url }}
   SIBYL_VALIDATION_RECEIPT_URL: {{ . | quote }}
+  {{- end }}
+  {{- with .Values.backend.backupArchives.url }}
+  SIBYL_BACKUP_ARCHIVE_URL: {{ . | quote }}
   {{- end }}
   SIBYL_LOCAL_AUTH_ENABLED: {{ .Values.auth.localAuthEnabled | quote }}
   SIBYL_PUBLIC_SIGNUPS_ENABLED: {{ .Values.auth.publicSignupsEnabled | quote }}

@@ -1,5 +1,7 @@
 """Tests for configuration security validation."""
 
+from pathlib import Path
+
 import pytest
 
 from sibyl.config import Settings
@@ -427,6 +429,31 @@ def test_api_settings_refuse_a_receipt_url_before_the_first_validation() -> None
         Settings(_env_file=None, validation_receipt_url="https://receipts.s3.amazonaws.com/prod")
     with pytest.raises(ValueError, match="only one region"):
         Settings(_env_file=None, validation_receipt_url="s3://receipts/prod?endpoint=minio")
+
+
+def test_api_settings_check_the_backup_archive_store_at_startup() -> None:
+    default = Settings(_env_file=None)
+    # The image's working directory is root-owned and read-only under the
+    # chart, so the default lives in the service user's home.
+    assert default.backup_dir == Path.home() / ".sibyl" / "backups"
+    assert default.backup_archive_url == ""
+    accepted = Settings(
+        _env_file=None,
+        backup_archive_url="s3://sibyl/backups?region=us-west-2",
+        validation_receipt_url="s3://sibyl/receipts?region=us-west-2",
+    )
+    assert accepted.backup_archive_url == "s3://sibyl/backups?region=us-west-2"
+    with pytest.raises(ValueError, match="Backup archive URL must use the s3:// scheme"):
+        Settings(_env_file=None, backup_archive_url="/var/lib/sibyl-backups")
+    with pytest.raises(ValueError, match="Backup archive URL may not carry a fragment"):
+        Settings(_env_file=None, backup_archive_url="s3://sibyl/backups#x")
+    for receipts in ("s3://sibyl/backups", "s3://sibyl", "s3://sibyl/backups/receipts"):
+        with pytest.raises(ValueError, match="separate S3 prefixes"):
+            Settings(
+                _env_file=None,
+                backup_archive_url="s3://sibyl/backups",
+                validation_receipt_url=receipts,
+            )
 
 
 @pytest.mark.parametrize(

@@ -16,6 +16,7 @@ from sibyl.coordination.broker import (
     RECENT_JOB_INDEX_LIMIT,
     JobInfo,
     JobStatus,
+    job_organization_id,
     operational_note_distillation_job_id,
     raw_capture_changefeed_job_id,
     raw_promotion_job_id,
@@ -430,6 +431,22 @@ async def test_enqueue_backup_cleanup_indexes_recent_job() -> None:
     assert pool.calls[0][2]["retention_days"] == 7
     assert pool.delete.await_args_list[-1].args == ("arq:result:backup_cleanup",)
     assert_recent_job_indexed(pool, "backup_cleanup")
+
+
+@pytest.mark.asyncio
+async def test_enqueue_backup_cleanup_for_an_org_is_its_own_visible_job() -> None:
+    pool = RecordingEnqueuePool()
+    broker = make_broker(pool)
+
+    job_id = await broker.enqueue_backup_cleanup(retention_days=7, organization_id="org-123")
+
+    assert job_id == "backup_cleanup:org-123"
+    assert pool.calls[0][0] == "cleanup_old_backups"
+    assert pool.calls[0][1] == "org-123"
+    assert pool.calls[0][2]["retention_days"] == 7
+    assert job_organization_id("cleanup_old_backups", ("org-123",), {}) == "org-123"
+    assert job_organization_id("cleanup_old_backups", (), {"retention_days": 7}) is None
+    assert_recent_job_indexed(pool, "backup_cleanup:org-123")
 
 
 @pytest.mark.asyncio

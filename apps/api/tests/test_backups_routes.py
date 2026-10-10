@@ -9,6 +9,7 @@ from fastapi import HTTPException
 from sibyl.api.routes import backups as backup_routes
 from sibyl.coordination.broker import JobInfo, JobStatus
 from sibyl.persistence.backups_common import BackupListResult
+from sibyl_core.backends.archive_store import ArchiveStoreUnavailable
 
 
 def _org() -> SimpleNamespace:
@@ -240,17 +241,18 @@ async def test_run_cleanup_uses_retention_helper(monkeypatch: pytest.MonkeyPatch
         "resolve_backup_retention",
         AsyncMock(return_value=14),
     )
-    monkeypatch.setattr(
-        "sibyl.jobs.queue.enqueue_backup_cleanup",
-        AsyncMock(return_value="cleanup-job"),
-    )
+    enqueue = AsyncMock(return_value="cleanup-job")
+    monkeypatch.setattr("sibyl.jobs.queue.enqueue_backup_cleanup", enqueue)
+    org = _org()
 
     response = await backup_routes.run_cleanup(
         request=backup_routes.CleanupRequest(retention_days=None),
-        org=_org(),
+        org=org,
     )
 
     assert response.job_id == "cleanup-job"
+    # One organization's admin cleans up only that organization's archives.
+    enqueue.assert_awaited_once_with(retention_days=14, organization_id=str(org.id))
 
 
 @pytest.mark.asyncio
@@ -265,11 +267,73 @@ async def test_delete_backup_uses_runtime_delete_helper(monkeypatch: pytest.Monk
         "delete_backup_record",
         AsyncMock(return_value=SimpleNamespace(backup_id="backup_a")),
     )
-    monkeypatch.setattr("sibyl.jobs.backup.delete_backup", lambda _: None)
+    deleted: list[str] = []
+    store = SimpleNamespace(delete=deleted.append)
+    monkeypatch.setattr(backup_routes, "backup_archive_store", lambda: store)
 
     response = await backup_routes.delete_backup("backup_a", org=_org())
 
     assert response == {"deleted": True, "backup_id": "backup_a"}
+    assert deleted == ["sibyl_backup_a.tar.gz"]
+
+
+@pytest.mark.asyncio
+async def test_delete_backup_keeps_the_record_when_the_store_refuses(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        backup_routes,
+        "get_backup_record",
+        AsyncMock(return_value=SimpleNamespace(backup_id="backup_a")),
+    )
+    delete_record = AsyncMock()
+    monkeypatch.setattr(backup_routes, "delete_backup_record", delete_record)
+
+    def refuse(_name: str) -> None:
+        raise ArchiveStoreUnavailable("Backup archive bucket b refused DeleteObject: AccessDenied")
+
+    monkeypatch.setattr(
+        backup_routes, "backup_archive_store", lambda: SimpleNamespace(delete=refuse)
+    )
+
+    with pytest.raises(HTTPException) as refused:
+        await backup_routes.delete_backup("backup_a", org=_org())
+
+    assert refused.value.status_code == 503
+    delete_record.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("record", "opened", "status"),
+    [
+        (SimpleNamespace(backup_id="backup_a", status="in_progress"), None, 400),
+        (SimpleNamespace(backup_id="backup_a", status="completed"), None, 404),
+        (
+            SimpleNamespace(backup_id="backup_a", status="completed"),
+            ArchiveStoreUnavailable("Backup archive bucket b refused GetObject: SlowDown (503)"),
+            503,
+        ),
+    ],
+)
+async def test_download_answers_missing_and_unavailable_archives(
+    monkeypatch: pytest.MonkeyPatch, record, opened, status
+) -> None:
+    monkeypatch.setattr(backup_routes, "get_backup_record", AsyncMock(return_value=record))
+
+    def open_archive(_name: str):
+        if isinstance(opened, Exception):
+            raise opened
+        return opened
+
+    monkeypatch.setattr(
+        backup_routes, "backup_archive_store", lambda: SimpleNamespace(open=open_archive)
+    )
+
+    with pytest.raises(HTTPException) as answered:
+        await backup_routes.download_backup("backup_a", org=_org())
+
+    assert answered.value.status_code == status
 
 
 def _backup_job(organization_id: str) -> JobInfo:

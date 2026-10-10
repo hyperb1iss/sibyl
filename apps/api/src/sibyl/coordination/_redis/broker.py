@@ -23,6 +23,7 @@ from sibyl.coordination.broker import (
     RECENT_JOB_INDEX_LIMIT,
     JobInfo,
     JobStatus,
+    backup_cleanup_job_id,
     crawl_job_id,
     entity_embedding_job_id,
     job_organization_id,
@@ -805,15 +806,18 @@ class RedisQueueBroker:
         self,
         *,
         retention_days: int | None = None,
+        organization_id: str | None = None,
     ) -> str:
-        """Enqueue a backup cleanup job."""
+        """Enqueue a backup cleanup job, for one organization or the whole store."""
         job_kwargs: dict[str, Any] = {}
         if retention_days is not None:
             job_kwargs["retention_days"] = retention_days
-
-        job_id = "backup_cleanup"
+        # An organization's cleanup is its own job, visible to that org only.
+        job_args = (organization_id,) if organization_id is not None else ()
+        job_id = backup_cleanup_job_id(organization_id)
         result = await self._enqueue_unique(
             "cleanup_old_backups",
+            *job_args,
             job_id=job_id,
             clear_result=True,
             **job_kwargs,
@@ -823,7 +827,12 @@ class RedisQueueBroker:
             log.info("Backup cleanup job already running", job_id=job_id)
             return result.job_id
 
-        log.info("Enqueued backup cleanup job", job_id=result.job_id, retention_days=retention_days)
+        log.info(
+            "Enqueued backup cleanup job",
+            job_id=result.job_id,
+            organization_id=organization_id,
+            retention_days=retention_days,
+        )
         return result.job_id
 
     async def enqueue_consolidation(

@@ -4,6 +4,10 @@ Creates timestamped, compressed backup archives containing:
 - SurrealDB auth and content snapshots when those runtimes are active
 - Graph export
 - Metadata JSON (checksums, counts, version info)
+
+Archives are published once to the configured archive store (a shared
+directory or an S3 prefix, see :mod:`sibyl.backup_archives`), so any API
+replica can list, download and delete what any worker wrote.
 """
 
 from __future__ import annotations
@@ -11,21 +15,24 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
-import os
 import tarfile
 import tempfile
 from dataclasses import asdict, dataclass, field
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
+from uuid import UUID
 
 import structlog
 
 from sibyl.api.event_types import WSEvent
+from sibyl.backup_archives import backup_archive_store
 from sibyl.backup_ids import generate_backup_id
 from sibyl.config import settings
 from sibyl.persistence.auth_archive import export_auth_archive_payload
 from sibyl.persistence.backups_common import (
+    BackupRecord,
+    BackupStatus,
     resolve_backup_runtime_options,
     resolve_object_database_dump,
 )
@@ -33,10 +40,13 @@ from sibyl.persistence.backups_runtime import (
     attach_backup_job,
     create_backup_record,
     delete_backup_record,
+    forget_backup_record,
+    list_backups as list_backup_records,
     list_enabled_backup_settings,
     update_backup_record,
 )
 from sibyl.persistence.content_archive import export_content_archive_payload
+from sibyl_core.backends.archive_store import archive_name as archive_name_for, backup_id_of
 
 log = structlog.get_logger()
 
@@ -134,28 +144,6 @@ async def _create_backup_archive_async(
         entries,
         compresslevel=compresslevel,
     )
-
-
-async def _replace_file_async(source: Path, target: Path) -> None:
-    await asyncio.to_thread(os.replace, source, target)
-
-
-def _cleanup_old_backup_archives(backup_dir: Path, cutoff: float) -> tuple[int, int]:
-    deleted = 0
-    freed_bytes = 0
-
-    for archive in backup_dir.glob("sibyl_backup_*.tar.gz"):
-        try:
-            if archive.stat().st_mtime < cutoff:
-                size = archive.stat().st_size
-                archive.unlink()
-                deleted += 1
-                freed_bytes += size
-                log.info("backup_deleted", path=str(archive), size_bytes=size)
-        except Exception as e:
-            log.warning("backup_delete_failed", path=str(archive), error=str(e))
-
-    return deleted, freed_bytes
 
 
 async def _safe_broadcast(event: str, data: dict[str, Any], *, org_id: str | None) -> None:
@@ -270,12 +258,15 @@ async def run_backup(  # noqa: PLR0915
     )
 
     try:
-        # Ensure backup directory exists
-        backup_dir = settings.backup_dir
-        backup_dir.mkdir(parents=True, exist_ok=True)
+        # A store that cannot publish fails the job before any export work.
+        store = backup_archive_store()
+        await asyncio.to_thread(store.ready)
+        archive_name = archive_name_for(backup_id)
+        staging = await asyncio.to_thread(store.staging_dir)
 
-        # Work in a temp directory
-        with tempfile.TemporaryDirectory(prefix="sibyl_backup_", dir=backup_dir) as tmpdir:
+        # Assemble next to the store when it is a directory, so publishing is
+        # a hard link on one filesystem; otherwise in the system temp dir.
+        with tempfile.TemporaryDirectory(prefix=".staging-", dir=staging) as tmpdir:
             tmp_path = Path(tmpdir)
             auth_file = tmp_path / "auth.json"
             content_file = tmp_path / "content.json"
@@ -392,11 +383,10 @@ async def run_backup(  # noqa: PLR0915
             await _write_json_file_async(metadata_file, asdict(metadata))
 
             # Step 5: Create tar.gz archive
-            archive_name = f"sibyl_{backup_id}.tar.gz"
-            archive_path = backup_dir / archive_name
+            archive_path = store.location(archive_name)
             archive_tmp_path = tmp_path / archive_name
 
-            log.info("backup_archive_start", backup_id=backup_id, archive_path=str(archive_path))
+            log.info("backup_archive_start", backup_id=backup_id, archive_path=archive_path)
 
             archive_entries = [(metadata_file, "metadata.json", True)]
             if include_auth_snapshot:
@@ -410,14 +400,19 @@ async def run_backup(  # noqa: PLR0915
                 archive_entries,
                 compresslevel=6,
             )
-            await _replace_file_async(archive_tmp_path, archive_path)
+            # Published once, never replaced: a name that already holds these
+            # bytes is a retried write that landed, any other bytes a conflict.
+            archive_sha256 = await _sha256_file_async(archive_tmp_path)
+            await asyncio.to_thread(
+                store.put_new, archive_name, archive_tmp_path, sha256=archive_sha256
+            )
             duration = time.time() - start_time
             completed_at = datetime.now(UTC)
 
             log.info(
                 "backup_complete",
                 backup_id=backup_id,
-                archive_path=str(archive_path),
+                archive_path=archive_path,
                 archive_size_bytes=archive_size,
                 duration_seconds=duration,
             )
@@ -427,7 +422,7 @@ async def run_backup(  # noqa: PLR0915
                 backup_id,
                 status="completed",
                 filename=archive_name,
-                file_path=str(archive_path),
+                file_path=archive_path,
                 size_bytes=archive_size,
                 entity_count=entity_count,
                 relationship_count=relationship_count,
@@ -440,7 +435,7 @@ async def run_backup(  # noqa: PLR0915
                 "backup_id": backup_id,
                 "job_id": job_id,
                 "organization_id": organization_id,
-                "archive_path": str(archive_path),
+                "archive_path": archive_path,
                 "archive_size_bytes": archive_size,
                 "database_dump_size_bytes": database_dump_size,
                 "graph_size_bytes": graph_size,
@@ -488,15 +483,42 @@ async def run_backup(  # noqa: PLR0915
         }
 
 
+async def _expired_org_backups(organization_id: UUID, cutoff: datetime) -> list[BackupRecord]:
+    """Completed backups of one organization finished before the cutoff."""
+    expired: list[BackupRecord] = []
+    offset = 0
+    page_size = 200
+    while True:
+        page = await list_backup_records(organization_id, limit=page_size, offset=offset)
+        for record in page.backups:
+            created = record.completed_at or record.created_at
+            if created.tzinfo is None:
+                created = created.replace(tzinfo=UTC)
+            if record.status == BackupStatus.COMPLETED.value and created < cutoff:
+                expired.append(record)
+        offset += page_size
+        if len(page.backups) < page_size:
+            return expired
+
+
 async def cleanup_old_backups(
     ctx: dict[str, Any],  # noqa: ARG001
+    organization_id: str | None = None,
     *,
     retention_days: int | None = None,
 ) -> dict[str, Any]:
-    """Clean up backup archives older than retention period.
+    """Remove backup archives older than the retention period, with their records.
+
+    With an organization (the cleanup route), only that organization's
+    completed backups are considered, found through their records, so one
+    organization's admin never removes another's archives. Without one (the
+    scheduled sweep), every archive in the store older than the operator's
+    retention is removed, and the record of each is forgotten so no listing
+    offers a download that no longer exists.
 
     Args:
         ctx: arq context
+        organization_id: Limit the cleanup to this organization's backups
         retention_days: Override retention period (default: from settings)
 
     Returns:
@@ -506,18 +528,43 @@ async def cleanup_old_backups(
 
     start_time = time.time()
     retention = retention_days or settings.backup_retention_days
-    cutoff = datetime.now(UTC).timestamp() - (retention * 86400)
+    cutoff = datetime.now(UTC) - timedelta(days=retention)
+    store = backup_archive_store()
+    deleted = 0
+    freed_bytes = 0
 
-    backup_dir = settings.backup_dir
-    if not backup_dir.exists():
-        return {"deleted": 0, "freed_bytes": 0, "duration_seconds": 0}
-
-    deleted, freed_bytes = await asyncio.to_thread(_cleanup_old_backup_archives, backup_dir, cutoff)
+    if organization_id is not None:
+        org_uuid = UUID(organization_id)
+        for record in await _expired_org_backups(org_uuid, cutoff):
+            try:
+                await asyncio.to_thread(store.delete, archive_name_for(record.backup_id))
+                await delete_backup_record(org_uuid, record.backup_id)
+            except Exception as e:
+                log.warning("backup_delete_failed", backup_id=record.backup_id, error=str(e))
+                continue
+            deleted += 1
+            freed_bytes += record.size_bytes
+            log.info("backup_deleted", backup_id=record.backup_id, size_bytes=record.size_bytes)
+    else:
+        for archive in await asyncio.to_thread(store.archives):
+            if archive.modified >= cutoff:
+                continue
+            backup_id = backup_id_of(archive.name)
+            try:
+                await asyncio.to_thread(store.delete, archive.name)
+                await forget_backup_record(backup_id)
+            except Exception as e:
+                log.warning("backup_delete_failed", backup_id=backup_id, error=str(e))
+                continue
+            deleted += 1
+            freed_bytes += archive.size
+            log.info("backup_deleted", backup_id=backup_id, size_bytes=archive.size)
 
     duration = time.time() - start_time
 
     log.info(
         "backup_cleanup_complete",
+        organization_id=organization_id,
         deleted=deleted,
         freed_bytes=freed_bytes,
         retention_days=retention,
@@ -530,124 +577,6 @@ async def cleanup_old_backups(
         "retention_days": retention,
         "duration_seconds": duration,
     }
-
-
-def list_backups() -> list[dict[str, Any]]:
-    """List available backup archives.
-
-    Returns:
-        List of backup info dicts sorted by creation time (newest first)
-    """
-    backup_dir = settings.backup_dir
-    if not backup_dir.exists():
-        return []
-
-    backups: list[dict[str, Any]] = []
-
-    for archive in backup_dir.glob("sibyl_backup_*.tar.gz"):
-        try:
-            stat = archive.stat()
-
-            # Try to extract metadata for details (optional, may fail for corrupted archives)
-            metadata = None
-            try:
-                with tarfile.open(archive, "r:gz") as tar:
-                    member = tar.getmember("metadata.json")
-                    f = tar.extractfile(member)
-                    if f:
-                        metadata = json.load(f)
-            except Exception:  # noqa: S110
-                pass  # Metadata extraction is optional
-
-            # Parse backup_id from filename
-            backup_id = archive.stem.replace("sibyl_", "").replace(".tar", "")
-
-            backups.append(
-                {
-                    "backup_id": backup_id,
-                    "filename": archive.name,
-                    "path": str(archive),
-                    "size_bytes": stat.st_size,
-                    "created_at": datetime.fromtimestamp(stat.st_mtime, tz=UTC).isoformat(),
-                    "metadata": metadata,
-                }
-            )
-        except Exception as e:
-            log.warning("backup_list_error", path=str(archive), error=str(e))
-
-    # Sort by creation time (newest first)
-    backups.sort(key=lambda b: b["created_at"], reverse=True)
-    return backups
-
-
-def get_backup(backup_id: str) -> dict[str, Any] | None:
-    """Get details of a specific backup.
-
-    Args:
-        backup_id: The backup ID (e.g., 'backup_20260110_153045')
-
-    Returns:
-        Backup info dict or None if not found
-    """
-    backup_dir = settings.backup_dir
-    archive_path = backup_dir / f"sibyl_{backup_id}.tar.gz"
-
-    if not archive_path.exists():
-        return None
-
-    try:
-        stat = archive_path.stat()
-
-        # Extract full metadata (optional, may fail for corrupted archives)
-        metadata = None
-        files_in_archive = []
-        try:
-            with tarfile.open(archive_path, "r:gz") as tar:
-                files_in_archive = tar.getnames()
-                member = tar.getmember("metadata.json")
-                f = tar.extractfile(member)
-                if f:
-                    metadata = json.load(f)
-        except Exception:  # noqa: S110
-            pass  # Metadata extraction is optional
-
-        return {
-            "backup_id": backup_id,
-            "filename": archive_path.name,
-            "path": str(archive_path),
-            "size_bytes": stat.st_size,
-            "created_at": datetime.fromtimestamp(stat.st_mtime, tz=UTC).isoformat(),
-            "metadata": metadata,
-            "files": files_in_archive,
-        }
-    except Exception as e:
-        log.warning("backup_get_error", backup_id=backup_id, error=str(e))
-        return None
-
-
-def delete_backup(backup_id: str) -> bool:
-    """Delete a specific backup archive.
-
-    Args:
-        backup_id: The backup ID to delete
-
-    Returns:
-        True if deleted, False if not found
-    """
-    backup_dir = settings.backup_dir
-    archive_path = backup_dir / f"sibyl_{backup_id}.tar.gz"
-
-    if not archive_path.exists():
-        return False
-
-    try:
-        size = archive_path.stat().st_size
-        archive_path.unlink()
-        log.info("backup_deleted", backup_id=backup_id, size_bytes=size)
-        return True
-    except Exception as e:
-        log.warning("backup_delete_failed", backup_id=backup_id, error=str(e))
-        return False
 
 
 async def run_scheduled_backups(

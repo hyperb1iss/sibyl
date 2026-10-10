@@ -786,12 +786,26 @@ setting SMTP passwords in a Compose `.env` file, escape literal `$` characters a
 Scheduled archive backups run from the worker. See [Monitoring](monitoring.md) for operational
 detail.
 
-| Variable                      | Default     | Description                                      |
-| ----------------------------- | ----------- | ------------------------------------------------ |
-| `SIBYL_BACKUP_ENABLED`        | `true`      | Enable scheduled automatic backups               |
-| `SIBYL_BACKUP_DIR`            | `./backups` | Directory to store backup archives               |
-| `SIBYL_BACKUP_RETENTION_DAYS` | `30`        | Days to retain backups before auto-cleanup       |
-| `SIBYL_BACKUP_SCHEDULE`       | `0 2 * * *` | Cron schedule for automatic backups (2 AM daily) |
+| Variable                      | Default            | Description                                                       |
+| ----------------------------- | ------------------ | ----------------------------------------------------------------- |
+| `SIBYL_BACKUP_ENABLED`        | `true`             | Enable scheduled automatic backups                                |
+| `SIBYL_BACKUP_DIR`            | `~/.sibyl/backups` | Archive directory, shared by every API and worker process         |
+| `SIBYL_BACKUP_ARCHIVE_URL`    | (empty)            | `s3://bucket[/prefix][?region=name]`; replaces the directory      |
+| `SIBYL_BACKUP_RETENTION_DAYS` | `30`               | Days to retain archives before the scheduled cleanup removes them |
+| `SIBYL_BACKUP_SCHEDULE`       | `0 2 * * *`        | Cron schedule for automatic backups (2 AM daily)                  |
+
+A backup archive is written once by whichever process runs the backup job (the worker under Redis
+coordination, the API otherwise) and downloaded through any API replica, so every process must open
+the same store: one directory they all mount, or an S3 prefix. With `SIBYL_BACKUP_ARCHIVE_URL` set,
+archives live in Amazon S3 and processes on different hosts need no shared volume; the store shares
+the validation receipt store's client (default AWS credential chain, `AWS_REGION` when the URL names
+no region, `AWS_ENDPOINT_URL_S3` for an S3-compatible endpoint), must use a prefix apart from
+receipts, and is refused at startup when malformed. Archives hold secrets in the clear; see
+[Backup Archives](./helm-chart.md#backup-archives) for encryption, IAM and lifecycle rules.
+
+Earlier releases defaulted `SIBYL_BACKUP_DIR` to `./backups` in the working directory, which the
+container image cannot write. A local install that kept archives there should set `SIBYL_BACKUP_DIR`
+to that directory, or move the archives into `~/.sibyl/backups`, to keep downloading them.
 
 ## Worker Configuration
 
