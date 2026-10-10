@@ -299,7 +299,7 @@ def _cluster_type_counts(
 ) -> dict[str, dict[str, int]]:
     counts: dict[str, dict[str, int]] = {}
 
-    for entity_id in entity_ids:
+    for entity_id in sorted(entity_ids):
         entity = entity_by_id.get(entity_id)
         if entity is None:
             continue
@@ -562,7 +562,7 @@ def _overview_cluster_label(
     """Human label for an aggregate cluster: its top members by degree."""
     if cluster_id == "unclustered":
         return "Unclustered"
-    ranked = sorted(member_ids, key=lambda entity_id: degrees.get(entity_id, 0), reverse=True)
+    ranked = sorted(member_ids, key=lambda entity_id: (-degrees.get(entity_id, 0), entity_id))
     names: list[str] = []
     for entity_id in ranked[:2]:
         entity = entity_by_id.get(entity_id)
@@ -626,9 +626,11 @@ def _build_overview_graph_from_snapshot(
         if relationship.target_id != relationship.source_id:
             degrees[relationship.target_id] += 1
 
+    # Sorted walks and id tie-breaks: replicas hash strings differently, so set
+    # order must never pick which clusters a reader sees or what they are called.
     members_by_cluster: dict[str, list[str]] = {}
     type_counts_by_cluster: dict[str, dict[str, int]] = {}
-    for entity_id in focused_ids:
+    for entity_id in sorted(focused_ids):
         entity = entity_by_id.get(entity_id)
         if entity is None:
             continue
@@ -652,8 +654,7 @@ def _build_overview_graph_from_snapshot(
             if cluster_id != "unclustered"
             and any(degrees.get(member_id, 0) > 0 for member_id in members)
         ),
-        key=lambda item: len(item[1]),
-        reverse=True,
+        key=lambda item: (-len(item[1]), item[0]),
     )[:OVERVIEW_MAX_CLUSTERS]
 
     # Fallback: if community detection produced no real clusters (e.g. networkx
@@ -674,7 +675,7 @@ def _build_overview_graph_from_snapshot(
         summary = ", ".join(
             f"{count} {entity_type.replace('_', ' ')}"
             for entity_type, count in sorted(
-                type_dist.items(), key=lambda item: item[1], reverse=True
+                type_dist.items(), key=lambda item: (-item[1], item[0])
             )[:4]
         )
         aggregate_nodes.append(
@@ -716,14 +717,13 @@ def _build_overview_graph_from_snapshot(
         pair: tuple[str, str] = (ordered[0], ordered[1])
         cluster_edge_counts[pair] = cluster_edge_counts.get(pair, 0) + 1
 
+    weighted = [(pair, weight) for pair, weight in cluster_edge_counts.items() if weight > 0]
+    if len(weighted) > max_edges:
+        weighted = sorted(weighted, key=lambda item: (-item[1], item[0]))[:max_edges]
     overview_edges = [
         {"source": pair[0], "target": pair[1], "type": "inter_cluster", "weight": weight}
-        for pair, weight in cluster_edge_counts.items()
-        if weight > 0
+        for pair, weight in weighted
     ]
-    if len(overview_edges) > max_edges:
-        overview_edges.sort(key=lambda edge: edge["weight"], reverse=True)
-        overview_edges = overview_edges[:max_edges]
 
     return HierarchicalGraphData(
         nodes=aggregate_nodes,
@@ -874,7 +874,7 @@ def _build_cluster_detail_graph_from_snapshot(
             "aggregate": False,
             "member_count": 1,
         }
-        for entity_id in visible_ids
+        for entity_id in sorted(visible_ids)
         if (entity := entity_by_id.get(entity_id)) is not None
     ]
 
