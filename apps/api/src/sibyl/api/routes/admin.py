@@ -38,7 +38,7 @@ from sibyl.api.schemas import (
 from sibyl.auth.dependencies import get_current_organization, get_current_user, require_org_role
 from sibyl.config import settings
 from sibyl.coordination import get_coordination_health
-from sibyl.coordination.broker import JobStatus, get_broker
+from sibyl.coordination.broker import live_crawl_job_id
 from sibyl.persistence.auth_runtime import (
     create_project_record,
     get_project_record_by_graph_id,
@@ -1311,28 +1311,6 @@ async def dev_status(
 
 # === Startup Recovery ===
 
-# A job in one of these states still owns its source: a worker is running it,
-# or one will pick it up (arq re-queues a job whose worker died mid-run).
-_LIVE_JOB_STATUSES = frozenset({JobStatus.QUEUED, JobStatus.DEFERRED, JobStatus.IN_PROGRESS})
-
-
-async def _live_crawl_job_id(source: Any) -> str | None:
-    """Return the queued or running job that still owns a source's crawl.
-
-    Crawls run under the deterministic ``crawl:<source id>`` job id, and the
-    source also records the id it was enqueued under. Broker errors propagate:
-    a question the broker could not answer is no proof the crawl is orphaned.
-    """
-    broker = get_broker()
-    candidates = dict.fromkeys(
-        job_id for job_id in (source.current_job_id, f"crawl:{source.id}") if job_id
-    )
-    for job_id in candidates:
-        info = await broker.get_job_status(job_id)
-        if info.status in _LIVE_JOB_STATUSES:
-            return job_id
-    return None
-
 
 async def recover_stuck_sources() -> dict[str, Any]:
     """Recover sources left IN_PROGRESS by a crawl job that no longer exists.
@@ -1371,7 +1349,9 @@ async def recover_stuck_sources() -> dict[str, Any]:
 
             for source in in_progress:
                 try:
-                    live_job_id = await _live_crawl_job_id(source)
+                    live_job_id = await live_crawl_job_id(
+                        source.id, recorded_job_id=source.current_job_id
+                    )
                 except Exception as exc:
                     log.warning(
                         "Skipped crawl recovery: job broker unavailable",

@@ -10,6 +10,7 @@ from uuid import UUID
 import structlog
 
 from sibyl.api.event_types import WSEvent
+from sibyl.coordination.broker import live_crawl_job_id
 from sibyl.persistence.content_common import utcnow_naive
 from sibyl.persistence.content_runtime import (
     get_content_read_session,
@@ -198,7 +199,10 @@ async def sync_source(
 ) -> dict[str, Any]:
     """Sync source stats from actual data.
 
-    Recalculates document_count, chunk_count, and fixes status.
+    Recalculates document_count, chunk_count, and fixes status. A crawl a job
+    still owns is left alone: it writes its own counts and status when it
+    ends, and resetting it here would clobber it mid-run on whichever worker
+    holds it. The sync then returns ``skipped`` with that job's id.
 
     Args:
         ctx: arq context
@@ -216,6 +220,16 @@ async def sync_source(
         if not source:
             raise ValueError(f"Source not found: {source_id}")
         organization_id = str(source.organization_id)
+
+        live_job_id = await live_crawl_job_id(source_uuid, recorded_job_id=source.current_job_id)
+        if live_job_id is not None:
+            log.info("Sync skipped: crawl still running", source_id=source_id, job_id=live_job_id)
+            return {
+                "source_id": source_id,
+                "skipped": "crawl_running",
+                "job_id": live_job_id,
+                "status": source.crawl_status.value,
+            }
 
         doc_count, chunk_count = await get_source_sync_counts(session, source_id=source_uuid)
 

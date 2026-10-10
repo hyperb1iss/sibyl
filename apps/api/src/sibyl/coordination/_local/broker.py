@@ -22,6 +22,7 @@ from sibyl.coordination.broker import (
     RECENT_JOB_INDEX_LIMIT,
     JobInfo,
     JobStatus,
+    crawl_job_id,
     entity_embedding_job_id,
     memory_extraction_job_id,
     memory_projection_job_id,
@@ -288,7 +289,7 @@ class LocalQueueBroker:
         result = await self._enqueue_unique(
             "crawl_source",
             str(source_id),
-            job_id=f"crawl:{source_id}",
+            job_id=crawl_job_id(source_id),
             clear_result=force,
             **job_kwargs,
         )

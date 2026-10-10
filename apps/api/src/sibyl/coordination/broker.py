@@ -443,3 +443,33 @@ def get_broker() -> QueueBroker:
     _broker = broker
     _broker_backend = backend
     return broker
+
+
+# A job in one of these states still owns its work: a worker is running it,
+# or one will pick it up (arq keeps a job queued until it finishes and
+# re-runs one whose worker died mid-run).
+LIVE_JOB_STATUSES = frozenset({JobStatus.QUEUED, JobStatus.DEFERRED, JobStatus.IN_PROGRESS})
+
+
+def crawl_job_id(source_id: str | UUID) -> str:
+    """The deterministic id every crawl of a source runs under."""
+    return f"crawl:{source_id}"
+
+
+async def live_crawl_job_id(
+    source_id: str | UUID, *, recorded_job_id: str | None = None
+) -> str | None:
+    """Return the queued or running job that still owns a source's crawl.
+
+    Checks the id the source recorded when its crawl was enqueued and the
+    deterministic crawl id. Broker errors propagate: a question the broker
+    could not answer is no proof that nothing owns the crawl.
+    """
+    broker = get_broker()
+    for job_id in dict.fromkeys(
+        job_id for job_id in (recorded_job_id, crawl_job_id(source_id)) if job_id
+    ):
+        info = await broker.get_job_status(job_id)
+        if info.status in LIVE_JOB_STATUSES:
+            return job_id
+    return None

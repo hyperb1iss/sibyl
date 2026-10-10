@@ -147,6 +147,8 @@ async def test_sync_source_uses_runtime_counts() -> None:
         ) as save_source,
         patch("sibyl.jobs.crawl._safe_broadcast", AsyncMock()) as broadcast,
         patch("sibyl.jobs.crawl.utcnow_naive", return_value=now),
+        # No job owns the crawl any more, so the sync may fix the source.
+        patch("sibyl.jobs.crawl.live_crawl_job_id", AsyncMock(return_value=None)),
     ):
         result = await crawl_jobs.sync_source({}, str(source.id))
 

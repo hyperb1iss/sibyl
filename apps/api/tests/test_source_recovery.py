@@ -10,6 +10,7 @@ import asyncio
 import os
 from collections.abc import AsyncIterator, Iterator
 from contextlib import asynccontextmanager, suppress
+from dataclasses import dataclass
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
@@ -91,7 +92,7 @@ class FakeBroker:
 def no_live_jobs() -> Iterator[FakeBroker]:
     """A broker that knows no jobs, as one does for crawls whose worker died."""
     broker = FakeBroker()
-    with patch("sibyl.api.routes.admin.get_broker", lambda: broker):
+    with patch("sibyl.coordination.broker.get_broker", lambda: broker):
         yield broker
 
 
@@ -347,7 +348,7 @@ class TestRecoveryLeavesLiveCrawlsAlone:
         store = InMemorySources(running, orphaned)
         broker = FakeBroker({running.current_job_id: live_status})
 
-        with patch("sibyl.api.routes.admin.get_broker", lambda: broker):
+        with patch("sibyl.coordination.broker.get_broker", lambda: broker):
             result = await store.recover()
 
         assert running.crawl_status == CrawlStatus.IN_PROGRESS
@@ -367,7 +368,7 @@ class TestRecoveryLeavesLiveCrawlsAlone:
         store = InMemorySources(running)
         broker = FakeBroker({f"crawl:{running.id}": JobStatus.IN_PROGRESS})
 
-        with patch("sibyl.api.routes.admin.get_broker", lambda: broker):
+        with patch("sibyl.coordination.broker.get_broker", lambda: broker):
             result = await store.recover()
 
         assert running.crawl_status == CrawlStatus.IN_PROGRESS
@@ -388,7 +389,7 @@ class TestRecoveryLeavesLiveCrawlsAlone:
             {with_docs.current_job_id: dead_status, empty.current_job_id: dead_status}
         )
 
-        with patch("sibyl.api.routes.admin.get_broker", lambda: broker):
+        with patch("sibyl.coordination.broker.get_broker", lambda: broker):
             result = await store.recover()
 
         assert with_docs.crawl_status == CrawlStatus.COMPLETED
@@ -409,7 +410,7 @@ class TestRecoveryLeavesLiveCrawlsAlone:
         store = InMemorySources(first, second)
         broker = FakeBroker(error=ConnectionError("redis down"))
 
-        with patch("sibyl.api.routes.admin.get_broker", lambda: broker):
+        with patch("sibyl.coordination.broker.get_broker", lambda: broker):
             result = await store.recover()
 
         assert first.crawl_status == CrawlStatus.IN_PROGRESS
@@ -442,7 +443,7 @@ class TestSingleProcessRecovery:
         broker = _local_broker()
         await broker.startup()
         try:
-            with patch("sibyl.api.routes.admin.get_broker", lambda: broker):
+            with patch("sibyl.coordination.broker.get_broker", lambda: broker):
                 result = await store.recover()
         finally:
             await broker.shutdown()
@@ -472,7 +473,7 @@ class TestSingleProcessRecovery:
             job_id = await broker.enqueue_crawl(running.id, force=True)
             await asyncio.wait_for(started.wait(), timeout=5)
             store = InMemorySources(running)
-            with patch("sibyl.api.routes.admin.get_broker", lambda: broker):
+            with patch("sibyl.coordination.broker.get_broker", lambda: broker):
                 result = await store.recover()
         finally:
             release.set()
@@ -491,92 +492,278 @@ def _live_redis() -> tuple[str, int]:
     return host, int(port)
 
 
+@dataclass
+class LiveCrawlWorker:
+    """A real arq worker on Redis/Valkey that holds each crawl until released."""
+
+    broker: object
+    started: asyncio.Event
+    release: asyncio.Event
+
+    async def start_crawl(self, source: SimpleNamespace) -> str:
+        job_id = await self.broker.enqueue_crawl(source.id, force=True)
+        await asyncio.wait_for(self.started.wait(), timeout=10)
+        assert (await self.broker.get_job_status(job_id)).status == JobStatus.IN_PROGRESS
+        return job_id
+
+
+@pytest.fixture
+async def live_crawl_worker(monkeypatch: pytest.MonkeyPatch) -> AsyncIterator[LiveCrawlWorker]:
+    """Coordination on a live Redis, with a separate arq worker mid-crawl."""
+    from arq import Worker, func
+
+    from sibyl.config import settings
+    from sibyl.coordination._redis.broker import _job_metadata_key
+
+    host, port = _live_redis()
+    # Patch the field values directly: assigning through the model would also
+    # mark the Redis fields as set, and ``auto`` coordination would resolve
+    # to redis for every test after this one.
+    for field, value in {
+        "coordination_backend": "redis",
+        "redis_host": host,
+        "redis_port": port,
+        "redis_jobs_db": 11,
+    }.items():
+        monkeypatch.setitem(settings.__dict__, field, value)
+    monkeypatch.setattr(broker_module, "_broker", None)
+    monkeypatch.setattr(broker_module, "_broker_backend", None)
+    broker = broker_module.get_broker()
+    started = asyncio.Event()
+    release = asyncio.Event()
+    crawled: list[str] = []
+
+    async def crawl_source(_ctx, source_id, **_kwargs):
+        crawled.append(source_id)
+        started.set()
+        await release.wait()
+        return {"source_id": source_id}
+
+    worker = Worker(
+        functions=[func(crawl_source, name="crawl_source")],
+        redis_settings=broker.get_redis_settings(),
+        handle_signals=False,
+        poll_delay=0.05,
+        max_jobs=2,
+    )
+    worker_task = asyncio.create_task(worker.async_run())
+    pool = await broker.get_pool()
+    try:
+        yield LiveCrawlWorker(broker=broker, started=started, release=release)
+    finally:
+        release.set()
+        for source_id in crawled:
+            for _ in range(200):
+                status = (await broker.get_job_status(f"crawl:{source_id}")).status
+                if status in {JobStatus.COMPLETE, JobStatus.FAILED, JobStatus.NOT_FOUND}:
+                    break
+                await asyncio.sleep(0.05)
+        await worker.close()
+        worker_task.cancel()
+        with suppress(asyncio.CancelledError, Exception):
+            await worker_task
+        for source_id in crawled:
+            job = f"crawl:{source_id}"
+            await pool.delete(
+                f"arq:result:{job}",
+                f"arq:job:{job}",
+                f"arq:retry:{job}",
+                f"arq:in-progress:{job}",
+                _job_metadata_key(job),
+            )
+            await pool.zrem(broker_module.RECENT_JOB_INDEX_KEY, job)
+        await broker.close_pool()
+
+
 class TestRecoveryAgainstALiveWorker:
     """An API start during a deploy, with a real arq worker mid-crawl on Redis."""
 
     async def test_crawl_on_a_live_worker_survives_and_an_orphan_is_recovered(
-        self, monkeypatch: pytest.MonkeyPatch
+        self, live_crawl_worker: LiveCrawlWorker
     ) -> None:
-        from arq import Worker, func
-
-        from sibyl.config import settings
-
-        host, port = _live_redis()
-        monkeypatch.setattr(settings, "coordination_backend", "redis")
-        monkeypatch.setattr(settings, "redis_host", host)
-        monkeypatch.setattr(settings, "redis_port", port)
-        monkeypatch.setattr(settings, "redis_jobs_db", 11)
-        monkeypatch.setattr(broker_module, "_broker", None)
-        monkeypatch.setattr(broker_module, "_broker_backend", None)
-        broker = broker_module.get_broker()
-
         running = _in_progress_source()
         orphaned = _in_progress_source()
-        started = asyncio.Event()
-        release = asyncio.Event()
+        job_id = await live_crawl_worker.start_crawl(running)
 
-        async def crawl_source(_ctx, source_id, **_kwargs):
-            started.set()
-            await release.wait()
-            return {"source_id": source_id}
+        result = await InMemorySources(running, orphaned).recover()
 
-        worker = Worker(
-            functions=[func(crawl_source, name="crawl_source")],
-            redis_settings=broker.get_redis_settings(),
-            handle_signals=False,
-            poll_delay=0.05,
-            max_jobs=2,
-        )
-        worker_task = asyncio.create_task(worker.async_run())
-        pool = await broker.get_pool()
+        assert running.crawl_status == CrawlStatus.IN_PROGRESS
+        assert running.current_job_id == job_id
+        assert orphaned.crawl_status == CrawlStatus.PENDING
+        assert orphaned.current_job_id is None
+        assert result == {
+            "recovered": 1,
+            "completed": 0,
+            "reset_to_pending": 1,
+            "still_running": 1,
+        }
+
+
+# =============================================================================
+# Manual sync of a source a crawl still owns
+# =============================================================================
+
+
+def _org_source(source: SimpleNamespace) -> SimpleNamespace:
+    source.organization_id = uuid4()
+    source.last_crawled_at = None
+    return source
+
+
+async def _sync_via_route(
+    source: SimpleNamespace, *, doc_counts: tuple[int, int] = (0, 0)
+) -> tuple[dict | None, int | None, list]:
+    """POST /sources/{id}/sync against an in-memory source; returns (body, error, saves)."""
+    from fastapi import HTTPException
+
+    from sibyl.api.routes.crawler import sync_source
+
+    saved: list[object] = []
+
+    @asynccontextmanager
+    async def session() -> AsyncIterator[object]:
+        yield object()
+
+    async def save(_session, *, source):
+        saved.append(source.id)
+        return source
+
+    with (
+        patch("sibyl.api.routes.crawler.get_content_read_session", session),
+        patch("sibyl.api.routes.crawler._get_org_source", AsyncMock(return_value=source)),
+        patch(
+            "sibyl.api.routes.crawler.get_source_sync_counts", AsyncMock(return_value=doc_counts)
+        ),
+        patch("sibyl.api.routes.crawler.save_crawl_source_record", save),
+        patch("sibyl.api.routes.crawler.broadcast_event", AsyncMock()),
+    ):
         try:
-            job_id = await broker.enqueue_crawl(running.id, force=True)
-            await asyncio.wait_for(started.wait(), timeout=10)
-            assert (await broker.get_job_status(job_id)).status == JobStatus.IN_PROGRESS
-
-            result = await InMemorySources(running, orphaned).recover()
-
-            assert running.crawl_status == CrawlStatus.IN_PROGRESS
-            assert running.current_job_id == job_id
-            assert orphaned.crawl_status == CrawlStatus.PENDING
-            assert orphaned.current_job_id is None
-            assert result == {
-                "recovered": 1,
-                "completed": 0,
-                "reset_to_pending": 1,
-                "still_running": 1,
-            }
-        finally:
-            release.set()
-            for _ in range(200):
-                if (await broker.get_job_status(f"crawl:{running.id}")).status in {
-                    JobStatus.COMPLETE,
-                    JobStatus.FAILED,
-                    JobStatus.NOT_FOUND,
-                }:
-                    break
-                await asyncio.sleep(0.05)
-            await worker.close()
-            worker_task.cancel()
-            with suppress(asyncio.CancelledError, Exception):
-                await worker_task
-            for source in (running, orphaned):
-                job = f"crawl:{source.id}"
-                await pool.delete(
-                    f"arq:result:{job}",
-                    f"arq:job:{job}",
-                    f"arq:retry:{job}",
-                    f"arq:in-progress:{job}",
-                    broker_module_metadata_key(job),
-                )
-                await pool.zrem(broker_module.RECENT_JOB_INDEX_KEY, job)
-            await broker.close_pool()
+            body = await sync_source(str(source.id), org=SimpleNamespace(id=source.organization_id))
+        except HTTPException as exc:
+            return None, exc.status_code, saved
+    return body, None, saved
 
 
-def broker_module_metadata_key(job_id: str) -> str:
-    from sibyl.coordination._redis.broker import _job_metadata_key
+async def _sync_via_job(
+    source: SimpleNamespace, *, doc_counts: tuple[int, int] = (0, 0)
+) -> tuple[dict, list]:
+    """The sync job an MCP sync or refresh enqueues, against an in-memory source."""
+    import sibyl.jobs.crawl as crawl_jobs
 
-    return _job_metadata_key(job_id)
+    saved: list[object] = []
+
+    @asynccontextmanager
+    async def session() -> AsyncIterator[object]:
+        yield object()
+
+    async def save(_session, *, source):
+        saved.append(source.id)
+        return source
+
+    with (
+        patch("sibyl.jobs.crawl.get_content_read_session", session),
+        patch("sibyl.jobs.crawl.get_crawl_source_by_id", AsyncMock(return_value=source)),
+        patch("sibyl.jobs.crawl.get_source_sync_counts", AsyncMock(return_value=doc_counts)),
+        patch("sibyl.jobs.crawl.save_crawl_source_record", save),
+        patch("sibyl.jobs.crawl._safe_broadcast", AsyncMock()),
+    ):
+        result = await crawl_jobs.sync_source({}, str(source.id))
+    return result, saved
+
+
+class TestManualSyncLeavesLiveCrawlsAlone:
+    """A manual sync is refused, or skipped, while a job still owns the crawl."""
+
+    @pytest.mark.parametrize(
+        "live_status", [JobStatus.IN_PROGRESS, JobStatus.QUEUED, JobStatus.DEFERRED]
+    )
+    async def test_route_answers_409_and_leaves_the_source(self, live_status: JobStatus) -> None:
+        source = _org_source(_in_progress_source())
+        broker = FakeBroker({source.current_job_id: live_status})
+
+        with patch("sibyl.coordination.broker.get_broker", lambda: broker):
+            body, status_code, saved = await _sync_via_route(source, doc_counts=(2, 6))
+
+        assert status_code == 409
+        assert body is None
+        assert saved == []
+        assert source.crawl_status == CrawlStatus.IN_PROGRESS
+        assert source.current_job_id == f"crawl:{source.id}"
+
+    async def test_route_answers_503_when_the_broker_cannot_say(self) -> None:
+        source = _org_source(_in_progress_source())
+        broker = FakeBroker(error=ConnectionError("redis down"))
+
+        with patch("sibyl.coordination.broker.get_broker", lambda: broker):
+            _body, status_code, saved = await _sync_via_route(source)
+
+        assert status_code == 503
+        assert saved == []
+        assert source.crawl_status == CrawlStatus.IN_PROGRESS
+
+    async def test_route_still_fixes_a_source_whose_crawl_is_gone(self) -> None:
+        source = _org_source(_in_progress_source())
+
+        with patch("sibyl.coordination.broker.get_broker", FakeBroker):
+            body, status_code, saved = await _sync_via_route(source, doc_counts=(2, 6))
+
+        assert status_code is None
+        assert body is not None
+        assert body["status"] == "completed"
+        assert saved == [source.id]
+        assert (source.document_count, source.chunk_count) == (2, 6)
+
+    async def test_sync_job_skips_a_crawl_that_is_still_owned(self) -> None:
+        source = _org_source(_in_progress_source())
+        broker = FakeBroker({source.current_job_id: JobStatus.IN_PROGRESS})
+
+        with patch("sibyl.coordination.broker.get_broker", lambda: broker):
+            result, saved = await _sync_via_job(source, doc_counts=(2, 6))
+
+        assert result["skipped"] == "crawl_running"
+        assert result["job_id"] == source.current_job_id
+        assert saved == []
+        assert source.crawl_status == CrawlStatus.IN_PROGRESS
+
+    async def test_sync_job_still_fixes_a_source_whose_crawl_is_gone(self) -> None:
+        source = _org_source(_in_progress_source())
+
+        with patch("sibyl.coordination.broker.get_broker", FakeBroker):
+            result, saved = await _sync_via_job(source)
+
+        assert "skipped" not in result
+        assert result["status"] == "pending"
+        assert saved == [source.id]
+        assert source.current_job_id is None
+
+
+class TestManualSyncAgainstALiveWorker:
+    """Manual syncs while a real arq worker on Redis holds the crawl."""
+
+    async def test_route_refuses_while_a_live_worker_crawls(
+        self, live_crawl_worker: LiveCrawlWorker
+    ) -> None:
+        source = _org_source(_in_progress_source())
+        job_id = await live_crawl_worker.start_crawl(source)
+
+        body, status_code, saved = await _sync_via_route(source)
+
+        assert (body, status_code, saved) == (None, 409, [])
+        assert source.crawl_status == CrawlStatus.IN_PROGRESS
+        assert source.current_job_id == job_id
+
+    async def test_sync_job_leaves_a_live_workers_crawl_alone(
+        self, live_crawl_worker: LiveCrawlWorker
+    ) -> None:
+        source = _org_source(_in_progress_source())
+        job_id = await live_crawl_worker.start_crawl(source)
+
+        result, saved = await _sync_via_job(source)
+
+        assert result["skipped"] == "crawl_running"
+        assert result["job_id"] == job_id
+        assert saved == []
+        assert source.crawl_status == CrawlStatus.IN_PROGRESS
 
 
 # =============================================================================

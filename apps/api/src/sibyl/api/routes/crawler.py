@@ -35,6 +35,7 @@ from sibyl.api.schemas import (
 )
 from sibyl.api.websocket import broadcast_event
 from sibyl.auth.dependencies import get_current_organization, require_org_role
+from sibyl.coordination.broker import live_crawl_job_id
 from sibyl.crawler.service import SourceAlreadyExistsError
 from sibyl.persistence.content_common import (
     CrawledDocumentRecord,
@@ -676,9 +677,31 @@ async def sync_source(
 
     Useful for fixing stuck sources or after manual data changes.
     Recalculates document_count, chunk_count, and fixes status if stuck.
+
+    A crawl that a job still owns (queued, deferred or running on any worker)
+    is not stuck: it writes its own counts and status when it ends, and a sync
+    now would reset it mid-run. That answers 409 instead, so the caller can
+    cancel the crawl or sync once it finishes.
     """
     async with get_content_read_session() as session:
         source = await _get_org_source(session, source_id, org)
+
+        try:
+            live_job_id = await live_crawl_job_id(source.id, recorded_job_id=source.current_job_id)
+        except Exception as e:
+            log.warning("Crawl job status unavailable for sync", source_id=source_id, error=str(e))
+            raise HTTPException(
+                status_code=503,
+                detail="Cannot tell whether a crawl is still running. Is the job queue available?",
+            ) from e
+        if live_job_id is not None:
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    f"A crawl is still running for this source (job {live_job_id}). It "
+                    "updates the counts and status when it finishes; cancel it or sync after."
+                ),
+            )
 
         actual_doc_count, actual_chunk_count = await get_source_sync_counts(
             session,

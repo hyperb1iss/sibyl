@@ -22,6 +22,7 @@ from sibyl.coordination.broker import (
     RECENT_JOB_INDEX_LIMIT,
     JobInfo,
     JobStatus,
+    crawl_job_id,
     entity_embedding_job_id,
     job_organization_id,
     memory_extraction_job_id,
@@ -135,7 +136,7 @@ class RedisQueueBroker:
         if organization_id is not None:
             job_kwargs["organization_id"] = organization_id
 
-        job_id = f"crawl:{source_id}"
+        job_id = crawl_job_id(source_id)
         result = await self._enqueue_unique(
             "crawl_source",
             str(source_id),
