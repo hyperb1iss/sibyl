@@ -52,10 +52,13 @@ connection:
   usernameKey: username
   passwordKey: password
 
-# Databases the strict-bootstrap Job defines as STRICT. The export and
-# restore drill do not read this list: they discover every namespace and
-# database on the server at run time, including each org's graph
-# namespace (org_<uuid>), which Sibyl creates as orgs appear.
+# Databases the strict-bootstrap Job defines as STRICT. The export does
+# not limit itself to this list: it discovers every namespace and database
+# on the server at run time, including each org's graph namespace
+# (org_<uuid>), which Sibyl creates as orgs appear. It does require every
+# entry here to exist, so an empty or wrong server fails the export
+# instead of producing an empty backup, and the restore drill requires
+# them in the manifest and restores them STRICT.
 databases:
   - namespace: sibyl_auth
     database: auth
@@ -84,6 +87,12 @@ jobDefaults:
       drop:
         - ALL
   resources: {}
+  # Every request the export and drill make is bounded, so a hung server
+  # cannot hold a Job (and, under concurrencyPolicy Forbid, every later
+  # run). maxTimeSeconds covers the longest single /export or /import.
+  http:
+    connectTimeoutSeconds: 10
+    maxTimeSeconds: 3600
 
 bootstrap:
   enabled: true
@@ -119,21 +128,52 @@ export:
   failedJobsHistoryLimit: 3
   concurrencyPolicy: Forbid
   startingDeadlineSeconds: 900
+  # Retries rerun the whole export into a new run directory.
+  backoffLimit: 2
+  # Kill a run that has not finished in 6 hours, well before the next
+  # daily schedule.
+  activeDeadlineSeconds: 21600
   destination:
     # Local staging path. Deployment overlays can mount blob/object storage here.
     path: /backups
-    # Informational URI for overlays that sync to object/blob storage.
+    # Where syncCommand copies runs, such as s3://bucket/prefix. Exposed
+    # as $SIBYL_EXPORT_DESTINATION_URI to syncCommand and to the restore
+    # drill's fetchCommand.
     uri: ""
   # Each run writes <destination.path>/<filePrefix>-<UTC timestamp>/ with
   # one <namespace>.<database>.surql per database and a manifest.json
   # written last; the restore drill reads the newest directory that has
-  # one. encryption.command runs once per file, manifest included, with
-  # the path in $SIBYL_EXPORT_FILE; syncCommand runs once at the end with
-  # the run directory in $SIBYL_EXPORT_RUN_DIR.
+  # one. The manifest's sizes and sha256 describe the plaintext. A run
+  # that fails before its manifest removes its directory, and directories
+  # without a manifest older than a day are pruned. Letters, digits, "_"
+  # and "-" only, so runs match <filePrefix>-<14 digits> exactly.
+  #
+  # Upgrading from 1.4.9 or earlier: exports used to be flat files,
+  # <filePrefix>-<namespace>-<database>-<timestamp>.surql, directly under
+  # destination.path. Point retention and sync scripts at the run
+  # directories instead; the drill ignores the old flat files, so take one
+  # new export before the first drill after upgrading.
   filePrefix: sibyl
   encryption:
     enabled: false
+    # Runs in its own `sh -ec` once per file, manifest last. It reads
+    # $SIBYL_EXPORT_FILE (a plaintext copy in scratch space, never in the
+    # destination) and writes the ciphertext to
+    # $SIBYL_EXPORT_ENCRYPTED_FILE; the job then moves the ciphertext to
+    # the file's final name, so names never change. Writing nothing, or
+    # the plaintext unchanged, fails the export. Example:
+    #   age -r "$AGE_RECIPIENT" -o "$SIBYL_EXPORT_ENCRYPTED_FILE" "$SIBYL_EXPORT_FILE"
+    #
+    # Upgrading from 1.4.9 or earlier: the command used to encrypt
+    # $SIBYL_EXPORT_FILE however it liked, for example
+    #   age -r "$AGE_RECIPIENT" -o "$SIBYL_EXPORT_FILE.age" "$SIBYL_EXPORT_FILE" && rm "$SIBYL_EXPORT_FILE"
+    # That form now fails every export ("wrote nothing to
+    # $SIBYL_EXPORT_ENCRYPTED_FILE"), so rewrite it to the example above
+    # before upgrading.
     command: ""
+  # Runs once after the manifest, with the run directory in
+  # $SIBYL_EXPORT_RUN_DIR. Upload the manifest last so a reader never sees
+  # a manifest before its files (see docs/admin/backup-restore.md).
   syncCommand: ""
   extraEnv: []
   extraEnvFrom: []
@@ -149,8 +189,36 @@ restoreDrill:
   failedJobsHistoryLimit: 3
   concurrencyPolicy: Forbid
   startingDeadlineSeconds: 900
+  # Every failed attempt runs failureNotification, so the default is a
+  # single attempt: one failing drill, one page.
+  backoffLimit: 0
+  activeDeadlineSeconds: 21600
   source:
     path: /backups
+  # Runs in its own `sh -ec` before the drill picks a run, with
+  # $SIBYL_RESTORE_SOURCE_PATH, $SIBYL_EXPORT_DESTINATION_URI and
+  # $SIBYL_EXPORT_FILE_PREFIX set. Use it to download the newest run whose
+  # manifest.json exists into the source path, files before manifest.
+  fetchCommand: ""
+  decryption:
+    enabled: false
+    # Runs in its own `sh -ec` once per file, manifest first. It reads
+    # $SIBYL_RESTORE_ENCRYPTED_FILE (never modified) and writes the
+    # plaintext to $SIBYL_RESTORE_FILE, which the drill then checks against
+    # the manifest's plaintext sha256. Example:
+    #   age -d -i /secrets/age/key.txt -o "$SIBYL_RESTORE_FILE" "$SIBYL_RESTORE_ENCRYPTED_FILE"
+    command: ""
+  # Fail when the newest complete export is older than this, so a stalled
+  # export pipeline pages instead of the drill passing on old data. Exports
+  # run daily by default; 36 allows one late run. 0 disables the check.
+  maxExportAgeHours: 36
+  # The export counts rows just before it exports, in a separate read, so
+  # writes in between move counts a little. Per table, a restore may fall
+  # short of the exported count by max(rows, percent% of that count); any
+  # larger shortfall, or a missing table, fails the drill.
+  rowDrift:
+    rows: 2
+    percent: 1
   restore:
     endpoint: http://127.0.0.1:8000
     username: drill

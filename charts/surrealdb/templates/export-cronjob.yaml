@@ -1,5 +1,6 @@
 {{- if .Values.export.enabled -}}
 {{- include "sibyl-surrealdb.validateDatabases" . -}}
+{{- include "sibyl-surrealdb.validateOps" . -}}
 {{- if and .Values.export.encryption.enabled (not .Values.export.encryption.command) -}}
 {{- fail "export.encryption.command is required when export.encryption.enabled=true" -}}
 {{- end -}}
@@ -18,6 +19,8 @@ spec:
   startingDeadlineSeconds: {{ .Values.export.startingDeadlineSeconds }}
   jobTemplate:
     spec:
+      backoffLimit: {{ .Values.export.backoffLimit }}
+      activeDeadlineSeconds: {{ .Values.export.activeDeadlineSeconds }}
       template:
         metadata:
           labels:
@@ -54,12 +57,39 @@ spec:
               # last, so a run directory without one is incomplete.
               args:
                 - |
-                  identifier='^[A-Za-z_][A-Za-z0-9_]*$'
+                  plain_identifier='^[A-Za-z_][A-Za-z0-9_]*$'
                   table_rows='RETURN object::keys((INFO FOR DB).tables).map(|$t| { table: $t, rows: (SELECT count() FROM type::table($t) GROUP ALL)[0].count ?? 0 });'
+                  # Names travel in the surreal-ns and surreal-db headers,
+                  # and SurrealDB rejects header bytes outside printable
+                  # ASCII. Any other name, quotes and spaces included, is
+                  # exported; only these cannot be.
+                  jq_defs='def header_safe: type == "string" and test("^[ -~]+$") and (test("^ | $") | not);'
                   work="$(mktemp -d)"
+                  SIBYL_EXPORT_RUN_DIR=""
+                  # A run that dies before its manifest leaves no partial
+                  # directory behind, and scratch plaintext never outlives
+                  # the job.
+                  on_exit() {
+                    status=$?
+                    trap - EXIT
+                    if [ "$status" -ne 0 ] && [ -n "$SIBYL_EXPORT_RUN_DIR" ] \
+                      && [ ! -f "$SIBYL_EXPORT_RUN_DIR/manifest.json" ]; then
+                      rm -rf "$SIBYL_EXPORT_RUN_DIR"
+                      echo "removed incomplete run $SIBYL_EXPORT_RUN_DIR" >&2
+                    fi
+                    rm -rf "$work"
+                    exit "$status"
+                  }
+                  trap on_exit EXIT
+                  # Bounded requests: a hung server must not hold the job
+                  # (and, under concurrencyPolicy Forbid, every later one).
+                  http() {
+                    curl --connect-timeout "$SIBYL_HTTP_CONNECT_TIMEOUT" \
+                      --max-time "$SIBYL_HTTP_MAX_TIME" "$@"
+                  }
                   # /sql answers HTTP 200 with a status per statement, so
                   # the jq gate is what turns a refused statement into a
-                  # failed Job. Prints the last statement's result.
+                  # failure. Prints the last statement's result.
                   sql_result() {
                     scope_ns="$1"
                     scope_db="$2"
@@ -68,7 +98,7 @@ spec:
                       -H "Accept: application/json" -H "Content-Type: text/plain"
                     if [ -n "$scope_ns" ]; then set -- "$@" -H "surreal-ns: $scope_ns"; fi
                     if [ -n "$scope_db" ]; then set -- "$@" -H "surreal-db: $scope_db"; fi
-                    response="$(curl "$@" --data-binary "$statement" "$SURREAL_ENDPOINT/sql")" || exit 1
+                    response="$(http "$@" --data-binary "$statement" "$SURREAL_ENDPOINT/sql")" || exit 1
                     if ! printf '%s\n' "$response" \
                       | jq -e 'type == "array" and length > 0 and all(.[]; .status == "OK")' >/dev/null 2>&1; then
                       printf 'SurrealQL failed in %s/%s: %s\n%s\n' \
@@ -77,94 +107,197 @@ spec:
                     fi
                     printf '%s\n' "$response" | jq -c '.[-1].result'
                   }
-                  # Names reach HTTP headers, file names and SurrealQL, and a
-                  # name with a space would split into wrong names in the
-                  # loops below, so anything but a plain identifier stops
-                  # the run instead of being skipped.
-                  names_of() {
-                    jq -r --arg key "$1" --arg re "$identifier" '
-                      (.[$key] // {} | keys) as $names
-                      | ($names | map(select(test($re) | not))) as $refused
-                      | if ($refused | length) > 0
-                        then error("cannot back up \($key) \($refused | map(@json) | join(", ")): not a plain SurrealDB identifier")
-                        else $names[] end'
+                  # A database that cannot be exported is recorded in the
+                  # manifest and fails the job at the end, after every other
+                  # database has been exported and synced.
+                  record_failure() {
+                    printf '%s\n' "$1" | jq -c --arg reason "$2" '. + {reason: $reason}' >> "$work/failures.jsonl"
+                    printf '%s\n' "$1" | jq -r --arg reason "$2" \
+                      '"cannot export \(.namespace | @json)/\(.database // "*" | @json): \($reason)"' >&2
                   }
+                  # The hook reads plaintext from scratch and writes the
+                  # ciphertext beside its final name in the run directory,
+                  # so plaintext never reaches the destination and every
+                  # name the manifest and the drill rely on survives. A
+                  # hook that writes nothing, or copies the plaintext, stops
+                  # the run rather than shipping an unencrypted backup.
                   encrypt_export_file() {
-                    {{- if .Values.export.encryption.enabled }}
-                    SIBYL_EXPORT_FILE="$1"
-                    export SIBYL_EXPORT_FILE
-                    {{ .Values.export.encryption.command | nindent 20 }}
-                    {{- else }}
-                    return 0
-                    {{- end }}
+                    encrypted="$2.encrypting"
+                    rm -f "$encrypted"
+                    SIBYL_EXPORT_FILE="$1" SIBYL_EXPORT_ENCRYPTED_FILE="$encrypted" \
+                      sh -ec "$SIBYL_EXPORT_ENCRYPTION_COMMAND"
+                    if [ ! -s "$encrypted" ]; then
+                      echo "export.encryption.command wrote nothing to \$SIBYL_EXPORT_ENCRYPTED_FILE for ${2##*/}" >&2
+                      exit 1
+                    fi
+                    if cmp -s "$1" "$encrypted"; then
+                      echo "export.encryption.command copied ${2##*/} without encrypting it" >&2
+                      exit 1
+                    fi
+                    mv "$encrypted" "$2"
+                    rm -f "$1"
                   }
+
+                  mkdir -p "$SIBYL_EXPORT_DESTINATION_PATH" "$work/plain"
+                  : > "$work/targets.jsonl"
+                  : > "$work/failures.jsonl"
+                  : > "$work/databases.jsonl"
+                  # Runs that died without cleaning up (a killed pod) are
+                  # removed once they are a day old. Only exact
+                  # <filePrefix>-<14 digits> names are touched.
+                  cutoff="$(jq -rn 'now - 86400 | strftime("%Y%m%d%H%M%S")')"
+                  for candidate in "$SIBYL_EXPORT_DESTINATION_PATH/$SIBYL_EXPORT_FILE_PREFIX"-*; do
+                    stamp="${candidate##*/}"
+                    stamp="${stamp#"$SIBYL_EXPORT_FILE_PREFIX"-}"
+                    case "$stamp" in
+                      [0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]) ;;
+                      *) continue ;;
+                    esac
+                    if [ -d "$candidate" ] && [ ! -f "$candidate/manifest.json" ] \
+                      && [ "$stamp" -lt "$cutoff" ]; then
+                      rm -rf "$candidate"
+                      echo "pruned incomplete run ${candidate##*/} (no manifest.json, over a day old)"
+                    fi
+                  done
 
                   timestamp="$(date -u +%Y%m%d%H%M%S)"
                   created_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+                  server_version="$(http -fsS "$SURREAL_ENDPOINT/version")"
+                  # No pipefail in POSIX sh: each request runs as its own
+                  # command so a failure is seen before anything consumes
+                  # its output.
+                  root_info="$(sql_result "" "" "INFO FOR ROOT;")"
+                  printf '%s\n' "$root_info" | jq -c '.namespaces // {} | keys' > "$work/namespaces.json"
+                  namespace_count="$(jq 'length' "$work/namespaces.json")"
+                  index=0
+                  while [ "$index" -lt "$namespace_count" ]; do
+                    entry="$(jq -c --argjson index "$index" '{namespace: .[$index], database: null}' "$work/namespaces.json")"
+                    index=$((index + 1))
+                    if ! printf '%s\n' "$entry" | jq -e "$jq_defs"' .namespace | header_safe' >/dev/null; then
+                      record_failure "$entry" "the namespace name is not printable ASCII, which the surreal-ns header cannot carry"
+                      continue
+                    fi
+                    namespace="$(printf '%s\n' "$entry" | jq -r '.namespace')"
+                    if ! namespace_info="$(sql_result "$namespace" "" "INFO FOR NS;" 2>"$work/error")"; then
+                      record_failure "$entry" "INFO FOR NS failed: $(head -c 500 "$work/error")"
+                      continue
+                    fi
+                    printf '%s\n' "$namespace_info" | jq -c --arg namespace "$namespace" "$jq_defs"'
+                      .databases // {} | keys[] | {namespace: $namespace, database: .}
+                      | if (.database | header_safe) then {target: .}
+                        else {failure: (. + {reason: "the database name is not printable ASCII, which the surreal-db header cannot carry"})} end' \
+                      > "$work/discovered.jsonl"
+                    jq -c 'select(.target) | .target' "$work/discovered.jsonl" >> "$work/targets.jsonl"
+                    jq -c 'select(.failure) | .failure' "$work/discovered.jsonl" >> "$work/failures.jsonl"
+                    jq -r 'select(.failure) | .failure | "cannot export \(.namespace | @json)/\(.database | @json): \(.reason)"' \
+                      "$work/discovered.jsonl" >&2
+                  done
+                  # SurrealDB always has its own main/main, so it cannot
+                  # count as finding something. The bootstrap databases must
+                  # all be there: their absence means the wrong server or a
+                  # Sibyl that never started, not a smaller backup.
+                  found="$(jq -s '[.[] | select(.namespace != "main" or .database != "main")] | length' "$work/targets.jsonl")"
+                  if [ "$found" -eq 0 ]; then
+                    echo "discovery found no databases at $SURREAL_ENDPOINT besides SurrealDB's default main/main; refusing to record an empty backup" >&2
+                    exit 1
+                  fi
+                  missing="$(jq -rn --argjson required "$SIBYL_EXPORT_REQUIRED_DATABASES" --slurpfile found "$work/targets.jsonl" \
+                    '$required - [$found[] | {namespace, database}] | map("\(.namespace)/\(.database)") | join(", ")')"
+                  if [ -n "$missing" ]; then
+                    echo "required databases missing at $SURREAL_ENDPOINT: $missing (wrong server, or a Sibyl that never bootstrapped); refusing to record a backup without them" >&2
+                    exit 1
+                  fi
+
                   SIBYL_EXPORT_RUN_DIR="$SIBYL_EXPORT_DESTINATION_PATH/$SIBYL_EXPORT_FILE_PREFIX-$timestamp"
                   export SIBYL_EXPORT_RUN_DIR
                   mkdir -p "$SIBYL_EXPORT_RUN_DIR"
-                  server_version="$(curl -fsS "$SURREAL_ENDPOINT/version")"
-                  # No pipefail in POSIX sh: each producer runs on its own
-                  # line so a failed request stops the job instead of
-                  # feeding an empty list to the loop.
-                  root_info="$(sql_result "" "" "INFO FOR ROOT;")"
-                  namespaces="$(printf '%s\n' "$root_info" | names_of namespaces)"
-                  : > "$work/databases.jsonl"
-                  for namespace in $namespaces; do
-                    namespace_info="$(sql_result "$namespace" "" "INFO FOR NS;")"
-                    databases="$(printf '%s\n' "$namespace_info" | names_of databases)"
-                    for database in $databases; do
-                      # Counted just before the export, from a separate
-                      # transaction: on a live server these are the rows
-                      # the drill should find, give or take concurrent writes.
-                      tables="$(sql_result "$namespace" "$database" "$table_rows")"
+                  target_count="$(wc -l < "$work/targets.jsonl" | tr -d ' ')"
+                  index=0
+                  while [ "$index" -lt "$target_count" ]; do
+                    index=$((index + 1))
+                    target="$(sed -n "${index}p" "$work/targets.jsonl")"
+                    namespace="$(printf '%s\n' "$target" | jq -r '.namespace')"
+                    database="$(printf '%s\n' "$target" | jq -r '.database')"
+                    if printf '%s\n' "$target" \
+                      | jq -e --arg re "$plain_identifier" '(.namespace | test($re)) and (.database | test($re))' >/dev/null; then
                       file="$namespace.$database.surql"
-                      curl -fsS \
-                        -u "$SURREAL_USER:$SURREAL_PASS" \
-                        -H "Accept: application/octet-stream" \
-                        -H "surreal-ns: $namespace" \
-                        -H "surreal-db: $database" \
-                        "$SURREAL_ENDPOINT/export" -o "$SIBYL_EXPORT_RUN_DIR/$file"
-                      if [ ! -s "$SIBYL_EXPORT_RUN_DIR/$file" ]; then
-                        echo "empty export for $namespace/$database" >&2
-                        exit 1
-                      fi
-                      bytes="$(wc -c < "$SIBYL_EXPORT_RUN_DIR/$file" | tr -d ' ')"
-                      sha256="$(sha256sum "$SIBYL_EXPORT_RUN_DIR/$file")"
-                      sha256="${sha256%% *}"
-                      printf '%s\n' "$tables" | jq -c \
-                        --arg namespace "$namespace" \
-                        --arg database "$database" \
-                        --arg file "$file" \
-                        --argjson bytes "$bytes" \
-                        --arg sha256 "$sha256" \
-                        '{namespace: $namespace, database: $database, file: $file, bytes: $bytes,
-                          sha256: $sha256, rows: (map(.rows) | add // 0),
-                          tables: (map({key: .table, value: .rows}) | from_entries)}' \
-                        >> "$work/databases.jsonl"
-                      encrypt_export_file "$SIBYL_EXPORT_RUN_DIR/$file"
-                    done
+                    else
+                      # Other names get a file-safe spelling plus a digest,
+                      # so "a-b" and "a_b" never share a file.
+                      digest="$(printf '%s\n%s' "$namespace" "$database" | sha256sum)"
+                      file="$(printf '%s' "$namespace" | tr -c 'A-Za-z0-9_' '_').$(printf '%s' "$database" | tr -c 'A-Za-z0-9_' '_').$(printf '%.12s' "$digest").surql"
+                    fi
+                    output="$SIBYL_EXPORT_RUN_DIR/$file"
+                    if [ -n "${SIBYL_EXPORT_ENCRYPTION_COMMAND:-}" ]; then
+                      output="$work/plain/$file"
+                    fi
+                    # Counted just before the export, from a separate
+                    # transaction: on a live server these are the rows the
+                    # drill should find, give or take concurrent writes.
+                    if ! tables="$(sql_result "$namespace" "$database" "$table_rows" 2>"$work/error")"; then
+                      record_failure "$target" "counting rows failed: $(head -c 500 "$work/error")"
+                      continue
+                    fi
+                    if ! http -fsS \
+                      -u "$SURREAL_USER:$SURREAL_PASS" \
+                      -H "Accept: application/octet-stream" \
+                      -H "surreal-ns: $namespace" \
+                      -H "surreal-db: $database" \
+                      "$SURREAL_ENDPOINT/export" -o "$output" 2>"$work/error"; then
+                      rm -f "$output"
+                      record_failure "$target" "GET /export failed: $(head -c 500 "$work/error")"
+                      continue
+                    fi
+                    if [ ! -s "$output" ]; then
+                      rm -f "$output"
+                      record_failure "$target" "the export came back empty"
+                      continue
+                    fi
+                    bytes="$(wc -c < "$output" | tr -d ' ')"
+                    sha256="$(sha256sum "$output")"
+                    sha256="${sha256%% *}"
+                    printf '%s\n' "$tables" | jq -c \
+                      --argjson target "$target" \
+                      --arg file "$file" \
+                      --argjson bytes "$bytes" \
+                      --arg sha256 "$sha256" \
+                      '$target + {file: $file, bytes: $bytes, sha256: $sha256, rows: (map(.rows) | add // 0),
+                        tables: (map({key: .table, value: .rows}) | from_entries)}' \
+                      >> "$work/databases.jsonl"
+                    if [ -n "${SIBYL_EXPORT_ENCRYPTION_COMMAND:-}" ]; then
+                      encrypt_export_file "$output" "$SIBYL_EXPORT_RUN_DIR/$file"
+                    fi
                   done
                   if [ ! -s "$work/databases.jsonl" ]; then
-                    echo "discovery found no databases at $SURREAL_ENDPOINT; refusing to record an empty backup" >&2
+                    echo "no database could be exported from $SURREAL_ENDPOINT" >&2
                     exit 1
                   fi
-                  # The manifest lists plaintext names, sizes and checksums:
-                  # what a restore verifies after any decryption.
-                  jq -s \
+                  # The manifest lists plaintext names, sizes and checksums,
+                  # which a restore verifies after any decryption, and every
+                  # database the run could not export.
+                  jq -n \
                     --arg created_at "$created_at" \
                     --arg server_version "$server_version" \
-                    '{format: "sibyl-surrealdb-export", version: 1, created_at: $created_at,
-                      server_version: $server_version, databases: .}' \
-                    "$work/databases.jsonl" > "$SIBYL_EXPORT_RUN_DIR/.manifest.json.tmp"
-                  mv "$SIBYL_EXPORT_RUN_DIR/.manifest.json.tmp" "$SIBYL_EXPORT_RUN_DIR/manifest.json"
+                    --slurpfile databases "$work/databases.jsonl" \
+                    --slurpfile failures "$work/failures.jsonl" \
+                    '{format: "sibyl-surrealdb-export", version: 2, created_at: $created_at,
+                      server_version: $server_version, databases: $databases, failures: $failures}' \
+                    > "$work/manifest.json"
                   jq -r '.databases[] | "exported \(.namespace)/\(.database): \(.bytes) bytes, \(.rows) rows"' \
-                    "$SIBYL_EXPORT_RUN_DIR/manifest.json"
-                  encrypt_export_file "$SIBYL_EXPORT_RUN_DIR/manifest.json"
+                    "$work/manifest.json"
+                  if [ -n "${SIBYL_EXPORT_ENCRYPTION_COMMAND:-}" ]; then
+                    encrypt_export_file "$work/manifest.json" "$SIBYL_EXPORT_RUN_DIR/manifest.json"
+                  else
+                    cp "$work/manifest.json" "$SIBYL_EXPORT_RUN_DIR/.manifest.json.tmp"
+                    mv "$SIBYL_EXPORT_RUN_DIR/.manifest.json.tmp" "$SIBYL_EXPORT_RUN_DIR/manifest.json"
+                  fi
                   {{- with .Values.export.syncCommand }}
-                  {{ . | nindent 18 }}
+                  {{ . | replace "$" "$$" | nindent 18 }}
                   {{- end }}
+                  if [ -s "$work/failures.jsonl" ]; then
+                    echo "export finished with $(wc -l < "$work/failures.jsonl" | tr -d ' ') failures recorded in $SIBYL_EXPORT_RUN_DIR/manifest.json" >&2
+                    exit 1
+                  fi
                   echo "export complete: $SIBYL_EXPORT_RUN_DIR"
               env:
                 - name: HOME
@@ -175,6 +308,13 @@ spec:
                   value: {{ .Values.export.destination.uri | quote }}
                 - name: SIBYL_EXPORT_FILE_PREFIX
                   value: {{ .Values.export.filePrefix | quote }}
+                - name: SIBYL_EXPORT_REQUIRED_DATABASES
+                  value: {{ .Values.databases | toJson | quote }}
+                {{- include "sibyl-surrealdb.httpEnv" . | nindent 16 }}
+                {{- if .Values.export.encryption.enabled }}
+                - name: SIBYL_EXPORT_ENCRYPTION_COMMAND
+                  value: {{ include "sibyl-surrealdb.hookEnvValue" .Values.export.encryption.command }}
+                {{- end }}
                 {{- include "sibyl-surrealdb.surrealEnv" . | nindent 16 }}
                 {{- with .Values.export.extraEnv }}
                 {{- toYaml . | nindent 16 }}
