@@ -511,22 +511,36 @@ async def test_repository_revocations_announce_to_peers(monkeypatch: pytest.Monk
     ]
 
 
-async def test_revoking_again_reannounces_to_heal_a_peer_that_missed_it(
-    monkeypatch: pytest.MonkeyPatch,
+class _SequenceClient:
+    """Answers each query with the next canned result."""
+
+    def __init__(self, *results: list[dict[str, object]]) -> None:
+        self.results = list(results)
+        self.queries: list[str] = []
+
+    async def execute_query(self, query: str, **params: object) -> object:
+        self.queries.append(query)
+        return self.results.pop(0)
+
+
+@pytest.mark.parametrize("claimed", [True, False], ids=["window-open", "within-window"])
+async def test_revoking_again_reannounces_only_when_the_window_allows(
+    monkeypatch: pytest.MonkeyPatch, claimed: bool
 ) -> None:
+    """Re-revocation heals a peer that missed the first message, once per window."""
     announced = AsyncMock()
     monkeypatch.setattr(auth_common, "announce_sessions_invalidated", announced)
     session = _session()
     already_revoked = session.model_copy(update={"revoked_at": datetime.now(UTC)})
-    repo = surreal_auth_runtime.SurrealSessionRepository(_RecordingClient([]))
+    claim = [{"uuid": str(session.id)}] if claimed else []
+    # revoke_session: its UPDATE revokes nothing, then the re-announcement claim.
+    repo = surreal_auth_runtime.SurrealSessionRepository(_SequenceClient([], claim, claim))
 
     assert await repo.revoke_session(session.id, session.user_id) is False
     assert await repo.revoke_loaded_session(already_revoked) is False
 
-    assert [call.kwargs for call in announced.await_args_list] == [
-        {"session_ids": [session.id]},
-        {"session_ids": [session.id]},
-    ]
+    expected = [{"session_ids": [session.id]}] * 2 if claimed else []
+    assert [call.kwargs for call in announced.await_args_list] == expected
 
 
 def _forged_tokens(real: AuthSession) -> list[str]:
@@ -585,6 +599,7 @@ class _OneSessionStore:
 
     async def revoke_loaded_session(self, session: AuthSession) -> bool:
         self.revoked.append(session)
+        access_session_cache.mark_revoked(session.id, user_id=session.user_id)
         await auth_common.announce_sessions_invalidated(session_ids=[session.id])
         return session.revoked_at is None
 

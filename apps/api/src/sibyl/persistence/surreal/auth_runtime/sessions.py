@@ -270,7 +270,8 @@ async def revoke_access_session(token: str) -> None:
     an expired access token still names a session worth ending. A forged
     token, or one naming no session, touches no cache and announces nothing.
     A session that is already revoked is revoked again, which re-announces it
-    to heal any replica that missed the first announcement.
+    to heal any replica that missed the first announcement, at most once per
+    REANNOUNCE_REVOCATION_AFTER so repeated logouts stay quiet.
     """
     try:
         claims = verify_access_token(token, verify_expiry=False)
@@ -286,13 +287,9 @@ async def revoke_access_session(token: str) -> None:
         )
         if existing is None or str(existing.user_id) != str(claims.get("sub")):
             return
+        # Marks this replica's cache and announces to the others; for a session
+        # already revoked, at most once per re-announcement window.
         await sessions.revoke_loaded_session(existing)
-        access_session_cache.mark_revoked(
-            existing.id,
-            user_id=existing.user_id,
-            organization_id=existing.organization_id,
-            expires_at=existing.refresh_token_expires_at or existing.expires_at,
-        )
 
 
 async def list_user_sessions(

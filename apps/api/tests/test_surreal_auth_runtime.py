@@ -433,7 +433,9 @@ async def test_revoke_access_session_uses_sid_when_present(
     sessions.get_session_by_id.assert_awaited_once_with(session.id, include_inactive=True)
     sessions.get_session_by_token.assert_not_awaited()
     sessions.revoke_loaded_session.assert_awaited_once_with(session)
-    assert access_session_cache.get(session.id) is False
+    # Marking the cache and announcing belong to revoke_loaded_session, mocked
+    # here; test_session_reannouncement.py covers them against a real store.
+    assert access_session_cache.get(session.id) is None
 
 
 @pytest.mark.asyncio
