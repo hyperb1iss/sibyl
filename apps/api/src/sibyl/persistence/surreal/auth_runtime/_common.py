@@ -766,11 +766,14 @@ class SurrealSessionRepository(_SurrealRepository):
         revoked = bool(_normalize_records(result))
         if revoked:
             access_session_cache.mark_revoked(session_id, user_id=user_id)
-            await announce_sessions_invalidated(session_ids=[session_id])
+        # Announced even when nothing changed: revoking again is how a peer
+        # that missed the first announcement gets healed.
+        await announce_sessions_invalidated(session_ids=[session_id])
         return revoked
 
     async def revoke_loaded_session(self, session: AuthSession) -> bool:
         if session.revoked_at is not None:
+            await announce_sessions_invalidated(session_ids=[session.id])
             return False
         now = _utcnow()
         result = await self._client.execute_query(

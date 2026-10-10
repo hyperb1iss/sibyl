@@ -292,6 +292,24 @@ async def test_repository_revocations_announce_to_peers(monkeypatch: pytest.Monk
     ]
 
 
+async def test_revoking_again_reannounces_to_heal_a_peer_that_missed_it(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    announced = AsyncMock()
+    monkeypatch.setattr(auth_common, "announce_sessions_invalidated", announced)
+    session = _session()
+    already_revoked = session.model_copy(update={"revoked_at": datetime.now(UTC)})
+    repo = surreal_auth_runtime.SurrealSessionRepository(_RecordingClient([]))
+
+    assert await repo.revoke_session(session.id, session.user_id) is False
+    assert await repo.revoke_loaded_session(already_revoked) is False
+
+    assert [call.kwargs for call in announced.await_args_list] == [
+        {"session_ids": [session.id]},
+        {"session_ids": [session.id]},
+    ]
+
+
 # --- Redis -------------------------------------------------------------------
 
 
