@@ -51,18 +51,27 @@ oidc:
 
 # -- Backend configuration
 backend:
-  # -- Shared persistent claim for completed validation receipts. Use RWX when
-  # replicas may run on different nodes. Provision before running validation.
+  # -- Durable store for completed validation receipts, shared by API and
+  # worker. Set exactly one of url or existingClaim.
   validationReceipts:
+    # -- Amazon S3 location, s3://bucket[/prefix][?region=name]. Pods may then
+    # run on any node with no receipts volume. Credentials come from the pod's
+    # AWS identity (IRSA through serviceAccount.annotations); grant
+    # s3:PutObject, s3:GetObject and s3:DeleteObject on the prefix and
+    # s3:ListBucket on the bucket. Receipts are encrypted by Sibyl before
+    # upload; keep the bucket's public access blocked.
+    url: ""
+    # -- Shared persistent claim used when url is empty. Use RWX when replicas
+    # may run on different nodes. Provision before running validation.
     existingClaim: ""
 
   # -- Number of replicas (ignored if autoscaling is enabled)
   replicaCount: 1
 
-  # -- Deployment update strategy. Empty rolls a single fixed replica with
-  # maxSurge 0 and maxUnavailable 1, because a surge pod on another node
-  # cannot attach an RWO receipts claim, and uses the Kubernetes
-  # RollingUpdate default otherwise.
+  # -- Deployment update strategy. Empty rolls a single fixed replica on a
+  # receipts claim with maxSurge 0 and maxUnavailable 1, because a surge pod
+  # on another node cannot attach an RWO claim, and uses the Kubernetes
+  # RollingUpdate default otherwise, including whenever receipts live in S3.
   strategy: {}
 
   image:

@@ -228,6 +228,9 @@ jobs:
           - profile: production-redis
             values: '["--set","backend.existingSecret=sibyl-secrets","--set","coordinationBackend=redis","--set","backend.redis.password=ci-only","--set","publicUrl=https://sibyl.example.test","--set","backend.validationReceipts.existingClaim=ci-validation-receipts"]'
             worker: present
+          - profile: s3-receipts
+            values: '["--set","backend.existingSecret=sibyl-secrets","--set","coordinationBackend=redis","--set","backend.redis.password=ci-only","--set","publicUrl=https://sibyl.example.test","--set","backend.validationReceipts.url=s3://ci-validation-receipts/sibyl"]'
+            worker: present
     steps:
       - uses: actions/checkout@v7
         with:

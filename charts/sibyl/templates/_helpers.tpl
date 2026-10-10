@@ -214,21 +214,25 @@ existing release to chart defaults, silently discarding every other override.
 {{- end }}
 
 {{/*
-Update strategy for a Deployment that mounts the validation receipts claim.
-An explicit strategy wins. A single fixed replica rolls with maxSurge 0 so no
-surge pod ever competes for a ReadWriteOnce claim. The default stays type
+Update strategy for a Deployment that may mount the validation receipts
+claim. Takes a dict: "workload" (backend or worker values) and "claim" (the
+receipts claim name, empty when receipts live in S3). An explicit strategy
+wins. A single fixed replica on a claim rolls with maxSurge 0 so no surge pod
+ever competes for a ReadWriteOnce claim; with S3 there is no claim to compete
+for, so the Kubernetes default applies. The claim default stays type
 RollingUpdate rather than Recreate: the API server defaults rollingUpdate on
 every existing Deployment, no applier owns that field, and server-side apply
 can never remove it, so switching type to Recreate is rejected on upgrade.
 */}}
 {{- define "sibyl.receiptsStrategy" -}}
-{{- if .strategy -}}
-{{- if and (eq (toString .strategy.type) "Recreate") .strategy.rollingUpdate -}}
+{{- $workload := .workload -}}
+{{- if $workload.strategy -}}
+{{- if and (eq (toString $workload.strategy.type) "Recreate") $workload.strategy.rollingUpdate -}}
 {{- fail "strategy.rollingUpdate may not be set when strategy.type is Recreate" -}}
 {{- end -}}
 strategy:
-  {{- toYaml .strategy | nindent 2 }}
-{{- else if and (not .autoscaling.enabled) (le (int .replicaCount) 1) -}}
+  {{- toYaml $workload.strategy | nindent 2 }}
+{{- else if and .claim (not $workload.autoscaling.enabled) (le (int $workload.replicaCount) 1) -}}
 strategy:
   type: RollingUpdate
   rollingUpdate:

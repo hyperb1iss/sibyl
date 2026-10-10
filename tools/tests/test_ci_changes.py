@@ -132,6 +132,7 @@ def test_ci_runs_release_and_helm_contract_jobs() -> None:
     assert "moon run e2e:test-browser" in workflow
     assert "profile: defaults" in workflow
     assert "profile: production-redis" in workflow
+    assert "profile: s3-receipts" in workflow
 
 
 # Gates that PR CI already runs through another job on the same change sets:

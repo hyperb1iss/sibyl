@@ -1034,6 +1034,62 @@ def test_helm_receipt_pods_keep_claim_private_and_attachable() -> None:
 
 
 @requires_helm
+def test_helm_s3_receipts_need_no_claim_and_keep_the_default_rollout() -> None:
+    url = "s3://sibyl-receipts/prod?region=us-west-2"
+    s3 = (
+        "--set",
+        "backend.validationReceipts.existingClaim=",
+        "--set",
+        f"backend.validationReceipts.url={url}",
+    )
+    deployments = _receipt_deployments(*s3)
+    for name in ("sibyl-backend", "sibyl-worker"):
+        spec = deployments[name]["spec"]
+        pod = spec["template"]["spec"]
+        assert "strategy" not in spec, "no claim to compete for, so no maxSurge 0 rollout"
+        assert all(volume["name"] != "validation-receipts" for volume in pod["volumes"])
+        for container in pod["containers"]:
+            assert all(m["name"] != "validation-receipts" for m in container["volumeMounts"])
+            assert all(e["name"] != "SIBYL_VALIDATION_RECEIPT_DIR" for e in container["env"])
+            assert {"configMapRef": {"name": "sibyl-config"}} in container["envFrom"]
+    rendered = _helm_template("--set", "backend.existingSecret=runtime-secret", *s3)
+    assert rendered.returncode == 0, rendered.stderr
+    config = next(
+        d
+        for d in yaml.safe_load_all(rendered.stdout)
+        if d and d.get("kind") == "ConfigMap" and d["metadata"]["name"] == "sibyl-config"
+    )
+    assert config["data"]["SIBYL_VALIDATION_RECEIPT_URL"] == url
+
+    both = _helm_template(
+        "--set",
+        "backend.existingSecret=runtime-secret",
+        "--set",
+        f"backend.validationReceipts.url={url}",
+    )
+    assert both.returncode != 0
+    assert "Set only one of backend.validationReceipts.url" in both.stderr
+    https = _helm_template(
+        "--set",
+        "backend.existingSecret=runtime-secret",
+        "--set",
+        "backend.validationReceipts.existingClaim=",
+        "--set",
+        "backend.validationReceipts.url=https://sibyl-receipts.s3.amazonaws.com/prod",
+    )
+    assert https.returncode != 0
+    assert "must be an s3://" in https.stderr
+    bypass = _helm_template(
+        "--set",
+        "backend.existingSecret=runtime-secret",
+        "--set",
+        f"backend.env.SIBYL_VALIDATION_RECEIPT_URL={url}",
+    )
+    assert bypass.returncode != 0
+    assert "instead of backend.env.SIBYL_VALIDATION_RECEIPT_URL" in bypass.stderr
+
+
+@requires_helm
 def test_helm_receipt_strategy_leaves_no_whitespace_lines() -> None:
     rendered = _helm_template(
         "--set",
@@ -1074,7 +1130,7 @@ def test_production_compose_validation_receipts_share_durable_state() -> None:
 
 
 @requires_helm
-@pytest.mark.parametrize("profile", ["defaults", "production-redis"])
+@pytest.mark.parametrize("profile", ["defaults", "production-redis", "s3-receipts"])
 def test_helm_ci_profile_renders_exact_workflow_arguments(profile: str) -> None:
     workflow = yaml.safe_load((REPO_ROOT / ".github/workflows/ci.yml").read_text())
     profiles = workflow["jobs"]["helm"]["strategy"]["matrix"]["include"]
@@ -1100,6 +1156,12 @@ def test_helm_ci_profile_renders_exact_workflow_arguments(profile: str) -> None:
     ]
     assert backend_pods
     for pod in backend_pods:
-        volume = next(item for item in pod["volumes"] if item["name"] == "validation-receipts")
-        assert volume["persistentVolumeClaim"]["claimName"] == "ci-validation-receipts"
+        volumes = {item["name"]: item for item in pod["volumes"]}
+        if profile == "s3-receipts":
+            assert "validation-receipts" not in volumes
+        else:
+            claim = volumes["validation-receipts"]["persistentVolumeClaim"]["claimName"]
+            assert claim == "ci-validation-receipts"
+    receipt_url = 'SIBYL_VALIDATION_RECEIPT_URL: "s3://ci-validation-receipts/sibyl"'
+    assert (receipt_url in result.stdout) == (profile == "s3-receipts")
     assert ("name: sibyl-worker" in result.stdout) == (selected["worker"] == "present")

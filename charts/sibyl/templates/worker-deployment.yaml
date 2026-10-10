@@ -9,7 +9,7 @@ spec:
   {{- if not .Values.worker.autoscaling.enabled }}
   replicas: {{ .Values.worker.replicaCount }}
   {{- end }}
-  {{- with include "sibyl.receiptsStrategy" .Values.worker }}
+  {{- with include "sibyl.receiptsStrategy" (dict "workload" .Values.worker "claim" .Values.backend.validationReceipts.existingClaim) }}
   {{- . | nindent 2 }}
   {{- end }}
   selector:
@@ -69,8 +69,10 @@ spec:
                 name: {{ .Values.backend.existingSecret }}
             {{- end }}
           env:
+            {{- if .Values.backend.validationReceipts.existingClaim }}
             - name: SIBYL_VALIDATION_RECEIPT_DIR
               value: /var/lib/sibyl-receipts/private
+            {{- end }}
             {{- if .Values.backend.existingSecret }}
             - name: SIBYL_JWT_SECRET
               valueFrom:
@@ -120,14 +122,18 @@ spec:
           resources:
             {{- toYaml .Values.worker.resources | nindent 12 }}
           volumeMounts:
+            {{- if .Values.backend.validationReceipts.existingClaim }}
             - name: validation-receipts
               mountPath: /var/lib/sibyl-receipts
+            {{- end }}
             - name: tmp
               mountPath: /tmp
       volumes:
+        {{- if .Values.backend.validationReceipts.existingClaim }}
         - name: validation-receipts
           persistentVolumeClaim:
             claimName: {{ .Values.backend.validationReceipts.existingClaim | quote }}
+        {{- end }}
         - name: tmp
           emptyDir: {}
       {{- with .Values.worker.nodeSelector }}
