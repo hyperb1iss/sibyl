@@ -1,0 +1,24 @@
+# Packages the roles under roles/ as the hyperb1iss.sibyl collection, so a
+# deployment repo can pin the role to a Sibyl release tag instead of pointing
+# roles_path at a working checkout. `version` is stamped from VERSION by
+# tools/release/sync_versions.py; installs resolve the git ref, not this field.
+namespace: hyperb1iss
+name: sibyl
+version: 1.4.9
+readme: README.md
+authors:
+  - Stefanie Jane <stef@hyperbliss.tech>
+description: Deploy the Sibyl knowledge-graph stack on a single host.
+license:
+  - Apache-2.0
+tags:
+  - sibyl
+  - docker
+  - surrealdb
+dependencies:
+  community.general: ">=8.0.0"
+repository: https://github.com/hyperb1iss/sibyl
+documentation: https://github.com/hyperb1iss/sibyl/blob/main/docs/deployment/ansible.md
+issues: https://github.com/hyperb1iss/sibyl/issues
+build_ignore:
+  - "*.retry"

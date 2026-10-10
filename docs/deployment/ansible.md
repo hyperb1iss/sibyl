@@ -25,7 +25,8 @@ compiles on the host.
 
 ## The `sibyl` role
 
-`infra/ansible/roles/sibyl/` provisions a host end to end:
+`infra/ansible/roles/sibyl/` ships in the `hyperb1iss.sibyl` collection (`infra/ansible/`) and
+provisions a host end to end:
 
 - installs Docker Engine and the Compose plugin
 - installs `ufw`: default-deny inbound, SSH allowed, HTTP and HTTPS reachable only on the proxy
@@ -88,21 +89,34 @@ manages. The next restart recreates `sibyl-network` with the new plan. Set
 replacing it, so list that proxy's address as well. The
 [environment reference](./environment.md#trusted-proxies) explains how the address resolves.
 
+When Caddy listens on a Tailscale address, turn off Tailscale's subnet-router SNAT on that node
+(`tailscale set --snat-subnet-routes=false`). Docker forwards published ports through the kernel, so
+Tailscale treats tailnet traffic to Caddy as routed traffic and masquerades it to the bridge gateway
+by default. Caddy then sees every client as `.1`, and the per-address limit collapses back into one
+shared bucket. A node that advertises no subnet routes loses nothing by turning it off.
+
 ## Deploying
 
 The role is provider-agnostic: any Ubuntu host reachable over SSH works.
 
 ### Prerequisites
 
-The role is not published to Ansible Galaxy, so two things must be in place before the playbook runs
-end to end:
+Two things must be in place before the playbook runs end to end:
 
-- **`roles_path`**: your playbook has to resolve the `sibyl` role from a checkout of this
-  repository. Point `ansible.cfg` at it:
+- **The collection**: install `hyperb1iss.sibyl` straight from this repository, pinned to a release
+  tag. The tag fixes the role and the image versions it deploys together, so leave `sibyl_version`
+  at its default unless you mean to run images from a different release than the role.
 
-  ```ini
-  [defaults]
-  roles_path = roles:/path/to/sibyl/infra/ansible/roles
+  ```yaml
+  # requirements.yml
+  collections:
+    - name: https://github.com/hyperb1iss/sibyl.git#/infra/ansible
+      type: git
+      version: v1.4.9
+  ```
+
+  ```bash
+  ansible-galaxy collection install -r requirements.yml
   ```
 
 - **Secrets**: the five vault variables listed under [Variables](#variables) have no defaults. The
@@ -128,7 +142,8 @@ authorizes its SSH key, so later runs connect as that user and host hardening ca
 
 ### 3. Provision
 
-Apply the role, alongside a base-hardening role and optionally a Tailscale role, from your playbook:
+Apply `hyperb1iss.sibyl.sibyl`, alongside a base-hardening role and optionally a Tailscale role,
+from your playbook:
 
 ```bash
 ansible-playbook site.yml --limit my-host
@@ -148,7 +163,9 @@ curl -sf https://<sibyl_domain>/api/health
 ## Operations
 
 - **Logs:** `docker compose --env-file /opt/sibyl/.env -f /opt/sibyl/docker-compose.yml logs -f`
-- **Update:** bump `sibyl_version` and re-run the role
+- **Update:** bump the collection's `version` in `requirements.yml` to the new release tag,
+  reinstall it with `ansible-galaxy collection install -r requirements.yml --force`, and re-run the
+  role
 - **Backups:** schedule `surreal export` against the running stack and copy the dump off-host. The
   graph is your memory; back it up.
 

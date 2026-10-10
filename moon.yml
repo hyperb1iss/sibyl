@@ -317,6 +317,8 @@ tasks:
       - charts/sibyl/Chart.yaml
       - charts/surrealdb/Chart.yaml
       - docker-compose.quickstart.yml
+      - infra/ansible/galaxy.yml
+      - infra/ansible/README.md
       - infra/ansible/roles/sibyl/defaults/main.yml
       - infra/ansible/roles/sibyl/files/docker-compose.yml
       - docs/cli/docker.md
