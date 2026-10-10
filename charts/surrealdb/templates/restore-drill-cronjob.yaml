@@ -33,9 +33,11 @@ spec:
       # failed drill, so a node rotation does not page.
       podFailurePolicy:
         rules:
+          # status is required by the API server before 1.34.
           - action: Ignore
             onPodConditions:
               - type: DisruptionTarget
+                status: "True"
       template:
         metadata:
           labels:

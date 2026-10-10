@@ -1182,7 +1182,10 @@ def test_helm_export_job_fails_fast_only_on_recorded_failures() -> None:
                     "values": [RECORDED_FAILURE_EXIT],
                 },
             },
-            {"action": "Ignore", "onPodConditions": [{"type": "DisruptionTarget"}]},
+            {
+                "action": "Ignore",
+                "onPodConditions": [{"type": "DisruptionTarget", "status": "True"}],
+            },
         ]
     }
 
@@ -1359,7 +1362,12 @@ def test_helm_drill_job_replaces_pods_lost_to_disruption() -> None:
     spec, _ = _raw_env("restore-drill")
     assert spec["template"]["spec"]["restartPolicy"] == "Never"
     assert spec["podFailurePolicy"] == {
-        "rules": [{"action": "Ignore", "onPodConditions": [{"type": "DisruptionTarget"}]}]
+        "rules": [
+            {
+                "action": "Ignore",
+                "onPodConditions": [{"type": "DisruptionTarget", "status": "True"}],
+            }
+        ]
     }
 
 
@@ -1420,3 +1428,38 @@ def test_helm_export_org_check_requires_the_graph_database(harness: OpsHarness) 
     assert _manifest(harness)["organizations"]["without_graph"] == [
         {"organization": ORPHAN_ORG, "namespace": other, "database": "graph"}
     ]
+
+
+def test_helm_pod_condition_rules_carry_status() -> None:
+    """kube-apiserver before 1.34 rejects an onPodConditions entry without
+    status ("Required value"); only 1.34 defaults it, so a render-only check
+    on a recent cluster misses it."""
+    assert _HELM is not None
+    rendered = subprocess.run(  # noqa: S603
+        [
+            _HELM,
+            "template",
+            "drill",
+            "charts/surrealdb",
+            "--set",
+            "export.enabled=true",
+            "--set",
+            "restoreDrill.enabled=true",
+            "--set",
+            "snapshot.enabled=true",
+        ],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    entries = []
+    for document in yaml.safe_load_all(rendered.stdout):
+        if not document or document.get("kind") not in {"CronJob", "Job"}:
+            continue
+        spec = document["spec"].get("jobTemplate", {}).get("spec", document["spec"])
+        for rule in (spec.get("podFailurePolicy") or {}).get("rules", []):
+            entries.extend(rule.get("onPodConditions", []))
+    assert entries, "the chart renders onPodConditions rules"
+    for entry in entries:
+        assert entry.get("status") in {"True", "False", "Unknown"}, entry
