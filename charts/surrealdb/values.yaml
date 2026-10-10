@@ -123,7 +123,8 @@ export:
     # Local staging path. Deployment overlays can mount blob/object storage here.
     path: /backups
     # Where syncCommand copies runs, such as s3://bucket/prefix. Exposed
-    # as $SIBYL_EXPORT_DESTINATION_URI to syncCommand.
+    # as $SIBYL_EXPORT_DESTINATION_URI to syncCommand and to the restore
+    # drill's fetchCommand.
     uri: ""
   # Each run writes <destination.path>/<filePrefix>-<UTC timestamp>/ with
   # one <namespace>.<database>.surql per database and a manifest.json
@@ -159,6 +160,19 @@ restoreDrill:
   startingDeadlineSeconds: 900
   source:
     path: /backups
+  # Runs in its own `sh -ec` before the drill picks a run, with
+  # $SIBYL_RESTORE_SOURCE_PATH, $SIBYL_EXPORT_DESTINATION_URI and
+  # $SIBYL_EXPORT_FILE_PREFIX set. Use it to download the newest run whose
+  # manifest.json exists into the source path, files before manifest.
+  fetchCommand: ""
+  decryption:
+    enabled: false
+    # Runs in its own `sh -ec` once per file, manifest first. It reads
+    # $SIBYL_RESTORE_ENCRYPTED_FILE (never modified) and writes the
+    # plaintext to $SIBYL_RESTORE_FILE, which the drill then checks against
+    # the manifest's plaintext sha256. Example:
+    #   age -d -i /secrets/age/key.txt -o "$SIBYL_RESTORE_FILE" "$SIBYL_RESTORE_ENCRYPTED_FILE"
+    command: ""
   restore:
     endpoint: http://127.0.0.1:8000
     username: drill

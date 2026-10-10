@@ -250,6 +250,24 @@ ENCRYPT = (
     f'( echo {CIPHER_HEADER}; tr "A-Za-z" "N-ZA-Mn-za-m" < "$SIBYL_EXPORT_FILE" )'
     ' > "$SIBYL_EXPORT_ENCRYPTED_FILE"'
 )
+DECRYPT = (
+    'tail -n +2 "$SIBYL_RESTORE_ENCRYPTED_FILE" | tr "A-Za-z" "N-ZA-Mn-za-m"'
+    ' > "$SIBYL_RESTORE_FILE"'
+)
+NOTIFY = 'echo notified >> "$HOME/notified.log"'
+
+
+def _encrypted_export_values() -> dict[str, Any]:
+    return {"export": {"encryption": {"enabled": True, "command": ENCRYPT}}}
+
+
+def _decrypting_drill_values(command: str = DECRYPT) -> dict[str, Any]:
+    return {
+        "restoreDrill": {
+            "decryption": {"enabled": True, "command": command},
+            "failureNotification": {"command": NOTIFY},
+        }
+    }
 
 
 def _stored_files(run_dir: Path) -> dict[str, bytes]:
@@ -360,6 +378,7 @@ def test_helm_restore_drill_restores_every_database_in_the_newest_manifest(
     assert receipt["status"] == "PASS"
     assert receipt["manifest"]["path"] == str(run_dir / "manifest.json")
     assert receipt["manifest"]["databases"] == SOURCE_DATABASES
+    assert receipt["manifest"]["decrypted"] is False
     by_name = {(item["namespace"], item["database"]): item for item in receipt["databases"]}
     assert set(by_name) == {(ns, db) for ns, dbs in _source().items() for db in dbs}
     for (namespace, database), item in by_name.items():
@@ -434,3 +453,144 @@ def test_helm_restore_drill_scratch_server_keeps_data_on_its_tmp_volume() -> Non
             assert "emptyDir" in tmp_volume
             return
     pytest.fail("restore-drill CronJob not rendered")
+
+
+def test_helm_restore_drill_decrypts_into_scratch_and_checks_the_plaintext(
+    harness: OpsHarness,
+) -> None:
+    harness.serve(source=_source())
+    exported = harness.run("export", *harness.values(_encrypted_export_values()))
+    assert exported.returncode == 0, exported.stderr
+    harness.serve()
+    (run_dir,) = _run_dirs(harness)
+    before = _stored_files(run_dir)
+
+    result = harness.run("restore-drill", *harness.values(_decrypting_drill_values()))
+    assert result.returncode == 0, result.stderr
+
+    receipt = json.loads(harness.receipt_path.read_text())
+    assert receipt["status"] == "PASS"
+    assert receipt["manifest"]["decrypted"] is True
+    assert {item["status"] for item in receipt["databases"]} == {"PASS"}
+    assert harness.server("http://restore")["namespaces"] == _source()
+    assert _stored_files(run_dir) == before, "the drill must never rewrite the backup it reads"
+
+
+@pytest.mark.parametrize(
+    ("drill_values", "message"),
+    [
+        ({}, "is not JSON; encrypted exports need restoreDrill.decryption"),
+        (
+            _decrypting_drill_values('cp "$SIBYL_RESTORE_ENCRYPTED_FILE" "$SIBYL_RESTORE_FILE"'),
+            "is not JSON",
+        ),
+        (
+            _decrypting_drill_values(
+                DECRYPT
+                + '\ncase "$SIBYL_RESTORE_FILE" in *.surql) echo tampered >> "$SIBYL_RESTORE_FILE";; esac'
+            ),
+            f"restore failed for {ORG_A}/graph: export file",
+        ),
+        (
+            _decrypting_drill_values(
+                'case "$SIBYL_RESTORE_FILE" in *.surql) exit 4;; esac\n' + DECRYPT
+            ),
+            f"restore failed for {ORG_A}/graph: decryption failed",
+        ),
+    ],
+    ids=["no-decryption", "wrong-key", "wrong-plaintext", "decrypt-error"],
+)
+def test_helm_restore_drill_fails_when_decryption_is_missing_or_wrong(
+    harness: OpsHarness, drill_values: dict[str, Any], message: str
+) -> None:
+    harness.serve(source=_source())
+    exported = harness.run("export", *harness.values(_encrypted_export_values()))
+    assert exported.returncode == 0, exported.stderr
+    harness.serve()
+
+    values = {"restoreDrill": {"failureNotification": {"command": NOTIFY}}}
+    values["restoreDrill"].update(drill_values.get("restoreDrill", {}))
+    result = harness.run("restore-drill", *harness.values(values))
+
+    assert result.returncode != 0
+    assert message in result.stderr
+    assert (harness.root / "notified.log").read_text() == "notified\n"
+    assert not harness.receipt_path.exists()
+
+
+# Mirrors the documented S3 fetch with a directory standing in for the
+# bucket: newest run whose manifest exists, files first, manifest last.
+# The `exit 0` also proves the hook cannot end the drill early.
+FETCH = """\
+remote="$SIBYL_EXPORT_DESTINATION_URI"
+for run in $(ls -1 "$remote" | grep "^$SIBYL_EXPORT_FILE_PREFIX-" | sort -r); do
+  if [ -f "$remote/$run/manifest.json" ]; then
+    mkdir -p "$SIBYL_RESTORE_SOURCE_PATH/$run"
+    for file in "$remote/$run"/*.surql; do cp "$file" "$SIBYL_RESTORE_SOURCE_PATH/$run/"; done
+    cp "$remote/$run/manifest.json" "$SIBYL_RESTORE_SOURCE_PATH/$run/manifest.json"
+    exit 0
+  fi
+done
+echo "no complete run under $remote" >&2
+exit 1
+"""
+
+
+def test_helm_restore_drill_fetches_the_newest_complete_run(harness: OpsHarness) -> None:
+    run_dir = _export_then_reset(harness)
+    remote = harness.root / "bucket"
+    remote.mkdir()
+    shutil.move(run_dir, remote / run_dir.name)
+    unfinished = remote / "sibyl-99991231235959"
+    unfinished.mkdir()
+    (unfinished / f"{ORG_A}.graph.surql").write_text("-- upload still running\n")
+
+    result = harness.run(
+        "restore-drill",
+        *harness.values(
+            {
+                "export": {"destination": {"uri": str(remote)}},
+                "restoreDrill": {"fetchCommand": FETCH},
+            }
+        ),
+    )
+    assert result.returncode == 0, result.stderr
+
+    receipt = json.loads(harness.receipt_path.read_text())
+    assert receipt["status"] == "PASS"
+    assert receipt["manifest"]["path"] == str(harness.backups / run_dir.name / "manifest.json")
+    assert [path.name for path in _run_dirs(harness)] == [run_dir.name]
+    assert harness.server("http://restore")["namespaces"] == _source()
+
+
+@pytest.mark.parametrize(
+    ("override", "message"),
+    [
+        (
+            ("--set", "restoreDrill.decryption.enabled=true"),
+            "restoreDrill.decryption.command is required",
+        ),
+    ],
+    ids=["decryption-without-command"],
+)
+def test_helm_restore_drill_rejects_unusable_hook_values(
+    override: tuple[str, str], message: str
+) -> None:
+    assert _HELM is not None
+    rendered = subprocess.run(  # noqa: S603
+        [
+            _HELM,
+            "template",
+            "drill",
+            "charts/surrealdb",
+            "--set",
+            "restoreDrill.enabled=true",
+            *override,
+        ],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert rendered.returncode != 0
+    assert message in rendered.stderr

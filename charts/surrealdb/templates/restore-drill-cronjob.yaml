@@ -3,6 +3,9 @@
 {{- if and .Values.restoreDrill.recallCheck.enabled (not .Values.restoreDrill.recallCheck.command) -}}
 {{- fail "restoreDrill.recallCheck.command is required when restoreDrill.recallCheck.enabled=true" -}}
 {{- end -}}
+{{- if and .Values.restoreDrill.decryption.enabled (not .Values.restoreDrill.decryption.command) -}}
+{{- fail "restoreDrill.decryption.command is required when restoreDrill.decryption.enabled=true" -}}
+{{- end -}}
 apiVersion: batch/v1
 kind: CronJob
 metadata:
@@ -130,6 +133,18 @@ spec:
                     fi
                     printf '%s\n' "$response" | jq -c '.[-1].result'
                   }
+                  # Hooks run in their own `sh -ec`, so a failing step inside
+                  # one fails the hook, and an `exit` in it cannot end the
+                  # drill early.
+                  decrypt_restore_file() {
+                    SIBYL_RESTORE_ENCRYPTED_FILE="$1" SIBYL_RESTORE_FILE="$2" \
+                      sh -ec "$SIBYL_RESTORE_DECRYPTION_COMMAND"
+                  }
+                  if [ -n "${SIBYL_RESTORE_FETCH_COMMAND:-}" ]; then
+                    mkdir -p "$SIBYL_RESTORE_SOURCE_PATH"
+                    echo "fetching exports from ${SIBYL_EXPORT_DESTINATION_URI:-(no destination URI)}"
+                    sh -ec "$SIBYL_RESTORE_FETCH_COMMAND"
+                  fi
                   ready=""
                   for _ in $(seq 1 30); do
                     if curl -fsS "$SURREAL_RESTORE_ENDPOINT/health" >/dev/null 2>&1; then
@@ -156,6 +171,19 @@ spec:
                     exit 1
                   fi
                   run_dir="$(dirname "$manifest")"
+                  # Decrypted copies go to scratch space: the source may be
+                  # the backup store itself, and it is never modified.
+                  manifest_doc="$manifest"
+                  decrypted=false
+                  if [ -n "${SIBYL_RESTORE_DECRYPTION_COMMAND:-}" ]; then
+                    decrypted=true
+                    manifest_doc="$work/manifest.json"
+                    decrypt_restore_file "$manifest" "$manifest_doc"
+                  fi
+                  if ! jq -e 'type == "object"' "$manifest_doc" >/dev/null 2>&1; then
+                    echo "manifest $manifest is not JSON; encrypted exports need restoreDrill.decryption" >&2
+                    exit 1
+                  fi
                   # Manifest names reach SurrealQL and file paths, so each
                   # entry must name plain identifiers and its own file.
                   if ! jq -e --arg re "$identifier" '
@@ -163,27 +191,41 @@ spec:
                       and all(.databases[];
                         (.namespace | test($re)) and (.database | test($re))
                         and .file == "\(.namespace).\(.database).surql")' \
-                      "$manifest" >/dev/null; then
+                      "$manifest_doc" >/dev/null; then
                     echo "manifest $manifest lists no databases or names an unsafe file" >&2
                     exit 1
                   fi
-                  echo "restoring $(jq '.databases | length' "$manifest") databases from $manifest"
+                  echo "restoring $(jq '.databases | length' "$manifest_doc") databases from $manifest"
                   : > "$work/databases.jsonl"
-                  database_count="$(jq '.databases | length' "$manifest")"
+                  database_count="$(jq '.databases | length' "$manifest_doc")"
                   index=0
                   while [ "$index" -lt "$database_count" ]; do
-                    expected="$(jq -c --argjson index "$index" '.databases[$index]' "$manifest")"
+                    expected="$(jq -c --argjson index "$index" '.databases[$index]' "$manifest_doc")"
                     index=$((index + 1))
                     namespace="$(printf '%s\n' "$expected" | jq -r '.namespace')"
                     database="$(printf '%s\n' "$expected" | jq -r '.database')"
-                    file="$run_dir/$namespace.$database.surql"
+                    stored="$run_dir/$namespace.$database.surql"
+                    file="$stored"
                     problem=""
                     restored='[]'
-                    if [ ! -f "$file" ]; then
-                      problem="export file $file is missing"
+                    if [ ! -f "$stored" ]; then
+                      problem="export file $stored is missing"
+                    elif [ "$decrypted" = true ]; then
+                      file="$work/$namespace.$database.surql"
+                      if ! decrypt_restore_file "$stored" "$file"; then
+                        problem="decryption failed for $stored"
+                      fi
+                    fi
+                    # Checksums describe the plaintext, so this also catches
+                    # a decrypt step that returns the wrong bytes.
+                    if [ -n "$problem" ]; then
+                      :
                     elif [ "$(wc -c < "$file" | tr -d ' ')" != "$(printf '%s\n' "$expected" | jq -r '.bytes')" ] \
                       || [ "$(sha256sum "$file" | cut -d ' ' -f 1)" != "$(printf '%s\n' "$expected" | jq -r '.sha256')" ]; then
-                      problem="export file $file does not match the manifest's size and sha256"
+                      problem="export file $stored does not match the manifest's size and sha256 after decryption"
+                      if [ "$decrypted" = false ]; then
+                        problem="export file $stored does not match the manifest's size and sha256"
+                      fi
                     else
                       # Export files assume their namespace and database
                       # exist, and 3.x does not create them over HTTP.
@@ -202,6 +244,9 @@ spec:
                       else
                         problem="import failed: $(printf '%s' "$import_response" | head -c 2000)"
                       fi
+                    fi
+                    if [ "$decrypted" = true ]; then
+                      rm -f "$file"
                     fi
                     # Counts come from a separate read on a live server, so
                     # a few rows of drift is expected. A table that vanished
@@ -260,8 +305,12 @@ spec:
                   {{- end }}
                   receipt_dir="$(dirname "$SIBYL_RESTORE_RECEIPT_PATH")"
                   mkdir -p "$receipt_dir"
-                  jq -c '{path: input_filename, created_at, server_version, databases: (.databases | length)}' \
-                    "$manifest" > "$work/manifest-summary.json"
+                  jq -c \
+                    --arg path "$manifest" \
+                    --argjson decrypted "$decrypted" \
+                    '{path: $path, created_at, server_version, databases: (.databases | length),
+                      decrypted: $decrypted}' \
+                    "$manifest_doc" > "$work/manifest-summary.json"
                   jq -cn \
                     --arg runtime "kubernetes:${POD_NAMESPACE:-default}/{{ include "sibyl-surrealdb.fullname" . }}-restore-drill" \
                     --slurpfile manifest "$work/manifest-summary.json" \
@@ -282,6 +331,14 @@ spec:
                   value: {{ .Values.restoreDrill.source.path | quote }}
                 - name: SIBYL_EXPORT_FILE_PREFIX
                   value: {{ .Values.export.filePrefix | quote }}
+                - name: SIBYL_EXPORT_DESTINATION_URI
+                  value: {{ .Values.export.destination.uri | quote }}
+                - name: SIBYL_RESTORE_FETCH_COMMAND
+                  value: {{ .Values.restoreDrill.fetchCommand | quote }}
+                {{- if .Values.restoreDrill.decryption.enabled }}
+                - name: SIBYL_RESTORE_DECRYPTION_COMMAND
+                  value: {{ .Values.restoreDrill.decryption.command | quote }}
+                {{- end }}
                 - name: SURREAL_RESTORE_ENDPOINT
                   value: {{ .Values.restoreDrill.restore.endpoint | quote }}
                 - name: SURREAL_RESTORE_USER
