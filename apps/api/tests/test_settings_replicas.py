@@ -4,7 +4,8 @@ Replica A is the process that handles the admin's request; replica B is any
 other API replica or worker. They share a settings table and one invalidation
 channel, nothing else. Replica B runs the production handlers, installed with
 ``install_cache_invalidation_handlers`` over B's own settings service and LLM
-config source.
+config source. Announcing only queues a message and each topic has its own
+worker, so tests ``settle`` both buses before asserting what B did.
 """
 
 from __future__ import annotations
@@ -66,8 +67,13 @@ async def _no_session() -> AsyncIterator[None]:
 class Replicas:
     table: SettingsTable
     a_bus: CacheInvalidationBus
+    b_bus: CacheInvalidationBus
     a: SettingsService
     b: SettingsService
+
+    async def settle(self) -> None:
+        await self.a_bus.flush()
+        await self.b_bus.drain()
 
 
 @pytest.fixture
@@ -102,7 +108,7 @@ async def _replicas(
     if linked:
         await a_bus.attach(FakeTransport(channel))
         await b_bus.attach(FakeTransport(channel))
-    return Replicas(table=table, a_bus=a_bus, a=a, b=b)
+    return Replicas(table=table, a_bus=a_bus, b_bus=b_bus, a=a, b=b)
 
 
 @pytest.mark.parametrize("linked", [False, True], ids=["no-channel", "channel"])
@@ -111,9 +117,11 @@ async def test_a_rotated_key_is_served_by_the_other_replica(
 ) -> None:
     replicas = await _replicas(table, monkeypatch, linked=linked)
     await replicas.a.set("anthropic_api_key", "sk-old")
+    await replicas.settle()
     assert await replicas.b.get("anthropic_api_key") == "sk-old"
 
     await replicas.a.set("anthropic_api_key", "sk-rotated")
+    await replicas.settle()
 
     served = await replicas.b.get("anthropic_api_key")
     # Without the channel, B serves its cached copy until the 60s TTL lapses.
@@ -126,9 +134,11 @@ async def test_a_deleted_setting_is_forgotten_by_the_other_replica(
     replicas = await _replicas(table, monkeypatch, linked=True)
     monkeypatch.delenv("SIBYL_LLM_BUDGET_MONTHLY_ORG_TOKENS", raising=False)
     await replicas.a.set("llm.budget.monthly_org_tokens", "5000", is_secret=False)
+    await replicas.settle()
     assert await replicas.b.get("llm.budget.monthly_org_tokens") == "5000"
 
     assert await replicas.a.delete("llm.budget.monthly_org_tokens") is True
+    await replicas.settle()
 
     assert await replicas.b.get("llm.budget.monthly_org_tokens") is None
 
@@ -152,6 +162,7 @@ async def test_runtime_settings_saved_on_one_replica_reach_the_others_environmen
     await announce_runtime_settings_changed(
         ["openai_api_key", "graph_embedding_provider", "gemini_api_key", "not_a_runtime_key"]
     )
+    await replicas.settle()
 
     assert os.environ["OPENAI_API_KEY"] == "sk-new"
     assert os.environ["SIBYL_GRAPH_EMBEDDING_PROVIDER"] == "gemini"
@@ -204,7 +215,7 @@ class _SettingsValues:
 async def test_llm_config_changed_on_one_replica_is_re_resolved_on_the_other(
     table: SettingsTable, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    await _replicas(table, monkeypatch, linked=True)
+    replicas = await _replicas(table, monkeypatch, linked=True)
     stored = {"llm.crawler.model": "claude-haiku-5-5", "anthropic_api_key": "sk-ant"}
     b_source = DBSettingsConfigSource(_SettingsValues(stored), environ={})  # type: ignore[arg-type]
     llm_config.set_config_source(b_source)
@@ -213,6 +224,7 @@ async def test_llm_config_changed_on_one_replica_is_re_resolved_on_the_other(
     stored["llm.crawler.model"] = "claude-sonnet-5-5"
     assert (await b_source.resolve(LLMSurface.CRAWLER)).model.value == "claude-haiku-5-5"
     await announce_llm_runtime_invalidated(LLMSurface.CRAWLER.value)
+    await replicas.settle()
 
     assert (await b_source.resolve(LLMSurface.CRAWLER)).model.value == "claude-sonnet-5-5"
 

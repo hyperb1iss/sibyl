@@ -44,7 +44,13 @@ async def get_coordination_health() -> dict[str, Any]:
             "error": "Health check failed",
         }
 
-    merged = {**health, **broker_health}
+    merged: dict[str, Any] = {**health, **broker_health}
+    try:
+        from sibyl.cache_invalidation import cache_invalidation_status
+
+        merged["cache_invalidation"] = cache_invalidation_status()
+    except Exception:
+        merged["cache_invalidation"] = {"state": "unknown"}
     telemetry_registry().record_queue_health(
         backend=str(merged.get("queue_backend") or backend),
         queue_depth=int(merged.get("queue_depth") or 0),

@@ -9,7 +9,10 @@ database.
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
 from collections.abc import Iterable
+from typing import Any
 from uuid import UUID
 
 import structlog
@@ -28,6 +31,11 @@ SESSIONS_TOPIC = "auth.sessions.invalidated"
 SETTINGS_TOPIC = "settings.changed"
 RUNTIME_SETTINGS_TOPIC = "settings.runtime.changed"
 LLM_RUNTIME_TOPIC = "llm.runtime.invalidated"
+# Backoff between attempts to join the channel while Redis is unreachable.
+ATTACH_RETRY_INITIAL_SECONDS = 0.5
+ATTACH_RETRY_MAX_SECONDS = 30.0
+
+_attach_task: asyncio.Task[None] | None = None
 
 
 def _uuid_strings(values: Iterable[UUID | str | None]) -> list[str]:
@@ -149,27 +157,73 @@ def install_cache_invalidation_handlers(bus: CacheInvalidationBus) -> None:
     bus.register(SETTINGS_TOPIC, _forget_settings)
     bus.register(RUNTIME_SETTINGS_TOPIC, _apply_runtime_settings)
     bus.register(LLM_RUNTIME_TOPIC, _invalidate_llm_runtime)
-    # Caches only: a missed runtime-settings message is not replayed here,
-    # because re-reading every setting into the environment would let stored
-    # values override what the deployment set, which startup never does.
     bus.on_reset(access_session_cache.clear)
     bus.on_reset(_clear_settings)
     bus.on_reset(_clear_llm_runtime)
 
 
+async def _attach_until_joined(bus: CacheInvalidationBus) -> None:
+    """Join the channel, retrying with backoff for as long as Redis is unreachable."""
+    delay = ATTACH_RETRY_INITIAL_SECONDS
+    attempt = 0
+    while True:
+        attempt += 1
+        transport = build_invalidation_transport(bus)
+        if transport is None:
+            return
+        try:
+            await bus.attach(transport)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            log.warning(
+                "cache_invalidation_attach_retrying",
+                attempt=attempt,
+                error=f"{type(exc).__name__}: {exc}",
+                retry_in_seconds=delay,
+            )
+            await asyncio.sleep(delay)
+            delay = min(delay * 2, ATTACH_RETRY_MAX_SECONDS)
+            continue
+        log.info("cache_invalidation_joined", attempts=attempt)
+        return
+
+
 async def start_cache_invalidation() -> bool:
-    """Join the invalidation channel; False when this process is the only one."""
+    """Join the invalidation channel; False when this process is the only one.
+
+    Joining never blocks startup. With Redis unreachable the process keeps
+    retrying in the background; announcements made meanwhile are queued, and
+    the confirmed subscription runs the reset hooks, which clear the caches,
+    so the process catches up on whatever it missed.
+    ``cache_invalidation_status`` reports progress.
+    """
+    global _attach_task  # noqa: PLW0603
     bus = get_cache_invalidation_bus()
     install_cache_invalidation_handlers(bus)
-    transport = build_invalidation_transport(bus)
-    if transport is None:
+    if build_invalidation_transport(bus) is None:
         return False
-    await bus.attach(transport)
+    bus.enable_broadcast()
+    if _attach_task is None or _attach_task.done():
+        _attach_task = asyncio.create_task(
+            _attach_until_joined(bus), name="cache-invalidation-attach"
+        )
     return True
 
 
 async def stop_cache_invalidation() -> None:
+    global _attach_task
+    task, _attach_task = _attach_task, None
+    if task is not None:
+        task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await task
     await get_cache_invalidation_bus().detach()
+
+
+def cache_invalidation_status() -> dict[str, Any]:
+    """This process's view of the invalidation channel, for health payloads."""
+    return get_cache_invalidation_bus().status()
 
 
 __all__ = [
@@ -182,6 +236,7 @@ __all__ = [
     "announce_sessions_invalidated",
     "announce_settings_changed",
     "apply_session_invalidation",
+    "cache_invalidation_status",
     "install_cache_invalidation_handlers",
     "start_cache_invalidation",
     "stop_cache_invalidation",

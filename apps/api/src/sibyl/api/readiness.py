@@ -2,7 +2,9 @@
 
 Liveness (`/health`) only asserts the process is up. Readiness asks the
 harder question: can this process actually serve traffic? For Sibyl that
-means the SurrealDB runtime and active coordination broker are reachable.
+means the SurrealDB runtime and active coordination broker are reachable,
+and, with several replicas, that this one hears the others' cache
+invalidations.
 The database check connects a dedicated auth client against the static
 `sibyl_auth` namespace and reads at most one user identifier. It never
 queries a per-org namespace or returns auth records in the probe response.
@@ -123,12 +125,38 @@ async def check_coordination_ready() -> DependencyStatus:
     )
 
 
+def check_cache_invalidation_ready() -> DependencyStatus | None:
+    """Whether this replica hears session revocations made on the others.
+
+    Only the redis coordination backend runs several replicas. A replica that
+    is not subscribed would keep honouring sessions revoked elsewhere, so it
+    is held out of rotation until it rejoins, the same way a dead Redis broker
+    already fails readiness. The local backend has nothing to subscribe to.
+    """
+    from sibyl.cache_invalidation import cache_invalidation_status
+
+    status = cache_invalidation_status()
+    state = status["state"]
+    if state == "local":
+        return None
+    ready = state == "subscribed"
+    detail = None
+    if not ready:
+        detail = f"cache invalidation channel {state}"
+        if status.get("last_error"):
+            detail = f"{detail}: {status['last_error']}"
+    return DependencyStatus(name="cache_invalidation", ready=ready, detail=detail, backend="redis")
+
+
 async def check_readiness() -> ReadinessReport:
     """Aggregate readiness across the dependencies needed to serve traffic."""
     dependencies = [await check_surreal_ready(), await check_coordination_ready()]
     schema_status = check_schema_bootstrap_ready()
     if schema_status is not None:
         dependencies.append(schema_status)
+    invalidation_status = check_cache_invalidation_ready()
+    if invalidation_status is not None:
+        dependencies.append(invalidation_status)
     return ReadinessReport(
         ready=all(dep.ready for dep in dependencies),
         dependencies=dependencies,
@@ -138,6 +166,7 @@ async def check_readiness() -> ReadinessReport:
 __all__ = [
     "DependencyStatus",
     "ReadinessReport",
+    "check_cache_invalidation_ready",
     "check_coordination_ready",
     "check_readiness",
     "check_schema_bootstrap_ready",

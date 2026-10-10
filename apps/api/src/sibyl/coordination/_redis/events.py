@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
+import time
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 from typing import Any
@@ -22,8 +23,23 @@ PUBSUB_DB = 2
 # Backoff between attempts to restore a dropped subscription.
 LISTEN_RETRY_INITIAL_SECONDS = 0.1
 LISTEN_RETRY_MAX_SECONDS = 5.0
+# Every socket operation is bounded, so a partition that silently drops
+# packets surfaces as an error in seconds instead of when TCP gives up.
+SOCKET_TIMEOUT_SECONDS = 5.0
+SOCKET_CONNECT_TIMEOUT_SECONDS = 5.0
+HEALTH_CHECK_INTERVAL_SECONDS = 15
+# A subscribed connection only receives, so silence is not a symptom. The
+# listener pings on this interval and treats a connection that has answered
+# nothing for DEAD_AFTER_SECONDS as dead, then reconnects and resets.
+PING_INTERVAL_SECONDS = 5.0
+DEAD_AFTER_SECONDS = 15.0
+_LIVENESS_PING_MESSAGE = "sibyl-event-bus-liveness"
 
 type SubscribedCallback = Callable[[], Awaitable[None]]
+
+
+class SubscriptionLostError(ConnectionError):
+    """The subscribed connection stopped answering liveness pings."""
 
 
 class RedisEventBus:
@@ -34,6 +50,10 @@ class RedisEventBus:
     ``on_subscribed`` each time Redis confirms it. A consumer that cannot
     afford to miss a message (cache invalidation) uses that callback to
     discard whatever it might have missed.
+
+    A connection that stops answering is treated like one that dropped: the
+    listener pings, and when nothing comes back for ``dead_after_seconds`` it
+    closes the socket, reconnects with backoff, and resubscribes.
     """
 
     def __init__(
@@ -41,17 +61,34 @@ class RedisEventBus:
         *,
         channel: str = PUBSUB_CHANNEL,
         on_subscribed: SubscribedCallback | None = None,
+        ping_interval_seconds: float | None = None,
+        dead_after_seconds: float | None = None,
+        socket_timeout_seconds: float | None = None,
     ) -> None:
         self._channel = channel
         self._on_subscribed = on_subscribed
+        self._ping_interval = ping_interval_seconds or PING_INTERVAL_SECONDS
+        self._dead_after = dead_after_seconds or DEAD_AFTER_SECONDS
+        self._socket_timeout = socket_timeout_seconds or SOCKET_TIMEOUT_SECONDS
         self._redis: Redis | None = None
         self._pubsub: Any | None = None
         self._listener_task: asyncio.Task[None] | None = None
         self._subscribers: list[EventSubscriber] = []
+        self._subscribed = False
+        self._last_error: str | None = None
 
     @property
     def channel(self) -> str:
         return self._channel
+
+    @property
+    def subscribed(self) -> bool:
+        """Whether Redis has confirmed the subscription on a live connection."""
+        return self._subscribed
+
+    @property
+    def last_error(self) -> str | None:
+        return self._last_error
 
     async def connect(self) -> None:
         """Connect to Redis for pub/sub."""
@@ -61,15 +98,23 @@ class RedisEventBus:
         redis_host = settings.redis_host or "127.0.0.1"
         redis_port = settings.redis_port or 6381
 
-        self._redis = Redis(
+        client = Redis(
             host=redis_host,
             port=redis_port,
             password=settings.redis_password_value or None,
             db=PUBSUB_DB,
             decode_responses=True,
+            socket_timeout=self._socket_timeout,
+            socket_connect_timeout=min(SOCKET_CONNECT_TIMEOUT_SECONDS, self._socket_timeout),
+            socket_keepalive=True,
+            health_check_interval=HEALTH_CHECK_INTERVAL_SECONDS,
         )
-
-        await self._redis.ping()
+        try:
+            await client.ping()
+        except Exception:
+            await client.aclose()
+            raise
+        self._redis = client
         log.info(
             "redis_event_bus_connected",
             host=redis_host,
@@ -87,15 +132,18 @@ class RedisEventBus:
             self._listener_task = None
 
         if self._pubsub:
+            pubsub, self._pubsub = self._pubsub, None
             with contextlib.suppress(Exception):
-                await self._pubsub.unsubscribe(self._channel)
-            await self._pubsub.close()
-            self._pubsub = None
+                await asyncio.wait_for(pubsub.unsubscribe(self._channel), self._socket_timeout)
+            with contextlib.suppress(Exception):
+                await pubsub.aclose()
 
         if self._redis:
-            await self._redis.close()
-            self._redis = None
+            client, self._redis = self._redis, None
+            with contextlib.suppress(Exception):
+                await client.aclose()
 
+        self._subscribed = False
         self._subscribers.clear()
         log.info("redis_event_bus_disconnected", channel=self._channel)
 
@@ -140,33 +188,62 @@ class RedisEventBus:
     async def _listen(self) -> None:
         """Receive events from Redis and fan them out locally, for the bus's lifetime.
 
-        A dropped connection ends ``listen()`` with an error. Iterating again
-        reconnects, and redis-py re-subscribes the channel on connect, so the
-        loop only has to wait out an outage with backoff.
+        A dropped or unresponsive connection ends a pump with an error. The
+        next read reconnects, and redis-py re-subscribes the channel on
+        connect, so the loop only has to wait out an outage with backoff.
         """
         delay = LISTEN_RETRY_INITIAL_SECONDS
         while self._pubsub is not None:
+            pubsub = self._pubsub
             try:
-                async for message in self._pubsub.listen():
-                    delay = LISTEN_RETRY_INITIAL_SECONDS
-                    await self._handle(message)
+                await self._pump(pubsub)
                 return
             except asyncio.CancelledError:
                 log.debug("redis_event_bus_listener_cancelled", channel=self._channel)
                 raise
             except Exception as exc:
+                self._subscribed = False
+                self._last_error = f"{type(exc).__name__}: {exc}"
                 log.warning(
                     "redis_event_bus_listener_reconnecting",
                     channel=self._channel,
-                    error=str(exc),
+                    error=self._last_error,
                     retry_in_seconds=delay,
                 )
+                await self._drop_connection(pubsub)
             await asyncio.sleep(delay)
             delay = min(delay * 2, LISTEN_RETRY_MAX_SECONDS)
+
+    async def _pump(self, pubsub: Any) -> None:
+        """Deliver messages until the connection fails or stops answering pings."""
+        last_heard = time.monotonic()
+        next_ping = last_heard + self._ping_interval
+        while self._pubsub is pubsub:
+            message = await pubsub.get_message(timeout=min(self._ping_interval, 1.0))
+            now = time.monotonic()
+            if message is not None:
+                last_heard = now
+                await self._handle(message)
+            if now - last_heard > self._dead_after:
+                raise SubscriptionLostError(
+                    f"no reply from Redis for {now - last_heard:.1f}s on {self._channel}"
+                )
+            if now >= next_ping:
+                next_ping = now + self._ping_interval
+                await asyncio.wait_for(pubsub.ping(_LIVENESS_PING_MESSAGE), self._socket_timeout)
+
+    async def _drop_connection(self, pubsub: Any) -> None:
+        connection = getattr(pubsub, "connection", None)
+        if connection is None:
+            return
+        with contextlib.suppress(Exception):
+            await connection.disconnect(nowait=True)
 
     async def _handle(self, message: dict[str, Any]) -> None:
         kind = message.get("type")
         if kind == "subscribe":
+            self._subscribed = True
+            self._last_error = None
             if self._on_subscribed is not None:
                 try:
                     await self._on_subscribed()

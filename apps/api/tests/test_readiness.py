@@ -356,3 +356,32 @@ async def test_check_surreal_ready_accepts_empty_auth_store() -> None:
 
     assert status.ready is True
     fake_client.close.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_a_replica_off_the_invalidation_channel_is_not_ready() -> None:
+    ready = DependencyStatus(name="surrealdb", ready=True)
+    coordination = DependencyStatus(name="coordination", ready=True, backend="redis")
+    schemas = DependencyStatus(name="schemas", ready=True)
+
+    with (
+        patch("sibyl.api.readiness.check_surreal_ready", AsyncMock(return_value=ready)),
+        patch(
+            "sibyl.api.readiness.check_coordination_ready",
+            AsyncMock(return_value=coordination),
+        ),
+        patch("sibyl.api.readiness.check_schema_bootstrap_ready", return_value=schemas),
+        patch(
+            "sibyl.cache_invalidation.cache_invalidation_status",
+            return_value={"state": "reconnecting", "last_error": "SubscriptionLostError: no reply"},
+        ),
+    ):
+        report = await check_readiness()
+
+    assert report.ready is False
+    assert report.as_payload()["dependencies"][-1] == {
+        "name": "cache_invalidation",
+        "ready": False,
+        "detail": "cache invalidation channel reconnecting: SubscriptionLostError: no reply",
+        "backend": "redis",
+    }
