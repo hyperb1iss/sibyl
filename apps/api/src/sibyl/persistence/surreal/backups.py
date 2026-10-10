@@ -378,6 +378,15 @@ async def delete_backup_record(org_id: UUID, backup_id: str) -> BackupRecord:
     return backup
 
 
+async def forget_backup_record(backup_id: str) -> BackupRecord | None:
+    """Delete the record of a backup whose archive retention removed, if any."""
+    backup = await _get_backup_by_backup_id(backup_id)
+    if backup is None:
+        return None
+    await _execute_query("DELETE FROM backups WHERE uuid = $uuid;", uuid=str(backup.id))
+    return backup
+
+
 async def update_backup_record(
     backup_id: str,
     *,
