@@ -916,6 +916,7 @@ def test_helm_export_prunes_only_its_own_stale_incomplete_runs(harness: OpsHarne
         f"sibyl-{recent}": False,  # incomplete, recent: may still be running
         "sibyl-20000101000001": True,  # complete, old: retention's business
         "sibyl-staging-20000101000000": False,  # another prefix
+        "sibyl-20000101": False,  # not <prefix>-<14 digits>: never touched
     }
     for name, complete in layout.items():
         (harness.backups / name).mkdir()
@@ -930,7 +931,12 @@ def test_helm_export_prunes_only_its_own_stale_incomplete_runs(harness: OpsHarne
     assert "pruned incomplete run sibyl-20000101000000" in result.stdout
     remaining = {path.name for path in harness.backups.iterdir()}
     assert "sibyl-20000101000000" not in remaining
-    assert {f"sibyl-{recent}", "sibyl-20000101000001", "sibyl-staging-20000101000000"} <= remaining
+    assert {
+        f"sibyl-{recent}",
+        "sibyl-20000101000001",
+        "sibyl-staging-20000101000000",
+        "sibyl-20000101",
+    } <= remaining
 
 
 @pytest.mark.parametrize(
@@ -1107,6 +1113,29 @@ def test_helm_restore_drill_fails_when_a_tiny_table_empties(harness: OpsHarness)
     )
 
 
+@pytest.mark.parametrize(
+    ("restored", "passes"),
+    [(992, True), (985, False)],
+    ids=["within-one-percent", "beyond-one-percent"],
+)
+def test_helm_restore_drill_allowance_scales_with_large_tables(
+    harness: OpsHarness, restored: int, *, passes: bool
+) -> None:
+    """For 1000 rows, 1% (10 rows) is the allowance, not the 2-row floor."""
+    source = _source()
+    source[ORG_A]["graph"]["entity"] = 1000
+    harness.serve(source=source)
+    exported = harness.run("export")
+    assert exported.returncode == 0, exported.stderr
+    harness.serve(shrink_on_import={f"{ORG_A}/graph/entity": restored})
+
+    result = harness.run("restore-drill")
+
+    assert (result.returncode == 0) is passes, result.stderr
+    if not passes:
+        assert f"entity ({restored} of 1000, allowed shortfall 10)" in result.stderr
+
+
 def test_helm_export_exit_codes_tell_recorded_failures_from_transient_ones(
     harness: OpsHarness,
 ) -> None:
@@ -1187,3 +1216,58 @@ def test_helm_export_organization_check_never_fails_the_run(harness: OpsHarness)
     assert result.returncode == 0, result.stderr
     error = _manifest(harness)["organizations"]["error"]
     assert "SurrealQL failed in sibyl_auth/auth" in error
+
+
+def test_helm_export_removes_each_scratch_plaintext_after_encrypting(harness: OpsHarness) -> None:
+    """At most one plaintext export sits in scratch at a time."""
+    count = 'ls "$(dirname "$SIBYL_EXPORT_FILE")" | grep -c "[.]surql$" >> "$HOME/scratch-counts.log" || true'
+    harness.serve(source=_source())
+    result = harness.run(
+        "export",
+        *harness.values(
+            {"export": {"encryption": {"enabled": True, "command": f"{count}\n{ENCRYPT}"}}}
+        ),
+    )
+
+    assert result.returncode == 0, result.stderr
+    counts = [int(line) for line in (harness.root / "scratch-counts.log").read_text().split()]
+    assert max(counts) == 1, counts
+
+
+@pytest.mark.parametrize(
+    "corrupt",
+    [
+        lambda databases: databases[0].update(file="../escape.surql"),
+        lambda databases: databases[0].update(file="nested/dir.surql"),
+        lambda databases: databases[1].update(file=databases[0]["file"]),
+    ],
+    ids=["parent-traversal", "subdirectory", "duplicate-file"],
+)
+def test_helm_restore_drill_refuses_unsafe_or_repeated_manifest_files(
+    harness: OpsHarness, corrupt: Callable[[list[dict[str, Any]]], None]
+) -> None:
+    run_dir = _export_then_reset(harness)
+    manifest_path = run_dir / "manifest.json"
+    manifest = json.loads(manifest_path.read_text())
+    corrupt(manifest["databases"])
+    manifest_path.write_text(json.dumps(manifest))
+
+    result = harness.run("restore-drill")
+
+    assert result.returncode != 0
+    assert "an unsafe or repeated file" in result.stderr
+    assert harness.server("http://restore")["namespaces"] == {}, "nothing is restored"
+
+
+def test_helm_failure_notification_survives_kubelet_expansion(harness: OpsHarness) -> None:
+    """The notification hook lives in args, which the kubelet also expands."""
+    harness.serve()
+    result = harness.run(
+        "restore-drill",
+        *harness.values(
+            {"restoreDrill": {"failureNotification": {"command": f'[ "$$" -gt 0 ] && {NOTIFY}'}}}
+        ),
+    )
+
+    assert result.returncode != 0
+    assert (harness.root / "notified.log").read_text() == "notified\n"
