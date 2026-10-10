@@ -173,6 +173,10 @@ restoreDrill:
     # the manifest's plaintext sha256. Example:
     #   age -d -i /secrets/age/key.txt -o "$SIBYL_RESTORE_FILE" "$SIBYL_RESTORE_ENCRYPTED_FILE"
     command: ""
+  # Fail when the newest complete export is older than this, so a stalled
+  # export pipeline pages instead of the drill passing on old data. Exports
+  # run daily by default; 36 allows one late run. 0 disables the check.
+  maxExportAgeHours: 36
   restore:
     endpoint: http://127.0.0.1:8000
     username: drill

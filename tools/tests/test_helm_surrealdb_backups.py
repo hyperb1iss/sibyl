@@ -17,6 +17,7 @@ import os
 import shutil
 import subprocess
 import sys
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -186,6 +187,8 @@ def _source() -> dict[str, dict[str, dict[str, int]]]:
 
 
 SOURCE_DATABASES = sum(len(databases) for databases in _source().values())
+DEFAULT_MAX_AGE_HOURS = 36
+FRESH_SECONDS = 600
 
 
 def _run_dirs(harness: OpsHarness) -> list[Path]:
@@ -378,6 +381,8 @@ def test_helm_restore_drill_restores_every_database_in_the_newest_manifest(
     assert receipt["status"] == "PASS"
     assert receipt["manifest"]["path"] == str(run_dir / "manifest.json")
     assert receipt["manifest"]["databases"] == SOURCE_DATABASES
+    assert 0 <= receipt["manifest"]["age_seconds"] < FRESH_SECONDS
+    assert receipt["manifest"]["max_age_hours"] == DEFAULT_MAX_AGE_HOURS
     assert receipt["manifest"]["decrypted"] is False
     by_name = {(item["namespace"], item["database"]): item for item in receipt["databases"]}
     assert set(by_name) == {(ns, db) for ns, dbs in _source().items() for db in dbs}
@@ -563,6 +568,42 @@ def test_helm_restore_drill_fetches_the_newest_complete_run(harness: OpsHarness)
     assert harness.server("http://restore")["namespaces"] == _source()
 
 
+def _age_manifest(run_dir: Path, hours: float) -> None:
+    manifest_path = run_dir / "manifest.json"
+    manifest = json.loads(manifest_path.read_text())
+    created = datetime.now(UTC) - timedelta(hours=hours)
+    manifest["created_at"] = created.strftime("%Y-%m-%dT%H:%M:%SZ")
+    manifest_path.write_text(json.dumps(manifest))
+
+
+@pytest.mark.parametrize(
+    ("max_age_hours", "passes"),
+    [(None, False), (48, True), (0, True)],
+    ids=["default-36h", "raised-to-48h", "disabled"],
+)
+def test_helm_restore_drill_pages_when_the_newest_export_is_stale(
+    harness: OpsHarness, max_age_hours: int | None, *, passes: bool
+) -> None:
+    run_dir = _export_then_reset(harness)
+    _age_manifest(run_dir, hours=40)
+    drill: dict[str, Any] = {"failureNotification": {"command": NOTIFY}}
+    if max_age_hours is not None:
+        drill["maxExportAgeHours"] = max_age_hours
+
+    result = harness.run("restore-drill", *harness.values({"restoreDrill": drill}))
+
+    if passes:
+        assert result.returncode == 0, result.stderr
+        manifest = json.loads(harness.receipt_path.read_text())["manifest"]
+        assert abs(manifest["age_seconds"] - 40 * 3600) < FRESH_SECONDS
+        assert manifest["max_age_hours"] == max_age_hours
+    else:
+        assert result.returncode != 0
+        assert "40h ago; restoreDrill.maxExportAgeHours is 36" in result.stderr
+        assert (harness.root / "notified.log").read_text() == "notified\n"
+        assert not harness.receipt_path.exists()
+
+
 @pytest.mark.parametrize(
     ("override", "message"),
     [
@@ -570,8 +611,11 @@ def test_helm_restore_drill_fetches_the_newest_complete_run(harness: OpsHarness)
             ("--set", "restoreDrill.decryption.enabled=true"),
             "restoreDrill.decryption.command is required",
         ),
+        (("--set-string", "restoreDrill.maxExportAgeHours=abc"), "whole number of hours"),
+        (("--set", "restoreDrill.maxExportAgeHours=-1"), "whole number of hours"),
+        (("--set", "restoreDrill.maxExportAgeHours=1.5"), "whole number of hours"),
     ],
-    ids=["decryption-without-command"],
+    ids=["decryption-without-command", "age-text", "age-negative", "age-fraction"],
 )
 def test_helm_restore_drill_rejects_unusable_hook_values(
     override: tuple[str, str], message: str

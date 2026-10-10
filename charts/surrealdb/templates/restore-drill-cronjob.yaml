@@ -6,6 +6,9 @@
 {{- if and .Values.restoreDrill.decryption.enabled (not .Values.restoreDrill.decryption.command) -}}
 {{- fail "restoreDrill.decryption.command is required when restoreDrill.decryption.enabled=true" -}}
 {{- end -}}
+{{- if not (regexMatch "^[0-9]+$" (toString .Values.restoreDrill.maxExportAgeHours)) -}}
+{{- fail (printf "restoreDrill.maxExportAgeHours must be a whole number of hours (0 disables the check), got %q" (toString .Values.restoreDrill.maxExportAgeHours)) -}}
+{{- end -}}
 apiVersion: batch/v1
 kind: CronJob
 metadata:
@@ -195,7 +198,17 @@ spec:
                     echo "manifest $manifest lists no databases or names an unsafe file" >&2
                     exit 1
                   fi
-                  echo "restoring $(jq '.databases | length' "$manifest_doc") databases from $manifest"
+                  # A stalled export pipeline must page, not leave the drill
+                  # passing on the last run that happened to complete.
+                  created_at="$(jq -r '.created_at' "$manifest_doc")"
+                  created_epoch="$(jq -r '.created_at | fromdateiso8601' "$manifest_doc")"
+                  age_seconds=$(( $(date -u +%s) - created_epoch ))
+                  max_age_hours="$SIBYL_RESTORE_MAX_EXPORT_AGE_HOURS"
+                  if [ "$max_age_hours" -gt 0 ] && [ "$age_seconds" -gt $((max_age_hours * 3600)) ]; then
+                    echo "newest complete export $manifest was created $created_at, $((age_seconds / 3600))h ago; restoreDrill.maxExportAgeHours is $max_age_hours" >&2
+                    exit 1
+                  fi
+                  echo "restoring $(jq '.databases | length' "$manifest_doc") databases from $manifest (created $created_at, $((age_seconds / 3600))h ago)"
                   : > "$work/databases.jsonl"
                   database_count="$(jq '.databases | length' "$manifest_doc")"
                   index=0
@@ -307,9 +320,11 @@ spec:
                   mkdir -p "$receipt_dir"
                   jq -c \
                     --arg path "$manifest" \
+                    --argjson age_seconds "$age_seconds" \
+                    --argjson max_age_hours "$max_age_hours" \
                     --argjson decrypted "$decrypted" \
                     '{path: $path, created_at, server_version, databases: (.databases | length),
-                      decrypted: $decrypted}' \
+                      age_seconds: $age_seconds, max_age_hours: $max_age_hours, decrypted: $decrypted}' \
                     "$manifest_doc" > "$work/manifest-summary.json"
                   jq -cn \
                     --arg runtime "kubernetes:${POD_NAMESPACE:-default}/{{ include "sibyl-surrealdb.fullname" . }}-restore-drill" \
@@ -339,6 +354,8 @@ spec:
                 - name: SIBYL_RESTORE_DECRYPTION_COMMAND
                   value: {{ .Values.restoreDrill.decryption.command | quote }}
                 {{- end }}
+                - name: SIBYL_RESTORE_MAX_EXPORT_AGE_HOURS
+                  value: {{ .Values.restoreDrill.maxExportAgeHours | toString | quote }}
                 - name: SURREAL_RESTORE_ENDPOINT
                   value: {{ .Values.restoreDrill.restore.endpoint | quote }}
                 - name: SURREAL_RESTORE_USER
