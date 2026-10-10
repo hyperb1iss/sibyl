@@ -183,6 +183,16 @@ export:
   extraVolumes: []
   workspace:
     emptyDir: true
+  # Lists, in the manifest's `organizations.without_graph`, organizations
+  # in the auth database that have no graph database at export time. It
+  # never fails the run: a new organization has no graph until it first
+  # uses it. An organization whose graph was lost shows up here too. Match
+  # Sibyl's SIBYL_SURREAL_NAMESPACE_PREFIX and SIBYL_SURREAL_DATABASE.
+  organizationCheck:
+    authNamespace: sibyl_auth
+    authDatabase: auth
+    graphNamespacePrefix: org_
+    graphDatabase: graph
 
 restoreDrill:
   enabled: false

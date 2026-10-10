@@ -220,6 +220,30 @@ spec:
                     exit 1
                   fi
 
+                  # Organizations in the auth database with no graph database
+                  # at export time. A new organization has none until it
+                  # first uses the graph, so this never fails the run; an
+                  # organization whose graph was lost shows up here too.
+                  if org_ids="$(sql_result "$SIBYL_ORG_CHECK_AUTH_NAMESPACE" "$SIBYL_ORG_CHECK_AUTH_DATABASE" \
+                    "SELECT VALUE uuid FROM organizations;" 2>"$work/error")"; then
+                    printf '%s\n' "$org_ids" | jq -c \
+                      --slurpfile found "$work/targets.jsonl" \
+                      --arg prefix "$SIBYL_ORG_CHECK_GRAPH_NAMESPACE_PREFIX" \
+                      --arg database "$SIBYL_ORG_CHECK_GRAPH_DATABASE" '
+                      [.[] | select(type == "string")] as $ids
+                      | [$found[] | select(.database == $database) | .namespace] as $graphs
+                      | {total: ($ids | length),
+                         without_graph: [$ids[]
+                           | {organization: ., namespace: ($prefix + (gsub("-"; "") | ascii_downcase)), database: $database}
+                           | select(.namespace as $namespace | $graphs | index($namespace) | not)]}' \
+                      > "$work/organizations.json"
+                  else
+                    jq -cn --arg error "$(head -c 500 "$work/error")" '{error: $error}' > "$work/organizations.json"
+                  fi
+                  jq -r 'if .error then "organization check skipped: \(.error)"
+                    else "organizations without a graph database: \(.without_graph | length) of \(.total)\(.without_graph | map(" " + .organization) | join(""))" end' \
+                    "$work/organizations.json"
+
                   SIBYL_EXPORT_RUN_DIR="$SIBYL_EXPORT_DESTINATION_PATH/$SIBYL_EXPORT_FILE_PREFIX-$timestamp"
                   export SIBYL_EXPORT_RUN_DIR
                   mkdir -p "$SIBYL_EXPORT_RUN_DIR"
@@ -292,8 +316,10 @@ spec:
                     --arg server_version "$server_version" \
                     --slurpfile databases "$work/databases.jsonl" \
                     --slurpfile failures "$work/failures.jsonl" \
+                    --slurpfile organizations "$work/organizations.json" \
                     '{format: "sibyl-surrealdb-export", version: 2, created_at: $created_at,
-                      server_version: $server_version, databases: $databases, failures: $failures}' \
+                      server_version: $server_version, databases: $databases, failures: $failures,
+                      organizations: $organizations[0]}' \
                     > "$work/manifest.json"
                   jq -r '.databases[] | "exported \(.namespace)/\(.database): \(.bytes) bytes, \(.rows) rows"' \
                     "$work/manifest.json"
@@ -325,6 +351,14 @@ spec:
                   value: {{ .Values.export.filePrefix | quote }}
                 - name: SIBYL_EXPORT_REQUIRED_DATABASES
                   value: {{ .Values.databases | toJson | quote }}
+                - name: SIBYL_ORG_CHECK_AUTH_NAMESPACE
+                  value: {{ .Values.export.organizationCheck.authNamespace | quote }}
+                - name: SIBYL_ORG_CHECK_AUTH_DATABASE
+                  value: {{ .Values.export.organizationCheck.authDatabase | quote }}
+                - name: SIBYL_ORG_CHECK_GRAPH_NAMESPACE_PREFIX
+                  value: {{ .Values.export.organizationCheck.graphNamespacePrefix | quote }}
+                - name: SIBYL_ORG_CHECK_GRAPH_DATABASE
+                  value: {{ .Values.export.organizationCheck.graphDatabase | quote }}
                 {{- include "sibyl-surrealdb.httpEnv" . | nindent 16 }}
                 {{- if .Values.export.encryption.enabled }}
                 - name: SIBYL_EXPORT_ENCRYPTION_COMMAND

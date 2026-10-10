@@ -130,13 +130,16 @@ class OpsHarness:
         drop_tables_on_import: tuple[str, ...] = (),
         shrink_on_import: dict[str, int] | None = None,
         ns_info_errors: tuple[str, ...] = (),
+        org_uuids: tuple[str, ...] = (),
+        org_check_error: bool = False,
     ) -> None:
         """Describe the fake servers and the faults they inject. Each fault
         names ``ns/db`` pairs (``ns/db/table`` for the table faults): an
         empty export, an import that zeroes every row, a refused row count,
         a refused import, a table that vanishes on import, or one that comes
         back with the given number of rows. ``ns_info_errors`` refuses INFO
-        FOR NS for whole namespaces."""
+        FOR NS for whole namespaces; ``org_uuids`` are the organizations the
+        auth database holds, and ``org_check_error`` refuses that query."""
         servers: dict[str, object] = {
             "http://restore": {"user": "drill:drill", "namespaces": restore or {}},
         }
@@ -145,6 +148,7 @@ class OpsHarness:
                 "user": "root:secret",
                 "version": "surrealdb-3.2.4",
                 "namespaces": source,
+                "org_uuids": list(org_uuids),
             }
         self.state_path.write_text(
             json.dumps(
@@ -157,6 +161,7 @@ class OpsHarness:
                     "drop_tables_on_import": list(drop_tables_on_import),
                     "shrink_on_import": shrink_on_import or {},
                     "ns_info_errors": list(ns_info_errors),
+                    "org_check_error": org_check_error,
                 }
             )
         )
@@ -1081,6 +1086,14 @@ def test_helm_ops_values_are_validated_at_render(override: tuple[str, str], mess
     assert message in rendered.stderr
 
 
+def _org_uuid(namespace: str) -> str:
+    hexes = namespace.removeprefix("org_")
+    return f"{hexes[:8]}-{hexes[8:12]}-{hexes[12:16]}-{hexes[16:20]}-{hexes[20:]}"
+
+
+ORPHAN_ORG = "11111111-2222-4333-8444-555555555555"
+
+
 def test_helm_restore_drill_fails_when_a_tiny_table_empties(harness: OpsHarness) -> None:
     """users exports 2 rows; the 2-row allowance must not let it restore 0."""
     _export_then_reset(harness, lambda h: h.serve(shrink_on_import={"sibyl_auth/auth/users": 0}))
@@ -1136,3 +1149,41 @@ def test_helm_export_job_fails_fast_only_on_recorded_failures() -> None:
             }
         ]
     }
+
+
+def test_helm_export_lists_organizations_without_a_graph(harness: OpsHarness) -> None:
+    harness.serve(source=_source(), org_uuids=(_org_uuid(ORG_A), _org_uuid(ORG_B), ORPHAN_ORG))
+    result = harness.run("export")
+
+    assert result.returncode == 0, result.stderr
+    assert f"organizations without a graph database: 1 of 3 {ORPHAN_ORG}" in result.stdout
+    organizations = _manifest(harness)["organizations"]
+    assert organizations == {
+        "total": 3,
+        "without_graph": [
+            {
+                "organization": ORPHAN_ORG,
+                "namespace": "org_" + ORPHAN_ORG.replace("-", ""),
+                "database": "graph",
+            }
+        ],
+    }
+
+    harness.serve()
+    drilled = harness.run("restore-drill")
+    assert drilled.returncode == 0, drilled.stderr
+    assert (
+        json.loads(harness.receipt_path.read_text())["manifest"]["organizations"] == organizations
+    )
+    assert (
+        f"organizations without a graph database at export: 1 of 3 {ORPHAN_ORG}" in drilled.stdout
+    )
+
+
+def test_helm_export_organization_check_never_fails_the_run(harness: OpsHarness) -> None:
+    harness.serve(source=_source(), org_check_error=True)
+    result = harness.run("export")
+
+    assert result.returncode == 0, result.stderr
+    error = _manifest(harness)["organizations"]["error"]
+    assert "SurrealQL failed in sibyl_auth/auth" in error

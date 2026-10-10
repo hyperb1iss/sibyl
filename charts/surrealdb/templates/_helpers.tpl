@@ -183,6 +183,10 @@ a Job, and under concurrencyPolicy Forbid every later one, forever.
 {{- if not (regexMatch "^[A-Za-z0-9][A-Za-z0-9_-]*$" (toString .Values.export.filePrefix)) -}}
 {{- fail (printf "export.filePrefix must match ^[A-Za-z0-9][A-Za-z0-9_-]*$ so run directories can be matched exactly, got %q" (toString .Values.export.filePrefix)) -}}
 {{- end -}}
+{{- include "sibyl-surrealdb.validateIdentifier" (dict "field" "export.organizationCheck.authNamespace" "value" .Values.export.organizationCheck.authNamespace) -}}
+{{- include "sibyl-surrealdb.validateIdentifier" (dict "field" "export.organizationCheck.authDatabase" "value" .Values.export.organizationCheck.authDatabase) -}}
+{{- include "sibyl-surrealdb.validateIdentifier" (dict "field" "export.organizationCheck.graphNamespacePrefix" "value" .Values.export.organizationCheck.graphNamespacePrefix) -}}
+{{- include "sibyl-surrealdb.validateIdentifier" (dict "field" "export.organizationCheck.graphDatabase" "value" .Values.export.organizationCheck.graphDatabase) -}}
 {{- include "sibyl-surrealdb.validateWholeNumber" (dict "field" "jobDefaults.http.connectTimeoutSeconds" "value" .Values.jobDefaults.http.connectTimeoutSeconds) -}}
 {{- include "sibyl-surrealdb.validateWholeNumber" (dict "field" "jobDefaults.http.maxTimeSeconds" "value" .Values.jobDefaults.http.maxTimeSeconds) -}}
 {{- include "sibyl-surrealdb.validateWholeNumber" (dict "field" "export.backoffLimit" "value" .Values.export.backoffLimit) -}}

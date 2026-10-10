@@ -13,7 +13,10 @@ work, against servers described in a JSON state file
      "sql_errors": ["ns/db"], "refuse_import": ["ns/db"],
      "drop_tables_on_import": ["ns/db/table"],
      "shrink_on_import": {"ns/db/table": rows},
-     "ns_info_errors": ["ns"]}
+     "ns_info_errors": ["ns"], "org_check_error": false}
+
+A source server may also carry "org_uuids": [...], the organizations the
+export's read-only organization check finds in the auth database.
 
 Response shapes mirror a real v3.2.4 server: ``/sql`` answers HTTP 200
 with one ``{"status", "result"}`` entry per statement, ``/import`` answers
@@ -157,6 +160,21 @@ def _statement(
     )
 
 
+def _injected(
+    state: dict[str, Any], server: dict[str, Any], ns: str, db: str, body: str
+) -> list[dict[str, object]] | None:
+    """Faults the test asked for, and the organization check's query."""
+    if body.startswith(TABLE_ROWS_QUERY_PREFIX) and f"{ns}/{db}" in state.get("sql_errors", []):
+        return [_err("fake surreal: the query was refused")]
+    if body == "INFO FOR NS;" and ns in state.get("ns_info_errors", []):
+        return [_err("fake surreal: INFO FOR NS was refused")]
+    if body != "SELECT VALUE uuid FROM organizations;":
+        return None
+    if state.get("org_check_error"):
+        return [_err("The table 'organizations' does not exist")]
+    return [_ok(server.get("org_uuids", []))]
+
+
 def _sql(
     state: dict[str, Any], server: dict[str, Any], request: Request
 ) -> list[dict[str, object]]:
@@ -165,10 +183,9 @@ def _sql(
     ns = request.headers.get("surreal-ns", "")
     db = request.headers.get("surreal-db", "")
     body = (request.body or "").strip()
-    if body.startswith(TABLE_ROWS_QUERY_PREFIX) and f"{ns}/{db}" in state.get("sql_errors", []):
-        return [_err("fake surreal: the query was refused")]
-    if body == "INFO FOR NS;" and ns in state.get("ns_info_errors", []):
-        return [_err("fake surreal: INFO FOR NS was refused")]
+    injected = _injected(state, server, ns, db, body)
+    if injected is not None:
+        return injected
     if body.startswith(TABLE_ROWS_QUERY_PREFIX):
         tables = namespaces.get(ns, {}).get(db)
         if tables is None:

@@ -352,6 +352,10 @@ spec:
                   fi
                   jq -r '"restored \(.namespace)/\(.database): \(.rows_restored) rows (export counted \(.rows_exported))"' \
                     "$work/databases.jsonl"
+                  jq -r '.organizations // empty
+                    | if .error then "export skipped its organization check: \(.error)"
+                      else "organizations without a graph database at export: \(.without_graph | length) of \(.total)\(.without_graph | map(" " + .organization) | join(""))" end' \
+                    "$manifest_doc"
                   row_counts_json="{"
                   row_counts_separator=""
                   {{- range .Values.restoreDrill.fixtureChecks }}
@@ -389,7 +393,8 @@ spec:
                     --argjson max_age_hours "$max_age_hours" \
                     --argjson decrypted "$decrypted" \
                     '{path: $path, created_at, server_version, databases: (.databases | length),
-                      age_seconds: $age_seconds, max_age_hours: $max_age_hours, decrypted: $decrypted}' \
+                      age_seconds: $age_seconds, max_age_hours: $max_age_hours, decrypted: $decrypted,
+                      organizations: (.organizations // null)}' \
                     "$manifest_doc" > "$work/manifest-summary.json"
                   jq -cn \
                     --arg runtime "kubernetes:${POD_NAMESPACE:-default}/{{ include "sibyl-surrealdb.fullname" . }}-restore-drill" \
