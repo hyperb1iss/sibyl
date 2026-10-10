@@ -101,28 +101,43 @@ back empty, or when a namespace or database name is not a plain identifier
 
 ### Encryption and sync hooks
 
-`export.encryption.command` runs once per exported file, after the file's checksum is recorded, with
-the path in `$SIBYL_EXPORT_FILE`. It runs for `manifest.json` last. `export.syncCommand` runs once
-after that, with the run directory in `$SIBYL_EXPORT_RUN_DIR`. The ops image ships the AWS CLI but
-no encryption tool, so bring one through `opsImage` or `export.extraVolumes`. Use your deployment
-overlay for object storage credentials.
+`export.encryption.command` runs once per exported file, after the file's checksum is recorded, and
+for `manifest.json` last. It runs in its own `sh -ec`, reads `$SIBYL_EXPORT_FILE`, and writes the
+ciphertext to `$SIBYL_EXPORT_ENCRYPTED_FILE`. The job then moves the ciphertext over the original,
+so file names never change and the drill finds encrypted runs by `manifest.json` like any other. A
+hook that fails, writes nothing, or writes the plaintext unchanged stops the export. The manifest's
+sizes and checksums stay those of the plaintext, and the drill checks them after decrypting, so a
+decrypt step that returns the wrong bytes fails the drill too.
+
+`export.syncCommand` runs once after the manifest is encrypted, with the run directory in
+`$SIBYL_EXPORT_RUN_DIR` and `export.destination.uri` in `$SIBYL_EXPORT_DESTINATION_URI`. Upload the
+manifest last, as the [S3 example](#s3-example-with-irsa) does, so a reader never sees a manifest
+before its files.
+
+The ops image ships the AWS CLI but no encryption tool. Bring one through `opsImage`, such as an
+image built from `alpine/k8s` with `apk add age`, or through `export.extraVolumes`.
 
 ## Restore Drill
 
-The restore drill picks the newest run directory under `source.path` that has a `manifest.json`,
-checks every file's size and sha256 against it, and imports every database into a scratch SurrealDB
-sidecar. It then counts the rows in every table and compares them with the counts the export
-recorded. A database fails when its file is missing or altered, when the import is refused, when a
-table the export saw is missing, or when it restores no rows although the export counted some. The
-drill reports every failing database, runs `failureNotification.command`, and exits non-zero. Small
-count differences are reported but do not fail the drill: the export counts rows just before it
-exports, in a separate read, so writes in between can move them.
+The restore drill runs `restoreDrill.fetchCommand` when one is set, then picks the newest run
+directory under `source.path` that has a `manifest.json`. It fails when that run is older than
+`restoreDrill.maxExportAgeHours` (36 by default, `0` turns the check off), so a stalled export
+pipeline pages instead of the drill passing on the last run that completed. With
+`restoreDrill.decryption.enabled`, it decrypts the manifest and then each file into scratch space
+and never modifies the files under `source.path`. It checks every plaintext file's size and sha256
+against the manifest and imports every database into a scratch SurrealDB sidecar. It then counts the
+rows in every table and compares them with the counts the export recorded. A database fails when its
+file is missing or altered, when the import is refused, when a table the export saw is missing, or
+when it restores no rows although the export counted some. The drill reports every failing database,
+runs `failureNotification.command`, and exits non-zero. Small count differences are reported but do
+not fail the drill: the export counts rows just before it exports, in a separate read, so writes in
+between can move them.
 
 After the databases pass, the drill runs the configured fixture checks and the optional recall
 check. It writes a structured receipt to disk and emits the same JSON between
 `SIBYL_RESTORE_RECEIPT_JSON_BEGIN` / `SIBYL_RESTORE_RECEIPT_JSON_END` markers in the job logs. The
-receipt names the manifest it restored and lists every database with its exported and restored row
-counts per table.
+receipt names the manifest it restored, its age and the age limit, and whether it was decrypted, and
+lists every database with its exported and restored row counts per table.
 
 ```yaml
 restoreDrill:
@@ -138,11 +153,16 @@ restoreDrill:
     path: /tmp/restore-drill-receipt.json
 ```
 
-The drill reads `source.path`, which defaults to an empty `emptyDir`. Mount the export destination
-there: set `restoreDrill.workspace.emptyDir: false` and add the volume through
-`restoreDrill.extraVolumes` and `restoreDrill.extraVolumeMounts`. The drill has no decryption step,
-so a deployment that encrypts exports must stage decrypted files under `source.path` before the
-drill runs.
+The drill reads `source.path`, which defaults to an empty `emptyDir`. Fill it with `fetchCommand`,
+or mount the export destination there: set `restoreDrill.workspace.emptyDir: false` and add the
+volume through `restoreDrill.extraVolumes` and `restoreDrill.extraVolumeMounts`.
+
+`restoreDrill.fetchCommand` runs once, in its own `sh -ec`, before the drill picks a run. It sees
+`$SIBYL_RESTORE_SOURCE_PATH`, `$SIBYL_EXPORT_DESTINATION_URI` and `$SIBYL_EXPORT_FILE_PREFIX`. Have
+it copy the newest run whose `manifest.json` exists, files first and manifest last, so an
+interrupted fetch leaves a run the drill ignores. `restoreDrill.decryption.command` mirrors the
+export hook: it runs once per file, manifest first, reads `$SIBYL_RESTORE_ENCRYPTED_FILE`, and
+writes the plaintext to `$SIBYL_RESTORE_FILE`.
 
 The scratch server keeps its copy with RocksDB under the pod's `/tmp` emptyDir
 (`restoreDrill.restore.path`), so the node needs ephemeral disk for a full copy of the data.
@@ -176,6 +196,99 @@ moon run enterprise-readiness-evidence -- \
   --manual-captured-by "$(whoami)"
 ```
 
+## S3 Example With IRSA
+
+This setup exports daily to a versioned S3 bucket with age encryption, and runs a weekly drill that
+fetches the newest complete run, decrypts it, and pages on failure. Both jobs run under the chart's
+ServiceAccount, so one IAM role through IRSA covers them. These sync and fetch commands have been
+run end to end with the ops image's AWS CLI against an S3-compatible server.
+
+```yaml
+serviceAccount:
+  annotations:
+    eks.amazonaws.com/role-arn: arn:aws:iam::111122223333:role/sibyl-surrealdb-backups
+
+# alpine/k8s with `apk add --no-cache age`, built and pushed by you.
+opsImage:
+  repository: registry.example.com/sibyl-ops-age
+  tag: "1.34.1-age"
+
+export:
+  enabled: true
+  destination:
+    uri: s3://example-sibyl-backups/prod
+  encryption:
+    enabled: true
+    command: age -r "$AGE_RECIPIENT" -o "$SIBYL_EXPORT_ENCRYPTED_FILE" "$SIBYL_EXPORT_FILE"
+  syncCommand: |
+    run="$(basename "$SIBYL_EXPORT_RUN_DIR")"
+    aws s3 cp --recursive --exclude manifest.json "$SIBYL_EXPORT_RUN_DIR" "$SIBYL_EXPORT_DESTINATION_URI/$run"
+    aws s3 cp "$SIBYL_EXPORT_RUN_DIR/manifest.json" "$SIBYL_EXPORT_DESTINATION_URI/$run/manifest.json"
+  extraEnv:
+    - name: AGE_RECIPIENT
+      value: age1examplepublickey
+
+restoreDrill:
+  enabled: true
+  maxExportAgeHours: 36
+  fetchCommand: |
+    for run in $(aws s3 ls "$SIBYL_EXPORT_DESTINATION_URI/" \
+        | awk '$1 == "PRE" { sub("/$", "", $2); print $2 }' \
+        | grep "^$SIBYL_EXPORT_FILE_PREFIX-" | sort -r); do
+      if aws s3 ls "$SIBYL_EXPORT_DESTINATION_URI/$run/manifest.json" >/dev/null; then
+        aws s3 cp --recursive --exclude manifest.json \
+          "$SIBYL_EXPORT_DESTINATION_URI/$run" "$SIBYL_RESTORE_SOURCE_PATH/$run"
+        aws s3 cp "$SIBYL_EXPORT_DESTINATION_URI/$run/manifest.json" \
+          "$SIBYL_RESTORE_SOURCE_PATH/$run/manifest.json"
+        exit 0
+      fi
+    done
+    echo "no complete export under $SIBYL_EXPORT_DESTINATION_URI" >&2
+    exit 1
+  decryption:
+    enabled: true
+    command: age -d -i /secrets/age/key.txt -o "$SIBYL_RESTORE_FILE" "$SIBYL_RESTORE_ENCRYPTED_FILE"
+  failureNotification:
+    command: curl -fsS -X POST "$PAGER_WEBHOOK_URL" -d '{"summary":"Sibyl restore drill failed"}'
+  extraEnvFrom:
+    - secretRef:
+        name: sibyl-backup-pager
+  extraVolumes:
+    - name: age-identity
+      secret:
+        secretName: sibyl-backup-age-identity
+  extraVolumeMounts:
+    - name: age-identity
+      mountPath: /secrets/age
+      readOnly: true
+```
+
+The role needs to list the prefix and read and write objects under it:
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": "s3:ListBucket",
+      "Resource": "arn:aws:s3:::example-sibyl-backups",
+      "Condition": { "StringLike": { "s3:prefix": ["prod/", "prod/*"] } }
+    },
+    {
+      "Effect": "Allow",
+      "Action": ["s3:GetObject", "s3:PutObject"],
+      "Resource": "arn:aws:s3:::example-sibyl-backups/prod/*"
+    }
+  ]
+}
+```
+
+Enable versioning on the bucket so an overwritten or deleted object keeps its previous version, and
+add a lifecycle rule that expires old runs and noncurrent versions on your retention schedule; the
+export never deletes anything. The export needs only the age public key. Keep the identity in the
+secret the drill mounts and wherever a restore operator can reach it.
+
 ## Manual Restore Shape
 
 1. Freeze writes or take the service offline.
@@ -186,7 +299,8 @@ moon run enterprise-readiness-evidence -- \
 5. Point Sibyl at the restored endpoint.
 6. Unfreeze writes after validation.
 
-To import an export run into a fresh server, check the files against the manifest, then define each
+To import an export run into a fresh server, decrypt every file first if the run is encrypted (the
+manifest's checksums describe the plaintext), check the files against the manifest, then define each
 namespace and database before importing its file. SurrealDB answers both calls with HTTP 200 and a
 status per statement, so the `jq` checks are what catch a refused import:
 
