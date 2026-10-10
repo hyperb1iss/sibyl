@@ -1208,11 +1208,32 @@ Size an archives volume, or the receipts claim when it holds archives, for:
 - a reserve for everything else on the volume, `SIBYL_BACKUP_FREE_SPACE_RESERVE_MB` (default 512;
   set it with `backend.env`).
 
-Before each backup on a directory store, Sibyl checks the volume's free space against eleven times
-that organization's last archive plus the reserve, and again against the staged export's real size
-before writing the archive. A backup that would eat into the reserve fails with the free space,
-estimate and reserve in its error before it writes anything more, so the reserve stays free for
-receipts.
+Before each backup on a directory store, Sibyl claims room for it: eleven times that organization's
+last archive, checked against the volume's free space less the reserve and less what other running
+backups have claimed and not yet written. Before writing the archive it claims again, at the staged
+export's real size. A backup that would eat into the reserve fails with the free space, its
+estimate, the other backups' claims and the reserve in its error, before it writes anything more, so
+the reserve stays free for receipts.
+
+Each claim is a hidden `.reserve-<backup id>` file beside the archives, so backups on different pods
+sharing the claim see each other; nothing is serialized. A backup writes its claim before it checks,
+so two backups starting at the same moment each count the other: neither can overcommit the volume,
+and at worst both are refused and the next scheduled run goes ahead. A claim untouched for a day
+belongs to a backup that died; it stops counting and the scheduled cleanup removes it.
+
+The estimate has two known gaps:
+
+- **An organization's first backup** has no earlier archive to estimate from, so before its export
+  only the reserve and other backups' claims are checked. Its staged size is checked before the
+  archive is written, but the export itself can use space the reserve was meant to keep. Leave
+  headroom beyond the reserve for the largest organization's first backup, or take it while the
+  volume is roomy.
+- **The factor of eleven** assumes the export is five to ten times its gzip archive, typical for
+  JSON. For a large organization the claim is then large too, and an export that compresses less
+  than that is over-estimated: it can be refused on a volume that would have held it. Free more
+  space or lower the reserve rather than waiting for it to fit. An export that compresses better is
+  under-estimated before it runs, and the second check, at its real staged size, still guards the
+  archive.
 
 ### Retried jobs
 
