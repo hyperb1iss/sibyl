@@ -1,0 +1,8 @@
+{
+  "error": "locked_by_env",
+  "message": "This setting is set by the deployment environment.",
+  "remediation": "Change it in the deployment, or unset the variable to manage it here.",
+  "details": {
+    "fields": [{ "field": "model", "env_var": "SIBYL_LLM_CRAWLER_MODEL" }]
+  }
+}

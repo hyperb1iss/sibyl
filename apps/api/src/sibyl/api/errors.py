@@ -62,6 +62,12 @@ _SENSITIVE_DETAIL_PATTERNS = (
     re.compile(r"\b(?:token|secret|password|credential|api[_-]?key)\b", re.IGNORECASE),
 )
 _REQUEST_ID_RE = re.compile(r"^[A-Za-z0-9_.:-]{1,128}$")
+# Detail fields that carry a list of named settings rather than one string.
+# Each entry may only name a field and the variable that owns it, and both
+# must be plain identifiers, so nothing else can ride along in an error.
+SAFE_DETAIL_SETTING_LISTS = frozenset({"fields", "deployment_owned"})
+_SETTING_ENTRY_KEYS = frozenset({"field", "env_var"})
+_IDENTIFIER_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_.]{0,127}$")
 
 
 # =============================================================================
@@ -152,6 +158,32 @@ def conflict(message: str | None = None) -> HTTPException:
         raise conflict("Resource is locked by another process")
     """
     return HTTPException(status_code=409, detail=message or CONFLICT_ERROR)
+
+
+def locked_by_env(
+    fields: list[dict[str, str]],
+    *,
+    deployment_owned: list[dict[str, str]] | None = None,
+) -> HTTPException:
+    """A 409 for a setting the deployment environment owns.
+
+    ``fields`` are the settings the request tried to change, each as
+    ``{"field": ..., "env_var": ...}``; ``deployment_owned`` lists every
+    setting the deployment owns, so a client can show them read-only. Both
+    travel in the payload's ``details``.
+    """
+    details: dict[str, object] = {"fields": fields}
+    if deployment_owned is not None:
+        details["deployment_owned"] = deployment_owned
+    return HTTPException(
+        status_code=409,
+        detail={
+            "error": "locked_by_env",
+            "message": "This setting is set by the deployment environment.",
+            "remediation": "Change it in the deployment, or unset the variable to manage it here.",
+            "details": details,
+        },
+    )
 
 
 def entity_locked() -> HTTPException:
@@ -408,9 +440,27 @@ def _safe_token(value: str) -> str:
     return safe[:80]
 
 
+def _safe_setting_entries(value: object) -> list[dict[str, str]] | None:
+    if not isinstance(value, list):
+        return None
+    entries: list[dict[str, str]] = []
+    for entry in value:
+        if not isinstance(entry, dict) or not set(entry) <= _SETTING_ENTRY_KEYS:
+            return None
+        if not all(isinstance(item, str) and _IDENTIFIER_RE.match(item) for item in entry.values()):
+            return None
+        entries.append({str(key): str(item) for key, item in entry.items()})
+    return entries
+
+
 def _safe_details(details: dict[str, object]) -> dict[str, object]:
     safe: dict[str, object] = {}
     for key, value in details.items():
+        if key in SAFE_DETAIL_SETTING_LISTS:
+            entries = _safe_setting_entries(value)
+            if entries is not None:
+                safe[key] = entries
+            continue
         mapped_key = _map_detail_key(str(key))
         if mapped_key not in SAFE_DETAIL_FIELDS or value is None:
             continue
@@ -471,6 +521,7 @@ def _remediation_for(error: str) -> str | None:
         "constraint_violation": "Use a different title or update the existing entity.",
         "forbidden": "Check your organization and project permissions.",
         "invalid_request": "Check the command arguments and try again.",
+        "locked_by_env": "Change it in the deployment, or unset the variable to manage it here.",
         "not_found": "Check the ID or prefix and try again.",
         "project_access_denied": "Check your project permissions or switch context.",
         "rate_limited": "Wait briefly, then retry the command.",

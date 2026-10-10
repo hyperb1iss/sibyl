@@ -28,6 +28,7 @@ import type {
   LLMTestResult,
   UpdateLLMSurfaceRequest,
 } from '@/lib/api/admin';
+import { parseApiError, parseLockedByEnv } from '@/lib/api/errors';
 import { useTestLLMSurface, useUpdateLLMSurface } from '@/lib/hooks/admin';
 import { SettingsField, type SettingsFieldSource, StatusPill } from './primitives';
 
@@ -135,25 +136,18 @@ function validateDraft(draft: SurfaceDraft) {
 }
 
 function parseEnvLockedError(error: unknown) {
-  const message = error instanceof Error ? error.message : String(error);
-  try {
-    const payload = JSON.parse(message) as {
-      detail?: { code?: string; fields?: Array<{ field?: string; env_var?: string | null }> };
-    };
-    if (payload.detail?.code === 'LOCKED_BY_ENV') {
-      const fields = payload.detail.fields ?? [];
-      const names = fields
-        .map(field => (field.env_var ? `${field.field} (${field.env_var})` : field.field))
-        .filter(Boolean)
-        .join(', ');
-      return names
-        ? `Locked by environment: ${names}.`
-        : "This field is set by an environment variable and can't be changed here.";
-    }
-  } catch {
-    return message;
+  const locked = parseLockedByEnv(error);
+  if (locked) {
+    const names = locked.fields
+      .map(field => (field.env_var ? `${field.field} (${field.env_var})` : field.field))
+      .join(', ');
+    return names
+      ? `Locked by environment: ${names}.`
+      : "This field is set by an environment variable and can't be changed here.";
   }
-  return message;
+  const body = parseApiError(error);
+  if (body?.message) return body.message;
+  return error instanceof Error ? error.message : String(error);
 }
 
 function formatTokens(result: LLMTestResult) {

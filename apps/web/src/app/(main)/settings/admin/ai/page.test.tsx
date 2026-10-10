@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { SettingInfo, SettingsResponse } from '@/lib/api';
+import settingsRefusal from '@/test/fixtures/api/settings-locked-by-env-409.json';
 import { render, screen } from '@/test/utils';
 
 const hooks = vi.hoisted(() => ({
@@ -119,16 +120,8 @@ describe('AIServicesPage embeddings', () => {
   });
 
   it('names the deployment variable when the server refuses a change', async () => {
-    mutateAsync.mockRejectedValue(
-      new Error(
-        JSON.stringify({
-          detail: {
-            code: 'LOCKED_BY_ENV',
-            fields: [{ field: 'graph_embedding_model', env_var: 'SIBYL_GRAPH_EMBEDDING_MODEL' }],
-          },
-        })
-      )
-    );
+    // The exact body the API sends, pinned by apps/api/tests/test_locked_by_env_contract.py.
+    mutateAsync.mockRejectedValue(new Error(JSON.stringify(settingsRefusal)));
     const { user } = render(<AIServicesPage />);
 
     const graphModel = screen.getByLabelText('Graph embeddings model');
@@ -137,7 +130,7 @@ describe('AIServicesPage embeddings', () => {
     await user.click(screen.getByRole('button', { name: /save embeddings/i }));
 
     expect(toast.error).toHaveBeenCalledWith(
-      'Set by the deployment (SIBYL_GRAPH_EMBEDDING_MODEL); change it there'
+      'Set by the deployment (SIBYL_EMBEDDING_MODEL); change it there'
     );
   });
 

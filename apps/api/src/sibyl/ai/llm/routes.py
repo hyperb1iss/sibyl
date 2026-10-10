@@ -15,6 +15,7 @@ from sibyl.ai.llm.budget import (
 )
 from sibyl.ai.llm.config_source import resolve_provider_api_key
 from sibyl.ai.llm.service import invalidate_llm_runtime
+from sibyl.api.errors import locked_by_env
 from sibyl.crypto import mask_secret
 from sibyl.persistence.operations_runtime import require_settings_owner
 from sibyl.services.settings import get_settings_service
@@ -326,19 +327,13 @@ def _requested_update_fields(body: UpdateLLMSurfaceRequest) -> list[str]:
 
 
 def _reject_env_locked_updates(resolved: ResolvedLLMConfig, fields: list[str]) -> None:
-    locked = [
-        {
-            "field": field,
-            "env_var": getattr(resolved, field).env_var,
-        }
-        for field in fields
-        if getattr(resolved, field).locked_by_env
-    ]
+    locked: list[dict[str, str]] = []
+    for field in fields:
+        value = getattr(resolved, field)
+        if value.locked_by_env:
+            locked.append({"field": field, **({"env_var": value.env_var} if value.env_var else {})})
     if locked:
-        raise HTTPException(
-            status_code=409,
-            detail={"code": "LOCKED_BY_ENV", "fields": locked},
-        )
+        raise locked_by_env(locked)
 
 
 def _validate_model_selection(

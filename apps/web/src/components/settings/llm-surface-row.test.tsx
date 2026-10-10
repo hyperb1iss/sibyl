@@ -6,6 +6,7 @@ import type {
   LLMSurface,
   LLMSurfaceSettings,
 } from '@/lib/api/admin';
+import llmRefusal from '@/test/fixtures/api/llm-locked-by-env-409.json';
 import { render, screen } from '@/test/utils';
 import { LLMSurfaceRow } from './llm-surface-row';
 
@@ -165,6 +166,35 @@ describe('LLMSurfaceRow', () => {
         timeout_seconds: 60,
       },
     });
+  });
+
+  it('names the deployment variable when the server refuses a change', async () => {
+    // The exact body the API sends, pinned by apps/api/tests/test_locked_by_env_contract.py.
+    updateMutateAsync.mockRejectedValue(new Error(JSON.stringify(llmRefusal)));
+    const { user } = renderCrawler();
+
+    await user.click(screen.getAllByRole('combobox')[0]);
+    await user.click(await screen.findByRole('option', { name: 'Gemini' }));
+    await user.click(screen.getByRole('button', { name: 'Save changes' }));
+
+    expect(
+      await screen.findByText('Locked by environment: model (SIBYL_LLM_CRAWLER_MODEL).')
+    ).toBeInTheDocument();
+  });
+
+  it('shows the message of any other refusal instead of the raw body', async () => {
+    updateMutateAsync.mockRejectedValue(
+      new Error(
+        JSON.stringify({ error: 'forbidden', message: 'Global admin required', request_id: 'r' })
+      )
+    );
+    const { user } = renderCrawler();
+
+    await user.click(screen.getAllByRole('combobox')[0]);
+    await user.click(await screen.findByRole('option', { name: 'Gemini' }));
+    await user.click(screen.getByRole('button', { name: 'Save changes' }));
+
+    expect(await screen.findByText('Global admin required')).toBeInTheDocument();
   });
 
   it('runs a surface test and renders latency plus token counts', async () => {

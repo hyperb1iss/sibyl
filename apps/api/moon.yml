@@ -16,6 +16,8 @@ fileGroups:
     - src/**/*
   tests:
     - tests/**/*
+    # Error-body contracts the web tests share (tests/test_locked_by_env_contract.py).
+    - /apps/web/src/test/fixtures/api/**/*
   configs:
     - pyproject.toml
     - /pyproject.toml
