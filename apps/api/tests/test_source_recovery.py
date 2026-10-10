@@ -10,10 +10,11 @@ import asyncio
 import os
 from collections.abc import AsyncIterator, Iterator
 from contextlib import asynccontextmanager, suppress
+from copy import copy
 from dataclasses import dataclass
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 
@@ -118,7 +119,7 @@ class TestRecoverStuckSources:
                 "sibyl.api.routes.admin.list_crawl_sources", AsyncMock(return_value=[])
             ) as list_sources,
             patch("sibyl.api.routes.admin.get_source_sync_counts", AsyncMock()) as get_counts,
-            patch("sibyl.api.routes.admin.save_crawl_source_record", AsyncMock()) as save_source,
+            patch("sibyl.api.routes.admin.reset_stuck_crawl_source", AsyncMock()) as reset_source,
         ):
             from sibyl.api.routes.admin import recover_stuck_sources
 
@@ -133,7 +134,7 @@ class TestRecoverStuckSources:
             limit=None,
         )
         get_counts.assert_not_awaited()
-        save_source.assert_not_awaited()
+        reset_source.assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_recover_source_with_documents(
@@ -161,9 +162,9 @@ class TestRecoverStuckSources:
                 AsyncMock(return_value=(10, 50)),
             ) as get_counts,
             patch(
-                "sibyl.api.routes.admin.save_crawl_source_record",
+                "sibyl.api.routes.admin.reset_stuck_crawl_source",
                 AsyncMock(return_value=stuck_source),
-            ) as save_source,
+            ) as reset_source,
         ):
             from sibyl.api.routes.admin import recover_stuck_sources
 
@@ -173,12 +174,15 @@ class TestRecoverStuckSources:
         assert result["completed"] == 1
         assert result["reset_to_pending"] == 0
 
-        assert stuck_source.crawl_status == CrawlStatus.COMPLETED
-        assert stuck_source.document_count == 10
-        assert stuck_source.chunk_count == 50
-        assert stuck_source.current_job_id is None
         get_counts.assert_awaited_once_with(mock_session, source_id=stuck_source.id)
-        save_source.assert_awaited_once_with(mock_session, source=stuck_source)
+        reset_source.assert_awaited_once_with(
+            mock_session,
+            source_id=stuck_source.id,
+            expected_job_id="job-123",
+            crawl_status=CrawlStatus.COMPLETED,
+            document_count=10,
+            chunk_count=50,
+        )
 
     @pytest.mark.asyncio
     async def test_recover_source_without_documents(
@@ -204,9 +208,9 @@ class TestRecoverStuckSources:
                 AsyncMock(return_value=(0, 0)),
             ) as get_counts,
             patch(
-                "sibyl.api.routes.admin.save_crawl_source_record",
+                "sibyl.api.routes.admin.reset_stuck_crawl_source",
                 AsyncMock(return_value=stuck_source),
-            ) as save_source,
+            ) as reset_source,
         ):
             from sibyl.api.routes.admin import recover_stuck_sources
 
@@ -216,10 +220,15 @@ class TestRecoverStuckSources:
         assert result["completed"] == 0
         assert result["reset_to_pending"] == 1
 
-        assert stuck_source.crawl_status == CrawlStatus.PENDING
-        assert stuck_source.current_job_id is None
         get_counts.assert_awaited_once_with(mock_session, source_id=stuck_source.id)
-        save_source.assert_awaited_once_with(mock_session, source=stuck_source)
+        reset_source.assert_awaited_once_with(
+            mock_session,
+            source_id=stuck_source.id,
+            expected_job_id="job-123",
+            crawl_status=CrawlStatus.PENDING,
+            document_count=0,
+            chunk_count=0,
+        )
 
     @pytest.mark.asyncio
     async def test_recover_multiple_sources(
@@ -243,9 +252,9 @@ class TestRecoverStuckSources:
                 AsyncMock(side_effect=[(5, 25), (0, 0)]),
             ) as get_counts,
             patch(
-                "sibyl.api.routes.admin.save_crawl_source_record",
+                "sibyl.api.routes.admin.reset_stuck_crawl_source",
                 AsyncMock(side_effect=[source_with_docs, source_empty]),
-            ) as save_source,
+            ) as reset_source,
         ):
             from sibyl.api.routes.admin import recover_stuck_sources
 
@@ -255,10 +264,9 @@ class TestRecoverStuckSources:
         assert result["completed"] == 1
         assert result["reset_to_pending"] == 1
 
-        assert source_with_docs.crawl_status == CrawlStatus.COMPLETED
-        assert source_empty.crawl_status == CrawlStatus.PENDING
+        statuses = [call.kwargs["crawl_status"] for call in reset_source.await_args_list]
+        assert statuses == [CrawlStatus.COMPLETED, CrawlStatus.PENDING]
         assert get_counts.await_count == 2
-        assert save_source.await_count == 2
 
     @pytest.mark.asyncio
     async def test_recover_handles_database_error(
@@ -284,12 +292,57 @@ class TestRecoverStuckSources:
 
 
 class InMemorySources:
-    """The content store's crawl sources, enough for startup recovery."""
+    """The content store's crawl sources, with the conditional writes it offers.
+
+    The sources passed in are the stored rows. Readers get copies, as a real
+    read returns a snapshot, so a test can change a row between a caller's
+    read and its write the way a crawl on another process would.
+    """
 
     def __init__(self, *sources: SimpleNamespace, doc_counts: dict | None = None) -> None:
-        self.sources = list(sources)
+        self.rows = {source.id: source for source in sources}
         self.doc_counts = doc_counts or {}
         self.saved: list[object] = []
+        self.on_read: list[object] = []
+
+    def read(self, source_id: object) -> SimpleNamespace:
+        return copy(self.rows[source_id])
+
+    async def reset_stuck(
+        self,
+        _session,
+        *,
+        source_id,
+        expected_job_id,
+        crawl_status,
+        document_count,
+        chunk_count,
+        crawled_at=None,
+    ):
+        row = self.rows.get(source_id)
+        if (
+            row is None
+            or row.crawl_status != CrawlStatus.IN_PROGRESS
+            or (row.current_job_id or "") != (expected_job_id or "")
+        ):
+            return None
+        row.crawl_status = crawl_status
+        row.current_job_id = None
+        row.document_count = document_count
+        row.chunk_count = chunk_count
+        if getattr(row, "last_crawled_at", None) is None and crawled_at is not None:
+            row.last_crawled_at = crawled_at
+        self.saved.append(source_id)
+        return copy(row)
+
+    async def update_counts(self, _session, *, source_id, document_count, chunk_count):
+        row = self.rows.get(source_id)
+        if row is None:
+            return None
+        row.document_count = document_count
+        row.chunk_count = chunk_count
+        self.saved.append(source_id)
+        return copy(row)
 
     def patches(self):
         @asynccontextmanager
@@ -298,20 +351,16 @@ class InMemorySources:
 
         async def list_sources(_session, *, status, limit):
             assert limit is None
-            return [source for source in self.sources if source.crawl_status == status]
+            return [copy(row) for row in self.rows.values() if row.crawl_status == status]
 
         async def sync_counts(_session, *, source_id):
             return self.doc_counts.get(source_id, (0, 0))
-
-        async def save(_session, *, source):
-            self.saved.append(source.id)
-            return source
 
         return (
             patch("sibyl.api.routes.admin.get_content_read_session", session),
             patch("sibyl.api.routes.admin.list_crawl_sources", list_sources),
             patch("sibyl.api.routes.admin.get_source_sync_counts", sync_counts),
-            patch("sibyl.api.routes.admin.save_crawl_source_record", save),
+            patch("sibyl.api.routes.admin.reset_stuck_crawl_source", self.reset_stuck),
         )
 
     async def recover(self) -> dict:
@@ -611,64 +660,168 @@ def _org_source(source: SimpleNamespace) -> SimpleNamespace:
 
 
 async def _sync_via_route(
-    source: SimpleNamespace, *, doc_counts: tuple[int, int] = (0, 0)
+    source: SimpleNamespace,
+    *,
+    doc_counts: tuple[int, int] = (0, 0),
+    store: InMemorySources | None = None,
 ) -> tuple[dict | None, int | None, list]:
     """POST /sources/{id}/sync against an in-memory source; returns (body, error, saves)."""
     from fastapi import HTTPException
 
     from sibyl.api.routes.crawler import sync_source
 
-    saved: list[object] = []
+    store = store or InMemorySources(source)
 
     @asynccontextmanager
     async def session() -> AsyncIterator[object]:
         yield object()
 
-    async def save(_session, *, source):
-        saved.append(source.id)
-        return source
+    async def read_source(_session, source_id, _org):
+        return store.read(UUID(source_id))
 
     with (
         patch("sibyl.api.routes.crawler.get_content_read_session", session),
-        patch("sibyl.api.routes.crawler._get_org_source", AsyncMock(return_value=source)),
+        patch("sibyl.api.routes.crawler._get_org_source", read_source),
         patch(
             "sibyl.api.routes.crawler.get_source_sync_counts", AsyncMock(return_value=doc_counts)
         ),
-        patch("sibyl.api.routes.crawler.save_crawl_source_record", save),
+        patch("sibyl.api.routes.crawler.reset_stuck_crawl_source", store.reset_stuck),
+        patch("sibyl.api.routes.crawler.update_crawl_source_counts", store.update_counts),
         patch("sibyl.api.routes.crawler.broadcast_event", AsyncMock()),
     ):
         try:
             body = await sync_source(str(source.id), org=SimpleNamespace(id=source.organization_id))
         except HTTPException as exc:
-            return None, exc.status_code, saved
-    return body, None, saved
+            return None, exc.status_code, store.saved
+    return body, None, store.saved
 
 
 async def _sync_via_job(
-    source: SimpleNamespace, *, doc_counts: tuple[int, int] = (0, 0)
+    source: SimpleNamespace,
+    *,
+    doc_counts: tuple[int, int] = (0, 0),
+    store: InMemorySources | None = None,
 ) -> tuple[dict, list]:
     """The sync job an MCP sync or refresh enqueues, against an in-memory source."""
     import sibyl.jobs.crawl as crawl_jobs
 
-    saved: list[object] = []
+    store = store or InMemorySources(source)
 
     @asynccontextmanager
     async def session() -> AsyncIterator[object]:
         yield object()
 
-    async def save(_session, *, source):
-        saved.append(source.id)
-        return source
+    async def read_source(_session, *, source_id):
+        return store.read(source_id)
 
     with (
         patch("sibyl.jobs.crawl.get_content_read_session", session),
-        patch("sibyl.jobs.crawl.get_crawl_source_by_id", AsyncMock(return_value=source)),
+        patch("sibyl.jobs.crawl.get_crawl_source_by_id", read_source),
         patch("sibyl.jobs.crawl.get_source_sync_counts", AsyncMock(return_value=doc_counts)),
-        patch("sibyl.jobs.crawl.save_crawl_source_record", save),
+        patch("sibyl.jobs.crawl.reset_stuck_crawl_source", store.reset_stuck),
+        patch("sibyl.jobs.crawl.update_crawl_source_counts", store.update_counts),
         patch("sibyl.jobs.crawl._safe_broadcast", AsyncMock()),
     ):
         result = await crawl_jobs.sync_source({}, str(source.id))
-    return result, saved
+    return result, store.saved
+
+
+class CrawlStartsMidway(FakeBroker):
+    """A broker that reports no live crawl, and a crawl that starts just after.
+
+    Between the caller's read of the source and its write, another process
+    claims the source for a new crawl (or a crawl finishes), which is the
+    window a stale whole-record save used to overwrite.
+    """
+
+    def __init__(self, store: InMemorySources, change) -> None:
+        super().__init__()
+        self.store = store
+        self.change = change
+
+    async def get_job_status(self, job_id: str) -> JobInfo:
+        info = await super().get_job_status(job_id)
+        for row in self.store.rows.values():
+            self.change(row)
+        return info
+
+
+def _new_crawl_claims(row: SimpleNamespace) -> None:
+    row.crawl_status = CrawlStatus.IN_PROGRESS
+    row.current_job_id = f"crawl:{row.id}:next"
+
+
+def _crawl_finishes(row: SimpleNamespace) -> None:
+    row.crawl_status = CrawlStatus.FAILED
+    row.current_job_id = None
+    row.last_error = "fetch failed"
+
+
+class TestWritesLeaveAConcurrentCrawlsState:
+    """Recovery and sync change a source only if no crawl claimed it after they read it."""
+
+    @pytest.mark.parametrize("change", [_new_crawl_claims, _crawl_finishes])
+    async def test_recovery_keeps_what_a_crawl_wrote_meanwhile(self, change) -> None:
+        source = _in_progress_source()
+        store = InMemorySources(source)
+        broker = CrawlStartsMidway(store, change)
+        after_change = copy(source)
+        change(after_change)
+
+        with patch("sibyl.coordination.broker.get_broker", lambda: broker):
+            result = await store.recover()
+
+        assert vars(source) == vars(after_change)
+        assert store.saved == []
+        assert result["recovered"] == 0
+
+    @pytest.mark.parametrize("change", [_new_crawl_claims, _crawl_finishes])
+    async def test_route_sync_keeps_what_a_crawl_wrote_meanwhile(self, change) -> None:
+        source = _org_source(_in_progress_source())
+        store = InMemorySources(source)
+        broker = CrawlStartsMidway(store, change)
+        after_change = copy(source)
+        change(after_change)
+
+        with patch("sibyl.coordination.broker.get_broker", lambda: broker):
+            body, status_code, saved = await _sync_via_route(source, store=store)
+
+        assert (body, status_code, saved) == (None, 409, [])
+        assert vars(source) == vars(after_change)
+
+    @pytest.mark.parametrize("change", [_new_crawl_claims, _crawl_finishes])
+    async def test_sync_job_keeps_what_a_crawl_wrote_meanwhile(self, change) -> None:
+        source = _org_source(_in_progress_source())
+        store = InMemorySources(source)
+        broker = CrawlStartsMidway(store, change)
+        after_change = copy(source)
+        change(after_change)
+
+        with patch("sibyl.coordination.broker.get_broker", lambda: broker):
+            result, saved = await _sync_via_job(source, store=store)
+
+        assert result["skipped"] == "crawl_running"
+        assert saved == []
+        assert vars(source) == vars(after_change)
+
+    async def test_route_sync_of_a_settled_source_changes_only_its_counts(self) -> None:
+        source = _org_source(_in_progress_source())
+        source.crawl_status = CrawlStatus.COMPLETED
+        source.current_job_id = None
+        store = InMemorySources(source)
+        broker = CrawlStartsMidway(store, _new_crawl_claims)
+
+        with patch("sibyl.coordination.broker.get_broker", lambda: broker):
+            body, status_code, _saved = await _sync_via_route(
+                source, doc_counts=(3, 9), store=store
+            )
+
+        assert status_code is None
+        assert body is not None
+        # The crawl that started meanwhile keeps its status and job id.
+        assert source.crawl_status == CrawlStatus.IN_PROGRESS
+        assert source.current_job_id == f"crawl:{source.id}:next"
+        assert (source.document_count, source.chunk_count) == (3, 9)
 
 
 class TestManualSyncLeavesLiveCrawlsAlone:

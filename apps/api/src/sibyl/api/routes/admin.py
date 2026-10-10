@@ -49,7 +49,7 @@ from sibyl.persistence.content_runtime import (
     get_content_read_session,
     get_source_sync_counts,
     list_crawl_sources,
-    save_crawl_source_record,
+    reset_stuck_crawl_source,
 )
 from sibyl_core.audit import audit_event_resource
 from sibyl_core.auth import AuthOrganization, AuthUser, OrganizationRole
@@ -1370,25 +1370,30 @@ async def recover_stuck_sources() -> dict[str, Any]:
                     continue
 
                 doc_count, chunk_count = await get_source_sync_counts(session, source_id=source.id)
-                old_status = source.crawl_status
+                new_status = CrawlStatus.COMPLETED if doc_count > 0 else CrawlStatus.PENDING
+                reset = await reset_stuck_crawl_source(
+                    session,
+                    source_id=source.id,
+                    expected_job_id=source.current_job_id,
+                    crawl_status=new_status,
+                    document_count=doc_count,
+                    chunk_count=chunk_count,
+                )
+                if reset is None:
+                    # A crawl started or ended since the source was read; it owns it.
+                    still_running += 1
+                    log.info("Source changed during startup recovery", source_name=source.name)
+                    continue
 
-                if doc_count > 0:
-                    source.crawl_status = CrawlStatus.COMPLETED
-                    source.document_count = doc_count
-                    source.chunk_count = chunk_count
+                if new_status == CrawlStatus.COMPLETED:
                     completed += 1
                 else:
-                    source.crawl_status = CrawlStatus.PENDING
                     reset_to_pending += 1
-
-                source.current_job_id = None
-                await save_crawl_source_record(session, source=source)
-
                 log.warning(
                     "Recovered orphaned IN_PROGRESS source",
                     source_name=source.name,
-                    old_status=old_status.value,
-                    new_status=source.crawl_status.value,
+                    old_status=CrawlStatus.IN_PROGRESS.value,
+                    new_status=new_status.value,
                     doc_count=doc_count,
                 )
                 recovered += 1

@@ -126,6 +126,14 @@ async def test_sync_source_uses_runtime_counts() -> None:
     source.document_count = 0
     source.chunk_count = 0
     now = datetime(2026, 4, 21, 18, 5, tzinfo=UTC)
+    reset_row = _make_source()
+    reset_row.id = source.id
+    reset_row.organization_id = source.organization_id
+    reset_row.crawl_status = CrawlStatus.COMPLETED
+    reset_row.current_job_id = None
+    reset_row.last_crawled_at = now
+    reset_row.document_count = 3
+    reset_row.chunk_count = 7
 
     @asynccontextmanager
     async def mock_session():
@@ -142,9 +150,9 @@ async def test_sync_source_uses_runtime_counts() -> None:
             AsyncMock(return_value=(3, 7)),
         ) as get_counts,
         patch(
-            "sibyl.jobs.crawl.save_crawl_source_record",
-            AsyncMock(side_effect=lambda _session, *, source: source),
-        ) as save_source,
+            "sibyl.jobs.crawl.reset_stuck_crawl_source",
+            AsyncMock(return_value=reset_row),
+        ) as reset_source,
         patch("sibyl.jobs.crawl._safe_broadcast", AsyncMock()) as broadcast,
         patch("sibyl.jobs.crawl.utcnow_naive", return_value=now),
         # No job owns the crawl any more, so the sync may fix the source.
@@ -154,13 +162,15 @@ async def test_sync_source_uses_runtime_counts() -> None:
 
     get_source_by_id.assert_awaited_once_with(None, source_id=source.id)
     get_counts.assert_awaited_once_with(None, source_id=source.id)
-    save_source.assert_awaited_once()
-    saved = save_source.await_args.kwargs["source"]
-    assert saved.crawl_status == CrawlStatus.COMPLETED
-    assert saved.current_job_id is None
-    assert saved.last_crawled_at == now
-    assert saved.document_count == 3
-    assert saved.chunk_count == 7
+    reset_source.assert_awaited_once_with(
+        None,
+        source_id=source.id,
+        expected_job_id="job-123",
+        crawl_status=CrawlStatus.COMPLETED,
+        document_count=3,
+        chunk_count=7,
+        crawled_at=now,
+    )
     broadcast.assert_awaited_once_with(
         WSEvent.CRAWL_SYNC_COMPLETE,
         result,

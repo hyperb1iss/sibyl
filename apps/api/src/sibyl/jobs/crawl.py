@@ -16,7 +16,9 @@ from sibyl.persistence.content_runtime import (
     get_content_read_session,
     get_crawl_source_by_id,
     get_source_sync_counts,
+    reset_stuck_crawl_source,
     save_crawl_source_record,
+    update_crawl_source_counts,
 )
 from sibyl_core.models import CrawlStatus
 from sibyl_core.observability import elapsed_ms, telemetry_registry
@@ -233,24 +235,41 @@ async def sync_source(
 
         doc_count, chunk_count = await get_source_sync_counts(session, source_id=source_uuid)
 
-        # Update source
         old_status = source.crawl_status
         old_doc_count = source.document_count
         old_chunk_count = source.chunk_count
 
-        source.document_count = doc_count
-        source.chunk_count = chunk_count
-
-        if doc_count > 0 and source.crawl_status == CrawlStatus.IN_PROGRESS:
-            source.crawl_status = CrawlStatus.COMPLETED
-            source.current_job_id = None  # Clear job on sync completion
-            if source.last_crawled_at is None:
-                source.last_crawled_at = utcnow_naive()
-        elif doc_count == 0 and source.crawl_status == CrawlStatus.IN_PROGRESS:
-            source.crawl_status = CrawlStatus.PENDING
-            source.current_job_id = None  # Clear job on sync reset
-
-        await save_crawl_source_record(session, source=source)
+        if old_status == CrawlStatus.IN_PROGRESS:
+            # Stuck: completed if it stored documents, otherwise back to pending.
+            # The reset matches only if no crawl claimed the source meanwhile.
+            completed = doc_count > 0
+            synced = await reset_stuck_crawl_source(
+                session,
+                source_id=source_uuid,
+                expected_job_id=source.current_job_id,
+                crawl_status=CrawlStatus.COMPLETED if completed else CrawlStatus.PENDING,
+                document_count=doc_count,
+                chunk_count=chunk_count,
+                crawled_at=utcnow_naive() if completed else None,
+            )
+            if synced is None:
+                log.info("Sync skipped: a crawl claimed the source", source_id=source_id)
+                return {
+                    "source_id": source_id,
+                    "skipped": "crawl_running",
+                    "job_id": None,
+                    "status": old_status.value,
+                }
+        else:
+            synced = await update_crawl_source_counts(
+                session,
+                source_id=source_uuid,
+                document_count=doc_count,
+                chunk_count=chunk_count,
+            )
+            if synced is None:
+                raise ValueError(f"Source not found: {source_id}")
+        source = synced
 
         result = {
             "source_id": source_id,

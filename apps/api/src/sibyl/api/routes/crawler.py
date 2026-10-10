@@ -58,7 +58,9 @@ from sibyl.persistence.content_runtime import (
     list_source_documents_page,
     list_sources_for_graph_linking,
     list_unlinked_source_chunks,
+    reset_stuck_crawl_source,
     save_crawl_source_record,
+    update_crawl_source_counts,
 )
 from sibyl_core.auth import AuthOrganization, OrganizationRole
 from sibyl_core.models import CrawlStatus, SourceType
@@ -708,24 +710,41 @@ async def sync_source(
             source_id=UUID(source_id),
         )
 
-        # Determine correct status
         old_status = source.crawl_status
-        if actual_doc_count > 0:
-            # Has documents - should be completed or partial
-            if source.crawl_status == CrawlStatus.IN_PROGRESS:
-                source.crawl_status = CrawlStatus.COMPLETED
-                if source.last_crawled_at is None:
-                    source.last_crawled_at = _utcnow_naive()
-        elif source.crawl_status == CrawlStatus.IN_PROGRESS:
-            # No documents but stuck in progress - reset to pending
-            source.crawl_status = CrawlStatus.PENDING
-
-        # Update counts
         old_doc_count = source.document_count
         old_chunk_count = source.chunk_count
-        source.document_count = actual_doc_count
-        source.chunk_count = actual_chunk_count
-        source = await save_crawl_source_record(session, source=source)
+        if old_status == CrawlStatus.IN_PROGRESS:
+            # Stuck: completed if it stored documents, otherwise back to pending.
+            # The reset matches only if no crawl claimed the source meanwhile.
+            completed = actual_doc_count > 0
+            synced = await reset_stuck_crawl_source(
+                session,
+                source_id=source.id,
+                expected_job_id=source.current_job_id,
+                crawl_status=CrawlStatus.COMPLETED if completed else CrawlStatus.PENDING,
+                document_count=actual_doc_count,
+                chunk_count=actual_chunk_count,
+                crawled_at=_utcnow_naive() if completed else None,
+            )
+            if synced is None:
+                raise HTTPException(
+                    status_code=409,
+                    detail=(
+                        "A crawl started or finished for this source while it was "
+                        "syncing; sync again once it is done."
+                    ),
+                )
+        else:
+            # Only the counts change, so a crawl that starts now keeps its status.
+            synced = await update_crawl_source_counts(
+                session,
+                source_id=source.id,
+                document_count=actual_doc_count,
+                chunk_count=actual_chunk_count,
+            )
+            if synced is None:
+                raise HTTPException(status_code=404, detail="Source not found")
+        source = synced
 
         # Capture values before session closes
         new_status = source.crawl_status
