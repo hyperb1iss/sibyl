@@ -13,10 +13,15 @@ work, against servers described in a JSON state file
      "sql_errors": ["ns/db"], "refuse_import": ["ns/db"],
      "drop_tables_on_import": ["ns/db/table"],
      "shrink_on_import": {"ns/db/table": rows},
-     "ns_info_errors": ["ns"], "org_check_error": false}
+     "ns_info_errors": ["ns"], "org_check_error": false,
+     "change_before_export": {"ns/db/table": rows or null}}
 
 A source server may also carry "org_uuids": [...], the organizations the
 export's read-only organization check finds in the auth database.
+``change_before_export`` is a write landing between the export's first row
+count and its snapshot: the table takes the new row count (null drops it)
+just before ``/export`` reads it, so the snapshot and the export's second
+count both see the change and the first count does not.
 
 Response shapes mirror a real v3.2.4 server: ``/sql`` answers HTTP 200
 with one ``{"status", "result"}`` entry per statement, ``/import`` answers
@@ -210,6 +215,14 @@ def _export(state: dict[str, Any], server: dict[str, Any], request: Request) -> 
     tables = server.get("namespaces", {}).get(namespace, {}).get(database)
     if tables is None:
         return EXPORT_HEADER
+    for key, rows in state.get("change_before_export", {}).items():
+        changed_ns, changed_db, table = key.split("/")
+        if (changed_ns, changed_db) != (namespace, database):
+            continue
+        if rows is None:
+            tables.pop(table, None)
+        else:
+            tables[table] = rows
     return f"{EXPORT_HEADER}\n{TABLES_MARKER}{json.dumps(tables, sort_keys=True)}\n"
 
 

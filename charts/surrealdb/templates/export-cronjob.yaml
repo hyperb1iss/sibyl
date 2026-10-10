@@ -289,6 +289,14 @@ spec:
                       record_failure "$target" "the export came back empty"
                       continue
                     fi
+                    # Counted again once the export has streamed. The snapshot
+                    # lies between the two counts, so the drill can tell rows
+                    # that left during the export window (an expired session,
+                    # a released lease) from rows lost on the way back.
+                    if ! tables_after="$(sql_result "$namespace" "$database" "$table_rows" 2>"$work/error")"; then
+                      echo "recounting $namespace/$database after its export failed; the drill falls back to the earlier count: $(head -c 300 "$work/error")" >&2
+                      tables_after=null
+                    fi
                     bytes="$(wc -c < "$output" | tr -d ' ')"
                     sha256="$(sha256sum "$output")"
                     sha256="${sha256%% *}"
@@ -297,8 +305,11 @@ spec:
                       --arg file "$file" \
                       --argjson bytes "$bytes" \
                       --arg sha256 "$sha256" \
+                      --argjson after "$tables_after" \
                       '$target + {file: $file, bytes: $bytes, sha256: $sha256, rows: (map(.rows) | add // 0),
-                        tables: (map({key: .table, value: .rows}) | from_entries)}' \
+                        tables: (map({key: .table, value: .rows}) | from_entries),
+                        rows_after: (if $after == null then null else ($after | map(.rows) | add // 0) end),
+                        tables_after: (if $after == null then null else ($after | map({key: .table, value: .rows}) | from_entries) end)}' \
                       >> "$work/databases.jsonl"
                     if [ -n "${SIBYL_EXPORT_ENCRYPTION_COMMAND:-}" ]; then
                       encrypt_export_file "$output" "$SIBYL_EXPORT_RUN_DIR/$file"

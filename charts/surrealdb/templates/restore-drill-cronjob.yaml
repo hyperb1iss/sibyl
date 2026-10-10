@@ -305,28 +305,42 @@ spec:
                     if [ "$decrypted" = true ]; then
                       rm -f "$file"
                     fi
-                    # Counts come from a separate read on a live server, so a
-                    # little drift is expected; it is allowed per table, never
-                    # pooled, so one empty table cannot hide behind others. A
-                    # table that exported rows and restored none always fails,
-                    # however small: drift does not empty a table.
+                    # The export counts each table just before and just after
+                    # it streams, and its snapshot lies between the two. A
+                    # table is judged against the lower count, with a small
+                    # allowance per table, never pooled, so one emptied table
+                    # cannot hide behind others. A table restored empty fails
+                    # when both counts saw rows: a table that emptied during
+                    # the export window (an expired session, a released lease)
+                    # does not page. Manifests without the second count fall
+                    # back to the first.
                     printf '%s\n' "$expected" | jq -c \
                       --argjson restored "$restored" \
                       --arg problem "$problem" \
                       --argjson drift_rows "$SIBYL_RESTORE_ROW_DRIFT_ROWS" \
                       --argjson drift_percent "$SIBYL_RESTORE_ROW_DRIFT_PERCENT" '
-                      ($restored | map({key: .table, value: .rows}) | from_entries) as $after
+                      ($restored | map({key: .table, value: .rows}) | from_entries) as $imported
+                      | (.tables_after // null) as $post
                       | {namespace, database, file, bytes, sha256,
                          rows_exported: .rows,
+                         rows_exported_after: (.rows_after // null),
                          rows_restored: ($restored | map(.rows) | add // 0),
-                         tables: (.tables | with_entries(.value = {exported: .value, restored: $after[.key]}))}
-                      | ([.tables | to_entries[] | select(.value.restored == null) | .key]) as $missing
+                         tables: (.tables | with_entries(.value = {
+                           exported: .value,
+                           exported_after: (if $post == null then null else $post[.key] end),
+                           restored: $imported[.key]}))}
+                      | ([.tables | to_entries[] | .key as $table
+                          | select(.value.restored == null and ($post == null or ($post | has($table))))
+                          | $table]) as $missing
                       | ([.tables | to_entries[] | select(.value.restored != null)
-                          | ([$drift_rows, (.value.exported * $drift_percent / 100 | ceil)] | max) as $allowed
-                          | if .value.exported > 0 and .value.restored == 0
-                            then "\(.key) (0 of \(.value.exported), emptied)"
-                            elif .value.exported - .value.restored > $allowed
-                            then "\(.key) (\(.value.restored) of \(.value.exported), allowed shortfall \($allowed))"
+                          | .value as $counts
+                          | ($counts.exported_after // $counts.exported) as $after_export
+                          | ([$counts.exported, $after_export] | min) as $low
+                          | ([$drift_rows, ($low * $drift_percent / 100 | ceil)] | max) as $allowed
+                          | if $counts.exported > 0 and $after_export > 0 and $counts.restored == 0
+                            then "\(.key) (0 of \($counts.exported)\(if $counts.exported_after == null then "" else ", \($after_export) after export" end), emptied)"
+                            elif $low - $counts.restored > $allowed
+                            then "\(.key) (\($counts.restored) of \($low), allowed shortfall \($allowed))"
                             else empty end]) as $short
                       | .problem = (
                           if $problem != "" then $problem

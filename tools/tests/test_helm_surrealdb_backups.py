@@ -132,6 +132,7 @@ class OpsHarness:
         ns_info_errors: tuple[str, ...] = (),
         org_uuids: tuple[str, ...] = (),
         org_check_error: bool = False,
+        change_before_export: dict[str, int | None] | None = None,
     ) -> None:
         """Describe the fake servers and the faults they inject. Each fault
         names ``ns/db`` pairs (``ns/db/table`` for the table faults): an
@@ -139,7 +140,9 @@ class OpsHarness:
         a refused import, a table that vanishes on import, or one that comes
         back with the given number of rows. ``ns_info_errors`` refuses INFO
         FOR NS for whole namespaces; ``org_uuids`` are the organizations the
-        auth database holds, and ``org_check_error`` refuses that query."""
+        auth database holds, and ``org_check_error`` refuses that query.
+        ``change_before_export`` sets a table's rows (None drops it) between
+        the export's first count and its snapshot."""
         servers: dict[str, object] = {
             "http://restore": {"user": "drill:drill", "namespaces": restore or {}},
         }
@@ -162,6 +165,7 @@ class OpsHarness:
                     "shrink_on_import": shrink_on_import or {},
                     "ns_info_errors": list(ns_info_errors),
                     "org_check_error": org_check_error,
+                    "change_before_export": change_before_export or {},
                 }
             )
         )
@@ -486,7 +490,8 @@ def test_helm_restore_drill_restores_every_database_in_the_newest_manifest(
         assert item["status"] == "PASS"
         assert item["rows_exported"] == item["rows_restored"] == sum(expected.values())
         assert item["tables"] == {
-            table: {"exported": rows, "restored": rows} for table, rows in expected.items()
+            table: {"exported": rows, "exported_after": rows, "restored": rows}
+            for table, rows in expected.items()
         }
     assert receipt["row_counts"] == {"sibyl_auth.auth.users": {"expected": 2, "actual": 2}}
     restore = harness.server("http://restore")
@@ -510,12 +515,13 @@ def _flip_letters(path: Path) -> None:
         (
             None,
             lambda h: h.serve(drop_on_import=(f"{ORG_A}/graph",)),
-            "tables short after import: entity (0 of 7, emptied), relates_to (0 of 6, emptied)",
+            "tables short after import: entity (0 of 7, 7 after export, emptied),"
+            " relates_to (0 of 6, 6 after export, emptied)",
         ),
         (
             None,
             lambda h: h.serve(shrink_on_import={f"{ORG_A}/graph/entity": 0}),
-            "tables short after import: entity (0 of 7, emptied)",
+            "tables short after import: entity (0 of 7, 7 after export, emptied)",
         ),
         (
             None,
@@ -1108,8 +1114,8 @@ def test_helm_restore_drill_fails_when_a_tiny_table_empties(harness: OpsHarness)
 
     assert result.returncode != 0
     assert (
-        "restore failed for sibyl_auth/auth: tables short after import: users (0 of 2, emptied)"
-        in result.stderr
+        "restore failed for sibyl_auth/auth: tables short after import:"
+        " users (0 of 2, 2 after export, emptied)" in result.stderr
     )
 
 
@@ -1271,3 +1277,78 @@ def test_helm_failure_notification_survives_kubelet_expansion(harness: OpsHarnes
 
     assert result.returncode != 0
     assert (harness.root / "notified.log").read_text() == "notified\n"
+
+
+def test_helm_restore_drill_tolerates_a_table_emptied_during_the_export(
+    harness: OpsHarness,
+) -> None:
+    """A lease released between the export's first count and its snapshot:
+    the first count saw a row, the snapshot and the second count did not."""
+    harness.serve(source=_source(), change_before_export={f"{ORG_A}/graph/schema_version": 0})
+    exported = harness.run("export")
+    assert exported.returncode == 0, exported.stderr
+    entry = next(e for e in _manifest(harness)["databases"] if e["namespace"] == ORG_A)
+    assert entry["tables"]["schema_version"] == 1
+    assert entry["tables_after"]["schema_version"] == 0
+
+    harness.serve()
+    result = harness.run("restore-drill")
+
+    assert result.returncode == 0, result.stderr
+    receipt = json.loads(harness.receipt_path.read_text())
+    org_a = next(item for item in receipt["databases"] if item["namespace"] == ORG_A)
+    assert org_a["tables"]["schema_version"] == {"exported": 1, "exported_after": 0, "restored": 0}
+
+
+@pytest.mark.parametrize(
+    ("restored", "passes"),
+    [(None, True), (880, False)],
+    ids=["restores-what-the-snapshot-held", "loses-rows-beyond-it"],
+)
+def test_helm_restore_drill_judges_a_table_by_its_lower_count(
+    harness: OpsHarness, restored: int | None, *, passes: bool
+) -> None:
+    """1000 rows before the export, 900 after it: the snapshot holds 900,
+    which must pass, and the allowance is taken from 900, not 1000."""
+    source = _source()
+    source[ORG_A]["graph"]["entity"] = 1000
+    harness.serve(source=source, change_before_export={f"{ORG_A}/graph/entity": 900})
+    exported = harness.run("export")
+    assert exported.returncode == 0, exported.stderr
+    harness.serve(shrink_on_import={f"{ORG_A}/graph/entity": restored} if restored else None)
+
+    result = harness.run("restore-drill")
+
+    assert (result.returncode == 0) is passes, result.stderr
+    if not passes:
+        assert "entity (880 of 900, allowed shortfall 9)" in result.stderr
+
+
+def test_helm_restore_drill_ignores_a_table_dropped_during_the_export(harness: OpsHarness) -> None:
+    harness.serve(source=_source(), change_before_export={f"{ORG_A}/graph/relates_to": None})
+    exported = harness.run("export")
+    assert exported.returncode == 0, exported.stderr
+    harness.serve()
+
+    result = harness.run("restore-drill")
+
+    assert result.returncode == 0, result.stderr
+
+
+def test_helm_restore_drill_falls_back_to_one_count_for_older_manifests(
+    harness: OpsHarness,
+) -> None:
+    run_dir = _export_then_reset(
+        harness, lambda h: h.serve(shrink_on_import={f"{ORG_A}/graph/schema_version": 0})
+    )
+    manifest_path = run_dir / "manifest.json"
+    manifest = json.loads(manifest_path.read_text())
+    for entry in manifest["databases"]:
+        entry.pop("tables_after")
+        entry.pop("rows_after")
+    manifest_path.write_text(json.dumps(manifest))
+
+    result = harness.run("restore-drill")
+
+    assert result.returncode != 0
+    assert "schema_version (0 of 1, emptied)" in result.stderr
