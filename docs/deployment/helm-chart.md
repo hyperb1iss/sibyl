@@ -1219,7 +1219,18 @@ Each claim is a hidden `.reserve-<backup id>` file beside the archives, so backu
 sharing the claim see each other; nothing is serialized. A backup writes its claim before it checks,
 so two backups starting at the same moment each count the other: neither can overcommit the volume,
 and at worst both are refused and the next scheduled run goes ahead. A claim untouched for a day
-belongs to a backup that died; it stops counting and the scheduled cleanup removes it.
+belongs to a backup that died; it stops counting and the scheduled cleanup removes it. A claim that
+fails its check, for a full volume or an I/O error alike, is removed at once. Anything named like a
+claim that is not a small regular file (a link, a FIFO, an oversized file) is ignored and logged
+once rather than read.
+
+That promise holds only where every pod sees a new file in the directory as soon as it is written.
+NFS-backed shared volumes, such as Amazon EFS, Google Filestore and most ReadWriteMany NFS
+provisioners, cache directory listings on each node for about 30 to 60 seconds. Backups on different
+nodes that start within that window can miss each other's claims. At worst they behave as if there
+were no claims: each still checks its own estimate, and its real staged size before writing the
+archive, but not the others'. On such volumes, keep headroom for concurrent backups, or use S3 for
+archives.
 
 The estimate has two known gaps:
 
