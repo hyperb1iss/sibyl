@@ -1497,7 +1497,9 @@ async def backfill_denormalized_fields(
                            priority,
                            complexity,
                            feature,
-                           tags
+                           tags,
+                           updated_at,
+                           created_at
                     FROM entity
                     WHERE group_id = $group_id
                     ORDER BY updated_at DESC, created_at DESC, uuid DESC

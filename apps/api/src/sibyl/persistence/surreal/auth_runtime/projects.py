@@ -731,7 +731,7 @@ async def list_team_records(*, organization_id: UUID):
                         ORDER BY created_at ASC
                     ),
                     spaces: (
-                        SELECT uuid, scope_key FROM memory_spaces
+                        SELECT uuid, scope_key, created_at FROM memory_spaces
                         WHERE organization_id = $organization_id
                         AND memory_scope = 'team'
                         ORDER BY created_at ASC
