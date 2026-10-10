@@ -31,7 +31,7 @@ import stat
 import tempfile
 import time
 from collections.abc import Iterator
-from contextlib import contextmanager
+from contextlib import contextmanager, suppress
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -381,7 +381,9 @@ class _DirectoryReservation:
         except BaseException:
             # A claim that failed for any reason, a full volume or an I/O
             # error while checking, must not keep counting against others.
-            self._path.unlink(missing_ok=True)
+            # A failing cleanup must not hide why the claim failed.
+            with suppress(OSError):
+                self._path.unlink(missing_ok=True)
             raise
 
     def track(self, staging: Path) -> None:

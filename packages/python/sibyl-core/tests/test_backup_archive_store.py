@@ -988,6 +988,31 @@ def test_a_first_claim_that_fails_any_way_leaves_nothing_behind(tmp_path, monkey
     assert _reservations(store) == [], "a failed claim must not count against others"
 
 
+def test_a_failing_cleanup_still_surfaces_why_the_claim_failed(tmp_path, monkeypatch):
+    root = tmp_path / "archives"
+    store = DirectoryArchiveStore(root)
+    store.ready()
+    _free(monkeypatch, tmp_path, 100 * MIB)
+    real_unlink = Path.unlink
+
+    def stale_handle(self, *args, **kwargs):
+        if self.name.startswith(".reserve-"):
+            raise OSError(errno.ESTALE, "Stale file handle")
+        return real_unlink(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "unlink", stale_handle)
+    with pytest.raises(ArchiveStoreFull, match="has 100 MiB free") as full:
+        store.reserve("backup_too_big", 900 * MIB)
+    assert "Stale file handle" not in str(full.value)
+
+    def broken(path):
+        raise OSError(errno.EIO, "Input/output error")
+
+    monkeypatch.setattr(archive_store.shutil, "disk_usage", broken)
+    with pytest.raises(ArchiveStoreUnavailable, match="refused a free-space check: Input/output"):
+        store.reserve("backup_unlucky", 10 * MIB)
+
+
 def test_an_unreadable_peer_claim_neither_blocks_nor_leaks(tmp_path, monkeypatch):
     root = tmp_path / "archives"
     store = DirectoryArchiveStore(root)
