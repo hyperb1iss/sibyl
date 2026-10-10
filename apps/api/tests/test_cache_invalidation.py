@@ -29,36 +29,11 @@ from sibyl.cache_invalidation import (
     announce_sessions_invalidated,
     apply_session_invalidation,
 )
-from sibyl.coordination.events import EventSubscriber
 from sibyl.coordination.invalidation import CacheInvalidationBus, get_cache_invalidation_bus
 from sibyl.persistence.surreal import auth_runtime as surreal_auth_runtime
 from sibyl.persistence.surreal.auth_runtime import _common as auth_common
 from sibyl_core.auth import AuthSession
-
-
-class FakeChannel:
-    def __init__(self) -> None:
-        self.transports: list[FakeTransport] = []
-
-
-class FakeTransport:
-    def __init__(self, channel: FakeChannel) -> None:
-        self._channel = channel
-        self.subscribers: list[EventSubscriber] = []
-
-    async def connect(self) -> None:
-        self._channel.transports.append(self)
-
-    async def disconnect(self) -> None:
-        self._channel.transports.remove(self)
-
-    async def subscribe(self, subscriber: EventSubscriber) -> None:
-        self.subscribers.append(subscriber)
-
-    async def publish(self, event: str, data: dict[str, Any], org_id: str | None = None) -> None:
-        for transport in list(self._channel.transports):
-            for subscriber in transport.subscribers:
-                await subscriber(event, data, org_id)
+from tests.invalidation_channel import FakeChannel, FakeTransport
 
 
 def _session(*, user_id: UUID | None = None, organization_id: UUID | None = None) -> AuthSession:

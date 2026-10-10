@@ -25,6 +25,9 @@ from sibyl.coordination.invalidation import (
 log = structlog.get_logger()
 
 SESSIONS_TOPIC = "auth.sessions.invalidated"
+SETTINGS_TOPIC = "settings.changed"
+RUNTIME_SETTINGS_TOPIC = "settings.runtime.changed"
+LLM_RUNTIME_TOPIC = "llm.runtime.invalidated"
 
 
 def _uuid_strings(values: Iterable[UUID | str | None]) -> list[str]:
@@ -75,12 +78,83 @@ def apply_session_invalidation(cache: AccessSessionCache, payload: InvalidationP
         cache.invalidate_organization(organization_id)
 
 
+def _strings(payload: InvalidationPayload, key: str) -> list[str]:
+    raw = payload.get(key)
+    if not isinstance(raw, list):
+        return []
+    return [str(value) for value in raw if isinstance(value, str) and value]
+
+
+async def announce_settings_changed(keys: Iterable[str]) -> None:
+    """Drop these system settings from every other process's settings cache."""
+    payload = {"keys": sorted(set(keys))}
+    if payload["keys"]:
+        await get_cache_invalidation_bus().announce(SETTINGS_TOPIC, payload)
+
+
+async def announce_runtime_settings_changed(keys: Iterable[str]) -> None:
+    """Have every other process re-apply these settings to its runtime, as this one did."""
+    payload = {"keys": sorted(set(keys))}
+    if payload["keys"]:
+        await get_cache_invalidation_bus().announce(RUNTIME_SETTINGS_TOPIC, payload)
+
+
+async def announce_llm_runtime_invalidated(surface: str | None) -> None:
+    """Drop resolved LLM config for one surface, or all of them, everywhere else."""
+    await get_cache_invalidation_bus().announce(LLM_RUNTIME_TOPIC, {"surface": surface})
+
+
+def _forget_settings(payload: InvalidationPayload) -> None:
+    from sibyl.services.settings import get_settings_service
+
+    get_settings_service().forget(_strings(payload, "keys"))
+
+
+async def _apply_runtime_settings(payload: InvalidationPayload) -> None:
+    from sibyl.services.settings import apply_runtime_settings_change
+
+    await apply_runtime_settings_change(_strings(payload, "keys"))
+
+
+async def _invalidate_llm_runtime(payload: InvalidationPayload) -> None:
+    from sibyl.ai.llm.service import invalidate_local_llm_runtime
+    from sibyl_core.ai.llm.config import LLMSurface
+
+    raw = payload.get("surface")
+    try:
+        surface = LLMSurface(raw) if isinstance(raw, str) else None
+    except ValueError:
+        # A surface this build does not know; forgetting all of them is safe.
+        surface = None
+    await invalidate_local_llm_runtime(surface)
+
+
+def _clear_settings() -> None:
+    from sibyl.services.settings import get_settings_service
+
+    get_settings_service().clear_cache()
+
+
+async def _clear_llm_runtime() -> None:
+    from sibyl.ai.llm.service import invalidate_local_llm_runtime
+
+    await invalidate_local_llm_runtime(None)
+
+
 def install_cache_invalidation_handlers(bus: CacheInvalidationBus) -> None:
     bus.register(
         SESSIONS_TOPIC,
         lambda payload: apply_session_invalidation(access_session_cache, payload),
     )
+    bus.register(SETTINGS_TOPIC, _forget_settings)
+    bus.register(RUNTIME_SETTINGS_TOPIC, _apply_runtime_settings)
+    bus.register(LLM_RUNTIME_TOPIC, _invalidate_llm_runtime)
+    # Caches only: a missed runtime-settings message is not replayed here,
+    # because re-reading every setting into the environment would let stored
+    # values override what the deployment set, which startup never does.
     bus.on_reset(access_session_cache.clear)
+    bus.on_reset(_clear_settings)
+    bus.on_reset(_clear_llm_runtime)
 
 
 async def start_cache_invalidation() -> bool:
@@ -99,8 +173,14 @@ async def stop_cache_invalidation() -> None:
 
 
 __all__ = [
+    "LLM_RUNTIME_TOPIC",
+    "RUNTIME_SETTINGS_TOPIC",
     "SESSIONS_TOPIC",
+    "SETTINGS_TOPIC",
+    "announce_llm_runtime_invalidated",
+    "announce_runtime_settings_changed",
     "announce_sessions_invalidated",
+    "announce_settings_changed",
     "apply_session_invalidation",
     "install_cache_invalidation_handlers",
     "start_cache_invalidation",

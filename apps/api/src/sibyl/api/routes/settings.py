@@ -12,11 +12,12 @@ import structlog
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
+from sibyl.cache_invalidation import announce_runtime_settings_changed
 from sibyl.persistence.operations_runtime import (
     is_setup_mode,
     require_settings_owner,
 )
-from sibyl.services.settings import get_settings_service
+from sibyl.services.settings import RUNTIME_SETTING_ENV_VARS, get_settings_service
 from sibyl_core.ai.bedrock import COHERE_EMBED_V4_DIMENSIONS
 from sibyl_core.ai.llm.config import LLMProviderName
 from sibyl_core.ai.validation import KeyValidationResult, check_provider_key
@@ -146,17 +147,7 @@ def _validation_error(result: KeyValidationResult) -> str | None:
     return result.error or result.status
 
 
-_SETTING_ENV_WRITES: dict[str, tuple[str, ...]] = {
-    "openai_api_key": ("OPENAI_API_KEY",),
-    "anthropic_api_key": ("ANTHROPIC_API_KEY",),
-    "gemini_api_key": ("GEMINI_API_KEY", "GOOGLE_API_KEY"),
-    "embedding_provider": ("SIBYL_EMBEDDING_PROVIDER",),
-    "embedding_model": ("SIBYL_EMBEDDING_MODEL",),
-    "embedding_dimensions": ("SIBYL_EMBEDDING_DIMENSIONS",),
-    "graph_embedding_provider": ("SIBYL_GRAPH_EMBEDDING_PROVIDER",),
-    "graph_embedding_model": ("SIBYL_GRAPH_EMBEDDING_MODEL",),
-    "graph_embedding_dimensions": ("SIBYL_GRAPH_EMBEDDING_DIMENSIONS",),
-}
+_SETTING_ENV_WRITES = RUNTIME_SETTING_ENV_VARS
 
 _SETTING_DESCRIPTIONS = {
     "openai_api_key": "OpenAI API key for embeddings and LLM operations",
@@ -339,6 +330,8 @@ async def update_settings(
     # so it reconnects with fresh provider/model/key configuration.
     if updated:
         await _try_reset_graph_client(f"API key update keys={updated}")
+        # Every other replica and worker applies the same change from the database.
+        await announce_runtime_settings_changed(updated)
 
     return UpdateSettingsResponse(updated=updated, validation=validation)
 
@@ -372,6 +365,7 @@ async def delete_setting(
             for env_key in _SETTING_ENV_WRITES[key]:
                 os.environ.pop(env_key, None)
             await _try_reset_graph_client(f"API key deletion key={key}")
+            await announce_runtime_settings_changed([key])
 
         return DeleteSettingResponse(
             deleted=True,

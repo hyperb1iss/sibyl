@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING
 
 import structlog
 
+from sibyl.cache_invalidation import announce_settings_changed
 from sibyl.crypto import decrypt_value, encrypt_value, mask_secret
 from sibyl.persistence.settings_runtime import (
     delete_system_setting,
@@ -53,6 +54,20 @@ _SETTING_ENV_VARS: dict[str, list[str]] = {
 
 # Settings that should be encrypted
 _SECRET_SETTINGS = {"openai_api_key", "anthropic_api_key", "gemini_api_key"}
+
+# Settings the settings API mirrors into the process environment, where the
+# graph and embedding runtimes read them, when an admin saves or deletes them.
+RUNTIME_SETTING_ENV_VARS: dict[str, tuple[str, ...]] = {
+    "openai_api_key": ("OPENAI_API_KEY",),
+    "anthropic_api_key": ("ANTHROPIC_API_KEY",),
+    "gemini_api_key": ("GEMINI_API_KEY", "GOOGLE_API_KEY"),
+    "embedding_provider": ("SIBYL_EMBEDDING_PROVIDER",),
+    "embedding_model": ("SIBYL_EMBEDDING_MODEL",),
+    "embedding_dimensions": ("SIBYL_EMBEDDING_DIMENSIONS",),
+    "graph_embedding_provider": ("SIBYL_GRAPH_EMBEDDING_PROVIDER",),
+    "graph_embedding_model": ("SIBYL_GRAPH_EMBEDDING_MODEL",),
+    "graph_embedding_dimensions": ("SIBYL_GRAPH_EMBEDDING_DIMENSIONS",),
+}
 
 
 class _CacheEntry:
@@ -269,6 +284,7 @@ class SettingsService:
             # Invalidate cache
             self._cache.pop(key, None)
 
+        await announce_settings_changed([key])
         log.info("Setting updated", key=key, is_secret=is_secret)
 
     async def delete(self, key: str) -> bool:
@@ -284,10 +300,11 @@ class SettingsService:
             deleted = await delete_system_setting(session, key=key)
             if deleted:
                 self._cache.pop(key, None)
-                log.info("Setting deleted", key=key)
-                return True
-
-        return False
+        if not deleted:
+            return False
+        await announce_settings_changed([key])
+        log.info("Setting deleted", key=key)
+        return True
 
     async def get_all(self, *, include_secrets: bool = False) -> dict[str, dict]:
         """Get all settings with their metadata.
@@ -360,6 +377,11 @@ class SettingsService:
         """Clear the settings cache."""
         self._cache.clear()
 
+    def forget(self, keys: list[str]) -> None:
+        """Drop cached values for keys another process changed."""
+        for key in keys:
+            self._cache.pop(key, None)
+
     # Convenience methods for common settings
 
     async def get_openai_key(self) -> str | None:
@@ -431,6 +453,45 @@ async def load_runtime_settings_from_db() -> list[str]:
             log.warning(f"Failed to load {setting_key} from database", error=str(e))
 
     return loaded
+
+
+async def reset_settings_dependent_runtimes() -> None:
+    """Rebuild the graph and embedding runtimes around the current environment."""
+    from sibyl.persistence.graph_runtime import reset_graph_runtime
+    from sibyl_core.services.document_search import reset_document_embedding_provider_cache
+    from sibyl_core.services.surreal_content import reset_raw_memory_embedding_provider_cache
+
+    await reset_graph_runtime()
+    reset_document_embedding_provider_cache()
+    reset_raw_memory_embedding_provider_cache()
+
+
+async def apply_runtime_settings_change(keys: list[str]) -> list[str]:
+    """Bring this process in line with runtime settings another process changed.
+
+    The settings API writes a saved runtime setting into the environment of
+    the process that handled the request, or pops it on delete, then rebuilds
+    the graph and embedding runtimes. This repeats that here from the stored
+    value, so secrets never travel in the announcement.
+    """
+    applied = [key for key in keys if key in RUNTIME_SETTING_ENV_VARS]
+    if not applied:
+        return []
+    service = get_settings_service()
+    service.forget(applied)
+    for key in applied:
+        value = await service.get_database_value(key)
+        for env_var in RUNTIME_SETTING_ENV_VARS[key]:
+            if value:
+                os.environ[env_var] = value
+            else:
+                os.environ.pop(env_var, None)
+    try:
+        await reset_settings_dependent_runtimes()
+    except Exception as e:
+        log.warning("Failed to reset graph and embedding runtimes", error=str(e))
+    log.info("Applied runtime settings changed on another process", keys=applied)
+    return applied
 
 
 async def load_api_keys_from_db() -> list[str]:
