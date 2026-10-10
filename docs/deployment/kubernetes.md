@@ -87,6 +87,8 @@ backend:
   existingSecret: sibyl-secrets
   validationReceipts:
     existingClaim: sibyl-validation-receipts
+    # Or keep receipts in S3 and leave existingClaim empty:
+    # url: "s3://sibyl-receipts/prod?region=us-west-2"
   # Only the ingress controller pods' own range, so logins key on each user's
   # address. Never the pod CIDR; see "Client Addresses Behind the Ingress".
   forwardedAllowIps: "10.250.0.0/28"

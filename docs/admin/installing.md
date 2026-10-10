@@ -90,6 +90,8 @@ backend:
   existingSecret: sibyl-secrets
   validationReceipts:
     existingClaim: sibyl-validation-receipts
+    # Or keep receipts in S3 and leave existingClaim empty:
+    # url: "s3://sibyl-receipts/prod?region=us-west-2"
   env:
     SIBYL_ENVIRONMENT: "production"
     SIBYL_PUBLIC_URL: "https://sibyl.example.com"

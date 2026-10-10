@@ -20,9 +20,11 @@ Release builds update `version` and `appVersion` from the repository `VERSION` f
 Release charts are published to the `sibyl` Helm repository on the `gh-pages` branch. The repository
 serves two charts: `sibyl` (the application) and `sibyl-surrealdb` (a SurrealDB wrapper).
 
-Provision a persistent claim before installation and set `backend.validationReceipts.existingClaim`
-in `values.yaml`. API and worker must share that claim; multi-node replicas require ReadWriteMany
-storage.
+Choose where completed validation receipts live before installation. An S3 bucket
+(`backend.validationReceipts.url`) lets API and worker run on any node with no shared volume. A
+persistent claim (`backend.validationReceipts.existingClaim`) must be shared by API and worker, and
+multi-node replicas then require ReadWriteMany storage. See
+[Durable Validation Receipts](#durable-validation-receipts).
 
 ```bash
 # From the published Helm repository (recommended)
@@ -834,6 +836,8 @@ backend:
   forwardedAllowIps: "10.250.0.0/28"
   validationReceipts:
     existingClaim: sibyl-validation-receipts
+    # Or keep receipts in S3 and leave existingClaim empty:
+    # url: "s3://sibyl-receipts/prod?region=us-west-2"
   surreal:
     url: "ws://prod-surrealdb.internal:8000/rpc"
     username: "root"
@@ -962,11 +966,93 @@ helm get manifest sibyl -n sibyl
 
 ## Durable Validation Receipts
 
-Provision a persistent claim and set `backend.validationReceipts.existingClaim` before installing or
-upgrading. The chart rejects an absent claim at render time. API and worker mount the same claim.
-Multi-node replicas require a ReadWriteMany volume; provision it with the storage class supported by
-your cluster. The service user (UID/GID 10001) must be able to create a private child directory. No
-temporary volume or single-replica fallback is used.
+Validation writes each completed model result as an encrypted receipt before it commits the result
+to the database, so a database outage does not force Sibyl to pay for the same validation twice. Set
+exactly one of `backend.validationReceipts.url` (Amazon S3) or
+`backend.validationReceipts.existingClaim` (a shared volume) before installing or upgrading. The
+chart refuses to render with neither or both.
+
+### Amazon S3
+
+```yaml
+serviceAccount:
+  annotations:
+    eks.amazonaws.com/role-arn: arn:aws:iam::<account-id>:role/sibyl
+
+backend:
+  validationReceipts:
+    url: "s3://<bucket>/sibyl/receipts?region=us-west-2"
+```
+
+The URL names a bucket, an optional key prefix, and an optional `region` query parameter. Without a
+region, the standard `AWS_REGION` and `AWS_DEFAULT_REGION` resolution applies (the EKS IRSA webhook
+sets `AWS_REGION`). Credentials come from the default AWS chain: IRSA, EKS Pod Identity, or an
+instance role, as described under [Amazon Bedrock](#amazon-bedrock). The chart passes the URL to API
+and worker as `SIBYL_VALIDATION_RECEIPT_URL` through its ConfigMap and mounts no receipts volume, so
+pods may run on any node and single-replica rollouts use the Kubernetes `RollingUpdate` default.
+
+Grant the pod role access to the prefix:
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": ["s3:PutObject", "s3:GetObject", "s3:DeleteObject"],
+      "Resource": "arn:aws:s3:::<bucket>/sibyl/receipts/*"
+    },
+    {
+      "Effect": "Allow",
+      "Action": "s3:ListBucket",
+      "Resource": "arn:aws:s3:::<bucket>"
+    }
+  ]
+}
+```
+
+`s3:ListBucket` makes a missing receipt answer 404 instead of 403. Sibyl must tell "absent" from
+"denied", and refuses to dispatch without it. If the bucket encrypts with a customer managed KMS
+key, also grant `kms:GenerateDataKey` and `kms:Decrypt` on that key.
+
+The volume guarantees carry over:
+
+- **Encrypted by Sibyl.** Each receipt is Fernet ciphertext under a per-execution key held in the
+  content database, so the bucket never sees a result in the clear. Bucket encryption (SSE-S3 or
+  SSE-KMS) is welcome but not relied on. Purging a source erases its key, which leaves any copy of
+  the ciphertext unreadable.
+- **Create-only.** Every write is a `PutObject` with `If-None-Match: *`. A `412 Precondition Failed`
+  answer means the receipt already exists: Sibyl compares the stored bytes and refuses any
+  difference, so neither validation nor backup restore ever replaces a receipt. A `409` from a
+  racing delete is retried, as S3 documents.
+- **Checked before every dispatch.** Before each model call the readiness check creates a probe
+  object under the prefix, confirms a second create is refused, reads it back, confirms an unsigned
+  request cannot read it, deletes it, and confirms that it and a never-written key both read as
+  absent. A bucket that fails any step stops validation before a provider is paid, including an
+  S3-compatible store that ignores `If-None-Match` and a bucket whose policy lets unsigned requests
+  read objects.
+
+Keep S3 Block Public Access on (the default for new buckets), and do not grant `Principal: "*"` read
+access in the bucket policy, even behind a VPC endpoint condition. Versioning is not required. If it
+is on, conditional writes still treat a delete marker as absent, but removed receipts and readiness
+probes linger as noncurrent versions, so add a lifecycle rule that expires noncurrent versions under
+the prefix. With `networkPolicy.enabled`, allow HTTPS egress to S3 and to STS (IRSA exchanges its
+token there), or to their VPC endpoints, through `networkPolicy.egress.extra`. For an S3-compatible
+endpoint, set `backend.env.AWS_ENDPOINT_URL_S3`; the readiness check verifies the store honors
+`If-None-Match`.
+
+To move an existing release from a claim to S3, stop validation work (scale the worker and backend
+to zero), copy any remaining `*.receipt` files from the claim's `private` directory into the empty
+prefix under the same names, then upgrade with `url` set and `existingClaim` cleared. A content
+backup taken before the switch also carries pending receipts, and restoring it publishes them into
+the bucket.
+
+### Shared Volume
+
+Provision a persistent claim and set `backend.validationReceipts.existingClaim`. API and worker
+mount the same claim. Multi-node replicas require a ReadWriteMany volume; provision it with the
+storage class supported by your cluster. The service user (UID/GID 10001) must be able to create a
+private child directory. No temporary volume or single-replica fallback is used.
 
 Two chart defaults keep a ReadWriteOnce block volume (EBS, Persistent Disk, Azure Disk) working
 across restarts and rollouts:
@@ -994,9 +1080,12 @@ kubectl -n sibyl patch deploy sibyl-backend --type=json \
   -p '[{"op":"remove","path":"/spec/strategy/rollingUpdate"},{"op":"replace","path":"/spec/strategy/type","value":"Recreate"}]'
 ```
 
+### Downgrades
+
 Content schema 40 retains a per-execution receipt key and erases it when a source is purged. Older
-servers cannot recover these pending receipts. Schema repair must not replace the key-erasing purge
-event with the historical definition. Recover pending validation receipts with the current server
-before a planned downgrade, retaining the shared volume and a coherent database backup. Removing the
-volume loses outage recovery for pending results; replay still refuses to repeat an unresolved
-provider dispatch.
+servers cannot recover these pending receipts, and servers older than the S3 store cannot read a
+bucket at all. Schema repair must not replace the key-erasing purge event with the historical
+definition. Recover pending validation receipts with the current server before a planned downgrade,
+retaining the receipt volume or bucket and a coherent database backup. Removing the receipt store
+loses outage recovery for pending results; replay still refuses to repeat an unresolved provider
+dispatch.
