@@ -14,6 +14,7 @@ import structlog
 from pydantic import BaseModel, Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
+from sibyl_core.backends.s3_archive_store import parse_s3_archive_url
 from sibyl_core.backends.s3_receipt_store import parse_s3_receipt_url
 from sibyl_core.backends.surreal.url_schemes import (
     is_embedded_surreal_url,
@@ -748,6 +749,16 @@ class Settings(BaseSettings):
             raise ValueError(reason)
         if self.validation_receipt_url:
             parse_s3_receipt_url(self.validation_receipt_url)
+        if self.backup_archive_url:
+            archives = parse_s3_archive_url(self.backup_archive_url)
+            if self.validation_receipt_url and archives.overlaps(
+                parse_s3_receipt_url(self.validation_receipt_url)
+            ):
+                # Receipt export lists its whole prefix and retention lists the
+                # archive prefix, so neither may contain the other.
+                raise ValueError(
+                    "Backup archives and validation receipts need separate S3 prefixes"
+                )
 
         if self.graph_embedding_provider == "local":
             if (
@@ -972,8 +983,17 @@ class Settings(BaseSettings):
 
     # Backup configuration
     backup_dir: Path = Field(
-        default=Path("./backups"),
-        description="Directory to store backup archives",
+        default_factory=lambda: Path.home() / ".sibyl" / "backups",
+        description=(
+            "Directory of backup archives; every API and worker process must mount the same one"
+        ),
+    )
+    backup_archive_url: str = Field(
+        default="",
+        description=(
+            "s3://bucket[/prefix][?region=name] backup archive store shared by every replica; "
+            "replaces backup_dir when set"
+        ),
     )
     backup_retention_days: int = Field(
         default=30,

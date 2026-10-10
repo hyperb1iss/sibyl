@@ -7,16 +7,18 @@ Provides REST API for:
 - Downloading backup archives
 """
 
+import asyncio
 from typing import Any
 
 import structlog
-from anyio import Path as AsyncPath
 from fastapi import APIRouter, Depends, HTTPException
-from fastapi.responses import FileResponse
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
+from starlette.background import BackgroundTask
 
 from sibyl.api.routes.jobs import job_visible_to_org
 from sibyl.auth.dependencies import get_current_organization, get_current_user, require_org_admin
+from sibyl.backup_archives import backup_archive_store
 from sibyl.backup_ids import generate_backup_id
 from sibyl.config import settings
 from sibyl.persistence.backups_common import (
@@ -34,6 +36,7 @@ from sibyl.persistence.backups_runtime import (
     update_backup_settings as save_backup_settings,
 )
 from sibyl_core.auth import AuthOrganization, AuthUser
+from sibyl_core.backends.archive_store import ArchiveStoreUnavailable, archive_name
 
 log = structlog.get_logger()
 
@@ -323,7 +326,8 @@ async def run_cleanup(
 ) -> CleanupResponse:
     """Trigger a backup cleanup job.
 
-    Removes backup archives older than the retention period.
+    Removes this organization's backup archives older than the retention
+    period; other organizations' archives are never touched.
     """
     retention = await resolve_backup_retention(org.id, request.retention_days)
 
@@ -335,7 +339,7 @@ async def run_cleanup(
 
     from sibyl.jobs.queue import enqueue_backup_cleanup
 
-    job_id = await enqueue_backup_cleanup(retention_days=retention)
+    job_id = await enqueue_backup_cleanup(retention_days=retention, organization_id=str(org.id))
 
     return CleanupResponse(
         job_id=job_id,
@@ -368,14 +372,20 @@ async def get_backup_details(
     )
 
 
+def _archive_store_error(action: str, error: ArchiveStoreUnavailable) -> HTTPException:
+    log.warning("backup_archive_store_failed", action=action, error=str(error))
+    return HTTPException(status_code=503, detail="Backup archive store is unavailable")
+
+
 @router.get("/{backup_id}/download")
 async def download_backup(
     backup_id: str,
     org: AuthOrganization = Depends(get_current_organization),
-) -> FileResponse:
+) -> StreamingResponse:
     """Download a backup archive.
 
-    Returns the .tar.gz file directly.
+    Streams the .tar.gz from the shared archive store, so any API replica
+    serves an archive whichever process wrote it.
     """
     backup = await get_backup_record(org.id, backup_id)
 
@@ -385,23 +395,24 @@ async def download_backup(
             detail=f"Backup not ready for download (status: {backup.status})",
         )
 
-    if not backup.file_path:
-        raise HTTPException(status_code=404, detail="Backup file path not recorded")
+    name = archive_name(backup.backup_id)
+    try:
+        reader = await asyncio.to_thread(backup_archive_store().open, name)
+    except ArchiveStoreUnavailable as error:
+        raise _archive_store_error("download", error) from error
+    if reader is None:
+        raise HTTPException(status_code=404, detail="Backup archive not found in the archive store")
 
-    from sibyl.jobs.backup import get_backup as get_backup_file
-
-    file_info = get_backup_file(backup_id)
-    if file_info is None:
-        raise HTTPException(status_code=404, detail="Backup file not found on disk")
-
-    archive_path = AsyncPath(file_info["path"])
-    if not await archive_path.exists():
-        raise HTTPException(status_code=404, detail="Backup file not found on disk")
-
-    return FileResponse(
-        path=archive_path,
-        filename=backup.filename or f"sibyl_{backup_id}.tar.gz",
+    # Chunks are read on the thread pool as the client consumes them; the
+    # background close also releases the archive when the client goes away.
+    return StreamingResponse(
+        reader.chunks(),
         media_type="application/gzip",
+        headers={
+            "Content-Disposition": f'attachment; filename="{name}"',
+            "Content-Length": str(reader.size),
+        },
+        background=BackgroundTask(reader.close),
     )
 
 
@@ -418,9 +429,12 @@ async def delete_backup(
 
     log.info("backup_delete_requested", backup_id=backup_id, organization_id=str(org.id))
 
-    from sibyl.jobs.backup import delete_backup as delete_backup_file
-
-    delete_backup_file(backup_id)
+    # The record goes only once the archive is gone, so a store outage leaves
+    # the backup listed for a retry instead of orphaning its archive.
+    try:
+        await asyncio.to_thread(backup_archive_store().delete, archive_name(backup.backup_id))
+    except ArchiveStoreUnavailable as error:
+        raise _archive_store_error("delete", error) from error
     await delete_backup_record(org.id, backup.backup_id)
 
     return {"deleted": True, "backup_id": backup_id}

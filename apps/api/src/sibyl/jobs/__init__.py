@@ -9,13 +9,7 @@ Provides background job processing for:
 Job queue client is in queue.py, worker settings in worker.py.
 """
 
-from sibyl.jobs.backup import (
-    cleanup_old_backups,
-    delete_backup,
-    get_backup,
-    list_backups,
-    run_backup,
-)
+from sibyl.jobs.backup import cleanup_old_backups, run_backup
 from sibyl.jobs.crawl import crawl_source, sync_all_sources, sync_source
 from sibyl.jobs.entities import (
     backfill_entity_embeddings,
@@ -140,7 +134,4 @@ __all__ = [
     # Backup
     "run_backup",
     "cleanup_old_backups",
-    "list_backups",
-    "get_backup",
-    "delete_backup",
 ]
