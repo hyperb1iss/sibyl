@@ -75,7 +75,8 @@ class RedisQueueBroker:
 
         Read from Redis itself: the queue depth is the size of arq's queue,
         and a worker is healthy while its health-check key is live (every arq
-        worker refreshes it as it polls, and it expires when none does).
+        worker refreshes it as it polls, at the interval WorkerSettings sets,
+        and it expires a second after the last worker stops refreshing it).
         """
         try:
             pool = await self.get_pool()

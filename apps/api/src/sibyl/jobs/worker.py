@@ -329,6 +329,9 @@ def log_schedule_specs(schedule_specs: list[ScheduleSpec]) -> None:
         log.info("cron_job_registered", job=spec.name, schedule=spec.schedule_label)
 
 
+WORKER_HEARTBEAT_SECONDS = 10
+
+
 class WorkerSettings:
     """arq worker settings."""
 
@@ -388,6 +391,10 @@ class WorkerSettings:
     job_timeout = 3600  # 1 hour timeout for crawl jobs
     keep_result = 86400  # Keep results for 24 hours
     poll_delay = 0.5  # Check for jobs every 0.5s
+    # Each worker refreshes arq's heartbeat key this often, and the key lives
+    # one second longer, so health reports a dead worker within that window
+    # rather than arq's default hour.
+    health_check_interval = WORKER_HEARTBEAT_SECONDS
 
 
 async def run_worker_async() -> None:
@@ -422,6 +429,7 @@ async def run_worker_async() -> None:
             job_timeout=WorkerSettings.job_timeout,
             keep_result=WorkerSettings.keep_result,
             poll_delay=WorkerSettings.poll_delay,
+            health_check_interval=WorkerSettings.health_check_interval,
         )
 
         await worker.async_run()

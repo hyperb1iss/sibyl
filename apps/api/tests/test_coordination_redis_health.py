@@ -138,3 +138,68 @@ async def test_live_valkey_is_ready_and_sees_a_running_worker(
                 await worker_task
         await pool.delete(WORKER_HEARTBEAT)
         await broker.close_pool()
+
+
+async def test_live_worker_that_dies_stops_counting_within_its_heartbeat(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A worker killed mid-run leaves its heartbeat behind; it must not linger."""
+    from arq import Worker, func
+
+    from sibyl.jobs.worker import WorkerSettings
+
+    host, port = _live_redis()
+    for field, value in {
+        "coordination_backend": "redis",
+        "redis_host": host,
+        "redis_port": port,
+        "redis_jobs_db": 12,
+    }.items():
+        monkeypatch.setitem(settings.__dict__, field, value)
+    monkeypatch.setattr(broker_module, "_broker", None)
+    monkeypatch.setattr(broker_module, "_broker_backend", None)
+    broker = broker_module.get_broker()
+    pool = await broker.get_pool()
+    await pool.delete(WORKER_HEARTBEAT)
+    interval = WorkerSettings.health_check_interval
+
+    async def noop(_ctx) -> None:
+        return None
+
+    worker = Worker(
+        functions=[func(noop, name="noop")],
+        redis_settings=broker.get_redis_settings(),
+        handle_signals=False,
+        poll_delay=0.05,
+        health_check_interval=interval,
+    )
+    worker_task = asyncio.create_task(worker.async_run())
+    try:
+        for _ in range(200):
+            if await pool.get(WORKER_HEARTBEAT) is not None:
+                break
+            await asyncio.sleep(0.05)
+        assert (await broker.health())["worker_healthy"] is True
+
+        # Killed, not shut down: nothing deletes the heartbeat on the way out.
+        worker_task.cancel()
+        with suppress(asyncio.CancelledError):
+            await worker_task
+        assert 0 < await pool.pttl(WORKER_HEARTBEAT) <= (interval + 1) * 1000
+
+        for _ in range((interval + 3) * 4):
+            if not (await broker.health())["worker_healthy"]:
+                break
+            await asyncio.sleep(0.25)
+        assert (await broker.health())["worker_healthy"] is False
+    finally:
+        await worker.close()
+        await pool.delete(WORKER_HEARTBEAT)
+        await broker.close_pool()
+
+
+def test_workers_refresh_their_heartbeat_every_few_seconds() -> None:
+    from sibyl.jobs.worker import WORKER_HEARTBEAT_SECONDS, WorkerSettings
+
+    assert WorkerSettings.health_check_interval == WORKER_HEARTBEAT_SECONDS
+    assert WORKER_HEARTBEAT_SECONDS <= 15
