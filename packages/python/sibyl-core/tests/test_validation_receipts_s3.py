@@ -64,6 +64,7 @@ class FakeS3:
         self.page_size = 1000
         self.listings = 0
         self.gets: list[str] = []
+        self.deletes: list[str] = []
         self.anonymous = FakeAnonymous(self)
 
     def put_object(self, *, Bucket, Key, Body, IfNoneMatch=None, ContentType=None):
@@ -100,6 +101,9 @@ class FakeS3:
         return {"Body": io.BytesIO(self.objects[(Bucket, Key)])}
 
     def delete_object(self, *, Bucket, Key):
+        self.deletes.append(Key)
+        if "delete_object" in self.refuse:
+            raise self.refuse["delete_object"]
         self.objects.pop((Bucket, Key), None)
         if self.versioned:
             self.delete_markers.add((Bucket, Key))
@@ -354,6 +358,35 @@ def test_ready_refuses_a_bucket_that_cannot_keep_the_contract(bucket, breakage, 
     assert bucket.objects == {}, "a failed probe must not leave objects behind"
 
 
+def test_ready_proves_delete_before_creating_anything(bucket):
+    bucket.refuse["delete_object"] = _error(403, "AccessDenied", "DeleteObject")
+    with pytest.raises(ReceiptStoreUnavailable, match="refused DeleteObject: AccessDenied"):
+        receipts.ready()
+    assert bucket.puts == [] and bucket.objects == {}, "no probe may leak without delete"
+
+
+@pytest.mark.parametrize("stage", ["create", "read_back"])
+def test_ready_skips_cleanup_when_the_endpoint_stops_answering(bucket, stage):
+    from botocore.exceptions import ReadTimeoutError
+
+    timeout = ReadTimeoutError(endpoint_url="https://s3.example.test")
+    if stage == "create":
+        bucket.refuse["put_object"] = timeout
+    else:
+        reads = iter([None, timeout])
+
+        def hang_on_read_back(_key):
+            failure = next(reads, None)
+            if failure is not None:
+                raise failure
+
+        bucket.before_get = hang_on_read_back
+    with pytest.raises(ReceiptStoreUnavailable, match="ReadTimeoutError"):
+        receipts.ready()
+    probe_deletes = [key for key in bucket.deletes if not key.endswith(".unwritten")]
+    assert probe_deletes == [], "a hung endpoint must not be waited out again"
+
+
 def test_ready_accepts_its_own_create_answered_412_after_a_retry(bucket):
     bucket.land_then_refuse = True
     receipts.ready()
@@ -508,7 +541,55 @@ def test_client_factory_signs_with_sigv4_and_probes_unsigned():
         assert signed.meta.region_name == "ap-southeast-2"
         assert signed.meta.config.signature_version == "s3v4"
         assert signed.meta.config.max_pool_connections == 32
+        assert signed.meta.config.connect_timeout == s3_store._CONNECT_TIMEOUT
+        assert signed.meta.config.read_timeout == s3_store._READ_TIMEOUT
+        assert signed.meta.config.retries == {"mode": "standard", "total_max_attempts": 3}
         assert anonymous.meta.config.signature_version is UNSIGNED
         assert s3_store.s3_clients("ap-southeast-2") == (signed, anonymous)
     finally:
         s3_store._CLIENTS.pop("ap-southeast-2", None)
+
+
+def test_ready_against_a_black_hole_endpoint_is_bounded(monkeypatch):
+    """An endpoint that accepts TCP and never answers must fail fast, not in minutes."""
+    import socket
+    import time
+
+    listener = socket.socket()
+    listener.bind(("127.0.0.1", 0))
+    listener.listen(16)
+    accepted: list[socket.socket] = []
+
+    def swallow():
+        while True:
+            try:
+                connection, _ = listener.accept()
+            except OSError:
+                return
+            accepted.append(connection)
+
+    threading.Thread(target=swallow, daemon=True).start()
+    port = listener.getsockname()[1]
+    for name, value in {
+        "AWS_ENDPOINT_URL_S3": f"http://127.0.0.1:{port}",
+        "AWS_ACCESS_KEY_ID": "testing",
+        "AWS_SECRET_ACCESS_KEY": "testing",
+    }.items():
+        monkeypatch.setenv(name, value)
+    monkeypatch.setattr(s3_store, "_CONNECT_TIMEOUT", 0.5)
+    monkeypatch.setattr(s3_store, "_READ_TIMEOUT", 0.3)
+    monkeypatch.setattr(settings, "validation_receipt_url", "s3://black-hole/p?region=eu-west-3")
+    s3_store._CLIENTS.pop("eu-west-3", None)
+    started = time.monotonic()
+    try:
+        with pytest.raises(ReceiptStoreUnavailable, match="ReadTimeoutError"):
+            receipts.ready()
+    finally:
+        s3_store._CLIENTS.pop("eu-west-3", None)
+        listener.close()
+        for connection in accepted:
+            connection.close()
+    elapsed = time.monotonic() - started
+    # Three attempts of one request plus standard-mode backoff; nothing after it.
+    assert elapsed < 15, elapsed
+    assert len(accepted) <= 3

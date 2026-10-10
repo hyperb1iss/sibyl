@@ -32,6 +32,13 @@ _CREATE_ATTEMPTS = 3
 # Receipt calls run on asyncio's default thread pool, which holds up to 32
 # workers; botocore's default of 10 pooled connections would queue them.
 _MAX_POOL_CONNECTIONS = 32
+# botocore defaults to 60 s connect and read timeouts, so an endpoint that
+# accepts TCP and never answers held a pool thread for minutes. These bound
+# one request; standard retries make at most _ATTEMPTS of them, with jittered
+# backoff of a few seconds between, and do not throttle healthy traffic.
+_CONNECT_TIMEOUT = 3.0
+_READ_TIMEOUT = 10.0
+_ATTEMPTS = 3
 
 
 class ReceiptStoreUnavailable(OSError):
@@ -104,7 +111,9 @@ def s3_clients(region: str | None) -> tuple[Any, Any]:
                 region_name=region,
                 config=Config(
                     signature_version="s3v4",
-                    retries={"mode": "standard"},
+                    connect_timeout=_CONNECT_TIMEOUT,
+                    read_timeout=_READ_TIMEOUT,
+                    retries={"mode": "standard", "total_max_attempts": _ATTEMPTS},
                     max_pool_connections=_MAX_POOL_CONNECTIONS,
                 ),
             )
@@ -121,6 +130,20 @@ def s3_clients(region: str | None) -> tuple[Any, Any]:
             )
             clients = _CLIENTS[region] = (signed, anonymous)
         return clients
+
+
+def _transport_failure(error: BaseException) -> bool:
+    """Whether the endpoint never answered, as opposed to answering with a refusal."""
+    from botocore.exceptions import BotoCoreError, ClientError
+
+    cause: BaseException | None = error
+    while cause is not None:
+        if isinstance(cause, ClientError):
+            return False
+        if isinstance(cause, BotoCoreError):
+            return True
+        cause = cause.__cause__
+    return False
 
 
 def _answer(error: BaseException) -> tuple[int | None, str]:
@@ -244,21 +267,42 @@ class S3ReceiptStore:
             'Principal "*" before running validation'
         )
 
-    def ready(self) -> None:
-        """Prove create-only writes, reads, privacy and deletion before dispatch.
+    def _require_absent(self, name: str) -> None:
+        try:
+            found = self.get(name)
+        except ReceiptStoreUnavailable as error:
+            if _answer(error.__cause__ or error)[0] != 403:
+                raise
+            raise ReceiptStoreUnavailable(
+                f"{error}; a missing receipt must read as absent, so grant s3:ListBucket "
+                "on the receipt bucket"
+            ) from error
+        if found is not None:
+            raise ReceiptStoreUnavailable(f"Validation receipt probe {name} reads as present")
 
-        A probe object is created with If-None-Match, refused a second create,
-        read back, refused to an unsigned client, deleted, and then must read
-        as absent. A key that was never written must also read as absent
-        rather than denied, which on AWS needs s3:ListBucket. A deleted key
-        alone cannot prove that: on a versioned bucket its delete marker
-        answers 404 even without the permission.
+    def ready(self) -> None:
+        """Prove deletion, absence, create-only writes, reads and privacy.
+
+        Runs once as each validation execution begins, before its first model
+        call. Deleting a key that was never written proves s3:DeleteObject
+        without creating anything, so a role that cannot delete never leaks a
+        probe. A second never-written key must read as absent rather than
+        denied, which on AWS needs s3:ListBucket; a deleted key cannot prove
+        that, because a versioned bucket answers 404 for its delete marker
+        even without the permission. Then a probe object is created with
+        If-None-Match, refused a second create, read back, refused to an
+        unsigned client, deleted, and must read as absent.
         """
         probe = f".probe-{secrets.token_hex(16)}"
         token = secrets.token_bytes(32)
+        self.delete(f"{probe}.unwritten")
+        self._require_absent(f"{probe}.absent")
+        # When the create fails there is nothing of ours to remove, and a
+        # timed-out endpoint must not be waited out again by a delete.
+        created = self.put_new(probe, token)
         try:
             # A retried create that already landed answers 412 with our own bytes.
-            if not self.put_new(probe, token) and self.get(probe) != token:
+            if not created and self.get(probe) != token:
                 raise ReceiptStoreUnavailable("Validation receipt probe collided with other data")
             if self.put_new(probe, b"overwrite"):
                 raise ReceiptStoreUnavailable(
@@ -268,20 +312,12 @@ class S3ReceiptStore:
             if self.get(probe) != token:
                 raise ReceiptStoreUnavailable("Validation receipt probe read back different bytes")
             self._refuse_public_read(probe)
-        except BaseException:
-            with contextlib.suppress(Exception):
-                self.delete(probe)
+        except BaseException as failure:
+            # Best effort, and only while the endpoint still answers: a probe
+            # left behind by a hung endpoint expires under the lifecycle rule.
+            if not _transport_failure(failure):
+                with contextlib.suppress(Exception):
+                    self.delete(probe)
             raise
         self.delete(probe)
-        for name in (probe, f"{probe}.absent"):
-            try:
-                found = self.get(name)
-            except ReceiptStoreUnavailable as error:
-                if _answer(error.__cause__ or error)[0] != 403:
-                    raise
-                raise ReceiptStoreUnavailable(
-                    f"{error}; a missing receipt must read as absent, so grant s3:ListBucket "
-                    "on the receipt bucket"
-                ) from error
-            if found is not None:
-                raise ReceiptStoreUnavailable(f"Validation receipt probe {name} reads as present")
+        self._require_absent(probe)
