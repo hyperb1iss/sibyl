@@ -456,6 +456,7 @@ async def test_database_outage_then_new_execution_recovers_from_bucket(
         ("s3://my.bucket-1/a/b/", S3ReceiptLocation("my.bucket-1", "a/b", None)),
         ("s3://bucket/p?region=eu-central-1", S3ReceiptLocation("bucket", "p", "eu-central-1")),
         ("s3://bucket?region=us-gov-west-1", S3ReceiptLocation("bucket", "", "us-gov-west-1")),
+        ("s3://r2-bucket/p?region=auto", S3ReceiptLocation("r2-bucket", "p", "auto")),
     ],
 )
 def test_receipt_url_parses_bucket_prefix_and_region(url, location):
@@ -480,6 +481,7 @@ def test_receipt_url_parses_bucket_prefix_and_region(url, location):
         "s3://bucket/p?endpoint=http://minio",
         "s3://bucket/p?region=us-west-2&region=us-east-1",
         "s3://bucket/p?region=US_WEST",
+        "s3://bucket/p?region=automatic",
         "s3://bucket/p?region",
     ],
 )

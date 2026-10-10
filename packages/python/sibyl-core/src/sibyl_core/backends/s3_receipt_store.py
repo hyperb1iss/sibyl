@@ -25,7 +25,8 @@ from urllib.parse import parse_qs, urlsplit
 
 # S3 general purpose bucket names: 3-63 lowercase letters, digits, dots, hyphens.
 _BUCKET = re.compile(r"[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]")
-_REGION = re.compile(r"[a-z0-9]+(?:-[a-z0-9]+)+")
+# AWS region names, or "auto" for endpoints such as Cloudflare R2.
+_REGION = re.compile(r"auto|[a-z0-9]+(?:-[a-z0-9]+)+")
 # S3 documents that a PutObject refused with 409 (a concurrent delete won the
 # race) may be retried; any later attempt resolves to created or 412.
 _CREATE_ATTEMPTS = 3

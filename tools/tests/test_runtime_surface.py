@@ -1079,6 +1079,27 @@ def test_helm_s3_receipts_need_no_claim_and_keep_the_default_rollout() -> None:
     )
     assert https.returncode != 0
     assert "must be an s3://" in https.stderr
+    for bucket in ("Receipts_Bucket", "ab", "receipts..bucket", "-receipts"):
+        invalid = _helm_template(
+            "--set",
+            "backend.existingSecret=runtime-secret",
+            "--set",
+            "backend.validationReceipts.existingClaim=",
+            "--set",
+            f"backend.validationReceipts.url=s3://{bucket}/prod",
+        )
+        assert invalid.returncode != 0, bucket
+        assert "must name a valid S3 bucket" in invalid.stderr, bucket
+    for valid in ("s3://r2-receipts?region=auto", "s3://my.receipts-1"):
+        rendered = _helm_template(
+            "--set",
+            "backend.existingSecret=runtime-secret",
+            "--set",
+            "backend.validationReceipts.existingClaim=",
+            "--set",
+            f"backend.validationReceipts.url={valid}",
+        )
+        assert rendered.returncode == 0, rendered.stderr
     bypass = _helm_template(
         "--set",
         "backend.existingSecret=runtime-secret",

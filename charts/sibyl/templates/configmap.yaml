@@ -12,6 +12,9 @@ kind: ConfigMap
 {{- if and .url (not (hasPrefix "s3://" .url)) }}
 {{- fail "backend.validationReceipts.url must be an s3://bucket[/prefix][?region=name] URL." }}
 {{- end }}
+{{- if and .url (or (not (regexMatch "^s3://[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]([/?].*)?$" .url)) (contains ".." (regexFind "^s3://[^/?#]*" .url))) }}
+{{- fail "backend.validationReceipts.url must name a valid S3 bucket: 3-63 lowercase letters, digits, dots and hyphens, starting and ending with a letter or digit." }}
+{{- end }}
 {{- if not (or .url .existingClaim) }}
 {{- fail "backend.validationReceipts.existingClaim is required unless backend.validationReceipts.url names an S3 bucket. Provision a persistent claim shared by API and worker, with ReadWriteMany access for multi-node replicas, or set an s3:// URL, before installation or upgrade." }}
 {{- end }}
