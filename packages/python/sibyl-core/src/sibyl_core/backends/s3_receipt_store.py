@@ -134,14 +134,15 @@ def s3_clients(region: str | None) -> tuple[Any, Any]:
 
 
 def _transport_failure(error: BaseException) -> bool:
-    """Whether the endpoint never answered, as opposed to answering with a refusal."""
-    from botocore.exceptions import BotoCoreError, ClientError
+    """Whether the endpoint never answered, as opposed to answering or a local error."""
+    from botocore.exceptions import ClientError, HTTPClientError
+    from botocore.exceptions import ConnectionError as EndpointUnreachable
 
     cause: BaseException | None = error
     while cause is not None:
         if isinstance(cause, ClientError):
             return False
-        if isinstance(cause, BotoCoreError):
+        if isinstance(cause, EndpointUnreachable | HTTPClientError):
             return True
         cause = cause.__cause__
     return False
@@ -268,6 +269,16 @@ class S3ReceiptStore:
             'Principal "*" before running validation'
         )
 
+    def _listed(self, name: str) -> bool:
+        from botocore.exceptions import BotoCoreError, ClientError
+
+        key = self.location.key(name)
+        try:
+            page = self._client.list_objects_v2(Bucket=self.location.bucket, Prefix=key)
+        except (BotoCoreError, ClientError) as error:
+            raise self._unavailable("ListObjectsV2", error) from error
+        return any(item["Key"] == key for item in page.get("Contents", ()))
+
     def _require_absent(self, name: str) -> None:
         try:
             found = self.get(name)
@@ -291,8 +302,8 @@ class S3ReceiptStore:
         denied, which on AWS needs s3:ListBucket; a deleted key cannot prove
         that, because a versioned bucket answers 404 for its delete marker
         even without the permission. Then a probe object is created with
-        If-None-Match, refused a second create, read back, refused to an
-        unsigned client, deleted, and must read as absent.
+        If-None-Match, refused a second create, read back, found by a listing,
+        refused to an unsigned client, deleted, and must read as absent.
         """
         probe = f".probe-{secrets.token_hex(16)}"
         token = secrets.token_bytes(32)
@@ -312,6 +323,13 @@ class S3ReceiptStore:
                 )
             if self.get(probe) != token:
                 raise ReceiptStoreUnavailable("Validation receipt probe read back different bytes")
+            # Backup export finds receipts by listing, so a store whose listing
+            # lags its writes would record a pending receipt as missing.
+            if not self._listed(probe):
+                raise ReceiptStoreUnavailable(
+                    f"Validation receipt bucket {self.location.bucket} does not list an object "
+                    "it just stored; backups would miss pending receipts"
+                )
             self._refuse_public_read(probe)
         except BaseException as failure:
             # Best effort, and only while the endpoint still answers: a probe

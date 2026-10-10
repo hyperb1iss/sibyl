@@ -62,6 +62,9 @@ class FakeS3:
         self.before_put: Callable[[str], None] | None = None
         self.before_get: Callable[[str], None] | None = None
         self.page_size = 1000
+        # Keys a lagging listing has not caught up with yet.
+        self.unlisted: set[str] = set()
+        self.listing_lags = False
         self.listings = 0
         self.gets: list[str] = []
         self.deletes: list[str] = []
@@ -81,6 +84,8 @@ class FakeS3:
             raise _error(412, "PreconditionFailed", "PutObject")
         self.objects[(Bucket, Key)] = bytes(Body)
         self.delete_markers.discard((Bucket, Key))
+        if self.listing_lags:
+            self.unlisted.add(Key)
         if self.land_then_refuse:
             self.land_then_refuse = False
             raise _error(412, "PreconditionFailed", "PutObject")
@@ -112,7 +117,7 @@ class FakeS3:
     def list_objects_v2(self, *, Bucket, Prefix, ContinuationToken=None):
         self.listings += 1
         keys = sorted(key for bucket, key in self.objects if bucket == Bucket)
-        keys = [key for key in keys if key.startswith(Prefix)]
+        keys = [key for key in keys if key.startswith(Prefix) and key not in self.unlisted]
         start = int(ContinuationToken or 0)
         page = keys[start : start + self.page_size]
         more = start + self.page_size < len(keys)
@@ -339,6 +344,7 @@ def test_conditional_conflict_is_retried_then_surfaced(bucket):
         ("no_list", "grant s3:ListBucket"),
         ("no_list_versioned", "grant s3:ListBucket"),
         ("public", "serves objects to unsigned requests"),
+        ("stale_listing", "does not list an object it just stored"),
     ],
 )
 def test_ready_refuses_a_bucket_that_cannot_keep_the_contract(bucket, breakage, message):
@@ -351,6 +357,8 @@ def test_ready_refuses_a_bucket_that_cannot_keep_the_contract(bucket, breakage, 
     elif breakage == "no_list_versioned":
         bucket.list_bucket = False
         bucket.versioned = True
+    elif breakage == "stale_listing":
+        bucket.listing_lags = True
     else:
         bucket.anonymous.public = True
     with pytest.raises(ReceiptStoreUnavailable, match=message):
@@ -365,26 +373,40 @@ def test_ready_proves_delete_before_creating_anything(bucket):
     assert bucket.puts == [] and bucket.objects == {}, "no probe may leak without delete"
 
 
-@pytest.mark.parametrize("stage", ["create", "read_back"])
-def test_ready_skips_cleanup_when_the_endpoint_stops_answering(bucket, stage):
-    from botocore.exceptions import ReadTimeoutError
+@pytest.mark.parametrize(
+    ("stage", "failure", "cleaned"),
+    [
+        ("create", "timeout", False),
+        ("read_back", "timeout", False),
+        ("read_back", "closed", False),
+        ("read_back", "credentials", True),
+    ],
+)
+def test_ready_skips_cleanup_only_when_the_endpoint_stops_answering(
+    bucket, stage, failure, cleaned
+):
+    from botocore.exceptions import ConnectionClosedError, NoCredentialsError, ReadTimeoutError
 
-    timeout = ReadTimeoutError(endpoint_url="https://s3.example.test")
+    error = {
+        "timeout": ReadTimeoutError(endpoint_url="https://s3.example.test"),
+        "closed": ConnectionClosedError(endpoint_url="https://s3.example.test"),
+        "credentials": NoCredentialsError(),
+    }[failure]
     if stage == "create":
-        bucket.refuse["put_object"] = timeout
+        bucket.refuse["put_object"] = error
     else:
-        reads = iter([None, timeout])
+        reads = iter([None, error])
 
-        def hang_on_read_back(_key):
-            failure = next(reads, None)
-            if failure is not None:
-                raise failure
+        def fail_on_read_back(_key):
+            raised = next(reads, None)
+            if raised is not None:
+                raise raised
 
-        bucket.before_get = hang_on_read_back
-    with pytest.raises(ReceiptStoreUnavailable, match="ReadTimeoutError"):
+        bucket.before_get = fail_on_read_back
+    with pytest.raises(ReceiptStoreUnavailable, match=type(error).__name__):
         receipts.ready()
     probe_deletes = [key for key in bucket.deletes if not key.endswith(".unwritten")]
-    assert probe_deletes == [], "a hung endpoint must not be waited out again"
+    assert bool(probe_deletes) is cleaned, "only an unanswering endpoint skips cleanup"
 
 
 def test_ready_accepts_its_own_create_answered_412_after_a_retry(bucket):
@@ -543,8 +565,8 @@ def test_client_factory_signs_with_sigv4_and_probes_unsigned():
         assert signed.meta.region_name == "ap-southeast-2"
         assert signed.meta.config.signature_version == "s3v4"
         assert signed.meta.config.max_pool_connections == 32
-        assert signed.meta.config.connect_timeout == s3_store._CONNECT_TIMEOUT
-        assert signed.meta.config.read_timeout == s3_store._READ_TIMEOUT
+        assert signed.meta.config.connect_timeout == 3.0
+        assert signed.meta.config.read_timeout == 10.0
         assert signed.meta.config.retries == {"mode": "standard", "total_max_attempts": 3}
         assert anonymous.meta.config.signature_version is UNSIGNED
         assert s3_store.s3_clients("ap-southeast-2") == (signed, anonymous)
