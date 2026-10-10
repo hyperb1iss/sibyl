@@ -10,6 +10,7 @@ import pytest
 from botocore.exceptions import ClientError
 from cryptography.fernet import Fernet, InvalidToken
 
+from sibyl_core.backends import s3_client
 from sibyl_core.backends import s3_receipt_store as s3_store
 from sibyl_core.backends.s3_receipt_store import (
     ReceiptStoreUnavailable,
@@ -559,8 +560,8 @@ def test_real_client_sends_create_only_puts_and_maps_answers(monkeypatch):
 def test_client_factory_signs_with_sigv4_and_probes_unsigned():
     from botocore import UNSIGNED
 
-    s3_store._CLIENTS.pop("ap-southeast-2", None)
-    signed, anonymous = s3_store.s3_clients("ap-southeast-2")
+    s3_client.CLIENTS.pop("ap-southeast-2", None)
+    signed, anonymous = s3_client.s3_clients("ap-southeast-2")
     try:
         assert signed.meta.region_name == "ap-southeast-2"
         assert signed.meta.config.signature_version == "s3v4"
@@ -569,9 +570,9 @@ def test_client_factory_signs_with_sigv4_and_probes_unsigned():
         assert signed.meta.config.read_timeout == 10.0
         assert signed.meta.config.retries == {"mode": "standard", "total_max_attempts": 3}
         assert anonymous.meta.config.signature_version is UNSIGNED
-        assert s3_store.s3_clients("ap-southeast-2") == (signed, anonymous)
+        assert s3_client.s3_clients("ap-southeast-2") == (signed, anonymous)
     finally:
-        s3_store._CLIENTS.pop("ap-southeast-2", None)
+        s3_client.CLIENTS.pop("ap-southeast-2", None)
 
 
 def test_ready_against_a_black_hole_endpoint_is_bounded(monkeypatch):
@@ -600,16 +601,16 @@ def test_ready_against_a_black_hole_endpoint_is_bounded(monkeypatch):
         "AWS_SECRET_ACCESS_KEY": "testing",
     }.items():
         monkeypatch.setenv(name, value)
-    monkeypatch.setattr(s3_store, "_CONNECT_TIMEOUT", 0.5)
-    monkeypatch.setattr(s3_store, "_READ_TIMEOUT", 0.3)
+    monkeypatch.setattr(s3_client, "CONNECT_TIMEOUT", 0.5)
+    monkeypatch.setattr(s3_client, "READ_TIMEOUT", 0.3)
     monkeypatch.setattr(settings, "validation_receipt_url", "s3://black-hole/p?region=eu-west-3")
-    s3_store._CLIENTS.pop("eu-west-3", None)
+    s3_client.CLIENTS.pop("eu-west-3", None)
     started = time.monotonic()
     try:
         with pytest.raises(ReceiptStoreUnavailable, match="ReadTimeoutError"):
             receipts.ready()
     finally:
-        s3_store._CLIENTS.pop("eu-west-3", None)
+        s3_client.CLIENTS.pop("eu-west-3", None)
         listener.close()
         for connection in accepted:
             connection.close()
