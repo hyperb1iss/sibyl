@@ -83,9 +83,12 @@ The export does not capture:
   write that touches auth and a graph during the run can land in one file and not the other. PVC
   snapshots are the crash-consistent lane.
 
-The API backup archive is written to `SIBYL_BACKUP_DIR` (default `./backups`). The Sibyl chart runs
-the API and worker with a read-only root filesystem and mounts no volume for that directory, so set
-it to a durable mount before relying on API archives in a Kubernetes deployment.
+The API backup archive is written once to the deployment's archive store: an S3 prefix
+(`SIBYL_BACKUP_ARCHIVE_URL`, the chart's `backend.backupArchives.url`) or a directory every API and
+worker process mounts (`SIBYL_BACKUP_DIR`, default `~/.sibyl/backups`). The Sibyl chart keeps
+archives on the validation receipts claim unless `backend.backupArchives` names a bucket or claim of
+their own; see [Backup Archives](../deployment/helm-chart.md#backup-archives). Any API replica lists
+and downloads an archive whichever process wrote it.
 
 ### Layout and manifest
 
@@ -413,7 +416,9 @@ timestamp.
 ## Restore an API backup
 
 A backup downloaded from the web settings or `/api/backups/{id}/download` contains `metadata.json`
-and the enabled auth, content and graph JSON payloads. The migration CLI accepts this version 2.0
+and the enabled auth, content and graph JSON payloads. Any API replica serves the download. With
+archives in S3, an operator holding read access to the prefix can also fetch
+`sibyl_<backup id>.tar.gz` from the bucket directly. The migration CLI accepts this version 2.0
 backup format directly, as well as its own manifest archives. Do not unpack or rename the metadata
 file.
 
