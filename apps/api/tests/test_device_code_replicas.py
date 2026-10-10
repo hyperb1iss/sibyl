@@ -29,6 +29,7 @@ from pydantic import SecretStr
 from sibyl.auth.primitives import DeviceTokenError
 from sibyl.config import settings
 from sibyl.persistence.surreal import auth_runtime as surreal_auth_runtime
+from sibyl.persistence.surreal.auth import SurrealUserRepository
 from sibyl.persistence.surreal.auth_runtime import device_authorization
 from sibyl.persistence.surreal.auth_runtime._common import _SurrealRepository
 from sibyl_core.backends.surreal import SurrealAuthClient, bootstrap_auth_schema
@@ -194,3 +195,66 @@ async def test_a_consumed_device_code_is_refused_on_every_replica(
         with pytest.raises(DeviceTokenError) as refused:
             await surreal_auth_runtime.exchange_device_code(device_code=device_code)
         assert refused.value.error == "invalid_grant"
+
+
+async def test_a_stale_approval_cannot_re_arm_a_used_device_code(
+    store_clients: list[SurrealAuthClient], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Two browser tabs approve one request; the CLI exchanges in between."""
+    monkeypatch.setattr(
+        surreal_auth_runtime, "_auth_client_scope", _round_robin_scope(store_clients)
+    )
+    user = await SurrealUserRepository.from_client(store_clients[0]).create_local_user(
+        email=f"{uuid4().hex}@example.com", password="replica-proof-password", name="Approver"
+    )
+    request_row, device_code = await surreal_auth_runtime.start_device_authorization(
+        client_name="replica-race",
+        scope="mcp",
+        expires_in=timedelta(minutes=10),
+        poll_interval_seconds=5,
+    )
+
+    # The first tab reads the pending request, then stalls before deciding.
+    read_pending = asyncio.Event()
+    resume = asyncio.Event()
+    load = device_authorization._load_device_authorization_user_and_request
+    held: list[bool] = []
+
+    async def load_and_hold_once(client, **kwargs):
+        loaded = await load(client, **kwargs)
+        if not held:
+            held.append(True)
+            read_pending.set()
+            await resume.wait()
+        return loaded
+
+    monkeypatch.setattr(
+        device_authorization, "_load_device_authorization_user_and_request", load_and_hold_once
+    )
+
+    async def approve():
+        return await surreal_auth_runtime.approve_device_authorization(
+            user_id=user.id, user_code=request_row.user_code, request=None
+        )
+
+    stale_tab = asyncio.create_task(approve())
+    await read_pending.wait()
+
+    # The second tab approves, and the CLI exchanges the code.
+    assert await approve() is not None
+    tokens = await surreal_auth_runtime.exchange_device_code(device_code=device_code)
+    assert tokens["token_type"] == "Bearer"
+
+    # The first tab's decision lands on a request that is no longer pending.
+    resume.set()
+    assert await stale_tab is None
+
+    with pytest.raises(DeviceTokenError) as again:
+        await surreal_auth_runtime.exchange_device_code(device_code=device_code)
+    assert again.value.error == "invalid_grant"
+    sessions = normalize_records(
+        await store_clients[0].execute_query(
+            "SELECT uuid FROM user_sessions WHERE user_id = $user_id;", user_id=str(user.id)
+        )
+    )
+    assert len(sessions) == 1
