@@ -96,7 +96,18 @@ spec:
                     return 0
                     {{- end }}
                   }
-                  trap 'notify_failure' ERR
+                  # EXIT, not ERR: busybox ash skips an ERR trap on an
+                  # explicit `exit 1` and on failures inside functions,
+                  # which are exactly the drill's validation failures.
+                  on_exit() {
+                    status=$?
+                    trap - EXIT
+                    if [ "$status" -ne 0 ]; then
+                      notify_failure || echo "restore drill failure notification failed" >&2
+                    fi
+                    exit "$status"
+                  }
+                  trap on_exit EXIT
                   ready=""
                   for _ in $(seq 1 30); do
                     if curl -fsS "$SURREAL_RESTORE_ENDPOINT/health" >/dev/null 2>&1; then

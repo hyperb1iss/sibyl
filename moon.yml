@@ -824,13 +824,17 @@ tasks:
       - "**/pyproject.toml"
 
   helm-test:
-    command: uv run pytest tools/tests/test_runtime_surface.py -k helm -v
+    command:
+      uv run pytest tools/tests/test_runtime_surface.py tools/tests/test_helm_surrealdb_backups.py
+      -k helm -v
     inputs:
       - charts/**/*.yaml
       - charts/**/*.yml
       - charts/**/*.tpl
       - tools/tests/conftest.py
       - tools/tests/test_runtime_surface.py
+      - tools/tests/test_helm_surrealdb_backups.py
+      - tools/tests/fixtures/fake_surreal_curl.py
 
   dev-script-test:
     command:
