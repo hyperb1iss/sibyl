@@ -340,3 +340,30 @@ def test_helm_restore_drill_fails_and_notifies_on_a_bad_database(
     assert f"restore failed for {ORG_B}/graph" not in result.stderr
     assert (harness.root / "notified.log").read_text() == "notified\n"
     assert not harness.receipt_path.exists()
+
+
+def test_helm_restore_drill_scratch_server_keeps_data_on_its_tmp_volume() -> None:
+    """The drill now restores every org's graph, so the scratch sidecar's
+    default store must be disk on its own /tmp emptyDir, not RAM."""
+    assert _HELM is not None
+    rendered = subprocess.run(  # noqa: S603
+        [_HELM, "template", "drill", "charts/surrealdb", "--set", "restoreDrill.enabled=true"],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    for document in yaml.safe_load_all(rendered.stdout):
+        if document and document.get("kind") == "CronJob":
+            pod = document["spec"]["jobTemplate"]["spec"]["template"]["spec"]
+            (server,) = (c for c in pod["initContainers"] if c["name"] == "restore-server")
+            env = {item["name"]: item.get("value") for item in server["env"]}
+            assert env["SURREAL_RESTORE_PATH"] == "rocksdb:/tmp/restore-db"
+            store_path = env["SURREAL_RESTORE_PATH"].removeprefix("rocksdb:")
+            tmp_mount = next(
+                m for m in server["volumeMounts"] if store_path.startswith(m["mountPath"] + "/")
+            )
+            tmp_volume = next(v for v in pod["volumes"] if v["name"] == tmp_mount["name"])
+            assert "emptyDir" in tmp_volume
+            return
+    pytest.fail("restore-drill CronJob not rendered")

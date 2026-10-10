@@ -155,7 +155,10 @@ restoreDrill:
     endpoint: http://127.0.0.1:8000
     username: drill
     password: drill
-    path: memory
+    # The drill restores every namespace, so the scratch server holds a
+    # full copy of the data. RocksDB on the pod's /tmp emptyDir keeps it
+    # on node disk rather than in memory; "memory" suits small datasets.
+    path: rocksdb:/tmp/restore-db
   # The scratch server runs as its own sidecar container, so a restore
   # path that lives on a volume (anything other than "memory" or a
   # path under /tmp) needs its mount declared here as well; the
