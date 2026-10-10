@@ -111,8 +111,10 @@ async def startup(ctx: dict[str, Any]) -> None:
     # A worker decrypts settings the API replicas saved, so it refuses to run
     # on a key of its own instead of reading every stored secret as empty.
     from sibyl.crypto import require_shared_settings_key
+    from sibyl.services.settings_key import verify_shared_settings_key
 
     require_shared_settings_key()
+    await verify_shared_settings_key()
 
     # Load API keys from database into environment before graph jobs run.
     from sibyl.services.settings import load_api_keys_from_db

@@ -180,7 +180,11 @@ admin can also enter keys in the web app, which stores them encrypted with `SIBY
 Use a generated 32-byte or stronger `SIBYL_JWT_SECRET`. Keep `SIBYL_SETTINGS_KEY` stable so
 encrypted settings can be read after a restart. With Redis coordination, every API replica and
 worker must carry the same `SIBYL_SETTINGS_KEY` (or mount one shared key file), and sibyld refuses
-to start without one rather than encrypt with a key no other process holds.
+to start without one rather than encrypt with a key no other process holds. The first process to
+start records a fingerprint of its key, and any process whose key differs refuses to start. To
+rotate the key on purpose, delete the `internal.settings_key_fingerprint` setting
+(`DELETE /api/settings/internal.settings_key_fingerprint`), restart every process with the new key,
+and enter the encrypted settings again.
 
 ### Transactional Email
 

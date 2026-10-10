@@ -68,10 +68,57 @@ async def get_system_setting(
     return _setting_from_record(rows[0]) if rows else None
 
 
+# Keys under this prefix are bookkeeping the server keeps for itself, not
+# settings an admin manages, so listings leave them out.
+INTERNAL_SETTING_PREFIX = "internal."
+
+
 async def list_system_settings(_session: object) -> list[SystemSettingRecord]:
     rows = await _select_many("SELECT * FROM system_settings;")
-    settings = [_setting_from_record(row) for row in rows]
+    settings = [
+        _setting_from_record(row)
+        for row in rows
+        if not _coerce_str(row.get("key")).startswith(INTERNAL_SETTING_PREFIX)
+    ]
     return sorted(settings, key=lambda setting: setting.key)
+
+
+def _is_duplicate_key(error: Exception) -> bool:
+    lowered = str(error).lower()
+    return "already contains" in lowered or "unique" in lowered
+
+
+async def claim_system_setting(
+    _session: object,
+    *,
+    setting: SystemSettingRecord,
+) -> SystemSettingRecord:
+    """Store ``setting`` unless its key exists, and return whichever row is stored.
+
+    The unique index on ``key`` decides concurrent claims: one CREATE wins
+    and every other caller reads the winner's row.
+    """
+    existing = await get_system_setting(None, key=setting.key)
+    if existing is not None:
+        return existing
+    now = _utcnow()
+    setting.created_at = setting.created_at or now
+    setting.updated_at = now
+    try:
+        rows = await _execute_write(
+            "CREATE system_settings CONTENT $record;", record=_setting_record(setting)
+        )
+    except RuntimeError as exc:
+        if not _is_duplicate_key(exc):
+            raise
+        rows = []
+    if rows:
+        return _setting_from_record(rows[0])
+    stored = await get_system_setting(None, key=setting.key)
+    if stored is None:
+        msg = f"Failed to claim system setting {setting.key!r}"
+        raise RuntimeError(msg)
+    return stored
 
 
 async def save_system_setting(

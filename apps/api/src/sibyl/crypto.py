@@ -13,6 +13,8 @@ key is never generated, and startup refuses without one.
 from __future__ import annotations
 
 import base64
+import hashlib
+import hmac
 import os
 import secrets
 from functools import lru_cache
@@ -75,13 +77,9 @@ def _get_or_create_settings_key() -> bytes:
             if len(key_bytes) == 32:
                 return key_bytes
             # Hash it if wrong length
-            import hashlib
-
             return hashlib.sha256(key_bytes).digest()
         except Exception:
             # If decoding fails, hash it
-            import hashlib
-
             return hashlib.sha256(env_key.encode()).digest()
 
     # 2. Check persisted key file
@@ -121,13 +119,37 @@ def require_shared_settings_key() -> None:
     _get_fernet()
 
 
+# The message the fingerprint authenticates. Changing it changes every
+# fingerprint, so it carries a version.
+_FINGERPRINT_MESSAGE = b"sibyl settings key fingerprint v1"
+
+
+def settings_key_fingerprint() -> str:
+    """An HMAC-SHA256 of a fixed message under the settings key.
+
+    Two processes holding the same key produce the same fingerprint and
+    different keys produce different ones, while the fingerprint reveals
+    nothing that would help recover the key.
+    """
+    return hmac.new(_settings_key(), _FINGERPRINT_MESSAGE, hashlib.sha256).hexdigest()
+
+
+@lru_cache(maxsize=1)
+def _settings_key() -> bytes:
+    return _get_or_create_settings_key()
+
+
 @lru_cache(maxsize=1)
 def _get_fernet() -> Fernet:
     """Get cached Fernet instance for encryption/decryption."""
-    key = _get_or_create_settings_key()
     # Fernet requires base64-encoded 32-byte key
-    fernet_key = base64.urlsafe_b64encode(key)
-    return Fernet(fernet_key)
+    return Fernet(base64.urlsafe_b64encode(_settings_key()))
+
+
+def clear_settings_key_cache() -> None:
+    """Forget the resolved key, so the next use resolves it again."""
+    _settings_key.cache_clear()
+    _get_fernet.cache_clear()
 
 
 def encrypt_value(plaintext: str) -> str:

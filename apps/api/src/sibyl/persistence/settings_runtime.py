@@ -6,6 +6,8 @@ from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING
 
 from sibyl.persistence.surreal.system_settings import (
+    INTERNAL_SETTING_PREFIX,
+    claim_system_setting,
     delete_system_setting,
     get_system_setting,
     list_system_settings,
@@ -16,6 +18,8 @@ if TYPE_CHECKING:
     from collections.abc import AsyncGenerator
 
 __all__ = [
+    "INTERNAL_SETTING_PREFIX",
+    "claim_system_setting",
     "delete_system_setting",
     "get_settings_session",
     "get_system_setting",

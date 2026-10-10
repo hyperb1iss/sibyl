@@ -28,7 +28,10 @@ class RuntimeServices:
         self._coordination_backend = settings.resolved_coordination_backend
 
         require_shared_settings_key()
-        await bootstrap_surreal_runtime_schemas()
+        if await bootstrap_surreal_runtime_schemas():
+            # A replica whose store is not ready serves nothing until restarted,
+            # so the shared-key check needs the store only when it is.
+            await verify_shared_settings_key()
         await load_runtime_settings_from_db()
         install_llm_db_config_source()
         install_core_runtime_ports()
@@ -268,6 +271,12 @@ def require_shared_settings_key() -> None:
     from sibyl.crypto import require_shared_settings_key as require_key
 
     require_key()
+
+
+async def verify_shared_settings_key() -> None:
+    from sibyl.services.settings_key import verify_shared_settings_key as verify_key
+
+    await verify_key()
 
 
 async def bootstrap_surreal_runtime_schemas() -> bool:
