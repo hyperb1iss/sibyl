@@ -84,8 +84,12 @@ class OpsHarness:
         *,
         source: dict[str, dict[str, dict[str, int]]] | None = None,
         restore: dict[str, dict[str, dict[str, int]]] | None = None,
-        **behaviour: list[str],
+        empty_exports: tuple[str, ...] = (),
+        drop_on_import: tuple[str, ...] = (),
     ) -> None:
+        """Describe the fake servers. ``empty_exports`` and ``drop_on_import``
+        name ``ns/db`` pairs whose export comes back empty or whose import
+        silently loses every row."""
         servers: dict[str, object] = {
             "http://restore": {"user": "drill:drill", "namespaces": restore or {}},
         }
@@ -95,7 +99,15 @@ class OpsHarness:
                 "version": "surrealdb-3.2.4",
                 "namespaces": source,
             }
-        self.state_path.write_text(json.dumps({"servers": servers, **behaviour}))
+        self.state_path.write_text(
+            json.dumps(
+                {
+                    "servers": servers,
+                    "empty_exports": list(empty_exports),
+                    "drop_on_import": list(drop_on_import),
+                }
+            )
+        )
 
     def server(self, endpoint: str) -> dict[str, Any]:
         return json.loads(self.state_path.read_text())["servers"][endpoint]
@@ -244,23 +256,23 @@ def test_helm_export_hooks_cover_every_file_and_the_manifest(harness: OpsHarness
 
 
 @pytest.mark.parametrize(
-    ("source", "behaviour", "message"),
+    ("source", "empty_exports", "message"),
     [
-        ({}, {}, "discovery found no databases"),
-        ({"ns_only": {}}, {}, "discovery found no databases"),
-        (_source(), {"empty_exports": [f"{ORG_B}/graph"]}, f"empty export for {ORG_B}/graph"),
-        ({"bad name": {"db": {"t": 1}}}, {}, "not a plain SurrealDB identifier"),
-        ({"ok": {"bad-db": {"t": 1}}}, {}, "not a plain SurrealDB identifier"),
+        ({}, (), "discovery found no databases"),
+        ({"ns_only": {}}, (), "discovery found no databases"),
+        (_source(), (f"{ORG_B}/graph",), f"empty export for {ORG_B}/graph"),
+        ({"bad name": {"db": {"t": 1}}}, (), "not a plain SurrealDB identifier"),
+        ({"ok": {"bad-db": {"t": 1}}}, (), "not a plain SurrealDB identifier"),
     ],
     ids=["no-namespaces", "no-databases", "empty-file", "unsafe-namespace", "unsafe-database"],
 )
 def test_helm_export_fails_loudly_instead_of_recording_a_partial_backup(
     harness: OpsHarness,
     source: dict[str, dict[str, dict[str, int]]],
-    behaviour: dict[str, list[str]],
+    empty_exports: tuple[str, ...],
     message: str,
 ) -> None:
-    harness.serve(source=source, **behaviour)
+    harness.serve(source=source, empty_exports=empty_exports)
     result = harness.run("export")
 
     assert result.returncode != 0
@@ -268,11 +280,11 @@ def test_helm_export_fails_loudly_instead_of_recording_a_partial_backup(
     assert not list(harness.backups.glob("*/manifest.json"))
 
 
-def _export_then_reset(harness: OpsHarness, **behaviour: list[str]) -> Path:
+def _export_then_reset(harness: OpsHarness, drop_on_import: tuple[str, ...] = ()) -> Path:
     harness.serve(source=_source())
     exported = harness.run("export")
     assert exported.returncode == 0, exported.stderr
-    harness.serve(**behaviour)
+    harness.serve(drop_on_import=drop_on_import)
     (run_dir,) = _run_dirs(harness)
     return run_dir
 
@@ -307,21 +319,21 @@ def test_helm_restore_drill_restores_every_database_in_the_newest_manifest(
 
 
 @pytest.mark.parametrize(
-    ("damage", "behaviour", "message"),
+    ("damage", "drop_on_import", "message"),
     [
-        ("tamper", {}, "does not match the manifest's size and sha256"),
-        ("delete", {}, "is missing"),
-        (None, {"drop_on_import": [f"{ORG_A}/graph"]}, "restored no rows; the export counted 14"),
+        ("tamper", (), "does not match the manifest's size and sha256"),
+        ("delete", (), "is missing"),
+        (None, (f"{ORG_A}/graph",), "restored no rows; the export counted 14"),
     ],
     ids=["checksum", "missing-file", "empty-restore"],
 )
 def test_helm_restore_drill_fails_and_notifies_on_a_bad_database(
     harness: OpsHarness,
     damage: str | None,
-    behaviour: dict[str, list[str]],
+    drop_on_import: tuple[str, ...],
     message: str,
 ) -> None:
-    run_dir = _export_then_reset(harness, **behaviour)
+    run_dir = _export_then_reset(harness, drop_on_import)
     target = run_dir / f"{ORG_A}.graph.surql"
     if damage == "tamper":
         target.write_text(target.read_text() + "\n-- tampered\n")
