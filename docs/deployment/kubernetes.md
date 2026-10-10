@@ -39,7 +39,10 @@ options.
 ## Quick Start
 
 Provision the `sibyl-validation-receipts` persistent claim before installation. API and worker share
-it; multi-node replicas require ReadWriteMany storage.
+it, along with the organization backup archives kept in its `backups` directory; multi-node replicas
+require ReadWriteMany storage. With receipts in S3, give archives a bucket prefix
+(`backend.backupArchives.url`) or a claim of their own; see
+[Backup Archives](helm-chart.md#backup-archives).
 
 ```bash
 # Add namespace
@@ -89,6 +92,9 @@ backend:
     existingClaim: sibyl-validation-receipts
     # Or keep receipts in S3 and leave existingClaim empty:
     # url: "s3://sibyl-receipts/prod?region=us-west-2"
+  # Archives default to the receipts claim; with receipts in S3:
+  # backupArchives:
+  #   url: "s3://sibyl-backups/prod?region=us-west-2"
   # Only the ingress controller pods' own range, so logins key on each user's
   # address. Never the pod CIDR; see "Client Addresses Behind the Ingress".
   forwardedAllowIps: "10.250.0.0/28"

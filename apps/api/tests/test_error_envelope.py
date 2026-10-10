@@ -50,6 +50,24 @@ def test_http_exception_envelope_redacts_cross_tenant_ids() -> None:
     assert "secret-token" not in response.text
 
 
+def test_http_exception_envelope_keeps_the_exception_headers() -> None:
+    app = create_api_app()
+
+    @app.get("/_test/past-the-end")
+    async def past_the_end() -> None:
+        raise HTTPException(
+            status_code=416,
+            detail="Requested range is not satisfiable",
+            headers={"Content-Range": "bytes */3006"},
+        )
+
+    response = TestClient(app, raise_server_exceptions=False).get("/_test/past-the-end")
+
+    assert response.status_code == 416
+    assert response.headers["Content-Range"] == "bytes */3006"
+    assert response.json()["message"] == "Requested range is not satisfiable"
+
+
 def test_unhandled_exception_envelope_hides_raw_details() -> None:
     app = create_api_app()
     raw_path = "/home/service/private/path"

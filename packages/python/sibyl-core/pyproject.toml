@@ -58,8 +58,9 @@ bedrock = [
 embeddings = [
     "google-genai>=2.23.0",
 ]
-# Validation receipts in Amazon S3: create-only writes need PutObject
-# If-None-Match, which botocore models from 1.35.2.
+# Validation receipts and backup archives in Amazon S3: create-only writes
+# need If-None-Match on PutObject and CompleteMultipartUpload, which botocore
+# models from 1.35.2.
 s3 = [
     "boto3>=1.35.2,<2",
     "botocore>=1.35.2,<2",

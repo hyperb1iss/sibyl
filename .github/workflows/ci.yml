@@ -229,7 +229,7 @@ jobs:
             values: '["--set","backend.existingSecret=sibyl-secrets","--set","coordinationBackend=redis","--set","backend.redis.password=ci-only","--set","publicUrl=https://sibyl.example.test","--set","backend.validationReceipts.existingClaim=ci-validation-receipts"]'
             worker: present
           - profile: s3-receipts
-            values: '["--set","backend.existingSecret=sibyl-secrets","--set","coordinationBackend=redis","--set","backend.redis.password=ci-only","--set","publicUrl=https://sibyl.example.test","--set","backend.validationReceipts.url=s3://ci-validation-receipts/sibyl"]'
+            values: '["--set","backend.existingSecret=sibyl-secrets","--set","coordinationBackend=redis","--set","backend.redis.password=ci-only","--set","publicUrl=https://sibyl.example.test","--set","backend.validationReceipts.url=s3://ci-validation-receipts/sibyl","--set","backend.backupArchives.url=s3://ci-backup-archives/sibyl"]'
             worker: present
     steps:
       - uses: actions/checkout@v7
