@@ -6,6 +6,7 @@ import errno
 import hashlib
 import io
 import os
+import shutil
 import stat
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -16,10 +17,14 @@ from botocore.exceptions import ClientError, EndpointConnectionError
 from sibyl_core.backends import archive_store, s3_archive_store
 from sibyl_core.backends.archive_store import (
     ArchiveConflict,
+    ArchiveStoreFull,
     ArchiveStoreUnavailable,
+    ByteRange,
     DirectoryArchiveStore,
+    RangeNotSatisfiable,
     archive_name,
     backup_id_of,
+    parse_byte_range,
 )
 from sibyl_core.backends.s3_archive_store import S3ArchiveStore, parse_s3_archive_url
 from sibyl_core.backends.s3_client import S3Location
@@ -156,6 +161,140 @@ def test_two_processes_on_one_directory_share_archives(tmp_path):
     assert _read(opened) == b"from the worker"
 
 
+@pytest.mark.parametrize(
+    ("header", "expected"),
+    [
+        ("bytes=0-9", ByteRange(0, 9)),
+        ("bytes=5-", ByteRange(5, None)),
+        ("bytes=-4", ByteRange(None, 4)),
+        (" bytes = 2 - 3 ", ByteRange(2, 3)),
+        (None, None),
+        ("", None),
+        ("bytes=", None),
+        ("bytes=-", None),
+        ("bytes=9-2", None),
+        ("bytes=0-1,4-5", None),
+        ("items=0-1", None),
+        ("bytes=a-b", None),
+    ],
+)
+def test_range_headers_parse_one_range_and_ignore_the_rest(header, expected):
+    assert parse_byte_range(header) == expected
+
+
+def test_directory_store_serves_byte_ranges_and_refuses_ones_past_the_end(tmp_path):
+    store = DirectoryArchiveStore(tmp_path / "archives")
+    data = bytes(range(200)) * 30
+    store.put_new(NAME, _archive(tmp_path, data), sha256=_sha(data))
+    for requested, (start, end) in (
+        (ByteRange(10, 19), (10, 19)),
+        (ByteRange(5990, None), (5990, 5999)),
+        (ByteRange(None, 7), (5993, 5999)),
+        (ByteRange(5000, 999999), (5000, 5999)),
+        (ByteRange(None, 999999), (0, 5999)),
+    ):
+        reader = store.open(NAME, requested)
+        assert reader is not None
+        assert (reader.start, reader.size, reader.total) == (start, end - start + 1, len(data))
+        assert _read(reader) == data[start : end + 1]
+    for refused in (ByteRange(6000, None), ByteRange(None, 0)):
+        with pytest.raises(RangeNotSatisfiable) as unsatisfiable:
+            store.open(NAME, refused)
+        assert unsatisfiable.value.total == len(data)
+
+
+def test_directory_store_reports_filesystem_failures_as_unavailable(tmp_path):
+    blocker = tmp_path / "not-a-directory"
+    blocker.write_text("a file where the archive directory should be")
+    store = DirectoryArchiveStore(blocker)
+    for call in (
+        lambda: store.open(NAME),
+        lambda: store.delete(NAME),
+        store.archives,
+        store.ready,
+        lambda: store.put_new(NAME, _archive(tmp_path, b"x"), sha256=_sha(b"x")),
+    ):
+        with pytest.raises(ArchiveStoreUnavailable, match="refused"):
+            call()
+
+    locked = tmp_path / "read-only"
+    locked.mkdir(mode=0o500)
+    try:
+        with pytest.raises(ArchiveStoreUnavailable, match="refused a publish"):
+            DirectoryArchiveStore(locked).put_new(NAME, _archive(tmp_path, b"x"), sha256=_sha(b"x"))
+    finally:
+        locked.chmod(0o700)
+
+
+@pytest.mark.parametrize("code", [errno.EPERM, errno.EOPNOTSUPP, errno.ENOSYS])
+def test_a_filesystem_without_hard_links_fails_readiness_and_publishes_nothing(
+    tmp_path, monkeypatch, code
+):
+    root = tmp_path / "archives"
+    store = DirectoryArchiveStore(root)
+
+    def no_links(src, dst):
+        raise OSError(code, os.strerror(code))
+
+    monkeypatch.setattr(os, "link", no_links)
+    with pytest.raises(ArchiveStoreUnavailable, match="without hard links"):
+        store.ready()
+    assert list(root.iterdir()) == [], "the readiness probe cleans up after itself"
+    with pytest.raises(ArchiveStoreUnavailable, match="without hard links"):
+        store.put_new(NAME, _archive(tmp_path, b"x"), sha256=_sha(b"x"))
+    assert store.archives() == []
+
+
+def test_directory_store_refuses_a_backup_that_would_eat_the_reserve(tmp_path, monkeypatch):
+    store = DirectoryArchiveStore(tmp_path / "archives", reserve_bytes=512 * 1024 * 1024)
+    usage = shutil.disk_usage(tmp_path)
+    monkeypatch.setattr(
+        archive_store.shutil,
+        "disk_usage",
+        lambda path: usage._replace(free=600 * 1024 * 1024),
+    )
+    store.reserve(80 * 1024 * 1024)
+    with pytest.raises(ArchiveStoreFull) as full:
+        store.reserve(100 * 1024 * 1024)
+    message = str(full.value)
+    assert "600 MiB free" in message
+    assert "about 100 MiB plus 512 MiB kept free" in message
+    assert isinstance(full.value, ArchiveStoreUnavailable)
+
+
+def test_directory_store_sweeps_only_stale_staging(tmp_path):
+    root = tmp_path / "archives"
+    store = DirectoryArchiveStore(root)
+    store.put_new(NAME, _archive(tmp_path, b"kept"), sha256=_sha(b"kept"))
+    old = (datetime.now(UTC) - timedelta(days=3)).timestamp()
+
+    def age(path: Path) -> None:
+        os.utime(path, (old, old))
+
+    dead = root / ".staging-dead"
+    dead.mkdir()
+    (dead / "content.json").write_text('{"secret": "plaintext export"}')
+    age(dead / "content.json")
+    age(dead)
+    running = root / ".staging-running"
+    running.mkdir()
+    (running / "graph.json").write_text("{}")
+    age(running)  # the directory is old, but a file inside is still being written
+    fresh = root / ".staging-fresh"
+    fresh.mkdir()
+    partial = root / ".partial-abc"
+    partial.write_bytes(b"half a copy")
+    age(partial)
+    age(root / NAME)
+
+    removed = store.sweep_stale(datetime.now(UTC) - timedelta(days=1))
+
+    assert removed == 2
+    assert sorted(path.name for path in root.iterdir()) == sorted(
+        [NAME, ".staging-fresh", ".staging-running"]
+    )
+
+
 # -- S3 store --------------------------------------------------------------------
 
 
@@ -254,13 +393,24 @@ class FakeS3:
         data, metadata, _ = self.objects[Key]
         return {"ContentLength": len(data), "Metadata": metadata}
 
-    def get_object(self, *, Bucket, Key):
+    def get_object(self, *, Bucket, Key, Range=None):
         self._record("get_object")
         if Key not in self.objects:
             raise _error(404, "NoSuchKey", "GetObject")
-        body = _Body(self.objects[Key][0])
+        data, metadata, _ = self.objects[Key]
+        answer = {"Metadata": dict(metadata)}
+        if Range is not None:
+            requested = parse_byte_range(Range)
+            assert requested is not None, Range
+            try:
+                start, end = requested.resolve(len(data))
+            except RangeNotSatisfiable:
+                raise _error(416, "InvalidRange", "GetObject") from None
+            answer["ContentRange"] = f"bytes {start}-{end}/{len(data)}"
+            data = data[start : end + 1]
+        body = _Body(data)
         self.bodies.append(body)
-        return {"Body": body, "ContentLength": len(self.objects[Key][0])}
+        return {**answer, "Body": body, "ContentLength": len(data)}
 
     def delete_object(self, *, Bucket, Key):
         self._record("delete_object")
@@ -432,6 +582,28 @@ def test_s3_streams_downloads_and_tells_absence_from_outage(bucket, tmp_path):
     bucket.fail["get_object"] = _error(404, "NoSuchBucket", "GetObject")
     with pytest.raises(ArchiveStoreUnavailable, match="NoSuchBucket"):
         store.open(NAME)
+
+
+def test_s3_serves_byte_ranges_with_the_recorded_digest(bucket, tmp_path):
+    store = _store()
+    data = bytes(range(256)) * 4
+    store.put_new(NAME, _archive(tmp_path, data), sha256=_sha(data))
+    whole = store.open(NAME)
+    assert whole is not None
+    assert (whole.start, whole.size, whole.total, whole.sha256) == (0, 1024, 1024, _sha(data))
+    whole.close()
+    for requested, (start, end) in (
+        (ByteRange(100, 199), (100, 199)),
+        (ByteRange(1000, None), (1000, 1023)),
+        (ByteRange(None, 24), (1000, 1023)),
+    ):
+        reader = store.open(NAME, requested)
+        assert reader is not None
+        assert (reader.start, reader.size, reader.total) == (start, end - start + 1, 1024)
+        assert _read(reader) == data[start : end + 1]
+    with pytest.raises(RangeNotSatisfiable) as unsatisfiable:
+        store.open(NAME, ByteRange(5000, None))
+    assert unsatisfiable.value.total == 1024, "the 416 answer still names the size"
 
 
 def test_s3_list_pages_and_skips_probes_partials_and_nested_keys(bucket, tmp_path):
@@ -616,3 +788,44 @@ def test_s3_listing_compares_against_aware_cutoffs(bucket):
     (listed,) = store.archives()
     assert listed.modified.tzinfo is not None
     assert listed.modified < datetime.now(UTC) - timedelta(days=30)
+
+
+def test_real_client_accepts_ranged_reads(monkeypatch):
+    """A ranged GetObject goes out as a Range header and 416 maps to unsatisfiable."""
+    import boto3
+    from botocore.response import StreamingBody
+    from botocore.stub import Stubber
+
+    session = boto3.session.Session(
+        aws_access_key_id="testing", aws_secret_access_key="testing", region_name="us-west-2"
+    )
+    client = session.client("s3")
+    monkeypatch.setattr(s3_archive_store, "s3_clients", lambda region: (client, client))
+    store = S3ArchiveStore(parse_s3_archive_url("s3://bucket/prefix"))
+    key = f"prefix/{NAME}"
+    with Stubber(client) as stub:
+        stub.add_response(
+            "get_object",
+            {
+                "Body": StreamingBody(io.BytesIO(b"2345"), 4),
+                "ContentLength": 4,
+                "ContentRange": "bytes 2-5/10",
+                "Metadata": {"sha256": "digest"},
+            },
+            {"Bucket": "bucket", "Key": key, "Range": "bytes=2-5"},
+        )
+        stub.add_client_error(
+            "get_object",
+            "InvalidRange",
+            http_status_code=416,
+            expected_params={"Bucket": "bucket", "Key": key, "Range": "bytes=50-"},
+        )
+        stub.add_response("head_object", {"ContentLength": 10}, {"Bucket": "bucket", "Key": key})
+        reader = store.open(NAME, ByteRange(2, 5))
+        assert reader is not None
+        assert (reader.start, reader.size, reader.total, reader.sha256) == (2, 4, 10, "digest")
+        assert _read(reader) == b"2345"
+        with pytest.raises(RangeNotSatisfiable) as unsatisfiable:
+            store.open(NAME, ByteRange(50, None))
+        assert unsatisfiable.value.total == 10
+        stub.assert_no_pending_responses()

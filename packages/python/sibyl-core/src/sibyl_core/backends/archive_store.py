@@ -14,7 +14,9 @@ and publishes it with a hard link, and S3 shows nothing until PutObject or
 CompleteMultipartUpload succeeds.
 
 Archives carry secret material (content recovery keys among it), so names,
-sizes and locations may be logged but archive bytes never are.
+sizes and locations may be logged but archive bytes never are. Every storage
+failure surfaces as :class:`ArchiveStoreUnavailable`, so callers answer an
+outage the same way whichever store they run on.
 """
 
 from __future__ import annotations
@@ -26,6 +28,7 @@ import re
 import shutil
 import tempfile
 from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -37,6 +40,12 @@ _BACKUP_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]{0,127}")
 _ARCHIVE_NAME = re.compile(r"sibyl_[A-Za-z0-9][A-Za-z0-9_-]{0,127}\.tar\.gz")
 # Retention only ever considers archives the backup job names this way.
 _RETAINED_NAME = re.compile(r"sibyl_backup_[A-Za-z0-9_-]{1,120}\.tar\.gz")
+# One "bytes=first-last" range; anything else in a Range header is ignored.
+_BYTE_RANGE = re.compile(r"\s*bytes\s*=\s*(\d*)\s*-\s*(\d*)\s*")
+# Hidden working files a backup leaves in a directory store while it runs.
+_STAGING_PREFIXES = (".staging-", ".partial-", ".probe-")
+# link() answers these when the filesystem cannot make hard links at all.
+_NO_HARD_LINKS = frozenset({errno.EPERM, errno.EOPNOTSUPP, errno.ENOTSUP, errno.ENOSYS})
 CHUNK_SIZE = 1024 * 1024
 
 
@@ -44,8 +53,20 @@ class ArchiveStoreUnavailable(OSError):
     """The archive store failed or refused a request."""
 
 
+class ArchiveStoreFull(ArchiveStoreUnavailable):
+    """The archive volume lacks room for the next backup and its reserve."""
+
+
 class ArchiveConflict(Exception):
     """The archive name already holds different bytes; nothing was replaced."""
+
+
+class RangeNotSatisfiable(Exception):
+    """A byte range starts past the end of the archive."""
+
+    def __init__(self, total: int | None) -> None:
+        super().__init__("Requested range is not satisfiable")
+        self.total = total
 
 
 def archive_name(backup_id: str) -> str:
@@ -80,6 +101,52 @@ def sha256_file(path: Path) -> str:
 
 
 @dataclass(frozen=True)
+class ByteRange:
+    """One HTTP byte range: ``first-last``, ``first-``, or a suffix ``-last``.
+
+    A suffix range has ``first`` None and asks for the final ``last`` bytes.
+    """
+
+    first: int | None
+    last: int | None
+
+    def resolve(self, total: int) -> tuple[int, int]:
+        """The inclusive (start, end) this range covers in ``total`` bytes."""
+        if self.first is None:
+            length = self.last or 0
+            if length <= 0 or total <= 0:
+                raise RangeNotSatisfiable(total)
+            return max(total - length, 0), total - 1
+        if self.first >= total:
+            raise RangeNotSatisfiable(total)
+        end = total - 1 if self.last is None else min(self.last, total - 1)
+        return self.first, end
+
+    def header(self) -> str:
+        first = "" if self.first is None else str(self.first)
+        last = "" if self.last is None else str(self.last)
+        return f"bytes={first}-{last}"
+
+
+def parse_byte_range(header: str | None) -> ByteRange | None:
+    """The single byte range a Range header asks for, or None to send it all.
+
+    RFC 9110 lets a server ignore a Range header, and requires it to ignore a
+    syntactically invalid one, so other units, several ranges and malformed
+    specs all read as "the whole archive".
+    """
+    match = _BYTE_RANGE.fullmatch(header or "")
+    if match is None:
+        return None
+    first, last = (int(value) if value else None for value in match.groups())
+    if first is None and last is None:
+        return None
+    if first is not None and last is not None and last < first:
+        return None
+    return ByteRange(first, last)
+
+
+@dataclass(frozen=True)
 class ArchiveObject:
     """One published archive as a listing reports it."""
 
@@ -89,9 +156,17 @@ class ArchiveObject:
 
 
 class ArchiveReader(Protocol):
-    """An open archive streamed in chunks; close it when done."""
+    """An open archive, or one byte range of it, streamed in chunks.
+
+    ``size`` is how many bytes ``chunks`` yields, ``start`` where they begin
+    and ``total`` the whole archive's size. ``sha256`` is the digest the
+    store recorded at publish time, when it keeps one.
+    """
 
     size: int
+    start: int
+    total: int
+    sha256: str | None
 
     def chunks(self) -> Iterator[bytes]: ...
 
@@ -101,6 +176,9 @@ class ArchiveReader(Protocol):
 class ArchiveStore(Protocol):
     def ready(self) -> None:
         """Fail now, before a backup does its work, if archives cannot be published."""
+
+    def reserve(self, estimated_bytes: int) -> None:
+        """Fail now if the next backup of about this size would not fit."""
 
     def staging_dir(self) -> Path | None:
         """Where a backup should assemble its archive; None means the system temp dir."""
@@ -116,14 +194,20 @@ class ArchiveStore(Protocol):
         it holds different bytes.
         """
 
-    def open(self, name: str) -> ArchiveReader | None:
-        """Stream a published archive, or None when there is none."""
+    def open(self, name: str, byte_range: ByteRange | None = None) -> ArchiveReader | None:
+        """Stream a published archive, or None when there is none.
+
+        Raises RangeNotSatisfiable when ``byte_range`` starts past its end.
+        """
 
     def archives(self) -> list[ArchiveObject]:
         """Every published backup archive, in no particular order."""
 
     def delete(self, name: str) -> None:
         """Remove an archive; a missing one is already gone."""
+
+    def sweep_stale(self, older_than: datetime) -> int:
+        """Remove working files abandoned before ``older_than``; returns how many."""
 
 
 def _fsync(path: Path) -> None:
@@ -135,14 +219,25 @@ def _fsync(path: Path) -> None:
         os.close(descriptor)
 
 
+def _mebibytes(count: int) -> str:
+    if count < 1024 * 1024:
+        return f"{count / 1024:.0f} KiB"
+    return f"{count / (1024 * 1024):.0f} MiB"
+
+
 class _FileReader:
-    def __init__(self, handle: BinaryIO) -> None:
+    def __init__(self, handle: BinaryIO, *, start: int, size: int, total: int) -> None:
         self._handle = handle
-        self.size = os.fstat(handle.fileno()).st_size
+        self.start = start
+        self.size = size
+        self.total = total
+        self.sha256 = None
 
     def chunks(self) -> Iterator[bytes]:
+        remaining = self.size
         try:
-            while chunk := self._handle.read(CHUNK_SIZE):
+            while remaining > 0 and (chunk := self._handle.read(min(CHUNK_SIZE, remaining))):
+                remaining -= len(chunk)
                 yield chunk
         finally:
             self.close()
@@ -156,11 +251,44 @@ class DirectoryArchiveStore:
 
     Every process that writes or serves archives must mount the same
     directory; on Kubernetes that means one claim shared by API and worker,
-    ReadWriteMany when replicas run on different nodes.
+    ReadWriteMany when replicas run on different nodes. ``reserve_bytes`` is
+    kept free on that volume for its other writers (validation receipts share
+    it by default), so a backup that would eat into it is refused up front.
     """
 
-    def __init__(self, root: Path | str) -> None:
+    def __init__(self, root: Path | str, *, reserve_bytes: int = 0) -> None:
         self._root = Path(root).expanduser()
+        self._reserve_bytes = reserve_bytes
+
+    @contextmanager
+    def _refusals(self, action: str) -> Iterator[None]:
+        """Report any filesystem failure as the store being unavailable."""
+        try:
+            yield
+        except ArchiveStoreUnavailable:
+            raise
+        except OSError as error:
+            reason = error.strerror or type(error).__name__
+            raise ArchiveStoreUnavailable(
+                f"Backup archive directory {self._root} refused {action}: {reason}"
+            ) from error
+
+    def _no_hard_links(self) -> ArchiveStoreUnavailable:
+        return ArchiveStoreUnavailable(
+            f"Backup archive directory {self._root} is on a filesystem without hard links, "
+            "which archives are published with so none is ever replaced or seen half "
+            "written; use a POSIX volume or an S3 archive store"
+        )
+
+    def _link(self, source: Path, target: Path) -> None:
+        try:
+            os.link(source, target)
+        except FileExistsError:
+            raise
+        except OSError as error:
+            if error.errno in _NO_HARD_LINKS:
+                raise self._no_hard_links() from error
+            raise
 
     def _directory(self) -> Path:
         path = self._root.absolute()
@@ -173,16 +301,39 @@ class DirectoryArchiveStore:
         return self._directory() / check_name(name)
 
     def ready(self) -> None:
-        directory = self._directory()
-        descriptor, probe = tempfile.mkstemp(prefix=".probe-", dir=directory)
-        os.close(descriptor)
-        Path(probe).unlink()
+        """Create a probe and publish it by hard link, as a backup will."""
+        with self._refusals("a readiness probe"):
+            directory = self._directory()
+            descriptor, name = tempfile.mkstemp(prefix=".probe-", dir=directory)
+            os.close(descriptor)
+            probe = Path(name)
+            published = probe.with_name(f"{probe.name}.published")
+            try:
+                self._link(probe, published)
+            finally:
+                published.unlink(missing_ok=True)
+                probe.unlink(missing_ok=True)
+
+    def reserve(self, estimated_bytes: int) -> None:
+        with self._refusals("a free-space check"):
+            free = shutil.disk_usage(self._directory()).free
+        needed = estimated_bytes + self._reserve_bytes
+        if free < needed:
+            raise ArchiveStoreFull(
+                f"Backup archive directory {self._root} has {_mebibytes(free)} free; this "
+                f"backup needs about {_mebibytes(estimated_bytes)} plus "
+                f"{_mebibytes(self._reserve_bytes)} kept free for other writers on the "
+                "volume. Free space, shorten retention, or move archives to a dedicated "
+                "volume or S3."
+            )
 
     def staging_dir(self) -> Path:
-        return self._directory()
+        with self._refusals("staging"):
+            return self._directory()
 
     def location(self, name: str) -> str:
-        return str(self._directory() / check_name(name))
+        with self._refusals("a lookup"):
+            return str(self._path(name))
 
     def _stage_copy(self, source: Path, directory: Path) -> Path:
         descriptor, staged = tempfile.mkstemp(prefix=".partial-", dir=directory)
@@ -195,43 +346,54 @@ class DirectoryArchiveStore:
         return Path(staged)
 
     def put_new(self, name: str, source: Path, *, sha256: str) -> bool:
-        target = self._path(name)
-        staged: Path | None = None
-        source.chmod(0o600)
-        _fsync(source)
-        try:
+        with self._refusals("a publish"):
+            target = self._path(name)
+            staged: Path | None = None
+            source.chmod(0o600)
+            _fsync(source)
             try:
-                os.link(source, target)
-            except OSError as error:
-                if error.errno != errno.EXDEV:
+                try:
+                    self._link(source, target)
+                except FileExistsError:
                     raise
-                # Assembled on another filesystem: copy beside the target
-                # under a hidden name, then publish that copy by link.
-                staged = self._stage_copy(source, target.parent)
-                _fsync(staged)
-                os.link(staged, target)
-        except FileExistsError:
-            if sha256_file(target) != sha256:
-                raise ArchiveConflict(f"{name} already holds a different archive") from None
-            return False
-        finally:
-            if staged is not None:
-                staged.unlink(missing_ok=True)
-        _fsync(target.parent)
-        return True
+                except OSError as error:
+                    if error.errno != errno.EXDEV:
+                        raise
+                    # Assembled on another filesystem: copy beside the target
+                    # under a hidden name, then publish that copy by link.
+                    staged = self._stage_copy(source, target.parent)
+                    _fsync(staged)
+                    self._link(staged, target)
+            except FileExistsError:
+                if sha256_file(target) != sha256:
+                    raise ArchiveConflict(f"{name} already holds a different archive") from None
+                return False
+            finally:
+                if staged is not None:
+                    staged.unlink(missing_ok=True)
+            _fsync(target.parent)
+            return True
 
-    def open(self, name: str) -> ArchiveReader | None:
-        path = self._path(name)
-        try:
-            descriptor = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
-        except FileNotFoundError:
-            return None
-        return _FileReader(os.fdopen(descriptor, "rb"))
+    def open(self, name: str, byte_range: ByteRange | None = None) -> ArchiveReader | None:
+        with self._refusals("a read"):
+            path = self._path(name)
+            try:
+                descriptor = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+            except FileNotFoundError:
+                return None
+            handle = os.fdopen(descriptor, "rb")
+            try:
+                total = os.fstat(handle.fileno()).st_size
+                start, end = byte_range.resolve(total) if byte_range else (0, total - 1)
+                handle.seek(start)
+            except BaseException:
+                handle.close()
+                raise
+            return _FileReader(handle, start=start, size=end - start + 1, total=total)
 
     def archives(self) -> list[ArchiveObject]:
-        directory = self._directory()
         found: list[ArchiveObject] = []
-        with os.scandir(directory) as entries:
+        with self._refusals("a listing"), os.scandir(self._directory()) as entries:
             for entry in entries:
                 if not retained_name(entry.name) or not entry.is_file(follow_symlinks=False):
                     continue
@@ -249,9 +411,44 @@ class DirectoryArchiveStore:
         return found
 
     def delete(self, name: str) -> None:
-        path = self._path(name)
-        path.unlink(missing_ok=True)
-        _fsync(path.parent)
+        with self._refusals("a delete"):
+            path = self._path(name)
+            path.unlink(missing_ok=True)
+            _fsync(path.parent)
+
+    def sweep_stale(self, older_than: datetime) -> int:
+        """Remove staging directories, partial copies and probes left by dead jobs.
+
+        They hold plaintext export JSON on a durable volume. Anything touched
+        since ``older_than`` may belong to a backup still running and stays.
+        """
+        cutoff = older_than.timestamp()
+        removed = 0
+        with self._refusals("a staging sweep"), os.scandir(self._directory()) as entries:
+            for entry in entries:
+                if not entry.name.startswith(_STAGING_PREFIXES):
+                    continue
+                try:
+                    if _newest_mtime(entry) >= cutoff:
+                        continue
+                    if entry.is_dir(follow_symlinks=False):
+                        shutil.rmtree(entry.path)
+                    else:
+                        os.unlink(entry.path)
+                except FileNotFoundError:
+                    continue
+                removed += 1
+        return removed
+
+
+def _newest_mtime(entry: os.DirEntry[str]) -> float:
+    """An entry's mtime, or for a directory the newest of it and its children."""
+    newest = entry.stat(follow_symlinks=False).st_mtime
+    if entry.is_dir(follow_symlinks=False):
+        with os.scandir(entry.path) as children:
+            for child in children:
+                newest = max(newest, child.stat(follow_symlinks=False).st_mtime)
+    return newest
 
 
 __all__ = [
@@ -259,11 +456,15 @@ __all__ = [
     "ArchiveObject",
     "ArchiveReader",
     "ArchiveStore",
+    "ArchiveStoreFull",
     "ArchiveStoreUnavailable",
+    "ByteRange",
     "DirectoryArchiveStore",
+    "RangeNotSatisfiable",
     "archive_name",
     "backup_id_of",
     "check_name",
+    "parse_byte_range",
     "retained_name",
     "sha256_file",
 ]

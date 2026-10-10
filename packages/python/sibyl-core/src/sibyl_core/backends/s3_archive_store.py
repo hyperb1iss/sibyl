@@ -23,9 +23,10 @@ from __future__ import annotations
 
 import contextlib
 import math
+import re
 import secrets
 from collections.abc import Iterator
-from datetime import UTC
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -35,6 +36,8 @@ from sibyl_core.backends.archive_store import (
     ArchiveObject,
     ArchiveReader,
     ArchiveStoreUnavailable,
+    ByteRange,
+    RangeNotSatisfiable,
     check_name,
     retained_name,
 )
@@ -65,10 +68,17 @@ def parse_s3_archive_url(url: str) -> S3Location:
     return parse_s3_url(url, subject="Backup archive")
 
 
+# "bytes first-last/total" in a ranged GetObject answer.
+_CONTENT_RANGE = re.compile(r"bytes (\d+)-(\d+)/(\d+)")
+
+
 class _ObjectReader:
-    def __init__(self, body: Any, size: int) -> None:
+    def __init__(self, body: Any, *, start: int, size: int, total: int, sha256: str | None) -> None:
         self._body = body
+        self.start = start
         self.size = size
+        self.total = total
+        self.sha256 = sha256
 
     def chunks(self) -> Iterator[bytes]:
         try:
@@ -200,20 +210,51 @@ class S3ArchiveStore:
 
     # -- reads ----------------------------------------------------------------
 
-    def open(self, name: str) -> ArchiveReader | None:
+    def _size(self, key: str) -> int | None:
+        """The object's size for a 416 answer, best effort."""
         from botocore.exceptions import BotoCoreError, ClientError
 
         try:
-            response = self._client.get_object(Bucket=self.s3_location.bucket, Key=self._key(name))
+            head = self._client.head_object(Bucket=self.s3_location.bucket, Key=key)
+        except (BotoCoreError, ClientError):
+            return None
+        return int(head["ContentLength"])
+
+    def open(self, name: str, byte_range: ByteRange | None = None) -> ArchiveReader | None:
+        from botocore.exceptions import BotoCoreError, ClientError
+
+        key = self._key(name)
+        params: dict[str, Any] = {"Bucket": self.s3_location.bucket, "Key": key}
+        if byte_range is not None:
+            params["Range"] = byte_range.header()
+        try:
+            response = self._client.get_object(**params)
         except ClientError as error:
+            status, code = answer(error)
             # Only a missing key is absence; NoSuchBucket or a bare 404 from a
             # wrong endpoint is an outage, not "no archive".
-            if answer(error)[1] == "NoSuchKey":
+            if code == "NoSuchKey":
                 return None
+            if byte_range is not None and (status == 416 or code == "InvalidRange"):
+                raise RangeNotSatisfiable(self._size(key)) from None
             raise self._unavailable("GetObject", error) from error
         except BotoCoreError as error:
             raise self._unavailable("GetObject", error) from error
-        return _ObjectReader(response["Body"], int(response["ContentLength"]))
+        size = int(response["ContentLength"])
+        start, total = 0, size
+        ranged = _CONTENT_RANGE.fullmatch(response.get("ContentRange") or "")
+        if ranged is not None:
+            start, total = int(ranged.group(1)), int(ranged.group(3))
+        metadata = {
+            field.lower(): value for field, value in (response.get("Metadata") or {}).items()
+        }
+        return _ObjectReader(
+            response["Body"],
+            start=start,
+            size=size,
+            total=total,
+            sha256=metadata.get(_SHA256_METADATA),
+        )
 
     def archives(self) -> list[ArchiveObject]:
         base = self.s3_location.base
@@ -235,6 +276,15 @@ class S3ArchiveStore:
 
     def delete(self, name: str) -> None:
         self._call("DeleteObject", "delete_object", Key=self._key(name))
+
+    def reserve(self, estimated_bytes: int) -> None:
+        """A bucket has no volume to fill; staging space is the pod's temp dir."""
+        del estimated_bytes
+
+    def sweep_stale(self, older_than: datetime) -> int:
+        """Nothing to sweep: stranded uploads expire under the lifecycle rule."""
+        del older_than
+        return 0
 
     # -- readiness ------------------------------------------------------------
 
