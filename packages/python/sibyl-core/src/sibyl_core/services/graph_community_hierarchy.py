@@ -34,7 +34,7 @@ from sibyl_core.services.graph_community_snapshot import (
     _ReaderCacheKey,
     _snapshot_fingerprint,
 )
-from sibyl_core.services.graph_compute import compute_rows, off_loop
+from sibyl_core.services.graph_compute import compute_rows, graph_build, off_loop
 
 log = structlog.get_logger()
 
@@ -51,6 +51,7 @@ GRAPH_LOD_CACHE: BoundedTTLCache[tuple[Any, ...], tuple[datetime, str, Hierarchi
 )
 
 
+@graph_build
 async def get_hierarchical_graph(
     client: Any,
     organization_id: str,

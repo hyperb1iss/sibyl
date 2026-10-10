@@ -25,7 +25,7 @@ from sibyl_core.services.graph_community_managers import (
     _list_all_relationships,
 )
 from sibyl_core.services.graph_community_models import GraphSnapshot
-from sibyl_core.services.graph_compute import compute_rows, off_loop
+from sibyl_core.services.graph_compute import compute_rows, graph_build, off_loop
 from sibyl_core.services.graph_visibility import graph_row_read_allowed
 
 log = structlog.get_logger()
@@ -209,6 +209,7 @@ async def _get_graph_snapshot(
     )
 
 
+@graph_build
 async def _load_graph_snapshot(
     client: Any,
     organization_id: str,
@@ -396,6 +397,7 @@ async def _get_visible_graph_snapshot(
     )
 
 
+@graph_build
 async def _load_visible_graph_snapshot(
     client: Any,
     organization_id: str,
