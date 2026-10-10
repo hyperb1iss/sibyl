@@ -89,7 +89,6 @@ spec:
                 - -ec
               args:
                 - |
-                  set -o pipefail
                   notify_failure() {
                     {{- if .Values.restoreDrill.failureNotification.command }}
                     {{ .Values.restoreDrill.failureNotification.command | nindent 20 }}
@@ -233,7 +232,8 @@ spec:
                   row_counts_json="{"
                   row_counts_separator=""
                   {{- range .Values.restoreDrill.fixtureChecks }}
-                  row_count="$(restore_sql {{ .namespace }} {{ .database }} "SELECT count() AS count FROM {{ .table }} GROUP ALL;" | jq -r '.[0].count // 0')"
+                  count_result="$(restore_sql {{ .namespace }} {{ .database }} "SELECT count() AS count FROM {{ .table }} GROUP ALL;")"
+                  row_count="$(printf '%s\n' "$count_result" | jq -r '.[0].count // 0')"
                   if [ "${row_count:-0}" -lt {{ .minRows }} ]; then
                     echo "fixture {{ .namespace }}/{{ .database }}/{{ .table }} expected >= {{ .minRows }}, got ${row_count:-0}" >&2
                     exit 1

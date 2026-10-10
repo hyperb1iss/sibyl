@@ -54,7 +54,6 @@ spec:
               # last, so a run directory without one is incomplete.
               args:
                 - |
-                  set -o pipefail
                   identifier='^[A-Za-z_][A-Za-z0-9_]*$'
                   table_rows='RETURN object::keys((INFO FOR DB).tables).map(|$t| { table: $t, rows: (SELECT count() FROM type::table($t) GROUP ALL)[0].count ?? 0 });'
                   work="$(mktemp -d)"
@@ -106,10 +105,15 @@ spec:
                   export SIBYL_EXPORT_RUN_DIR
                   mkdir -p "$SIBYL_EXPORT_RUN_DIR"
                   server_version="$(curl -fsS "$SURREAL_ENDPOINT/version")"
-                  namespaces="$(sql_result "" "" "INFO FOR ROOT;" | names_of namespaces)"
+                  # No pipefail in POSIX sh: each producer runs on its own
+                  # line so a failed request stops the job instead of
+                  # feeding an empty list to the loop.
+                  root_info="$(sql_result "" "" "INFO FOR ROOT;")"
+                  namespaces="$(printf '%s\n' "$root_info" | names_of namespaces)"
                   : > "$work/databases.jsonl"
                   for namespace in $namespaces; do
-                    databases="$(sql_result "$namespace" "" "INFO FOR NS;" | names_of databases)"
+                    namespace_info="$(sql_result "$namespace" "" "INFO FOR NS;")"
+                    databases="$(printf '%s\n' "$namespace_info" | names_of databases)"
                     for database in $databases; do
                       # Counted just before the export, from a separate
                       # transaction: on a live server these are the rows
@@ -127,7 +131,8 @@ spec:
                         exit 1
                       fi
                       bytes="$(wc -c < "$SIBYL_EXPORT_RUN_DIR/$file" | tr -d ' ')"
-                      sha256="$(sha256sum "$SIBYL_EXPORT_RUN_DIR/$file" | cut -d ' ' -f 1)"
+                      sha256="$(sha256sum "$SIBYL_EXPORT_RUN_DIR/$file")"
+                      sha256="${sha256%% *}"
                       printf '%s\n' "$tables" | jq -c \
                         --arg namespace "$namespace" \
                         --arg database "$database" \
