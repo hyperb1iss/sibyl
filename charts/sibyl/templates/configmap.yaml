@@ -2,8 +2,35 @@ apiVersion: v1
 kind: ConfigMap
 {{- include "sibyl.validateOidcProviders" . }}
 {{- include "sibyl.validateProductionAuthSecret" . }}
-{{- if not .Values.backend.validationReceipts.existingClaim }}
-{{- fail "backend.validationReceipts.existingClaim is required. Provision a persistent claim shared by API and worker, with ReadWriteMany access for multi-node replicas, before installation or upgrade." }}
+{{- if hasKey .Values.backend.env "SIBYL_VALIDATION_RECEIPT_URL" }}
+{{- fail "Set backend.validationReceipts.url instead of backend.env.SIBYL_VALIDATION_RECEIPT_URL, so the chart can check it against the receipts claim." }}
+{{- end }}
+{{- with .Values.backend.validationReceipts }}
+{{- if and .url .existingClaim }}
+{{- fail "Set only one of backend.validationReceipts.url or backend.validationReceipts.existingClaim." }}
+{{- end }}
+{{- if and .url (not (hasPrefix "s3://" .url)) }}
+{{- fail "backend.validationReceipts.url must be an s3://bucket[/prefix][?region=name] URL." }}
+{{- end }}
+{{- if and .url (or (not (regexMatch "^s3://[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]([/?].*)?$" .url)) (contains ".." (regexFind "^s3://[^/?#]*" .url))) }}
+{{- fail "backend.validationReceipts.url must name a valid S3 bucket: 3-63 lowercase letters, digits, dots and hyphens, starting and ending with a letter or digit." }}
+{{- end }}
+{{- if .url }}
+{{- if not (regexMatch "^s3://[^/?#]+(/[^?#]*)?([?]region=(auto|[a-z0-9]+(-[a-z0-9]+)+))?$" .url) }}
+{{- fail "backend.validationReceipts.url accepts only a ?region=name query (an AWS region or auto) and no fragment." }}
+{{- end }}
+{{- $prefix := regexFind "^s3://[^?#]*" .url | trimPrefix "s3://" | regexReplaceAll "^[^/]*" "" | trimAll "/" }}
+{{- if $prefix }}
+{{- range splitList "/" $prefix }}
+{{- if or (eq . "") (eq . ".") (eq . "..") }}
+{{- fail "backend.validationReceipts.url prefix may not contain empty, . or .. segments." }}
+{{- end }}
+{{- end }}
+{{- end }}
+{{- end }}
+{{- if not (or .url .existingClaim) }}
+{{- fail "backend.validationReceipts.existingClaim is required unless backend.validationReceipts.url names an S3 bucket. Provision a persistent claim shared by API and worker, with ReadWriteMany access for multi-node replicas, or set an s3:// URL, before installation or upgrade." }}
+{{- end }}
 {{- end }}
 {{- if hasKey .Values "store" }}
 {{- fail "Deprecated value 'store' is no longer supported. Remove it and complete legacy-to-Surreal migration before upgrading." }}
@@ -29,6 +56,9 @@ data:
   SIBYL_STORE: "surreal"
   SIBYL_AUTH_STORE: "surreal"
   SIBYL_COORDINATION_BACKEND: {{ .Values.coordinationBackend | quote }}
+  {{- with .Values.backend.validationReceipts.url }}
+  SIBYL_VALIDATION_RECEIPT_URL: {{ . | quote }}
+  {{- end }}
   SIBYL_LOCAL_AUTH_ENABLED: {{ .Values.auth.localAuthEnabled | quote }}
   SIBYL_PUBLIC_SIGNUPS_ENABLED: {{ .Values.auth.publicSignupsEnabled | quote }}
   {{- if .Values.publicUrl }}

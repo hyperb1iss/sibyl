@@ -8,7 +8,7 @@ spec:
   {{- if not .Values.backend.autoscaling.enabled }}
   replicas: {{ .Values.backend.replicaCount }}
   {{- end }}
-  {{- with include "sibyl.receiptsStrategy" .Values.backend }}
+  {{- with include "sibyl.receiptsStrategy" (dict "workload" .Values.backend "claim" .Values.backend.validationReceipts.existingClaim) }}
   {{- . | nindent 2 }}
   {{- end }}
   selector:

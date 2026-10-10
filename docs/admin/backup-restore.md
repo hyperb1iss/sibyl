@@ -449,7 +449,9 @@ raw database dumps or archives from other memory systems.
 Content archive 2.3 includes encrypted completion receipts for the archived validation executions. A
 completed validation can remain in its private journal when the database cannot retain its result.
 Public backup and import preserve those ciphertext bytes, so recovery on a fresh host does not
-require the old receipt volume or another provider request.
+require the old receipt volume or bucket, or another provider request. Import publishes into
+whichever receipt store the destination server is configured with, so a backup from a volume
+deployment restores pending receipts into S3 and the reverse.
 
 The `validation_receipts.executions` inventory identifies each execution as `journal`, `database`,
 `purged`, or `unresolved`. An unresolved execution has no retained completed result in that
@@ -462,12 +464,13 @@ request and key before any content writes. Existing destination history, source 
 purge rules still apply. Older content archives remain supported but cannot supply omitted journal
 files.
 
-Receipt files are published privately before the content transaction. If that transaction fails,
-ciphertext may remain without an authorized execution row. Preserve the failed archive and receipt
-directory, then retry the same import after resolving the reported conflict. Import never replaces
-conflicting receipt bytes or restores an erased recovery key over current destination history.
+Receipts are published privately and create-only before the content transaction. If that transaction
+fails, ciphertext may remain without an authorized execution row. Preserve the failed archive and
+the receipt directory or bucket, then retry the same import after resolving the reported conflict.
+Import never replaces conflicting receipt bytes or restores an erased recovery key over current
+destination history.
 
 Protect the complete backup as secret material: the content payload includes the recovery keys
 needed to decrypt its receipts. The archive is not encrypted as a whole. Continue using encrypted
-backup storage and the configured private receipt directory. Logical backup still does not claim
+backup storage and the configured private receipt store. Logical backup still does not claim
 cross-namespace crash atomicity.

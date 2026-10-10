@@ -296,23 +296,29 @@ moon run core:bench-context
 
 Validation writes an encrypted completed-result receipt before committing its
 result to SurrealDB. Set `SIBYL_VALIDATION_RECEIPT_DIR` to persistent private
-storage (default: `~/.sibyl/validation-receipts`). Quickstart shares its existing
+storage (default: `~/.sibyl/validation-receipts`), or set
+`SIBYL_VALIDATION_RECEIPT_URL=s3://bucket[/prefix][?region=name]` to keep
+receipts in Amazon S3 so API and worker need no shared volume (install
+`sibyl-core[s3]`; the server ships it). Quickstart shares its existing
 server-state volume between API and worker; production Compose mounts a shared
-receipt volume. Helm deployments must provision a claim and set
-`backend.validationReceipts.existingClaim`; use ReadWriteMany storage when
-replicas run on different nodes. Keep the same directory available after process
-or container restart. A different replica without that storage refuses incomplete
-replay and cannot recover the receipt.
+receipt volume. Helm deployments set `backend.validationReceipts.url`, or
+provision a claim and set `backend.validationReceipts.existingClaim`; use
+ReadWriteMany storage when claim replicas run on different nodes. Keep the same
+directory or bucket available after process or container restart. A different
+replica without that storage refuses incomplete replay and cannot recover the
+receipt.
 
 Each receipt is encrypted with a per-execution key stored in the private content
 ledger. Source purge erases the key in the existing purge transaction. Recovery
 requires the original canonical request and current authorization, preserves
 terminal history, and runs the existing source/publication fences. Recovery never
-calls the model again. Files are removed only after database result retention.
+calls the model again. Receipts are removed only after database result retention.
 Back up the journal together with the content database when pending receipts must
 survive host loss; a database-only backup cannot recover a pending local receipt.
 
-The readiness probe checks journal write access before dispatch. If the journal
+The readiness probe checks journal write access before dispatch; for S3 it also
+proves create-only writes, privacy, and that a missing receipt reads as absent.
+If the journal
 fails after a provider returns, database result persistence can still preserve the
 receipt. Simultaneous loss of both stores, or a crash between provider completion
 and receipt fsync, leaves the pre-dispatch physical attempt explicitly unknown.

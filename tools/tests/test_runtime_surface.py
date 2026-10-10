@@ -253,7 +253,11 @@ def test_helm_bedrock_render_needs_irsa_and_a_region_not_provider_keys() -> None
 
     assert result.returncode == 0, result.stderr
     documents = [doc for doc in yaml.safe_load_all(result.stdout) if doc]
-    account = next(doc for doc in documents if doc["kind"] == "ServiceAccount")
+    account = next(
+        doc
+        for doc in documents
+        if doc["kind"] == "ServiceAccount" and doc["metadata"]["name"] == "sibyl"
+    )
     assert account["metadata"]["annotations"] == {"eks.amazonaws.com/role-arn": role}
     config = next(doc for doc in documents if doc["kind"] == "ConfigMap")
     assert config["data"]["SIBYL_LLM_PROVIDER"] == "bedrock"
@@ -276,6 +280,58 @@ def test_helm_bedrock_render_needs_irsa_and_a_region_not_provider_keys() -> None
         # Bedrock signs with the IRSA role, so provider API keys stay optional.
         assert provider_keys
         assert all(env["valueFrom"]["secretKeyRef"]["optional"] is True for env in provider_keys)
+
+
+@requires_helm
+def test_helm_frontend_never_shares_the_backend_cloud_role() -> None:
+    """The web tier calls only the Sibyl API, so an IRSA role bound to the
+    backend (Bedrock, S3 receipts) must not reach frontend pods."""
+    role = "arn:aws:iam::123456789012:role/sibyl"
+    irsa = ("--set-string", f"serviceAccount.annotations.eks\\.amazonaws\\.com/role-arn={role}")
+
+    def documents(*overrides: str) -> list[dict]:
+        result = _helm_template("--set", "backend.existingSecret=sibyl-secrets", *irsa, *overrides)
+        assert result.returncode == 0, result.stderr
+        return [doc for doc in yaml.safe_load_all(result.stdout) if doc]
+
+    rendered = documents()
+    accounts = {d["metadata"]["name"]: d for d in rendered if d["kind"] == "ServiceAccount"}
+    assert accounts["sibyl"]["metadata"]["annotations"] == {"eks.amazonaws.com/role-arn": role}
+    assert "annotations" not in accounts["sibyl-frontend"]["metadata"]
+    assert accounts["sibyl-frontend"]["automountServiceAccountToken"] is False
+    pods = {
+        d["metadata"]["name"]: d["spec"]["template"]["spec"]
+        for d in rendered
+        if d["kind"] == "Deployment"
+    }
+    assert pods["sibyl-frontend"]["serviceAccountName"] == "sibyl-frontend"
+    assert pods["sibyl-frontend"]["automountServiceAccountToken"] is False
+    assert pods["sibyl-backend"]["serviceAccountName"] == "sibyl"
+
+    shared = documents(
+        "--set",
+        "frontend.serviceAccount.create=false",
+        "--set",
+        "frontend.serviceAccount.name=sibyl",
+    )
+    assert [d["metadata"]["name"] for d in shared if d["kind"] == "ServiceAccount"] == ["sibyl"]
+    frontend = next(
+        d for d in shared if d["kind"] == "Deployment" and d["metadata"]["name"] == "sibyl-frontend"
+    )
+    assert frontend["spec"]["template"]["spec"]["serviceAccountName"] == "sibyl"
+
+    long_name = "s" * 62
+    long_accounts = [
+        d["metadata"]["name"]
+        for d in documents("--set", f"fullnameOverride={long_name}")
+        if d["kind"] == "ServiceAccount"
+    ]
+    assert long_accounts == [long_name, f"{long_name}-frontend"]
+
+    without_frontend = documents("--set", "frontend.enabled=false")
+    assert [d["metadata"]["name"] for d in without_frontend if d["kind"] == "ServiceAccount"] == [
+        "sibyl"
+    ]
 
 
 @requires_helm
@@ -1034,6 +1090,104 @@ def test_helm_receipt_pods_keep_claim_private_and_attachable() -> None:
 
 
 @requires_helm
+def test_helm_s3_receipts_need_no_claim_and_keep_the_default_rollout() -> None:
+    url = "s3://sibyl-receipts/prod?region=us-west-2"
+    s3 = (
+        "--set",
+        "backend.validationReceipts.existingClaim=",
+        "--set",
+        f"backend.validationReceipts.url={url}",
+    )
+    deployments = _receipt_deployments(*s3)
+    for name in ("sibyl-backend", "sibyl-worker"):
+        spec = deployments[name]["spec"]
+        pod = spec["template"]["spec"]
+        assert "strategy" not in spec, "no claim to compete for, so no maxSurge 0 rollout"
+        assert all(volume["name"] != "validation-receipts" for volume in pod["volumes"])
+        for container in pod["containers"]:
+            assert all(m["name"] != "validation-receipts" for m in container["volumeMounts"])
+            assert all(e["name"] != "SIBYL_VALIDATION_RECEIPT_DIR" for e in container["env"])
+            assert {"configMapRef": {"name": "sibyl-config"}} in container["envFrom"]
+    rendered = _helm_template("--set", "backend.existingSecret=runtime-secret", *s3)
+    assert rendered.returncode == 0, rendered.stderr
+    config = next(
+        d
+        for d in yaml.safe_load_all(rendered.stdout)
+        if d and d.get("kind") == "ConfigMap" and d["metadata"]["name"] == "sibyl-config"
+    )
+    assert config["data"]["SIBYL_VALIDATION_RECEIPT_URL"] == url
+
+    both = _helm_template(
+        "--set",
+        "backend.existingSecret=runtime-secret",
+        "--set",
+        f"backend.validationReceipts.url={url}",
+    )
+    assert both.returncode != 0
+    assert "Set only one of backend.validationReceipts.url" in both.stderr
+    https = _helm_template(
+        "--set",
+        "backend.existingSecret=runtime-secret",
+        "--set",
+        "backend.validationReceipts.existingClaim=",
+        "--set",
+        "backend.validationReceipts.url=https://sibyl-receipts.s3.amazonaws.com/prod",
+    )
+    assert https.returncode != 0
+    assert "must be an s3://" in https.stderr
+    for bucket in ("Receipts_Bucket", "ab", "receipts..bucket", "-receipts"):
+        invalid = _helm_template(
+            "--set",
+            "backend.existingSecret=runtime-secret",
+            "--set",
+            "backend.validationReceipts.existingClaim=",
+            "--set",
+            f"backend.validationReceipts.url=s3://{bucket}/prod",
+        )
+        assert invalid.returncode != 0, bucket
+        assert "must name a valid S3 bucket" in invalid.stderr, bucket
+    for url_problem, message in (
+        ("s3://receipts/prod?region=US_WEST", "accepts only a ?region=name query"),
+        ("s3://receipts/prod?endpoint=minio", "accepts only a ?region=name query"),
+        ("s3://receipts/prod#fragment", "accepts only a ?region=name query"),
+        ("s3://receipts/a/../b", "may not contain empty, . or .. segments"),
+        ("s3://receipts/a//b", "may not contain empty, . or .. segments"),
+    ):
+        refused = _helm_template(
+            "--set",
+            "backend.existingSecret=runtime-secret",
+            "--set",
+            "backend.validationReceipts.existingClaim=",
+            "--set",
+            f"backend.validationReceipts.url={url_problem}",
+        )
+        assert refused.returncode != 0, url_problem
+        assert message in refused.stderr, url_problem
+    for valid in (
+        "s3://r2-receipts?region=auto",
+        "s3://my.receipts-1",
+        "s3://receipts/team/prod/?region=us-gov-west-1",
+    ):
+        rendered = _helm_template(
+            "--set",
+            "backend.existingSecret=runtime-secret",
+            "--set",
+            "backend.validationReceipts.existingClaim=",
+            "--set",
+            f"backend.validationReceipts.url={valid}",
+        )
+        assert rendered.returncode == 0, rendered.stderr
+    bypass = _helm_template(
+        "--set",
+        "backend.existingSecret=runtime-secret",
+        "--set",
+        f"backend.env.SIBYL_VALIDATION_RECEIPT_URL={url}",
+    )
+    assert bypass.returncode != 0
+    assert "instead of backend.env.SIBYL_VALIDATION_RECEIPT_URL" in bypass.stderr
+
+
+@requires_helm
 def test_helm_receipt_strategy_leaves_no_whitespace_lines() -> None:
     rendered = _helm_template(
         "--set",
@@ -1076,7 +1230,7 @@ def test_production_compose_validation_receipts_share_durable_state() -> None:
 
 
 @requires_helm
-@pytest.mark.parametrize("profile", ["defaults", "production-redis"])
+@pytest.mark.parametrize("profile", ["defaults", "production-redis", "s3-receipts"])
 def test_helm_ci_profile_renders_exact_workflow_arguments(profile: str) -> None:
     workflow = yaml.safe_load((REPO_ROOT / ".github/workflows/ci.yml").read_text())
     profiles = workflow["jobs"]["helm"]["strategy"]["matrix"]["include"]
@@ -1102,6 +1256,12 @@ def test_helm_ci_profile_renders_exact_workflow_arguments(profile: str) -> None:
     ]
     assert backend_pods
     for pod in backend_pods:
-        volume = next(item for item in pod["volumes"] if item["name"] == "validation-receipts")
-        assert volume["persistentVolumeClaim"]["claimName"] == "ci-validation-receipts"
+        volumes = {item["name"]: item for item in pod["volumes"]}
+        if profile == "s3-receipts":
+            assert "validation-receipts" not in volumes
+        else:
+            claim = volumes["validation-receipts"]["persistentVolumeClaim"]["claimName"]
+            assert claim == "ci-validation-receipts"
+    receipt_url = 'SIBYL_VALIDATION_RECEIPT_URL: "s3://ci-validation-receipts/sibyl"'
+    assert (receipt_url in result.stdout) == (profile == "s3-receipts")
     assert ("name: sibyl-worker" in result.stdout) == (selected["worker"] == "present")

@@ -38,6 +38,21 @@ versions as fallbacks.
 `auto` resolves to local in-process coordination unless Redis settings are present. Use `redis` for
 multi-pod deployments. See [Storage Modes](../guide/storage-modes.md) for the connection options.
 
+## Validation Receipts
+
+| Variable                       | Default                        | Description                                                       |
+| ------------------------------ | ------------------------------ | ----------------------------------------------------------------- |
+| `SIBYL_VALIDATION_RECEIPT_DIR` | `~/.sibyl/validation-receipts` | Private receipt directory, shared by every API and worker process |
+| `SIBYL_VALIDATION_RECEIPT_URL` | (empty)                        | `s3://bucket[/prefix][?region=name]`; replaces the directory      |
+
+Completed validation results are written as encrypted receipts before the database commit, so a
+database outage does not force a second paid model call. With `SIBYL_VALIDATION_RECEIPT_URL` set,
+receipts live in Amazon S3 and processes on different hosts need no shared volume. The S3 store uses
+the default AWS credential chain, `AWS_REGION` when the URL names no region, and
+`AWS_ENDPOINT_URL_S3` for an S3-compatible endpoint. The server refuses a malformed URL at startup.
+See [Durable Validation Receipts](./helm-chart.md#durable-validation-receipts) for the IAM policy
+and what each guarantee means in S3.
+
 ## SurrealDB
 
 SurrealDB is the default and only runtime store. These settings apply to every Sibyl process.
