@@ -228,6 +228,72 @@ existing release to chart defaults, silently discarding every other override.
 {{- end }}
 
 {{/*
+Refuse a malformed s3:// URL at render time with the same rules the server
+applies at startup. Takes a dict: "url" (may be empty) and "value" (the
+values path named in the message).
+*/}}
+{{- define "sibyl.validateS3Url" -}}
+{{- $url := .url -}}
+{{- $value := .value -}}
+{{- if $url -}}
+{{- if not (hasPrefix "s3://" $url) -}}
+{{- fail (printf "%s must be an s3://bucket[/prefix][?region=name] URL." $value) -}}
+{{- end -}}
+{{- if or (not (regexMatch "^s3://[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]([/?].*)?$" $url)) (contains ".." (regexFind "^s3://[^/?#]*" $url)) -}}
+{{- fail (printf "%s must name a valid S3 bucket: 3-63 lowercase letters, digits, dots and hyphens, starting and ending with a letter or digit." $value) -}}
+{{- end -}}
+{{- if not (regexMatch "^s3://[^/?#]+(/[^?#]*)?([?]region=(auto|[a-z0-9]+(-[a-z0-9]+)+))?$" $url) -}}
+{{- fail (printf "%s accepts only a ?region=name query (an AWS region or auto) and no fragment." $value) -}}
+{{- end -}}
+{{- $prefix := regexFind "^s3://[^?#]*" $url | trimPrefix "s3://" | regexReplaceAll "^[^/]*" "" | trimAll "/" -}}
+{{- if $prefix -}}
+{{- range splitList "/" $prefix -}}
+{{- if or (eq . "") (eq . ".") (eq . "..") -}}
+{{- fail (printf "%s prefix may not contain empty, . or .. segments." $value) -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- end }}
+
+{{/*
+"bucket/prefix/" for a valid s3:// URL, so two locations overlap exactly
+when one of these strings starts with the other.
+*/}}
+{{- define "sibyl.s3KeyBase" -}}
+{{- $path := regexFind "^s3://[^?#]*" . | trimPrefix "s3://" | trimSuffix "/" -}}
+{{- printf "%s/" $path -}}
+{{- end }}
+
+{{/*
+Directory of backup archives in backend and worker pods, empty when they
+live in S3. An archives claim is mounted at /var/lib/sibyl-backups;
+otherwise archives share the validation receipts claim, beside its private
+receipts directory, so a default install keeps them durable and readable by
+every pod that mounts that claim.
+*/}}
+{{- define "sibyl.backupArchivesDir" -}}
+{{- if .Values.backend.backupArchives.url -}}
+{{- else if .Values.backend.backupArchives.existingClaim -}}
+/var/lib/sibyl-backups/archives
+{{- else if .Values.backend.validationReceipts.existingClaim -}}
+/var/lib/sibyl-receipts/backups
+{{- end -}}
+{{- end }}
+
+{{/*
+Claim whose ReadWriteOnce attachment constrains rollouts: the receipts claim
+or the archives claim, empty when both stores live in S3.
+*/}}
+{{- define "sibyl.sharedClaim" -}}
+{{- if .Values.backend.validationReceipts.existingClaim -}}
+{{- .Values.backend.validationReceipts.existingClaim -}}
+{{- else if .Values.backend.backupArchives.existingClaim -}}
+{{- .Values.backend.backupArchives.existingClaim -}}
+{{- end -}}
+{{- end }}
+
+{{/*
 Update strategy for a Deployment that may mount the validation receipts
 claim. Takes a dict: "workload" (backend or worker values) and "claim" (the
 receipts claim name, empty when receipts live in S3). An explicit strategy

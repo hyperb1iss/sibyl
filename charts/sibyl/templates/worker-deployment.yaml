@@ -9,7 +9,7 @@ spec:
   {{- if not .Values.worker.autoscaling.enabled }}
   replicas: {{ .Values.worker.replicaCount }}
   {{- end }}
-  {{- with include "sibyl.receiptsStrategy" (dict "workload" .Values.worker "claim" .Values.backend.validationReceipts.existingClaim) }}
+  {{- with include "sibyl.receiptsStrategy" (dict "workload" .Values.worker "claim" (include "sibyl.sharedClaim" .)) }}
   {{- . | nindent 2 }}
   {{- end }}
   selector:
@@ -73,6 +73,10 @@ spec:
             - name: SIBYL_VALIDATION_RECEIPT_DIR
               value: /var/lib/sibyl-receipts/private
             {{- end }}
+            {{- with include "sibyl.backupArchivesDir" . }}
+            - name: SIBYL_BACKUP_DIR
+              value: {{ . | quote }}
+            {{- end }}
             {{- if .Values.backend.existingSecret }}
             - name: SIBYL_JWT_SECRET
               valueFrom:
@@ -126,6 +130,10 @@ spec:
             - name: validation-receipts
               mountPath: /var/lib/sibyl-receipts
             {{- end }}
+            {{- if .Values.backend.backupArchives.existingClaim }}
+            - name: backup-archives
+              mountPath: /var/lib/sibyl-backups
+            {{- end }}
             - name: tmp
               mountPath: /tmp
       volumes:
@@ -133,6 +141,11 @@ spec:
         - name: validation-receipts
           persistentVolumeClaim:
             claimName: {{ .Values.backend.validationReceipts.existingClaim | quote }}
+        {{- end }}
+        {{- if .Values.backend.backupArchives.existingClaim }}
+        - name: backup-archives
+          persistentVolumeClaim:
+            claimName: {{ .Values.backend.backupArchives.existingClaim | quote }}
         {{- end }}
         - name: tmp
           emptyDir: {}
