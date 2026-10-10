@@ -7,13 +7,17 @@ from collections.abc import Mapping, Sequence
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from sibyl_core.services.graph_read_validation import GraphReadValidation
+    from sibyl_core.services.graph_read_validation import (
+        AssociationProofInputs,
+        GraphReadValidation,
+    )
 
 from sibyl_core.backends.surreal.records import normalize_records
 from sibyl_core.memory_pipeline.observations import SourceIdentity, SourceKind, evidence_hash
 from sibyl_core.models.entities import Entity
 from sibyl_core.runtime_ports import RuntimePortUnavailable, get_source_authority_resolver
 from sibyl_core.services.graph_client import SurrealGraphClient
+from sibyl_core.services.graph_compute import compute_rows
 from sibyl_core.services.memory_derivations import observation_from_record, validate_observations
 from sibyl_core.services.memory_source_validation import source_authority_ceiling
 from sibyl_core.services.source_observations import SourceUnavailableError, graph_evidence
@@ -46,7 +50,12 @@ def graph_target_digest(entity) -> str:
 
 
 async def graph_association_current(
-    entity, association, *, ancestors=frozenset(), read: GraphReadValidation | None = None
+    entity,
+    association,
+    *,
+    ancestors=frozenset(),
+    read: GraphReadValidation | None = None,
+    proof_inputs: AssociationProofInputs | None = None,
 ) -> bool:
     if read is not None:
         return await read.association_proof(
@@ -54,6 +63,7 @@ async def graph_association_current(
             association,
             ancestors,
             lambda: _graph_association_current(entity, association, ancestors=ancestors, read=read),
+            inputs=proof_inputs,
         )
     return await _graph_association_current(entity, association, ancestors=ancestors)
 
@@ -201,8 +211,6 @@ async def _graph_derivation_verdicts(
     read: GraphReadValidation | None = None,
     expected_publications: Mapping[str, Any] | None = None,
 ) -> dict[str, bool | None]:
-    from sibyl_core.services.graph_records import entity_from_surreal_row
-
     if not ids:
         return {}
     from sibyl_core.services.graph_runtime import get_surreal_graph_runtime
@@ -246,6 +254,82 @@ async def _graph_derivation_verdicts(
         snapshots = await asyncio.gather(*(snapshot(batch) for batch in batches))
     target_rows = [row for batch_targets, _ in snapshots for row in batch_targets]
     association_rows = [row for _, batch_associations in snapshots for row in batch_associations]
+    targets, associations, duplicate_associations = await compute_rows(
+        len(target_rows) + len(association_rows),
+        _verdict_rows,
+        organization_id,
+        target_rows,
+        association_rows,
+    )
+    if read is not None:
+        await read.prepare_graph(
+            list(targets.keys() & associations.keys())
+            if expected_publications is not None
+            else list(targets)
+        )
+    identifiers = sorted(
+        targets.keys()
+        | associations.keys()
+        | (expected_entities.keys() if expected_entities is not None else set())
+        | (expected_publications.keys() if expected_publications is not None else set())
+    )
+    # Everything a verdict decides from the rows alone is settled off the
+    # loop. The first error a row raised is raised here, and only rows with
+    # a stored association await its proof.
+    settled, unbound, bound, error = await compute_rows(
+        len(identifiers),
+        _settled_verdicts,
+        organization_id,
+        identifiers,
+        targets,
+        associations,
+        duplicate_associations,
+        expected_entities,
+        expected_publications,
+        read is not None,
+    )
+    if error is not None:
+        raise error
+    if read is not None:
+        # An absent association proves itself from the entity alone, and
+        # the proof records both reads exactly as association_proof does.
+        for target_id, evidence in unbound:
+            entity = targets[target_id]
+            read.record_entity_evidence(entity, evidence)
+            read.record_association(
+                SourceIdentity(organization_id, SourceKind.GRAPH_ENTITY, target_id),
+                None,
+                evidence=None,
+            )
+
+    async def current(target_id, inputs):
+        entity = targets[target_id]
+        identity = SourceIdentity(organization_id, SourceKind.GRAPH_ENTITY, target_id)
+        try:
+            current = await graph_association_current(
+                entity,
+                associations.get(target_id),
+                ancestors=frozenset({identity}),
+                read=read,
+                proof_inputs=inputs,
+            )
+        except Exception:
+            if expected_publications is None:
+                raise
+            return False
+        return current
+
+    proven = await asyncio.gather(*(current(target_id, inputs) for target_id, inputs in bound))
+    settled.update(zip((target_id for target_id, _ in bound), proven, strict=True))
+    return {identifier: settled[identifier] for identifier in identifiers}
+
+
+def _verdict_rows(
+    organization_id: str, target_rows: list[Any], association_rows: list[Any]
+) -> tuple[dict[str, Entity], dict[str, Any], set[str]]:
+    """Decode the verdict snapshot's targets and index its associations."""
+    from sibyl_core.services.graph_records import entity_from_surreal_row
+
     targets = {}
     for row in target_rows:
         try:
@@ -264,64 +348,89 @@ async def _graph_derivation_verdicts(
         if target_id in associations:
             duplicate_associations.add(target_id)
         associations[target_id] = row
-    if read is not None:
-        await read.prepare_graph(
-            list(targets.keys() & associations.keys())
-            if expected_publications is not None
-            else list(targets)
-        )
+    return targets, associations, duplicate_associations
 
-    async def current(target_id):
-        association = associations.get(target_id)
-        entity = targets.get(target_id)
-        identity = SourceIdentity(organization_id, SourceKind.GRAPH_ENTITY, target_id)
-        if expected_publications is not None:
-            if association is None:
-                return False if entity is not None and entity.derivation_required else None
-            if (
-                target_id in duplicate_associations
-                or association.get("organization_id") != organization_id
-                or association.get("target_kind") != "graph_entity"
-                or association.get("target_id") != target_id
-                or entity is None
-                or not _same_publication_row(expected_publications.get(target_id), entity)
-            ):
-                return False
-        if expected_entities is not None:
-            expected = expected_entities.get(target_id)
-            # The snapshot rows above carry no vectors, so the comparison
-            # must not either; entity_read_evidence draws the same line.
-            if (
-                expected is None
-                or entity is None
-                or (
-                    expected.model_dump(mode="json", exclude={"embedding"})
-                    != entity.model_dump(mode="json", exclude={"embedding"})
-                    or expected.derivation_required != entity.derivation_required
-                    or expected.observed_revision != entity.observed_revision
-                )
-            ):
-                return False
-        if entity is None:
-            return False
-        try:
-            current = await graph_association_current(
-                entity, association, ancestors=frozenset({identity}), read=read
-            )
-        except Exception:
-            if expected_publications is None:
-                raise
-            return False
-        return current
 
-    identifiers = sorted(
-        targets.keys()
-        | associations.keys()
-        | (expected_entities.keys() if expected_entities is not None else set())
-        | (expected_publications.keys() if expected_publications is not None else set())
+def _settled_verdicts(
+    organization_id: str,
+    identifiers: list[str],
+    targets: Mapping[str, Entity],
+    associations: Mapping[str, Any],
+    duplicate_associations: set[str],
+    expected_entities: Mapping[str, Entity] | None,
+    expected_publications: Mapping[str, Any] | None,
+    recorded: bool,
+) -> tuple[
+    dict[str, bool | None],
+    list[tuple[str, Any]],
+    list[tuple[str, AssociationProofInputs | None]],
+    Exception | None,
+]:
+    """Verdicts the rows decide alone, and what the association proof still needs.
+
+    A row without a stored association is settled here, and when the proof
+    records its reads it comes back with its entity evidence for the loop
+    to record. A row with one comes back with its precomputed proof inputs.
+    The first error a row raises stops the pass, as it stopped the verdicts.
+    """
+    from sibyl_core.services.graph_read_validation import (
+        association_proof_inputs,
+        entity_evidence_values,
     )
-    verdicts = await asyncio.gather(*(current(identifier) for identifier in identifiers))
-    return dict(zip(identifiers, verdicts, strict=True))
+
+    settled: dict[str, bool | None] = {}
+    unbound: list[tuple[str, Any]] = []
+    bound: list[tuple[str, AssociationProofInputs | None]] = []
+    try:
+        for target_id in identifiers:
+            association = associations.get(target_id)
+            entity = targets.get(target_id)
+            if expected_publications is not None:
+                if association is None:
+                    settled[target_id] = (
+                        False if entity is not None and entity.derivation_required else None
+                    )
+                    continue
+                if (
+                    target_id in duplicate_associations
+                    or association.get("organization_id") != organization_id
+                    or association.get("target_kind") != "graph_entity"
+                    or association.get("target_id") != target_id
+                    or entity is None
+                    or not _same_publication_row(expected_publications.get(target_id), entity)
+                ):
+                    settled[target_id] = False
+                    continue
+            if expected_entities is not None:
+                expected = expected_entities.get(target_id)
+                # The snapshot rows above carry no vectors, so the comparison
+                # must not either; entity_read_evidence draws the same line.
+                if (
+                    expected is None
+                    or entity is None
+                    or (
+                        expected.model_dump(mode="json", exclude={"embedding"})
+                        != entity.model_dump(mode="json", exclude={"embedding"})
+                        or expected.derivation_required != entity.derivation_required
+                        or expected.observed_revision != entity.observed_revision
+                    )
+                ):
+                    settled[target_id] = False
+                    continue
+            if entity is None:
+                settled[target_id] = False
+                continue
+            if association is None:
+                settled[target_id] = not entity.derivation_required
+                if recorded:
+                    unbound.append((target_id, entity_evidence_values([entity])[0]))
+                continue
+            bound.append(
+                (target_id, association_proof_inputs(entity, association) if recorded else None)
+            )
+    except Exception as error:
+        return settled, unbound, bound, error
+    return settled, unbound, bound, None
 
 
 def _same_publication_row(row, entity: Entity) -> bool:

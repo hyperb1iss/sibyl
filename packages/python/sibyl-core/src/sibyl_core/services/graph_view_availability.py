@@ -13,11 +13,13 @@ from sibyl_core.memory_pipeline.observations import SourceIdentity, SourceKind
 from sibyl_core.models.entities import Entity, Relationship
 from sibyl_core.services import content_client
 from sibyl_core.services.content_models import raw_memory_from_record
+from sibyl_core.services.graph_compute import compute_rows
 from sibyl_core.services.graph_read_availability import (
     available_graph_entities,
     available_graph_relationships,
 )
 from sibyl_core.services.graph_read_validation import (
+    GraphReadFootprint,
     GraphReadValidation,
     association_read_evidence,
     capture_read_evidence,
@@ -82,7 +84,9 @@ async def _capture_snapshot(organization_id: str, ids: list[str]) -> dict[str, A
     return rows[0]
 
 
-def _changed_inputs(read: GraphReadValidation, graph, captures) -> set[SourceIdentity]:
+def _changed_inputs(
+    read: GraphReadValidation | GraphReadFootprint, graph, captures
+) -> set[SourceIdentity]:
     changed = set(read.conflicts)
 
     def indexed(rows, key, kind, decode=lambda row: row):
@@ -187,24 +191,11 @@ async def available_graph_view(
     current_edges = await available_graph_relationships(
         organization_id, list(relationships), runtime=runtime, read=read, proven_endpoints=nodes
     )
-    current_edges = {
-        identifier: edge
-        for identifier, edge in current_edges.items()
-        if _edge_evidence(edge) == _edge_evidence(relationships[identifier])
-    }
-    edge_dependencies: dict[str, set[SourceIdentity]] = {}
-    for identifier, edge in current_edges.items():
-        dependencies = {
-            SourceIdentity(organization_id, SourceKind.GRAPH_ENTITY, endpoint)
-            for endpoint in (edge.source_id, edge.target_id)
-        }
-        binding = edge.operational_source_binding
-        if binding is not None:
-            for value in [binding.get("source"), *binding.get("endpoints", [])]:
-                observation = observation_from_record(value)
-                read.record_observation(observation)
-                dependencies.add(observation.source)
-        edge_dependencies[identifier] = dependencies
+    current_edges, edge_dependencies, observations = await compute_rows(
+        len(current_edges), _edge_dependencies, organization_id, current_edges, relationships
+    )
+    for observation in observations:
+        read.record_observation(observation)
     identities = (
         read.graph_rows.keys()
         | read.graph_ancestry.keys()
@@ -237,8 +228,63 @@ async def available_graph_view(
         )
         # Canonical failure affects its dependents; ordinary graph facts survive.
         final_captures = {"captures": [], "states": [], "associations": [], "content_hashes": []}
+    return await compute_rows(
+        len(nodes) + len(current_edges),
+        _final_view,
+        read.footprint(),
+        organization_id,
+        nodes,
+        current_edges,
+        edge_dependencies,
+        final_graph,
+        final_captures,
+    )
+
+
+def _edge_dependencies(
+    organization_id: str,
+    current_edges: Mapping[str, Relationship],
+    relationships: Mapping[str, Relationship],
+) -> tuple[dict[str, Relationship], dict[str, set[SourceIdentity]], list[Any]]:
+    """Keep the proven edges whose bodies match the enumeration, with their inputs.
+
+    Returns the edges, each edge's source dependencies, and the operational
+    observations its binding names, in edge order, for the caller to record.
+    """
+    matching = {
+        identifier: edge
+        for identifier, edge in current_edges.items()
+        if _edge_evidence(edge) == _edge_evidence(relationships[identifier])
+    }
+    edge_dependencies: dict[str, set[SourceIdentity]] = {}
+    observations: list[Any] = []
+    for identifier, edge in matching.items():
+        dependencies = {
+            SourceIdentity(organization_id, SourceKind.GRAPH_ENTITY, endpoint)
+            for endpoint in (edge.source_id, edge.target_id)
+        }
+        binding = edge.operational_source_binding
+        if binding is not None:
+            for value in [binding.get("source"), *binding.get("endpoints", [])]:
+                observation = observation_from_record(value)
+                observations.append(observation)
+                dependencies.add(observation.source)
+        edge_dependencies[identifier] = dependencies
+    return matching, edge_dependencies, observations
+
+
+def _final_view(
+    read: GraphReadFootprint,
+    organization_id: str,
+    nodes: Mapping[str, Entity],
+    current_edges: Mapping[str, Relationship],
+    edge_dependencies: Mapping[str, set[SourceIdentity]],
+    final_graph: dict[str, Any],
+    final_captures: dict[str, Any],
+) -> tuple[dict[str, Entity], dict[str, Relationship]]:
+    """Withhold every node and edge whose recorded inputs moved by the final capture."""
     changed = _changed_inputs(read, final_graph, final_captures)
-    nodes = {
+    kept_nodes = {
         identifier: node
         for identifier, node in nodes.items()
         if not read.affected(
@@ -260,8 +306,8 @@ async def available_graph_view(
         for identifier, edge in current_edges.items()
         if identifier in stored_edges
         and _edge_evidence(stored_edges[identifier]) == _edge_evidence(edge)
-        and edge.source_id in nodes
-        and edge.target_id in nodes
+        and edge.source_id in kept_nodes
+        and edge.target_id in kept_nodes
         and not any(read.affected(source, changed) for source in edge_dependencies[identifier])
     }
-    return nodes, edges
+    return kept_nodes, edges
