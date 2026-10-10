@@ -19,9 +19,18 @@
 # Optional environment variables for advanced setup:
 #   SIBYL_OPENAI_API_KEY      — Pre-configure via env (or enter in UI)
 #   SIBYL_ANTHROPIC_API_KEY   — Pre-configure via env (or enter in UI)
-#   SIBYL_SETTINGS_KEY        — Fernet key for settings encryption (auto-generated)
+#   SIBYL_SETTINGS_KEY        — Fernet key for settings encryption (unset, secrets-init
+#                               writes one to the shared sibyl_secrets volume)
 #   SIBYL_SURREAL_PASSWORD    — SurrealDB root password (default: sibyl_quickstart)
-#   SIBYL_COORDINATION_BACKEND — Set to redis with --profile redis for an external worker
+#   SIBYL_COORDINATION_BACKEND — Set to redis together with --profile redis to run jobs on
+#                               the separate worker; api and worker then share the redis
+#                               service for jobs, locks, events and rate limits:
+#     SIBYL_COORDINATION_BACKEND=redis docker compose --env-file /dev/null \
+#       -f docker-compose.quickstart.yml --profile redis up -d
+#                               Use local or redis here, not auto: the Redis address is
+#                               always set, so auto would resolve to redis. A worker
+#                               started without redis coordination exits with an error
+#                               rather than idling while the api runs every job.
 #
 # Running alongside an existing dev setup:
 #   docker compose --env-file /dev/null \
@@ -44,16 +53,24 @@ services:
         condition: service_completed_successfully
       surrealdb:
         condition: service_healthy
+      redis:
+        condition: service_started
+        required: false
     environment:
       # Store configuration — fully Surreal by default
       SIBYL_STORE: ${SIBYL_STORE:-surreal}
       SIBYL_AUTH_STORE: ${SIBYL_AUTH_STORE:-surreal}
-      SIBYL_COORDINATION_BACKEND: ${SIBYL_COORDINATION_BACKEND:-auto}
+      # local runs jobs in-process; redis (with --profile redis) hands them to the
+      # worker. The Redis address is read only under redis coordination, which is
+      # why the default is local rather than auto: auto would see it and pick redis.
+      SIBYL_COORDINATION_BACKEND: ${SIBYL_COORDINATION_BACKEND:-local}
+      SIBYL_REDIS_HOST: ${SIBYL_REDIS_HOST:-redis}
+      SIBYL_REDIS_PORT: 6379
       # SurrealDB connection (internal Docker network)
       SIBYL_SURREAL_URL: ws://surrealdb:8000/rpc
       SIBYL_SURREAL_USERNAME: ${SIBYL_SURREAL_USERNAME:-root}
       SIBYL_SURREAL_PASSWORD: ${SIBYL_SURREAL_PASSWORD:-sibyl_quickstart}
-      # Auth secret auto-generates and persists in the sibyl_secrets volume.
+      # Unset, the api and worker read the key secrets-init wrote to sibyl_secrets.
       SIBYL_SETTINGS_KEY: ${SIBYL_SETTINGS_KEY:-}
       SIBYL_PUBLIC_URL: http://localhost:${SIBYL_WEB_PORT:-3337}
       # AI Providers (optional — can be configured via UI during onboarding)
@@ -91,7 +108,7 @@ services:
     profiles: ["redis"]
     image: ghcr.io/hyperb1iss/sibyl-api:${SIBYL_IMAGE_TAG:-1.4.9}
     container_name: sibyl-worker
-    command: ["sibyld", "worker"]
+    command: ["sibyld", "worker", "--require-redis"]
     depends_on:
       secrets-init:
         condition: service_completed_successfully
@@ -102,7 +119,9 @@ services:
     environment:
       SIBYL_STORE: ${SIBYL_STORE:-surreal}
       SIBYL_AUTH_STORE: ${SIBYL_AUTH_STORE:-surreal}
-      SIBYL_COORDINATION_BACKEND: ${SIBYL_COORDINATION_BACKEND:-redis}
+      # Same variable and default as the api, so the two cannot disagree; left
+      # unset with --profile redis, this worker refuses to start.
+      SIBYL_COORDINATION_BACKEND: ${SIBYL_COORDINATION_BACKEND:-local}
       SIBYL_REDIS_HOST: ${SIBYL_REDIS_HOST:-redis}
       SIBYL_REDIS_PORT: 6379
       SIBYL_SURREAL_URL: ws://surrealdb:8000/rpc
@@ -115,6 +134,14 @@ services:
       SIBYL_LLM_MODEL: claude-haiku-5-5
     volumes:
       - sibyl_secrets:/home/sibyl/.sibyl
+    # The image's own healthcheck asks the API port, which a worker does not
+    # serve; this asks Valkey whether a worker heartbeat is live.
+    healthcheck:
+      test: ["CMD", "sibyld", "worker", "--check"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
     restart: unless-stopped
 
   # ==========================================================================
@@ -159,11 +186,22 @@ services:
   # Persist auto-generated keys there so JWT refresh tokens survive
   # container recreation. Override SIBYL_API_UID/GID only when pinning an
   # older image whose runtime user still used a different numeric UID.
+  # The settings key is written here, once, because a process on redis
+  # coordination never generates its own: the api and worker must share one.
   secrets-init:
     image: busybox:1.37
     container_name: sibyl-secrets-init
     command:
-      ["chown", "-R", "${SIBYL_API_UID:-10001}:${SIBYL_API_GID:-10001}", "/home/sibyl/.sibyl"]
+      - sh
+      - -c
+      - |
+        set -eu
+        key=/home/sibyl/.sibyl/settings.key
+        if [ ! -s "$$key" ]; then
+          head -c 32 /dev/urandom | base64 | tr '+/' '-_' > "$$key"
+          chmod 600 "$$key"
+        fi
+        chown -R "${SIBYL_API_UID:-10001}:${SIBYL_API_GID:-10001}" /home/sibyl/.sibyl
     volumes:
       - sibyl_secrets:/home/sibyl/.sibyl
     restart: "no"

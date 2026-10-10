@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import timedelta
+from datetime import datetime, timedelta
 from types import SimpleNamespace
 from uuid import UUID, uuid4
 
@@ -139,6 +139,27 @@ async def exchange_device_code(*, device_code: str) -> dict[str, object]:
 
         if request_row.user_id is None:
             raise DeviceTokenError("server_error", "Approved request missing user_id")
+        # The conditional UPDATE is the whole claim: when exchanges race on
+        # different replicas, the row goes to whichever commits first and
+        # every other exchange matches nothing, so only one mints a session.
+        claimed = _normalize_records(
+            await client.execute_query(
+                """
+                    UPDATE device_authorization_requests
+                    SET status = $status,
+                        consumed_at = $consumed_at,
+                        updated_at = $updated_at
+                    WHERE uuid = $uuid AND status = 'approved' AND expires_at > $consumed_at
+                    RETURN BEFORE;
+                """,
+                uuid=str(request_row.id),
+                status="consumed",
+                consumed_at=now,
+                updated_at=now,
+            )
+        )
+        if not claimed:
+            raise DeviceTokenError("invalid_grant", "Device code already used")
         session_id = uuid4()
         access_token = create_access_token(
             user_id=request_row.user_id,
@@ -162,19 +183,6 @@ async def exchange_device_code(*, device_code: str) -> dict[str, object]:
             refresh_token_expires_at=refresh_expires,
             device_name=request_row.client_name,
             device_type="device",
-        )
-        await client.execute_query(
-            """
-                UPDATE device_authorization_requests
-                SET status = $status,
-                    consumed_at = $consumed_at,
-                    updated_at = $updated_at
-                WHERE uuid = $uuid;
-            """,
-            uuid=str(request_row.id),
-            status="consumed",
-            consumed_at=now,
-            updated_at=now,
         )
         return {
             "access_token": access_token,
@@ -246,9 +254,38 @@ async def login_device_browser_user(
     )
 
 
+# Approving or denying a request is one conditional UPDATE, so a decision
+# that read the request before another one landed (two tabs, a double submit,
+# a request already exchanged) changes nothing instead of writing back a
+# stale row, which could re-arm a consumed device code.
+_DENY_PENDING_REQUEST = """
+    UPDATE device_authorization_requests
+    SET status = 'denied', denied_at = $now, updated_at = $now
+    WHERE uuid = $uuid AND status = 'pending' AND expires_at > $now
+    RETURN AFTER;
+"""
+_APPROVE_PENDING_REQUEST = """
+    UPDATE device_authorization_requests
+    SET status = 'approved',
+        approved_at = $now,
+        user_id = $user_id,
+        organization_id = $organization_id,
+        updated_at = $now
+    WHERE uuid = $uuid AND status = 'pending' AND expires_at > $now
+    RETURN AFTER;
+"""
+
+
+async def _decide_pending_request(
+    client: QueryClient, query: str, *, uuid: UUID, now: datetime, **params: object
+) -> SurrealRecord | None:
+    """Apply a decision to a still-pending, unexpired request; None if it was not."""
+    rows = _normalize_records(await client.execute_query(query, uuid=str(uuid), now=now, **params))
+    return rows[0] if rows else None
+
+
 async def deny_device_authorization(*, user_id: UUID, user_code: str, request):
     async with _auth_client_scope() as client:
-        repo = _SurrealRepository(client)
         user, record, request_row = await _load_device_authorization_user_and_request(
             client, user_id=user_id, user_code=user_code
         )
@@ -262,17 +299,11 @@ async def deny_device_authorization(*, user_id: UUID, user_code: str, request):
             or request_row.status != "pending"
         ):
             return None
-        updated = {
-            **record,
-            "status": "denied",
-            "denied_at": now,
-            "updated_at": now,
-        }
-        written = await repo.replace_record(
-            "device_authorization_requests",
-            uuid=request_row.id,
-            record=updated,
+        written = await _decide_pending_request(
+            client, _DENY_PENDING_REQUEST, uuid=request_row.id, now=now
         )
+        if written is None:
+            return None
         await _log_audit_event(
             client,
             action="auth.device.deny",
@@ -289,7 +320,6 @@ async def deny_device_authorization(*, user_id: UUID, user_code: str, request):
 
 async def approve_device_authorization(*, user_id: UUID, user_code: str, request):
     async with _auth_client_scope() as client:
-        repo = _SurrealRepository(client)
         user, record, request_row = await _load_device_authorization_user_and_request(
             client, user_id=user_id, user_code=user_code
         )
@@ -305,19 +335,16 @@ async def approve_device_authorization(*, user_id: UUID, user_code: str, request
             return None
         organization_record = await _ensure_personal_org_membership_record(client, user)
         organization = _require_namespace(_auth_org_namespace(organization_record), label="org")
-        updated = {
-            **record,
-            "status": "approved",
-            "approved_at": now,
-            "user_id": str(user.id),
-            "organization_id": str(organization.id),
-            "updated_at": now,
-        }
-        written = await repo.replace_record(
-            "device_authorization_requests",
+        written = await _decide_pending_request(
+            client,
+            _APPROVE_PENDING_REQUEST,
             uuid=request_row.id,
-            record=updated,
+            now=now,
+            user_id=str(user.id),
+            organization_id=str(organization.id),
         )
+        if written is None:
+            return None
         await _log_audit_event(
             client,
             action="auth.device.approve",

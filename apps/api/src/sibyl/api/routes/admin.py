@@ -38,6 +38,7 @@ from sibyl.api.schemas import (
 from sibyl.auth.dependencies import get_current_organization, get_current_user, require_org_role
 from sibyl.config import settings
 from sibyl.coordination import get_coordination_health
+from sibyl.coordination.broker import live_crawl_job_id
 from sibyl.persistence.auth_runtime import (
     create_project_record,
     get_project_record_by_graph_id,
@@ -48,7 +49,7 @@ from sibyl.persistence.content_runtime import (
     get_content_read_session,
     get_source_sync_counts,
     list_crawl_sources,
-    save_crawl_source_record,
+    reset_stuck_crawl_source,
 )
 from sibyl_core.audit import audit_event_resource
 from sibyl_core.auth import AuthOrganization, AuthUser, OrganizationRole
@@ -1312,56 +1313,87 @@ async def dev_status(
 
 
 async def recover_stuck_sources() -> dict[str, Any]:
-    """Recover sources stuck in IN_PROGRESS state after server restart.
+    """Recover sources left IN_PROGRESS by a crawl job that no longer exists.
 
-    Should be called during server startup to clean up orphaned crawl jobs.
+    Runs on every API start. With several replicas and a separate worker, a
+    replica starting during a rolling deploy must not reset crawls a worker is
+    still running, so a source is only recovered once the job broker reports
+    no queued or running job for it. A single process starts with an empty
+    in-process broker, so there every IN_PROGRESS source is recovered.
 
     Returns:
-        Dict with counts of recovered sources
+        Dict with counts of recovered sources and of sources still owned by a
+        live job (``still_running``)
     """
     recovered = 0
     completed = 0
     reset_to_pending = 0
+    still_running = 0
 
     try:
         async with get_content_read_session() as session:
-            stuck_sources = await list_crawl_sources(
+            in_progress = await list_crawl_sources(
                 session,
                 status=CrawlStatus.IN_PROGRESS,
                 limit=None,
             )
 
-            if not stuck_sources:
+            if not in_progress:
                 log.info("No stuck sources found during startup recovery")
-                return {"recovered": 0, "completed": 0, "reset_to_pending": 0}
+                return {
+                    "recovered": 0,
+                    "completed": 0,
+                    "reset_to_pending": 0,
+                    "still_running": 0,
+                }
 
-            log.warning(
-                "Found stuck IN_PROGRESS sources",
-                count=len(stuck_sources),
-                sources=[source.name for source in stuck_sources],
-            )
+            for source in in_progress:
+                try:
+                    live_job_id = await live_crawl_job_id(
+                        source.id, recorded_job_id=source.current_job_id
+                    )
+                except Exception as exc:
+                    log.warning(
+                        "Skipped crawl recovery: job broker unavailable",
+                        sources=len(in_progress) - recovered - still_running,
+                        error=str(exc),
+                    )
+                    break
 
-            for source in stuck_sources:
+                if live_job_id is not None:
+                    still_running += 1
+                    log.info(
+                        "Source crawl still owned by a live job",
+                        source_name=source.name,
+                        job_id=live_job_id,
+                    )
+                    continue
+
                 doc_count, chunk_count = await get_source_sync_counts(session, source_id=source.id)
-                old_status = source.crawl_status
+                new_status = CrawlStatus.COMPLETED if doc_count > 0 else CrawlStatus.PENDING
+                reset = await reset_stuck_crawl_source(
+                    session,
+                    source_id=source.id,
+                    expected_job_id=source.current_job_id,
+                    crawl_status=new_status,
+                    document_count=doc_count,
+                    chunk_count=chunk_count,
+                )
+                if reset is None:
+                    # A crawl started or ended since the source was read; it owns it.
+                    still_running += 1
+                    log.info("Source changed during startup recovery", source_name=source.name)
+                    continue
 
-                if doc_count > 0:
-                    source.crawl_status = CrawlStatus.COMPLETED
-                    source.document_count = doc_count
-                    source.chunk_count = chunk_count
+                if new_status == CrawlStatus.COMPLETED:
                     completed += 1
                 else:
-                    source.crawl_status = CrawlStatus.PENDING
                     reset_to_pending += 1
-
-                source.current_job_id = None
-                await save_crawl_source_record(session, source=source)
-
-                log.info(
-                    "Recovered stuck source",
+                log.warning(
+                    "Recovered orphaned IN_PROGRESS source",
                     source_name=source.name,
-                    old_status=old_status.value,
-                    new_status=source.crawl_status.value,
+                    old_status=CrawlStatus.IN_PROGRESS.value,
+                    new_status=new_status.value,
                     doc_count=doc_count,
                 )
                 recovered += 1
@@ -1371,6 +1403,7 @@ async def recover_stuck_sources() -> dict[str, Any]:
             recovered=recovered,
             completed=completed,
             reset_to_pending=reset_to_pending,
+            still_running=still_running,
         )
     except Exception as exc:
         log.exception("Startup recovery failed", error=str(exc))
@@ -1379,4 +1412,5 @@ async def recover_stuck_sources() -> dict[str, Any]:
         "recovered": recovered,
         "completed": completed,
         "reset_to_pending": reset_to_pending,
+        "still_running": still_running,
     }

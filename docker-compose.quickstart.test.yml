@@ -18,6 +18,9 @@ services:
   worker:
     container_name: sibyl-test-worker
 
+  redis:
+    container_name: sibyl-test-redis
+
   web:
     container_name: sibyl-test-web
     ports: !override

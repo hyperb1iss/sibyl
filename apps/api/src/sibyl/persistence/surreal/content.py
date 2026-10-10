@@ -1502,6 +1502,75 @@ async def save_crawl_source_record(
     return _source_from_record(record)
 
 
+_RESET_STUCK_CRAWL_SOURCE = """
+    UPDATE crawl_sources SET
+        crawl_status = $crawl_status,
+        current_job_id = NONE,
+        document_count = $document_count,
+        chunk_count = $chunk_count,
+        last_crawled_at = last_crawled_at ?? $crawled_at,
+        updated_at = $now
+    WHERE uuid = $uuid
+        AND crawl_status = 'in_progress'
+        AND (current_job_id ?? '') = $expected_job_id
+    RETURN AFTER;
+"""
+
+
+async def reset_stuck_crawl_source(
+    _session: object,
+    *,
+    source_id: UUID,
+    expected_job_id: str | None,
+    crawl_status: CrawlStatus,
+    document_count: int,
+    chunk_count: int,
+    crawled_at: datetime | None = None,
+) -> CrawlSource | None:
+    """Move a source out of IN_PROGRESS, unless a crawl claimed it since it was read.
+
+    The update matches only while the source is still in progress under the
+    job id the caller saw, so a crawl that started, finished or failed in
+    between keeps its status, job id and error. ``crawled_at`` fills
+    ``last_crawled_at`` only when it is unset. Returns None when nothing
+    matched.
+    """
+    async with surreal_content_client() as client:
+        rows = await _select_many(
+            client,
+            _RESET_STUCK_CRAWL_SOURCE,
+            uuid=str(source_id),
+            crawl_status=_serialize_value(crawl_status),
+            document_count=document_count,
+            chunk_count=chunk_count,
+            crawled_at=crawled_at,
+            expected_job_id=expected_job_id or "",
+            now=_utcnow(),
+        )
+    return _source_from_record(rows[0]) if rows else None
+
+
+async def update_crawl_source_counts(
+    _session: object,
+    *,
+    source_id: UUID,
+    document_count: int,
+    chunk_count: int,
+) -> CrawlSource | None:
+    """Set a source's document and chunk counts, and nothing else about it."""
+    async with surreal_content_client() as client:
+        rows = await _select_many(
+            client,
+            "UPDATE crawl_sources SET document_count = $document_count, "
+            "chunk_count = $chunk_count, updated_at = $now WHERE uuid = $uuid RETURN AFTER;",
+            uuid=str(source_id),
+            document_count=document_count,
+            chunk_count=chunk_count,
+            now=_utcnow(),
+        )
+    return _source_from_record(rows[0]) if rows else None
+
+
 async def list_document_chunks(
     _session: object,
     *,

@@ -86,6 +86,51 @@ def test_worker_command_keeps_arq_path_in_redis_mode(monkeypatch) -> None:
     run_worker.assert_called_once()
 
 
+def test_worker_container_refuses_to_idle_beside_a_local_api(monkeypatch) -> None:
+    """--profile redis without SIBYL_COORDINATION_BACKEND=redis: fail loudly."""
+    run_worker = MagicMock()
+    monkeypatch.setattr("sibyl.config.settings.store", "surreal")
+    monkeypatch.setattr("sibyl.config.settings.coordination_backend", "local")
+    monkeypatch.setattr("arq.run_worker", run_worker)
+
+    result = runner.invoke(app, ["worker", "--require-redis"])
+
+    assert result.exit_code == 1
+    assert "SIBYL_COORDINATION_BACKEND=redis" in " ".join(result.output.split())
+    run_worker.assert_not_called()
+
+
+def test_worker_container_runs_under_redis_coordination(monkeypatch) -> None:
+    run_worker = MagicMock()
+    monkeypatch.setattr("sibyl.config.settings.store", "surreal")
+    monkeypatch.setattr("sibyl.config.settings.coordination_backend", "redis")
+    monkeypatch.setattr("arq.run_worker", run_worker)
+
+    result = runner.invoke(app, ["worker", "--require-redis", "--burst"])
+
+    assert result.exit_code == 0
+    run_worker.assert_called_once()
+
+
+@pytest.mark.parametrize(
+    ("backend", "heartbeat", "exit_code"),
+    [("redis", True, 0), ("redis", False, 1), ("local", True, 1)],
+)
+def test_worker_check_reports_the_heartbeat(
+    monkeypatch, backend: str, heartbeat: bool, exit_code: int
+) -> None:
+    cli_main = sys.modules["sibyl.cli.main"]
+    run_worker = MagicMock()
+    monkeypatch.setattr("sibyl.config.settings.coordination_backend", backend)
+    monkeypatch.setattr(cli_main, "_worker_heartbeat_live", lambda: heartbeat)
+    monkeypatch.setattr("arq.run_worker", run_worker)
+
+    result = runner.invoke(app, ["worker", "--check"])
+
+    assert result.exit_code == exit_code
+    run_worker.assert_not_called()
+
+
 def test_serve_with_reload_enables_dev_diagnostics(monkeypatch) -> None:
     cli_main = sys.modules["sibyl.cli.main"]
     process = MagicMock()

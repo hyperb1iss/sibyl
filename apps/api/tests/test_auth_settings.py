@@ -250,6 +250,69 @@ def test_settings_rate_limit_storage_uses_redis_password() -> None:
     assert s.rate_limit_storage == "redis://:p%40%20ss@valkey:6379/4"
 
 
+@pytest.mark.parametrize(
+    "coordination",
+    [
+        {"coordination_backend": "redis"},
+        # auto resolves to redis once any Redis setting is given.
+        {"coordination_backend": "auto"},
+    ],
+)
+def test_settings_rate_limit_storage_derives_shared_redis_under_redis_coordination(
+    coordination: dict[str, str],
+) -> None:
+    s = Settings(
+        _env_file=None,
+        redis_host="valkey",
+        redis_port=6379,
+        redis_password="p@ ss",
+        **coordination,
+    )
+
+    assert s.resolved_coordination_backend == "redis"
+    assert s.rate_limit_storage == "redis://:p%40%20ss@valkey:6379/4"
+
+
+def test_settings_rate_limit_storage_derives_when_set_empty_under_redis() -> None:
+    s = Settings(
+        _env_file=None,
+        coordination_backend="redis",
+        redis_host="valkey",
+        rate_limit_storage="  ",
+    )
+
+    assert s.rate_limit_storage == "redis://valkey:6381/4"
+
+
+def test_settings_rate_limit_storage_brackets_ipv6_redis_host() -> None:
+    s = Settings(_env_file=None, coordination_backend="redis", redis_host="::1")
+
+    assert s.rate_limit_storage == "redis://[::1]:6381/4"
+
+
+@pytest.mark.parametrize("storage", [None, ""])
+def test_settings_rate_limit_storage_stays_in_memory_for_one_process(
+    storage: str | None,
+) -> None:
+    overrides = {} if storage is None else {"rate_limit_storage": storage}
+    s = Settings(_env_file=None, coordination_backend="local", redis_host="valkey", **overrides)
+
+    assert s.resolved_coordination_backend == "local"
+    assert s.rate_limit_storage == "memory://"
+    assert Settings(_env_file=None).rate_limit_storage == "memory://"
+
+
+def test_settings_rate_limit_storage_keeps_explicit_storage_under_redis() -> None:
+    s = Settings(
+        _env_file=None,
+        coordination_backend="redis",
+        redis_host="valkey",
+        rate_limit_storage="memory://",
+    )
+
+    assert s.rate_limit_storage == "memory://"
+
+
 def test_settings_rate_limit_storage_keeps_explicit_auth() -> None:
     s = Settings(
         _env_file=None,

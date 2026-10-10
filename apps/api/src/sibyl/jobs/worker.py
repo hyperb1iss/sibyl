@@ -108,6 +108,14 @@ async def startup(ctx: dict[str, Any]) -> None:
     log.info("Job worker online")
     ctx["start_time"] = datetime.now(UTC)
 
+    # A worker decrypts settings the API replicas saved, so it refuses to run
+    # on a key of its own instead of reading every stored secret as empty.
+    from sibyl.crypto import require_shared_settings_key
+    from sibyl.services.settings_key import verify_shared_settings_key
+
+    require_shared_settings_key()
+    await verify_shared_settings_key()
+
     # Load API keys from database into environment before graph jobs run.
     from sibyl.services.settings import load_api_keys_from_db
 
@@ -321,6 +329,9 @@ def log_schedule_specs(schedule_specs: list[ScheduleSpec]) -> None:
         log.info("cron_job_registered", job=spec.name, schedule=spec.schedule_label)
 
 
+WORKER_HEARTBEAT_SECONDS = 10
+
+
 class WorkerSettings:
     """arq worker settings."""
 
@@ -380,6 +391,10 @@ class WorkerSettings:
     job_timeout = 3600  # 1 hour timeout for crawl jobs
     keep_result = 86400  # Keep results for 24 hours
     poll_delay = 0.5  # Check for jobs every 0.5s
+    # Each worker refreshes arq's heartbeat key this often, and the key lives
+    # one second longer, so health reports a dead worker within that window
+    # rather than arq's default hour.
+    health_check_interval = WORKER_HEARTBEAT_SECONDS
 
 
 async def run_worker_async() -> None:
@@ -414,6 +429,7 @@ async def run_worker_async() -> None:
             job_timeout=WorkerSettings.job_timeout,
             keep_result=WorkerSettings.keep_result,
             poll_delay=WorkerSettings.poll_delay,
+            health_check_interval=WorkerSettings.health_check_interval,
         )
 
         await worker.async_run()

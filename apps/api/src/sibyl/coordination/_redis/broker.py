@@ -13,6 +13,7 @@ from uuid import UUID
 import structlog
 from arq import ArqRedis, create_pool
 from arq.connections import RedisSettings
+from arq.constants import default_queue_name, health_check_key_suffix
 from arq.jobs import Job, JobStatus as ArqJobStatus
 
 from sibyl.backup_ids import generate_backup_id
@@ -22,6 +23,7 @@ from sibyl.coordination.broker import (
     RECENT_JOB_INDEX_LIMIT,
     JobInfo,
     JobStatus,
+    crawl_job_id,
     entity_embedding_job_id,
     job_organization_id,
     memory_extraction_job_id,
@@ -69,11 +71,18 @@ class RedisQueueBroker:
         await self.close_pool()
 
     async def health(self) -> dict[str, Any]:
-        """Report queue health for admin and jobs surfaces."""
+        """Report queue health for admin, jobs and readiness surfaces.
+
+        Read from Redis itself: the queue depth is the size of arq's queue,
+        and a worker is healthy while its health-check key is live (every arq
+        worker refreshes it as it polls, at the interval WorkerSettings sets,
+        and it expires a second after the last worker stops refreshing it).
+        """
         try:
             pool = await self.get_pool()
             redis_info = await pool.info()
-            pool_info = await pool.pool.info()
+            queue_depth = await pool.zcard(default_queue_name)
+            worker_heartbeat = await pool.get(default_queue_name + health_check_key_suffix)
         except Exception:
             return {
                 "status": "unhealthy",
@@ -86,8 +95,8 @@ class RedisQueueBroker:
         return {
             "status": "healthy",
             "queue_healthy": bool(redis_info),
-            "worker_healthy": bool(pool_info.get("workers", 0)),
-            "queue_depth": pool_info.get("pending_jobs", 0) if pool_info else 0,
+            "worker_healthy": worker_heartbeat is not None,
+            "queue_depth": int(queue_depth or 0),
             "redis_version": redis_info.get("redis_version", "unknown"),
             "connected_clients": redis_info.get("connected_clients", 0),
             "used_memory_human": redis_info.get("used_memory_human", "unknown"),
@@ -135,7 +144,7 @@ class RedisQueueBroker:
         if organization_id is not None:
             job_kwargs["organization_id"] = organization_id
 
-        job_id = f"crawl:{source_id}"
+        job_id = crawl_job_id(source_id)
         result = await self._enqueue_unique(
             "crawl_source",
             str(source_id),

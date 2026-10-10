@@ -1066,11 +1066,13 @@ def test_production_compose_validation_receipts_share_durable_state() -> None:
     assert (
         "validation_receipts:/home/sibyl/.sibyl" in compose["services"]["receipts-init"]["volumes"]
     )
-    assert compose["services"]["receipts-init"]["command"] == [
-        "chown",
-        "10001:10001",
-        "/home/sibyl/.sibyl",
-    ]
+    command = compose["services"]["receipts-init"]["command"]
+    assert command[:2] == ["sh", "-c"]
+    # The one-shot keeps the shared home owned by the API user and writes the
+    # settings key the backend and worker share, once.
+    assert 'chown 10001:10001 /home/sibyl/.sibyl "$$key"' in command[-1]
+    assert "key=/home/sibyl/.sibyl/settings.key" in command[-1]
+    assert 'if [ ! -s "$$key" ]' in command[-1]
 
 
 @requires_helm

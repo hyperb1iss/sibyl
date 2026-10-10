@@ -42,6 +42,7 @@ from sibyl.persistence.surreal.content import (
     mark_raw_memory_projected_entity,
     purge_due_deleted_raw_captures,
     reserve_api_idempotency_record,
+    reset_stuck_crawl_source,
     resolve_document_entity,
     save_api_idempotency_record,
     save_crawl_source_record,
@@ -51,6 +52,7 @@ from sibyl.persistence.surreal.content import (
     search_code_example_chunks,
     search_rag_chunks,
     soft_delete_private_raw_captures_for_user,
+    update_crawl_source_counts,
     update_raw_capture_review_state,
 )
 
@@ -96,6 +98,7 @@ __all__ = [
     "list_unlinked_source_chunks",
     "purge_due_deleted_raw_captures",
     "reserve_api_idempotency_record",
+    "reset_stuck_crawl_source",
     "resolve_document_entity",
     "save_api_idempotency_record",
     "save_crawl_source_record",
@@ -105,6 +108,7 @@ __all__ = [
     "search_code_example_chunks",
     "search_rag_chunks",
     "soft_delete_private_raw_captures_for_user",
+    "update_crawl_source_counts",
     "update_raw_capture_review_state",
 ]
 

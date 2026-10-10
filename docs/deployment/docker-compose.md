@@ -149,11 +149,27 @@ sibyl docker init
 # Optional: run a separate worker with Redis/Valkey coordination
 sibyl docker init --force --with-worker
 
+# Or run the repo production compose with its worker: the backend and worker
+# then share the redis service for jobs, locks, events and rate limits
+SIBYL_COORDINATION_BACKEND=redis docker compose --env-file ~/.sibyl/prod.env \
+  -f docker-compose.prod.yml --profile redis up -d
+
 # Start, follow logs, and stop
 sibyl docker up
 sibyl docker logs
 sibyl docker down
 ```
+
+The backend and worker read the same `SIBYL_COORDINATION_BACKEND`, defaulting to `local`. Set it to
+`redis` whenever the `redis` profile runs: a worker left on `local` exits with an error instead of
+idling while the backend runs every job itself. Use `local` or `redis` in these files rather than
+`auto`, because the compose files always set the Redis address and `auto` would resolve to `redis`.
+The worker's healthcheck runs `sibyld worker --check`, which passes while a worker heartbeat is live
+in Valkey (the heartbeat belongs to the queue, so with several workers it shows that one is live,
+not which). `sibyl docker upgrade` brings an older `--with-worker` bundle up to the same wiring and
+moves its settings key into the bundle's `.env`, keeping the key the API container generated,
+whether that container is running or stopped. If a key exists but cannot be read, the upgrade stops
+without changing anything.
 
 The repo's `docker-compose.prod.yml` refuses to start without both `SIBYL_OPENAI_API_KEY` and
 `SIBYL_ANTHROPIC_API_KEY`, and it pins Anthropic as the language model, so switching providers there
@@ -270,7 +286,10 @@ Differences from the production compose:
 
 - Pulls `ghcr.io/hyperb1iss/sibyl-api` and `sibyl-web` images instead of building locally
 - `SIBYL_JWT_SECRET` and `SIBYL_SETTINGS_KEY` auto-generate when unset (persisted in the
-  `sibyl_secrets` volume mounted at `/home/sibyl/.sibyl`)
+  `sibyl_secrets` volume mounted at `/home/sibyl/.sibyl`). The `secrets-init` service writes the
+  settings key once, before the api and worker start, because a process on Redis coordination never
+  generates its own: it reads that shared key, or `SIBYL_SETTINGS_KEY`, and refuses to start with
+  neither
 - Runs with `SIBYL_ENVIRONMENT=development` and a `sibyl_quickstart` default Surreal password
 - The backend service is named `api` and the frontend `web`
 

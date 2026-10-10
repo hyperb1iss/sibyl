@@ -3227,6 +3227,48 @@ async def test_exchange_device_code_accepts_aware_datetime_rows(
     assert "UPSERT device_authorization_requests" not in query
     assert params["uuid"] == str(device_request_id)
     assert params["status"] == "consumed"
+    assert "status = 'approved'" in query
+    assert "RETURN BEFORE" in query
+
+
+@pytest.mark.asyncio
+async def test_exchange_device_code_mints_nothing_when_another_exchange_claimed_it(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The row read as approved, but the claim matched nothing: another won."""
+    fake_client = _RecordingAuthClient([])
+    create_session = AsyncMock()
+    select_one = AsyncMock(
+        return_value={
+            "uuid": str(uuid4()),
+            "device_code_hash": "hash",
+            "user_code": "ABCD-EFGH",
+            "client_name": "sibyl-cli",
+            "scope": "mcp",
+            "status": "approved",
+            "poll_interval_seconds": 5,
+            "expires_at": datetime.now(UTC) + timedelta(minutes=10),
+            "user_id": str(uuid4()),
+            "organization_id": str(uuid4()),
+        }
+    )
+    monkeypatch.setattr(
+        surreal_auth_runtime,
+        "_auth_client_scope",
+        lambda: _StaticAuthClientScope(fake_client),
+    )
+    monkeypatch.setattr(surreal_auth_runtime._SurrealRepository, "select_one", select_one)
+    monkeypatch.setattr(
+        surreal_auth_runtime.SurrealSessionRepository,
+        "from_client",
+        lambda client: SimpleNamespace(create_session=create_session),
+    )
+
+    with pytest.raises(DeviceTokenError) as exc_info:
+        await surreal_auth_runtime.exchange_device_code(device_code="device-code")
+
+    assert exc_info.value.error == "invalid_grant"
+    create_session.assert_not_awaited()
 
 
 @pytest.mark.asyncio
