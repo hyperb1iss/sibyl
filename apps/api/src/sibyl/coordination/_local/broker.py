@@ -22,6 +22,7 @@ from sibyl.coordination.broker import (
     RECENT_JOB_INDEX_LIMIT,
     JobInfo,
     JobStatus,
+    backup_cleanup_job_id,
     crawl_job_id,
     entity_embedding_job_id,
     memory_extraction_job_id,
@@ -688,14 +689,19 @@ class LocalQueueBroker:
         self,
         *,
         retention_days: int | None = None,
+        organization_id: str | None = None,
     ) -> str:
         job_kwargs: dict[str, Any] = {}
         if retention_days is not None:
             job_kwargs["retention_days"] = retention_days
+        # An organization's cleanup is its own job, visible to that org only.
+        job_args = (organization_id,) if organization_id is not None else ()
+        job_id = backup_cleanup_job_id(organization_id)
 
         result = await self._enqueue_unique(
             "cleanup_old_backups",
-            job_id="backup_cleanup",
+            *job_args,
+            job_id=job_id,
             clear_result=True,
             **job_kwargs,
         )
