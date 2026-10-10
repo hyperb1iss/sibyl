@@ -118,10 +118,12 @@ def _forget_settings(payload: InvalidationPayload) -> None:
     get_settings_service().forget(_strings(payload, "keys"))
 
 
-async def _apply_runtime_settings(payload: InvalidationPayload) -> None:
-    from sibyl.services.settings import apply_runtime_settings_change
+async def _sync_runtime_settings(payload: InvalidationPayload) -> None:
+    from sibyl.services.settings import sync_runtime_settings
 
-    await apply_runtime_settings_change(_strings(payload, "keys"))
+    # The whole stored state is re-read, so the keys named only label the log.
+    keys = ", ".join(_strings(payload, "keys")) or "all"
+    await sync_runtime_settings(reason=f"announced by another process: {keys}")
 
 
 async def _invalidate_llm_runtime(payload: InvalidationPayload) -> None:
@@ -155,11 +157,19 @@ def install_cache_invalidation_handlers(bus: CacheInvalidationBus) -> None:
         lambda payload: apply_session_invalidation(access_session_cache, payload),
     )
     bus.register(SETTINGS_TOPIC, _forget_settings)
-    bus.register(RUNTIME_SETTINGS_TOPIC, _apply_runtime_settings)
+    # A rebuild re-reads every stored runtime setting, so queued runs collapse.
+    bus.register(RUNTIME_SETTINGS_TOPIC, _sync_runtime_settings, coalesce=True)
     bus.register(LLM_RUNTIME_TOPIC, _invalidate_llm_runtime)
     bus.on_reset(access_session_cache.clear)
     bus.on_reset(_clear_settings)
     bus.on_reset(_clear_llm_runtime)
+    # A runtime-settings change may have been missed too. Re-syncing applies
+    # the same rule as startup, on the topic's own worker so the rebuild does
+    # not hold up the session invalidations that follow.
+    bus.on_reset(
+        lambda: bus.submit_local(RUNTIME_SETTINGS_TOPIC, {"keys": ["resubscribed"]}),
+        name=RUNTIME_SETTINGS_TOPIC,
+    )
 
 
 async def _attach_until_joined(bus: CacheInvalidationBus) -> None:
@@ -194,9 +204,9 @@ async def start_cache_invalidation() -> bool:
 
     Joining never blocks startup. With Redis unreachable the process keeps
     retrying in the background; announcements made meanwhile are queued, and
-    the confirmed subscription runs the reset hooks, which clear the caches,
-    so the process catches up on whatever it missed.
-    ``cache_invalidation_status`` reports progress.
+    the confirmed subscription runs the reset hooks, which clear the caches
+    and re-sync runtime settings, so the process catches up on whatever it
+    missed. ``cache_invalidation_status`` reports progress.
     """
     global _attach_task  # noqa: PLW0603
     bus = get_cache_invalidation_bus()

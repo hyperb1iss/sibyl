@@ -158,6 +158,10 @@ async def test_update_config_persists_and_reports_current_state(
         AsyncMock(return_value=(False, "Invalid API key")),
     )
     monkeypatch.setattr(setup_routes, "_check_gemini_key", AsyncMock(return_value=(True, None)))
+    sync = AsyncMock()
+    announce = AsyncMock()
+    monkeypatch.setattr(setup_routes, "sync_runtime_settings", sync)
+    monkeypatch.setattr(setup_routes, "announce_runtime_settings_changed", announce)
 
     response = await setup_routes.update_config(
         setup_routes.ConfigUpdateRequest(
@@ -166,6 +170,10 @@ async def test_update_config_persists_and_reports_current_state(
             gemini_api_key="gemini-key",
         )
     )
+
+    # Saved keys take effect at once, here and on every other replica.
+    sync.assert_awaited_once()
+    announce.assert_awaited_once_with(["openai_api_key", "anthropic_api_key", "gemini_api_key"])
 
     assert response.success is True
     assert response.openai_valid is True

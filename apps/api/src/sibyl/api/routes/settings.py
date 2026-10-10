@@ -6,8 +6,6 @@ Works without auth during setup mode, requires global admin otherwise.
 
 from __future__ import annotations
 
-import os
-
 import structlog
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
@@ -17,7 +15,12 @@ from sibyl.persistence.operations_runtime import (
     is_setup_mode,
     require_settings_owner,
 )
-from sibyl.services.settings import RUNTIME_SETTING_ENV_VARS, get_settings_service
+from sibyl.services.settings import (
+    RUNTIME_SETTING_ENV_VARS,
+    get_settings_service,
+    runtime_setting_lock,
+    sync_runtime_settings,
+)
 from sibyl_core.ai.bedrock import COHERE_EMBED_V4_DIMENSIONS
 from sibyl_core.ai.llm.config import LLMProviderName
 from sibyl_core.ai.validation import KeyValidationResult, check_provider_key
@@ -26,32 +29,31 @@ router = APIRouter(prefix="/settings", tags=["settings"])
 log = structlog.get_logger()
 
 
-async def reset_graph_runtime() -> None:
-    from sibyl.persistence.graph_runtime import reset_graph_runtime as service
+def _reject_env_locked_settings(keys: list[str]) -> None:
+    """Refuse to store a runtime setting the deployment environment owns here.
 
-    await service()
-
-
-def reset_document_embedding_runtime() -> None:
-    from sibyl_core.services.document_search import reset_document_embedding_provider_cache
-    from sibyl_core.services.surreal_content import reset_raw_memory_embedding_provider_cache
-
-    reset_document_embedding_provider_cache()
-    reset_raw_memory_embedding_provider_cache()
-
-
-async def _try_reset_graph_client(context: str) -> None:
-    """Reset the active graph runtime, logging on failure.
-
-    Args:
-        context: Description for log message (e.g., "API key update", "API key deletion")
+    A stored value for such a setting would never take effect on this
+    replica, and a replica started without that variable would apply it, so
+    replicas would disagree. The LLM settings routes refuse the same way.
     """
+    locked = [
+        {"field": key, "env_var": env_var}
+        for key in keys
+        if (env_var := runtime_setting_lock(key)) is not None
+    ]
+    if locked:
+        raise HTTPException(status_code=409, detail={"code": "LOCKED_BY_ENV", "fields": locked})
+
+
+async def _apply_runtime_settings(keys: list[str]) -> None:
+    """Apply stored runtime settings here, then on every other replica and worker."""
+    runtime_keys = [key for key in keys if key in RUNTIME_SETTING_ENV_VARS]
+    if not runtime_keys:
+        return
     try:
-        await reset_graph_runtime()
-        reset_document_embedding_runtime()
-        log.info(f"Reset graph and embedding runtimes after {context}")
-    except Exception as e:
-        log.warning("Failed to reset graph and embedding runtimes", error=str(e))
+        await sync_runtime_settings(reason=f"settings changed: {', '.join(runtime_keys)}")
+    finally:
+        await announce_runtime_settings_changed(runtime_keys)
 
 
 class SettingInfo(BaseModel):
@@ -147,8 +149,6 @@ def _validation_error(result: KeyValidationResult) -> str | None:
     return result.error or result.status
 
 
-_SETTING_ENV_WRITES = RUNTIME_SETTING_ENV_VARS
-
 _SETTING_DESCRIPTIONS = {
     "openai_api_key": "OpenAI API key for embeddings and LLM operations",
     "anthropic_api_key": "Anthropic API key for Claude models",
@@ -191,11 +191,6 @@ async def _reject_unservable_bedrock_dimensions(body: UpdateSettingsRequest) -> 
                     f"Bedrock; use {supported}"
                 ),
             )
-
-
-def _write_runtime_env(key: str, value: object) -> None:
-    for env_var in _SETTING_ENV_WRITES.get(key, ()):
-        os.environ[env_var] = str(value)
 
 
 @router.get("", response_model=SettingsResponse)
@@ -244,7 +239,10 @@ async def update_settings(
     await require_settings_owner(request)
 
     service = get_settings_service()
-    # Before anything is saved, so a refused size leaves every setting as it was.
+    # Before anything is saved, so a refused update leaves every setting as it was.
+    _reject_env_locked_settings(
+        [key for key in RUNTIME_SETTING_ENV_VARS if getattr(body, key, None) is not None]
+    )
     await _reject_unservable_bedrock_dimensions(body)
     updated: list[str] = []
     validation: dict[str, dict] = {}
@@ -262,10 +260,6 @@ async def update_settings(
                 description="OpenAI API key for embeddings and LLM operations",
             )
             updated.append("openai_api_key")
-            # Update environment variable so running server uses new key immediately
-            # This bridges webapp settings to the graph runtime env configuration.
-            os.environ["OPENAI_API_KEY"] = body.openai_api_key
-            log.info("Updated OpenAI API key in environment")
         else:
             log.warning("OpenAI key validation failed", error=error)
 
@@ -282,9 +276,6 @@ async def update_settings(
                 description="Anthropic API key for Claude models",
             )
             updated.append("anthropic_api_key")
-            # Update environment variable so running server uses new key immediately
-            os.environ["ANTHROPIC_API_KEY"] = body.anthropic_api_key
-            log.info("Updated Anthropic API key in environment")
         else:
             log.warning("Anthropic key validation failed", error=error)
 
@@ -301,8 +292,6 @@ async def update_settings(
                 description=_SETTING_DESCRIPTIONS["gemini_api_key"],
             )
             updated.append("gemini_api_key")
-            _write_runtime_env("gemini_api_key", body.gemini_api_key)
-            log.info("Updated Gemini API key in environment")
         else:
             log.warning("Gemini key validation failed", error=error)
 
@@ -324,14 +313,10 @@ async def update_settings(
             description=_SETTING_DESCRIPTIONS[key],
         )
         updated.append(key)
-        _write_runtime_env(key, value)
 
-    # If API keys or graph embedding settings were updated, reset the graph runtime
-    # so it reconnects with fresh provider/model/key configuration.
-    if updated:
-        await _try_reset_graph_client(f"API key update keys={updated}")
-        # Every other replica and worker applies the same change from the database.
-        await announce_runtime_settings_changed(updated)
+    # Every key is saved before any is applied, so the runtimes rebuild once
+    # around the complete change, here and on every other replica.
+    await _apply_runtime_settings(updated)
 
     return UpdateSettingsResponse(updated=updated, validation=validation)
 
@@ -357,15 +342,9 @@ async def delete_setting(
     deleted = await service.delete(key)
 
     if deleted:
-        # Clear from environment and reset graph runtime if this was an API key
-        if key in _SETTING_ENV_WRITES:
-            # Note: This clears the env var even if it was externally set. Since webapp users
-            # typically configure keys via UI (not external env), this is the expected behavior.
-            # If external env vars need to be preserved, track DB-loaded keys at startup.
-            for env_key in _SETTING_ENV_WRITES[key]:
-                os.environ.pop(env_key, None)
-            await _try_reset_graph_client(f"API key deletion key={key}")
-            await announce_runtime_settings_changed([key])
+        # A runtime setting the deployment does not own is cleared from the
+        # environment; one it owns keeps the deployment's value.
+        await _apply_runtime_settings([key])
 
         return DeleteSettingResponse(
             deleted=True,

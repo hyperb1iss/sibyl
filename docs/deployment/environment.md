@@ -299,6 +299,15 @@ Redis/Valkey is optional. The default Surreal runtime uses local in-process coor
 | `SIBYL_REDIS_PASSWORD` | -           | Redis/Valkey password  |
 | `SIBYL_REDIS_JOBS_DB`  | `1`         | Redis DB for job queue |
 
+With several API replicas, each one caches which sessions are still valid, the stored system
+settings, and the resolved LLM configuration. A replica that revokes a session or saves a setting
+announces it on the `sibyl:cache:invalidations` channel, and every other replica and worker drops
+its copy. Announcing never holds up the request that made the change: the message is queued and
+retried until Redis accepts it. A replica that loses its subscription reconnects on its own and, on
+rejoining, discards everything it cached and re-applies the stored runtime settings, since Redis
+does not replay messages it missed. Until it has joined, `/api/health/ready` reports the
+`cache_invalidation` dependency as not ready, the same way an unreachable Redis broker fails it.
+
 ## LLM Configuration
 
 | Variable                           | Default            | Description                                      |
@@ -682,16 +691,24 @@ database.
 
 ### Lookup Priority
 
-API keys are resolved in this order:
+A provider key or an embedding setting (provider, model or dimensions, for document chunks or the
+graph) can come from the deployment environment or from the database, where the web UI's Settings
+and AI Services pages and the onboarding wizard store it. One rule decides which applies, at startup
+and whenever the setting changes on any replica:
 
-1. **Database** - Keys stored via web UI (Settings, AI Services)
-2. **Environment variables** - `SIBYL_OPENAI_API_KEY`, `SIBYL_ANTHROPIC_API_KEY`,
-   `SIBYL_GEMINI_API_KEY`
-3. **Unprefixed fallbacks** - `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GEMINI_API_KEY` /
-   `GOOGLE_API_KEY`
+1. **Deployment environment** - when the deployment sets any variable a setting is read from
+   (`SIBYL_OPENAI_API_KEY` or `OPENAI_API_KEY`, `SIBYL_GRAPH_EMBEDDING_PROVIDER`, and so on), that
+   value wins. The settings API refuses to store a different one with `409 LOCKED_BY_ENV`, as the
+   LLM settings already do.
+2. **Database** - otherwise the stored value applies, on every API replica and worker, moments after
+   it is saved, and the graph and embedding runtimes rebuild around it.
 
-This allows zero-config deployments where API keys are entered through the onboarding wizard and
-stored encrypted in the database (using `SIBYL_SETTINGS_KEY`).
+Keys stored in the database are encrypted with `SIBYL_SETTINGS_KEY`, which allows zero-config
+deployments where API keys are entered through the onboarding wizard.
+
+Every process given the same deployment environment resolves the same keys and the same embedding
+provider, model and dimensions. Give the API and worker deployments identical values for these
+variables; the Helm chart does, by loading both from one ConfigMap and Secret.
 
 ### Unprefixed Fallbacks
 

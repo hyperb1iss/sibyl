@@ -6,6 +6,12 @@ channel, nothing else. Replica B runs the production handlers, installed with
 ``install_cache_invalidation_handlers`` over B's own settings service and LLM
 config source. Announcing only queues a message and each topic has its own
 worker, so tests ``settle`` both buses before asserting what B did.
+
+Runtime settings (provider keys, embedding provider, model and size) follow one
+rule at startup, after a change on any replica, and after a resubscription:
+a setting whose variables the deployment set keeps the deployment's value,
+and every other one mirrors the stored value. The tests below pin each path
+to that rule, so no two processes given the same deployment can disagree.
 """
 
 from __future__ import annotations
@@ -14,16 +20,20 @@ import os
 from collections.abc import AsyncIterator, Iterator
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
+from types import SimpleNamespace
 from unittest.mock import AsyncMock
 from uuid import uuid4
 
 import pytest
+from fastapi import HTTPException
+from starlette.requests import Request
 
 from sibyl import cache_invalidation
 from sibyl.ai.llm import service as llm_service
 from sibyl.ai.llm.config_source import DBSettingsConfigSource
 from sibyl.api.routes import settings as settings_routes
 from sibyl.cache_invalidation import (
+    RUNTIME_SETTINGS_TOPIC,
     announce_llm_runtime_invalidated,
     announce_runtime_settings_changed,
     install_cache_invalidation_handlers,
@@ -31,10 +41,20 @@ from sibyl.cache_invalidation import (
 from sibyl.coordination.invalidation import CacheInvalidationBus
 from sibyl.persistence.settings_types import SystemSettingRecord
 from sibyl.services import settings as settings_module
-from sibyl.services.settings import SettingsService
+from sibyl.services.settings import (
+    RUNTIME_SETTING_ENV_VARS,
+    RUNTIME_SETTING_LOCK_ENV_VARS,
+    SettingsService,
+    sync_runtime_settings,
+)
 from sibyl_core.ai.llm import config as llm_config
 from sibyl_core.ai.llm.config import LLMSurface
 from tests.invalidation_channel import FakeChannel, FakeTransport
+
+_RUNTIME_ENV_NAMES = sorted(
+    {name for names in RUNTIME_SETTING_LOCK_ENV_VARS.values() for name in names}
+    | {name for names in RUNTIME_SETTING_ENV_VARS.values() for name in names}
+)
 
 
 class SettingsTable:
@@ -42,11 +62,12 @@ class SettingsTable:
 
     def __init__(self) -> None:
         self.rows: dict[str, SystemSettingRecord] = {}
-        self.reads = 0
+        self.failing_key: str | None = None
 
     async def get(self, session: object, *, key: str) -> SystemSettingRecord | None:
         del session
-        self.reads += 1
+        if key == self.failing_key:
+            raise ConnectionError(f"read of {key} failed")
         return self.rows.get(key)
 
     async def save(self, session: object, *, setting: SystemSettingRecord) -> None:
@@ -56,6 +77,9 @@ class SettingsTable:
     async def delete(self, session: object, *, key: str) -> bool:
         del session
         return self.rows.pop(key, None) is not None
+
+    def store(self, key: str, value: str) -> None:
+        self.rows[key] = SystemSettingRecord(key=key, value=value, is_secret=False)
 
 
 @asynccontextmanager
@@ -85,6 +109,39 @@ def table(monkeypatch: pytest.MonkeyPatch) -> SettingsTable:
     monkeypatch.setattr(settings_module, "encrypt_value", lambda value: f"enc:{value}")
     monkeypatch.setattr(settings_module, "decrypt_value", lambda value: value.removeprefix("enc:"))
     return table
+
+
+@pytest.fixture(autouse=True)
+def runtime_env(monkeypatch: pytest.MonkeyPatch) -> Iterator[dict[str, str]]:
+    """Start every test from an empty deployment environment and restore the real one.
+
+    Tests write the deployment's variables into the returned dict and
+    ``os.environ`` through ``deploy``.
+    """
+    saved = {name: os.environ.get(name) for name in _RUNTIME_ENV_NAMES}
+    for name in _RUNTIME_ENV_NAMES:
+        os.environ.pop(name, None)
+    deployment: dict[str, str] = {}
+    monkeypatch.setattr(settings_module, "_deployment_environment", deployment)
+    yield deployment
+    for name, value in saved.items():
+        if value is None:
+            os.environ.pop(name, None)
+        else:
+            os.environ[name] = value
+
+
+def deploy(deployment: dict[str, str], **variables: str) -> None:
+    """Variables the deployment set before the process started."""
+    deployment.update(variables)
+    os.environ.update(variables)
+
+
+@pytest.fixture
+def rebuilds(monkeypatch: pytest.MonkeyPatch) -> AsyncMock:
+    rebuild = AsyncMock()
+    monkeypatch.setattr(settings_module, "reset_settings_dependent_runtimes", rebuild)
+    return rebuild
 
 
 @pytest.fixture(autouse=True)
@@ -144,23 +201,21 @@ async def test_a_deleted_setting_is_forgotten_by_the_other_replica(
 
 
 async def test_runtime_settings_saved_on_one_replica_reach_the_others_environment(
-    table: SettingsTable, monkeypatch: pytest.MonkeyPatch
+    table: SettingsTable, monkeypatch: pytest.MonkeyPatch, rebuilds: AsyncMock
 ) -> None:
     replicas = await _replicas(table, monkeypatch, linked=True)
-    reset = AsyncMock()
-    monkeypatch.setattr(settings_module, "reset_settings_dependent_runtimes", reset)
-    # B started with the old key and provider in its environment.
-    monkeypatch.setenv("OPENAI_API_KEY", "sk-old")
-    monkeypatch.setenv("SIBYL_GRAPH_EMBEDDING_PROVIDER", "openai")
-    monkeypatch.setenv("GEMINI_API_KEY", "gemini-old")
-    monkeypatch.setenv("GOOGLE_API_KEY", "gemini-old")
+    table.store("openai_api_key", "sk-old")
+    table.store("graph_embedding_provider", "openai")
+    table.store("gemini_api_key", "gemini-old")
+    await sync_runtime_settings(rebuild=False, reason="B starts")
+    assert os.environ["OPENAI_API_KEY"] == "sk-old"
+    assert os.environ["GOOGLE_API_KEY"] == "gemini-old"
 
     await replicas.a.set("openai_api_key", "sk-new")
     await replicas.a.set("graph_embedding_provider", "gemini", is_secret=False)
-    # The admin removed the Gemini key on A, which popped it from A's environment.
-    table.rows.pop("gemini_api_key", None)
+    await replicas.a.delete("gemini_api_key")
     await announce_runtime_settings_changed(
-        ["openai_api_key", "graph_embedding_provider", "gemini_api_key", "not_a_runtime_key"]
+        ["openai_api_key", "graph_embedding_provider", "gemini_api_key"]
     )
     await replicas.settle()
 
@@ -168,35 +223,191 @@ async def test_runtime_settings_saved_on_one_replica_reach_the_others_environmen
     assert os.environ["SIBYL_GRAPH_EMBEDDING_PROVIDER"] == "gemini"
     assert "GEMINI_API_KEY" not in os.environ
     assert "GOOGLE_API_KEY" not in os.environ
-    reset.assert_awaited_once()
+    rebuilds.assert_awaited_once()
 
 
-async def test_settings_routes_announce_what_they_applied_locally(
+async def test_a_failed_read_leaves_the_environment_untouched(
+    table: SettingsTable, monkeypatch: pytest.MonkeyPatch, rebuilds: AsyncMock
+) -> None:
+    monkeypatch.setattr(settings_module, "_settings_service", SettingsService(_no_session))
+    table.store("embedding_provider", "openai")
+    table.store("embedding_model", "text-embedding-3-small")
+    await sync_runtime_settings(rebuild=False, reason="start")
+
+    table.store("embedding_provider", "gemini")
+    table.store("embedding_model", "gemini-embedding-001")
+    table.failing_key = "embedding_dimensions"
+    with pytest.raises(ConnectionError):
+        await sync_runtime_settings(reason="change")
+
+    # Nothing half-applied: the provider did not move without its model.
+    assert os.environ["SIBYL_EMBEDDING_PROVIDER"] == "openai"
+    assert os.environ["SIBYL_EMBEDDING_MODEL"] == "text-embedding-3-small"
+    rebuilds.assert_not_awaited()
+
+
+async def test_a_swap_that_stops_partway_still_rebuilds(
+    table: SettingsTable, monkeypatch: pytest.MonkeyPatch, rebuilds: AsyncMock
+) -> None:
+    monkeypatch.setattr(settings_module, "_settings_service", SettingsService(_no_session))
+    table.store("embedding_provider", "gemini")
+    table.store("embedding_model", "gemini-embedding-001")
+
+    class _Environ(dict[str, str]):
+        def __setitem__(self, key: str, value: str) -> None:
+            if key == "SIBYL_EMBEDDING_MODEL":
+                raise OSError("environment write failed")
+            super().__setitem__(key, value)
+
+    environ = _Environ(os.environ)
+    monkeypatch.setattr(settings_module, "os", SimpleNamespace(environ=environ))
+    with pytest.raises(OSError, match="environment write failed"):
+        await sync_runtime_settings(reason="change")
+
+    rebuilds.assert_awaited_once()
+
+
+async def test_a_replica_that_missed_the_change_converges_when_it_resubscribes(
+    table: SettingsTable, monkeypatch: pytest.MonkeyPatch, rebuilds: AsyncMock
+) -> None:
+    replicas = await _replicas(table, monkeypatch, linked=False)
+    table.store("graph_embedding_model", "text-embedding-3-small")
+    await sync_runtime_settings(rebuild=False, reason="B starts")
+
+    # The change lands while B is cut off: its announcement never arrives.
+    await replicas.a.set("graph_embedding_model", "text-embedding-3-large", is_secret=False)
+    await announce_runtime_settings_changed(["graph_embedding_model"])
+    await replicas.settle()
+    assert os.environ["SIBYL_GRAPH_EMBEDDING_MODEL"] == "text-embedding-3-small"
+
+    await replicas.b_bus.reset()
+    await replicas.b_bus.drain()
+
+    assert os.environ["SIBYL_GRAPH_EMBEDDING_MODEL"] == "text-embedding-3-large"
+    rebuilds.assert_awaited_once()
+
+
+async def test_startup_and_live_apply_resolve_settings_the_same_way(
+    table: SettingsTable, monkeypatch: pytest.MonkeyPatch, rebuilds: AsyncMock
+) -> None:
+    """A replica that applied a change live and one started afterwards agree."""
+    replicas = await _replicas(table, monkeypatch, linked=True)
+    table.store("embedding_provider", "openai")
+    table.store("embedding_model", "text-embedding-3-small")
+    await settings_module.load_runtime_settings_from_db()
+    assert os.environ["SIBYL_EMBEDDING_MODEL"] == "text-embedding-3-small"
+
+    await replicas.a.set("embedding_model", "text-embedding-3-large", is_secret=False)
+    await announce_runtime_settings_changed(["embedding_model"])
+    await replicas.settle()
+    live = {name: os.environ.get(name) for name in _RUNTIME_ENV_NAMES}
+
+    for name in _RUNTIME_ENV_NAMES:
+        os.environ.pop(name, None)
+    await settings_module.load_runtime_settings_from_db()
+    started = {name: os.environ.get(name) for name in _RUNTIME_ENV_NAMES}
+
+    assert started == live
+    assert started["SIBYL_EMBEDDING_MODEL"] == "text-embedding-3-large"
+
+
+async def test_a_setting_the_deployment_pins_keeps_its_value_everywhere(
+    table: SettingsTable,
+    monkeypatch: pytest.MonkeyPatch,
+    runtime_env: dict[str, str],
+    rebuilds: AsyncMock,
+) -> None:
+    monkeypatch.setattr(settings_module, "_settings_service", SettingsService(_no_session))
+    deploy(runtime_env, SIBYL_GRAPH_EMBEDDING_PROVIDER="openai", SIBYL_GEMINI_API_KEY="gem-env")
+    # Stored before the deployment pinned it, or through some other path.
+    table.store("graph_embedding_provider", "gemini")
+    table.store("gemini_api_key", "gem-stored")
+
+    at_startup = await sync_runtime_settings(rebuild=False, reason="startup")
+    assert os.environ["SIBYL_GRAPH_EMBEDDING_PROVIDER"] == "openai"
+    # The deployment's key fills the aliases it left unset; the stored one is set aside.
+    assert os.environ["GEMINI_API_KEY"] == "gem-env"
+    assert os.environ["GOOGLE_API_KEY"] == "gem-env"
+    assert set(at_startup.overridden_keys) == {"graph_embedding_provider", "gemini_api_key"}
+
+    table.store("graph_embedding_provider", "local")
+    live = await sync_runtime_settings(reason="announced")
+    assert os.environ["SIBYL_GRAPH_EMBEDDING_PROVIDER"] == "openai"
+    assert live.changed_env_vars == ()
+    rebuilds.assert_not_awaited()
+
+
+def _patch_request() -> Request:
+    return Request({"type": "http", "method": "PATCH", "path": "/settings", "headers": []})
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "variable"),
+    [
+        ("graph_embedding_provider", "gemini", "SIBYL_GRAPH_EMBEDDING_PROVIDER"),
+        ("embedding_dimensions", 768, "SIBYL_EMBEDDING_DIMENSIONS"),
+        ("openai_api_key", "sk-ui", "SIBYL_OPENAI_API_KEY"),
+    ],
+)
+async def test_the_settings_route_refuses_a_setting_the_deployment_pins(
+    monkeypatch: pytest.MonkeyPatch,
+    runtime_env: dict[str, str],
+    field: str,
+    value: object,
+    variable: str,
+) -> None:
+    deploy(runtime_env, **{variable: "from-deployment"})
+    monkeypatch.setattr(settings_routes, "require_settings_owner", AsyncMock())
+    service = AsyncMock()
+    monkeypatch.setattr(settings_routes, "get_settings_service", lambda: service)
+    applied = AsyncMock()
+    monkeypatch.setattr(settings_routes, "sync_runtime_settings", applied)
+
+    with pytest.raises(HTTPException) as refused:
+        await settings_routes.update_settings(
+            _patch_request(), body=settings_routes.UpdateSettingsRequest(**{field: value})
+        )
+
+    assert refused.value.status_code == 409
+    assert refused.value.detail == {
+        "code": "LOCKED_BY_ENV",
+        "fields": [{"field": field, "env_var": variable}],
+    }
+    service.set.assert_not_awaited()
+    applied.assert_not_awaited()
+
+
+async def test_settings_routes_apply_locally_then_announce(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from starlette.requests import Request
+    events: list[str] = []
 
-    announced = AsyncMock()
-    monkeypatch.setattr(settings_routes, "announce_runtime_settings_changed", announced)
+    async def sync(**kwargs: object) -> None:
+        events.append("sync")
+
+    async def announce(keys: list[str]) -> None:
+        events.append(f"announce:{','.join(keys)}")
+
+    monkeypatch.setattr(settings_routes, "sync_runtime_settings", sync)
+    monkeypatch.setattr(settings_routes, "announce_runtime_settings_changed", announce)
     monkeypatch.setattr(settings_routes, "require_settings_owner", AsyncMock())
-    monkeypatch.setattr(settings_routes, "_try_reset_graph_client", AsyncMock())
     monkeypatch.setattr(settings_routes, "is_setup_mode", AsyncMock(return_value=False))
     service = AsyncMock()
     service.delete.return_value = True
     monkeypatch.setattr(settings_routes, "get_settings_service", lambda: service)
-    # Registers the variable for restoration; the route writes and pops it.
-    monkeypatch.setenv("SIBYL_GRAPH_EMBEDDING_MODEL", "text-embedding-3-small")
-    request = Request({"type": "http", "method": "PATCH", "path": "/settings", "headers": []})
 
     await settings_routes.update_settings(
-        request,
+        _patch_request(),
         body=settings_routes.UpdateSettingsRequest(graph_embedding_model="text-embedding-3-large"),
     )
-    await settings_routes.delete_setting(request, key="graph_embedding_model")
+    await settings_routes.delete_setting(_patch_request(), key="graph_embedding_model")
+    await settings_routes.delete_setting(_patch_request(), key="llm.budget.monthly_org_tokens")
 
-    assert [call.args for call in announced.await_args_list] == [
-        (["graph_embedding_model"],),
-        (["graph_embedding_model"],),
+    assert events == [
+        "sync",
+        "announce:graph_embedding_model",
+        "sync",
+        "announce:graph_embedding_model",
     ]
 
 
@@ -249,8 +460,8 @@ async def test_invalidate_llm_runtime_announces_after_its_local_invalidation(
     assert events == ["local:crawler", "announce:crawler", "local:None", "announce:None"]
 
 
-async def test_resubscribing_clears_settings_and_llm_caches(
-    table: SettingsTable, monkeypatch: pytest.MonkeyPatch
+async def test_resubscribing_clears_settings_and_llm_caches_and_resyncs_the_runtime(
+    table: SettingsTable, monkeypatch: pytest.MonkeyPatch, rebuilds: AsyncMock
 ) -> None:
     bus = CacheInvalidationBus()
     service = SettingsService(_no_session)
@@ -259,17 +470,17 @@ async def test_resubscribing_clears_settings_and_llm_caches(
     source = DBSettingsConfigSource(_SettingsValues(stored), environ={})  # type: ignore[arg-type]
     llm_config.set_config_source(source)
     install_cache_invalidation_handlers(bus)
-    table.rows["embedding_model"] = SystemSettingRecord(
-        key="embedding_model", value="old", is_secret=False
-    )
-    await service.get("embedding_model")
+    table.store("embedding_model", "old")
+    assert await service.get("embedding_model") == "old"
     await source.resolve(LLMSurface.DEFAULT)
-    table.rows["embedding_model"] = SystemSettingRecord(
-        key="embedding_model", value="new", is_secret=False
-    )
+    table.store("embedding_model", "new")
     stored["llm.default.model"] = "model-new"
 
     await bus.reset()
+    await bus.drain()
 
     assert await service.get("embedding_model") == "new"
     assert (await source.resolve(LLMSurface.DEFAULT)).model.value == "model-new"
+    assert os.environ["SIBYL_EMBEDDING_MODEL"] == "new"
+    rebuilds.assert_awaited_once()
+    assert RUNTIME_SETTINGS_TOPIC in bus._workers
