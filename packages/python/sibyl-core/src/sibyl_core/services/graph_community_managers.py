@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Any
 
 from sibyl_core.models.entities import Entity, EntityType, Relationship, RelationshipType
 from sibyl_core.services.graph_community_models import DetectedCommunity
+from sibyl_core.services.graph_compute import compute_rows
 
 if TYPE_CHECKING:
     from sibyl_core.services.graph_runtime import GraphRuntime
@@ -289,7 +290,7 @@ async def _walk_entities(
     skipped and duplicated rows on 3.2. Rows without updated_at sort after
     every dated row and drain the same way.
     """
-    from sibyl_core.services.graph_records import _ENTITY_LIST_FIELDS, _entity_from_row
+    from sibyl_core.services.graph_records import _ENTITY_LIST_FIELDS, entities_from_rows
 
     # The list projection, plus the cursor text; its OMIT list stays the
     # single source of what an enumerated row leaves behind.
@@ -305,16 +306,18 @@ async def _walk_entities(
     def budget() -> int:
         return _page_limit(len(entities), batch_size=batch_size, max_items=max_items)
 
-    def emit(rows: list[dict[str, Any]], seen: set[str] | None = None) -> None:
+    async def emit(rows: list[dict[str, Any]], seen: set[str] | None = None) -> None:
+        accepted: list[dict[str, Any]] = []
         for row in rows:
             uuid = str(row.get("uuid"))
             if seen is not None:
                 if uuid in seen:
                     continue
                 seen.add(uuid)
-            if max_items is not None and len(entities) >= max_items:
-                return
-            entities.append(_entity_from_row(row))
+            if max_items is not None and len(entities) + len(accepted) >= max_items:
+                break
+            accepted.append(row)
+        entities.extend(await compute_rows(len(accepted), entities_from_rows, accepted))
 
     async def drain(predicate: str, params: dict[str, Any], seen: set[str]) -> None:
         """Walk one group (one updated_at, or the undated tail) by uuid."""
@@ -328,7 +331,7 @@ async def _walk_entities(
             (rows,) = await _page_results(
                 client, [f"{select} AND {predicate}{seek} {group_order} LIMIT $limit;"], page_params
             )
-            emit(rows, seen)
+            await emit(rows, seen)
             if len(rows) < limit:
                 return
             cursor = str(rows[-1].get("uuid"))
@@ -343,8 +346,8 @@ async def _walk_entities(
     while True:
         dated_rows = [row for row in rows if row.get("updated_at") is not None]
         undated_rows = rows[len(dated_rows) :]
-        emit(dated_rows)
-        emit(undated_rows, undated_seen)
+        await emit(dated_rows)
+        await emit(undated_rows, undated_seen)
         if budget() <= 0:
             return entities
         if undated_rows or len(rows) < limit or not dated_rows:
@@ -363,7 +366,7 @@ async def _walk_entities(
             ],
             params,
         )
-        emit(group_rows, seen)
+        await emit(group_rows, seen)
         if len(group_rows) >= limit:
             await drain(
                 f"updated_at = {updated_bound} AND uuid < {uuid_bound}",
@@ -434,7 +437,6 @@ async def _walk_relationships(
     """
     from sibyl_core.services.graph_records import (
         readable_legacy_relationship_metadata,
-        readable_relationship_from_surreal_row,
         relationship_weight_predicate,
     )
 
@@ -477,11 +479,7 @@ async def _walk_relationships(
                 f"{select} AND created_at < {created_bound} {_RELATIONSHIP_ORDER} LIMIT $limit;",
             ]
         rows = (await _page_rows(client, selects, params))[:limit]
-        relationships.extend(
-            relationship
-            for row in rows
-            if (relationship := readable_relationship_from_surreal_row(row)) is not None
-        )
+        relationships.extend(await compute_rows(len(rows), _readable_relationships, rows))
         if len(rows) < limit:
             break
         cursor = {
@@ -490,3 +488,13 @@ async def _walk_relationships(
         }
 
     return relationships
+
+
+def _readable_relationships(rows: list[dict[str, Any]]) -> list[Relationship]:
+    from sibyl_core.services.graph_records import readable_relationship_from_surreal_row
+
+    return [
+        relationship
+        for row in rows
+        if (relationship := readable_relationship_from_surreal_row(row)) is not None
+    ]

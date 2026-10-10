@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import math
 import re
-from collections.abc import Iterable, Mapping
+from collections.abc import Iterable, Mapping, Sequence
 from datetime import UTC, datetime
 from enum import Enum
 from typing import TYPE_CHECKING, Any, cast
@@ -261,6 +261,11 @@ def entity_from_surreal_row(row: Mapping[str, object]) -> Entity:
 
 def _entity_from_row(row: SurrealRecord) -> Entity:
     return entity_from_surreal_row(row)
+
+
+def entities_from_rows(rows: Sequence[SurrealRecord]) -> list[Entity]:
+    """Decode stored entity rows in order; pure, so a compute thread can run it."""
+    return [entity_from_surreal_row(row) for row in rows]
 
 
 def _related_entity_projection(side: str) -> str:
