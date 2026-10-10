@@ -134,13 +134,9 @@ backend:
     type: ClusterIP
     port: 3334
     annotations: {}
-    # Session affinity for MCP stateful connections
-    # Set to "ClientIP" for sticky sessions (recommended for multi-replica)
-    sessionAffinity: ""
-    sessionAffinityConfig:
-      clientIP:
-        timeoutSeconds: 10800 # 3 hours
 ```
+
+The backend needs no session affinity. MCP runs stateless, so any replica can answer any request.
 
 ### Autoscaling
 
