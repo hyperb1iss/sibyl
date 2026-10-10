@@ -101,10 +101,10 @@ Each run writes one directory:
 
 `manifest.json` (format version 2) lists every database with its file name, byte size, sha256 and
 per-table row counts, plus the SurrealDB server version, the UTC time of the run, and a `failures`
-list. The job writes it after every file, so a directory without one belongs to a failed or
-interrupted run. A run that fails before its manifest removes its own directory, the next run prunes
-any directory without a manifest that is over a day old, and the restore drill skips them. Sizes and
-checksums describe the plaintext files.
+list whose entries carry a `kind` and a `reason`. The job writes it after every file, so a directory
+without one belongs to a failed or interrupted run. A run that fails before its manifest removes its
+own directory, the next run prunes any directory without a manifest that is over a day old, and the
+restore drill skips them. Sizes and checksums describe the plaintext files.
 
 A database whose names are plain identifiers is stored as `<namespace>.<database>.surql`. Any other
 name SurrealDB allows, such as `legacy-tenant` or one with spaces or quotes, is exported too, under
@@ -114,16 +114,19 @@ drill restores it with the identifier escaped.
 One database the job cannot export does not cost the others. A name outside printable ASCII (which
 the `surreal-ns` and `surreal-db` headers cannot carry), a refused namespace listing, a refused row
 count before or after the export, a failed or empty `/export`: each is recorded in the manifest's
-`failures` with a reason, the rest of the run is exported and synced, and the job then exits 111 so
-it pages. The restore drill fails on a run with recorded failures as well, after restoring
-everything else.
+`failures` with a kind and a reason, the rest of the run is exported and synced, and the job then
+fails. The restore drill fails on a run with recorded failures as well, after restoring everything
+else, and names each failure's kind.
 
-A run with recorded failures would fail the same way again, so it is not retried: the export Job's
-`podFailurePolicy` fails the Job at once on exit code 111, while any other failure (an unreachable
-server, a timeout) is retried up to `export.backoffLimit`. A pod lost to a node drain or eviction
-(the `DisruptionTarget` condition) is replaced without spending a retry, for the export and for the
-restore drill. `podFailurePolicy` requires `restartPolicy: Never`, so each retry starts from a fresh
-pod.
+The kind decides whether the Job tries again. A name the headers cannot carry is `deterministic`:
+every attempt would record it again, so a run whose failures are all deterministic exits 111, and
+the export Job's `podFailurePolicy` fails the Job at once. Every other recorded failure is
+`transient`, such as a refused query or an `/export` that timed out or failed on the server. A run
+with any transient failure exits 1 and is retried like an unreachable server or a timeout, up to
+`export.backoffLimit`, and each retry exports everything again into a new run directory. A pod lost
+to a node drain or eviction (the `DisruptionTarget` condition) is replaced without spending a retry,
+for the export and for the restore drill. `podFailurePolicy` requires `restartPolicy: Never`, so
+each retry starts from a fresh pod.
 
 The chart requires Kubernetes 1.29 or later (`kubeVersion: ">=1.29.0-0"` in `Chart.yaml`): the
 restore drill runs its scratch SurrealDB as a native sidecar, on by default from 1.29, and
@@ -429,7 +432,8 @@ STRICT belongs to the database definition, which a database export does not carr
 database comes back non-strict. `DEFINE DATABASE OVERWRITE ... STRICT` restores it and keeps the
 rows; add any other entries from your `databases` value, or run `helm upgrade` on the surrealdb
 chart so its strict-bootstrap hook does the same. If the manifest lists `failures`, those databases
-are not in the run; recover them from a PVC snapshot or an older run.
+are not in the run; a newer run from the Job's retry may hold them, or recover them from a PVC
+snapshot or an older run.
 
 A logical restore also replays the `raw_captures` changefeed once. The import lands as a single
 change set with a newer versionstamp, so Sibyl's enrichment runs again for every imported capture

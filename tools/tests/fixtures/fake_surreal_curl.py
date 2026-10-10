@@ -15,7 +15,7 @@ work, against servers described in a JSON state file
      "shrink_on_import": {"ns/db/table": rows},
      "ns_info_errors": ["ns"], "org_check_error": false,
      "change_before_export": {"ns/db/table": rows or null},
-     "recount_errors": ["ns/db"]}
+     "recount_errors": ["ns/db"], "export_errors": ["ns/db"]}
 
 A source server may also carry "org_uuids": [...], the organizations the
 export's read-only organization check finds in the auth database.
@@ -25,6 +25,7 @@ just before ``/export`` reads it, so the snapshot and the export's second
 count both see the change and the first count does not.
 ``recount_errors`` refuses the row count for ``ns/db`` once that database
 has been exported, so only the export's second count fails.
+``export_errors`` answers ``/export`` for ``ns/db`` with HTTP 500.
 
 Response shapes mirror a real v3.2.4 server: ``/sql`` answers HTTP 200
 with one ``{"status", "result"}`` entry per statement, ``/import`` answers
@@ -42,6 +43,7 @@ import json
 import os
 import re
 import sys
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -269,6 +271,18 @@ def _import(state: dict[str, Any], server: dict[str, Any], request: Request) -> 
     return []
 
 
+def _export_refused(state: dict[str, Any], request: Request) -> bool:
+    key = f"{request.headers.get('surreal-ns', '')}/{request.headers.get('surreal-db', '')}"
+    return request.fail and key in state.get("export_errors", [])
+
+
+ROUTES: dict[str, Callable[[dict[str, Any], dict[str, Any], Request], object]] = {
+    "/sql": _sql,
+    "/export": _export,
+    "/import": _import,
+}
+
+
 def main(argv: list[str]) -> int:
     request = Request(argv)
     state_path = Path(os.environ["FAKE_SURREAL_STATE"])
@@ -293,12 +307,11 @@ def main(argv: list[str]) -> int:
         if request.fail:
             sys.stderr.write("curl: (22) The requested URL returned error: 401\n")
             return 22
-    elif route == "/sql":
-        body = _sql(state, server, request)
-    elif route == "/export":
-        body = _export(state, server, request)
-    elif route == "/import":
-        body = _import(state, server, request)
+    elif route == "/export" and _export_refused(state, request):
+        sys.stderr.write("curl: (22) The requested URL returned error: 500\n")
+        return 22
+    elif route in ROUTES:
+        body = ROUTES[route](state, server, request)
     else:
         sys.stderr.write(f"fake curl: unsupported route {route}\n")
         return 2

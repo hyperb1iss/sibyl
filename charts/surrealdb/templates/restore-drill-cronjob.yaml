@@ -363,7 +363,7 @@ spec:
                   failures="$(jq -r 'select(.status == "FAIL") | "restore failed for \(.namespace)/\(.database): \(.problem)"' "$work/databases.jsonl")"
                   # Databases the export itself could not capture make the
                   # backup incomplete, however well the rest restored.
-                  export_failures="$(jq -r '.failures // [] | .[] | "export recorded a failure for \(.namespace | @json)/\(.database // "*" | @json): \(.reason)"' "$manifest_doc")"
+                  export_failures="$(jq -r '.failures // [] | .[] | "export recorded a failure for \(.namespace | @json)/\(.database // "*" | @json)\(if .kind then " (\(.kind))" else "" end): \(.reason)"' "$manifest_doc")"
                   if [ -n "$failures" ] || [ -n "$export_failures" ]; then
                     if [ -n "$failures" ]; then
                       printf '%s\n' "$failures" >&2

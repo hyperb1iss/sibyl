@@ -21,10 +21,11 @@ spec:
     spec:
       backoffLimit: {{ .Values.export.backoffLimit }}
       activeDeadlineSeconds: {{ .Values.export.activeDeadlineSeconds }}
-      # A run that recorded databases it could not export (exit 111) fails
-      # the same way on every retry, so it fails the Job at once instead of
-      # rerunning the whole export. A pod lost to a drain or eviction is
-      # replaced without spending a retry. Any other failure is retried.
+      # A run whose recorded failures are all deterministic (names the
+      # SurrealDB headers cannot carry) exits 111: every retry would record
+      # them again, so it fails the Job at once. A run with any transient
+      # failure exits 1 and is retried like any other failure. A pod lost
+      # to a drain or eviction is replaced without spending a retry.
       podFailurePolicy:
         rules:
           - action: FailJob
@@ -127,11 +128,14 @@ spec:
                   }
                   # A database that cannot be exported is recorded in the
                   # manifest and fails the job at the end, after every other
-                  # database has been exported and synced.
+                  # database has been exported and synced. The kind says
+                  # whether a retry can help: "deterministic" for a name the
+                  # headers cannot carry, "transient" for a request that
+                  # failed and may pass on the next attempt.
                   record_failure() {
-                    printf '%s\n' "$1" | jq -c --arg reason "$2" '. + {reason: $reason}' >> "$work/failures.jsonl"
-                    printf '%s\n' "$1" | jq -r --arg reason "$2" \
-                      '"cannot export \(.namespace | @json)/\(.database // "*" | @json): \($reason)"' >&2
+                    printf '%s\n' "$1" | jq -c --arg kind "$2" --arg reason "$3" '. + {kind: $kind, reason: $reason}' >> "$work/failures.jsonl"
+                    printf '%s\n' "$1" | jq -r --arg kind "$2" --arg reason "$3" \
+                      '"cannot export \(.namespace | @json)/\(.database // "*" | @json) (\($kind)): \($reason)"' >&2
                   }
                   # The hook reads plaintext from scratch and writes the
                   # ciphertext beside its final name in the run directory,
@@ -192,22 +196,22 @@ spec:
                     entry="$(jq -c --argjson index "$index" '{namespace: .[$index], database: null}' "$work/namespaces.json")"
                     index=$((index + 1))
                     if ! printf '%s\n' "$entry" | jq -e "$jq_defs"' .namespace | header_safe' >/dev/null; then
-                      record_failure "$entry" "the namespace name is not printable ASCII, which the surreal-ns header cannot carry"
+                      record_failure "$entry" deterministic "the namespace name is not printable ASCII, which the surreal-ns header cannot carry"
                       continue
                     fi
                     namespace="$(printf '%s\n' "$entry" | jq -r '.namespace')"
                     if ! namespace_info="$(sql_result "$namespace" "" "INFO FOR NS;" 2>"$work/error")"; then
-                      record_failure "$entry" "INFO FOR NS failed: $(head -c 500 "$work/error")"
+                      record_failure "$entry" transient "INFO FOR NS failed: $(head -c 500 "$work/error")"
                       continue
                     fi
                     printf '%s\n' "$namespace_info" | jq -c --arg namespace "$namespace" "$jq_defs"'
                       .databases // {} | keys[] | {namespace: $namespace, database: .}
                       | if (.database | header_safe) then {target: .}
-                        else {failure: (. + {reason: "the database name is not printable ASCII, which the surreal-db header cannot carry"})} end' \
+                        else {failure: (. + {kind: "deterministic", reason: "the database name is not printable ASCII, which the surreal-db header cannot carry"})} end' \
                       > "$work/discovered.jsonl"
                     jq -c 'select(.target) | .target' "$work/discovered.jsonl" >> "$work/targets.jsonl"
                     jq -c 'select(.failure) | .failure' "$work/discovered.jsonl" >> "$work/failures.jsonl"
-                    jq -r 'select(.failure) | .failure | "cannot export \(.namespace | @json)/\(.database | @json): \(.reason)"' \
+                    jq -r 'select(.failure) | .failure | "cannot export \(.namespace | @json)/\(.database | @json) (\(.kind)): \(.reason)"' \
                       "$work/discovered.jsonl" >&2
                   done
                   # SurrealDB always has its own main/main, so it cannot
@@ -284,7 +288,7 @@ spec:
                     # transaction: on a live server these are the rows the
                     # drill should find, give or take concurrent writes.
                     if ! tables="$(sql_result "$namespace" "$database" "$table_rows" 2>"$work/error")"; then
-                      record_failure "$target" "counting rows failed: $(head -c 500 "$work/error")"
+                      record_failure "$target" transient "counting rows failed: $(head -c 500 "$work/error")"
                       continue
                     fi
                     if ! http -fsS \
@@ -294,12 +298,12 @@ spec:
                       -H "surreal-db: $database" \
                       "$SURREAL_ENDPOINT/export" -o "$output" 2>"$work/error"; then
                       rm -f "$output"
-                      record_failure "$target" "GET /export failed: $(head -c 500 "$work/error")"
+                      record_failure "$target" transient "GET /export failed: $(head -c 500 "$work/error")"
                       continue
                     fi
                     if [ ! -s "$output" ]; then
                       rm -f "$output"
-                      record_failure "$target" "the export came back empty"
+                      record_failure "$target" transient "the export came back empty"
                       continue
                     fi
                     # Counted again once the export has streamed. The snapshot
@@ -312,7 +316,7 @@ spec:
                     # failed first count.
                     if ! tables_after="$(sql_result "$namespace" "$database" "$table_rows" 2>"$work/error")"; then
                       rm -f "$output"
-                      record_failure "$target" "recounting rows after the export failed: $(head -c 500 "$work/error")"
+                      record_failure "$target" transient "recounting rows after the export failed: $(head -c 500 "$work/error")"
                       continue
                     fi
                     bytes="$(wc -c < "$output" | tr -d ' ')"
@@ -362,10 +366,17 @@ spec:
                   {{ . | replace "$" "$$" | nindent 18 }}
                   {{- end }}
                   if [ -s "$work/failures.jsonl" ]; then
-                    echo "export finished with $(wc -l < "$work/failures.jsonl" | tr -d ' ') failures recorded in $SIBYL_EXPORT_RUN_DIR/manifest.json" >&2
+                    transient="$(jq -s '[.[] | select(.kind != "deterministic")] | length' "$work/failures.jsonl")"
+                    echo "export finished with $(wc -l < "$work/failures.jsonl" | tr -d ' ') failures ($transient transient) recorded in $SIBYL_EXPORT_RUN_DIR/manifest.json" >&2
+                    if [ "$transient" -gt 0 ]; then
+                      # A refused query or a failed /export may pass on the
+                      # next attempt, which reruns the whole export into a
+                      # new run directory.
+                      exit 1
+                    fi
                     # Distinct from curl, jq and shell codes, so the Job's
-                    # podFailurePolicy can tell a deterministic, recorded
-                    # failure from a transient one worth retrying.
+                    # podFailurePolicy fails at once on a run that every
+                    # retry would record the same way.
                     exit 111
                   fi
                   echo "export complete: $SIBYL_EXPORT_RUN_DIR"

@@ -134,6 +134,7 @@ class OpsHarness:
         org_check_error: bool = False,
         change_before_export: dict[str, int | None] | None = None,
         recount_errors: tuple[str, ...] = (),
+        export_errors: tuple[str, ...] = (),
     ) -> None:
         """Describe the fake servers and the faults they inject. Each fault
         names ``ns/db`` pairs (``ns/db/table`` for the table faults): an
@@ -144,7 +145,8 @@ class OpsHarness:
         auth database holds, and ``org_check_error`` refuses that query.
         ``change_before_export`` sets a table's rows (None drops it) between
         the export's first count and its snapshot; ``recount_errors`` refuses
-        only the export's second count."""
+        only the export's second count; ``export_errors`` fails ``/export``
+        with HTTP 500."""
         servers: dict[str, object] = {
             "http://restore": {"user": "drill:drill", "namespaces": restore or {}},
         }
@@ -169,6 +171,7 @@ class OpsHarness:
                     "org_check_error": org_check_error,
                     "change_before_export": change_before_export or {},
                     "recount_errors": list(recount_errors),
+                    "export_errors": list(export_errors),
                 }
             )
         )
@@ -253,6 +256,7 @@ def _source() -> dict[str, dict[str, dict[str, int]]]:
 SOURCE_DATABASES = sum(len(databases) for databases in _source().values())
 MANIFEST_VERSION = 2
 RECORDED_FAILURE_EXIT = 111
+TRANSIENT_FAILURE_EXIT = 1
 DEFAULT_DEADLINE_SECONDS = 21600
 CUSTOM_BACKOFF = 2
 CUSTOM_DEADLINE_SECONDS = 600
@@ -839,8 +843,9 @@ def test_helm_export_records_what_it_cannot_export_and_keeps_the_rest(
     harness: OpsHarness,
 ) -> None:
     """One unusable name or one failing database must not cost every other
-    backup: the run exports the rest, records each failure in the manifest,
-    syncs, and then fails so it pages."""
+    backup: the run exports the rest, records each failure and its kind in
+    the manifest, syncs, and then fails. A transient failure among them
+    makes the run retryable."""
     unsafe = {"tenant-ü": {"graph": {"entity": 1}}, "bad\nline": {"graph": {"entity": 1}}}
     harness.serve(
         source={**_source(), **ODD_NAMES, **unsafe, "ok_ns": {"weird\tdb": {"t": 1}}},
@@ -852,8 +857,8 @@ def test_helm_export_records_what_it_cannot_export_and_keeps_the_rest(
         *harness.values({"export": {"syncCommand": 'echo synced >> "$HOME/synced.log"'}}),
     )
 
-    assert result.returncode == RECORDED_FAILURE_EXIT
-    assert "failures recorded in" in result.stderr
+    assert result.returncode == TRANSIENT_FAILURE_EXIT, result.stderr
+    assert "5 failures (2 transient) recorded in" in result.stderr
     assert (harness.root / "synced.log").read_text() == "synced\n", "the partial run still syncs"
     manifest = _manifest(harness)
     exported = {(entry["namespace"], entry["database"]) for entry in manifest["databases"]}
@@ -872,6 +877,14 @@ def test_helm_export_records_what_it_cannot_export_and_keeps_the_rest(
     assert "surreal-db header" in reasons[("ok_ns", "weird\tdb")]
     assert reasons[(ORG_B, "graph")] == "the export came back empty"
     assert "SurrealQL failed in legacy-tenant/graph" in reasons[("legacy-tenant", "graph")]
+    kinds = {(f["namespace"], f["database"]): f["kind"] for f in manifest["failures"]}
+    assert kinds == {
+        ("tenant-ü", None): "deterministic",
+        ("bad\nline", None): "deterministic",
+        ("ok_ns", "weird\tdb"): "deterministic",
+        (ORG_B, "graph"): "transient",
+        ("legacy-tenant", "graph"): "transient",
+    }
 
     harness.serve()
     drilled = harness.run(
@@ -879,7 +892,8 @@ def test_helm_export_records_what_it_cannot_export_and_keeps_the_rest(
         *harness.values({"restoreDrill": {"failureNotification": {"command": NOTIFY}}}),
     )
     assert drilled.returncode != 0
-    assert 'export recorded a failure for "tenant-ü"/"*"' in drilled.stderr
+    assert 'export recorded a failure for "tenant-ü"/"*" (deterministic)' in drilled.stderr
+    assert 'export recorded a failure for "legacy-tenant"/"graph" (transient)' in drilled.stderr
     assert (harness.root / "notified.log").read_text() == "notified\n"
     restored = harness.server("http://restore")["namespaces"]
     assert restored[ORG_A] == _source()[ORG_A], "the rest of the backup still restores"
@@ -1145,29 +1159,81 @@ def test_helm_restore_drill_allowance_scales_with_large_tables(
         assert f"entity ({restored} of 1000, allowed shortfall 10)" in result.stderr
 
 
-def test_helm_export_exit_codes_tell_recorded_failures_from_transient_ones(
-    harness: OpsHarness,
-) -> None:
-    """Recorded failures exit 111, which podFailurePolicy fails at once;
-    anything else keeps a normal non-zero code and is retried."""
-    harness.serve(source=_source(), ns_info_errors=(ORG_B,))
-    recorded = harness.run("export")
-    assert recorded.returncode == RECORDED_FAILURE_EXIT, recorded.stderr
-    failures = _manifest(harness)["failures"]
-    assert failures == [
-        {
-            "namespace": ORG_B,
-            "database": None,
-            "reason": failures[0]["reason"],
-        }
-    ]
-    assert failures[0]["reason"].startswith("INFO FOR NS failed: SurrealQL failed in")
+UNSAFE_NAMES: dict[str, dict[str, dict[str, int]]] = {
+    "tenant-ü": {"graph": {"entity": 1}},
+    "ok_ns": {"weird\tdb": {"t": 1}},
+}
 
-    for run_dir in _run_dirs(harness):
-        shutil.rmtree(run_dir)
+
+@pytest.mark.parametrize(
+    ("extra_names", "ns_info_errors", "exit_code", "kinds"),
+    [
+        ({}, (ORG_B,), TRANSIENT_FAILURE_EXIT, {(ORG_B, None): "transient"}),
+        (
+            UNSAFE_NAMES,
+            (),
+            RECORDED_FAILURE_EXIT,
+            {("tenant-ü", None): "deterministic", ("ok_ns", "weird\tdb"): "deterministic"},
+        ),
+        (
+            UNSAFE_NAMES,
+            (ORG_B,),
+            TRANSIENT_FAILURE_EXIT,
+            {
+                ("tenant-ü", None): "deterministic",
+                ("ok_ns", "weird\tdb"): "deterministic",
+                (ORG_B, None): "transient",
+            },
+        ),
+    ],
+    ids=["transient-only", "deterministic-only", "mixed"],
+)
+def test_helm_export_exit_code_follows_the_failure_kinds(
+    harness: OpsHarness,
+    extra_names: dict[str, dict[str, dict[str, int]]],
+    ns_info_errors: tuple[str, ...],
+    exit_code: int,
+    kinds: dict[tuple[str, str | None], str],
+) -> None:
+    """Only a run whose every recorded failure is deterministic (a name the
+    headers cannot carry) exits 111, which podFailurePolicy fails at once.
+    Any transient failure (here a refused INFO FOR NS) exits 1, so the Job
+    retries the export instead of losing that night's backup."""
+    harness.serve(source={**_source(), **extra_names}, ns_info_errors=ns_info_errors)
+    result = harness.run("export")
+
+    assert result.returncode == exit_code, result.stderr
+    failures = _manifest(harness)["failures"]
+    assert {(f["namespace"], f["database"]): f["kind"] for f in failures} == kinds
+    transient = sum(kind == "transient" for kind in kinds.values())
+    assert f"{len(kinds)} failures ({transient} transient) recorded in" in result.stderr
+    for failure in failures:
+        assert f"({failure['kind']}): " in result.stderr
+    if ns_info_errors:
+        reason = next(f["reason"] for f in failures if f["namespace"] == ORG_B)
+        assert reason.startswith("INFO FOR NS failed: SurrealQL failed in")
+
+
+def test_helm_export_records_a_failed_export_as_transient(harness: OpsHarness) -> None:
+    harness.serve(source=_source(), export_errors=(f"{ORG_A}/graph",))
+    result = harness.run("export")
+
+    assert result.returncode == TRANSIENT_FAILURE_EXIT, result.stderr
+    manifest = _manifest(harness)
+    (failure,) = manifest["failures"]
+    assert (failure["namespace"], failure["database"], failure["kind"]) == (
+        ORG_A,
+        "graph",
+        "transient",
+    )
+    assert failure["reason"].startswith("GET /export failed: curl: (22)")
+    assert ORG_A not in {entry["namespace"] for entry in manifest["databases"]}
+
+
+def test_helm_export_unreachable_server_is_retried(harness: OpsHarness) -> None:
     harness.serve()  # no source server: every request fails to connect
-    transient = harness.run("export")
-    assert transient.returncode not in (0, RECORDED_FAILURE_EXIT), transient.stderr
+    result = harness.run("export")
+    assert result.returncode not in (0, RECORDED_FAILURE_EXIT), result.stderr
 
 
 def test_helm_export_job_fails_fast_only_on_recorded_failures() -> None:
@@ -1470,14 +1536,19 @@ def test_helm_pod_condition_rules_carry_status() -> None:
 
 def test_helm_export_records_a_failed_recount(harness: OpsHarness) -> None:
     """Without the second count the drill could page on a table that
-    emptied during the window, so a failed recount fails that database."""
+    emptied during the window, so a failed recount fails that database, as
+    a transient failure the Job retries."""
     harness.serve(source=_source(), recount_errors=(f"{ORG_B}/graph",))
     result = harness.run("export")
 
-    assert result.returncode == RECORDED_FAILURE_EXIT, result.stderr
+    assert result.returncode == TRANSIENT_FAILURE_EXIT, result.stderr
     manifest = _manifest(harness)
     (failure,) = manifest["failures"]
-    assert (failure["namespace"], failure["database"]) == (ORG_B, "graph")
+    assert (failure["namespace"], failure["database"], failure["kind"]) == (
+        ORG_B,
+        "graph",
+        "transient",
+    )
     assert failure["reason"].startswith("recounting rows after the export failed: SurrealQL failed")
     assert ORG_B not in {entry["namespace"] for entry in manifest["databases"]}
     (run_dir,) = _run_dirs(harness)
