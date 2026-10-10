@@ -108,7 +108,10 @@ async def claim_system_setting(
         rows = await _execute_write(
             "CREATE system_settings CONTENT $record;", record=_setting_record(setting)
         )
-    except RuntimeError as exc:
+    except Exception as exc:
+        # A lost race surfaces as the SDK's own error (InternalError on a
+        # server) or as a statement error; either way the winner's row is
+        # there to read.
         if not _is_duplicate_key(exc):
             raise
         rows = []

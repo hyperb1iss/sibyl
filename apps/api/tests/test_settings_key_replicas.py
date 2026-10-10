@@ -17,6 +17,7 @@ import secrets
 from collections.abc import AsyncIterator, Iterator
 from contextlib import asynccontextmanager, suppress
 from contextvars import ContextVar
+from itertools import count
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
@@ -148,6 +149,8 @@ CREDENTIALS = {
     "username": os.environ.get("SIBYL_SURREAL_USERNAME", "root"),
     "password": os.environ.get("SIBYL_SURREAL_PASSWORD", "root"),
 }
+REPLICAS = 8
+RACERS = 32
 
 
 def _store_url(engine: str) -> str:
@@ -168,21 +171,33 @@ async def settings_store(
     """The shared system_settings table the replicas read and write."""
     url = _store_url(request.param)
     namespace = f"verify_settings_key_{uuid4().hex}"
-    client = SurrealContentClient(url=url, namespace=namespace, **CREDENTIALS)
-    await bootstrap_content_schema(client)
+    # A memory:// store lives inside its client, so embedded replicas share
+    # one; against a server every replica has its own client and pool.
+    clients = [
+        SurrealContentClient(url=url, namespace=namespace, **CREDENTIALS)
+        for _ in range(1 if request.param == "embedded" else REPLICAS)
+    ]
+    await bootstrap_content_schema(clients[0])
+    # Open every pooled connection now, so the replicas' first queries race
+    # each other instead of queueing behind connection setup.
+    await asyncio.gather(
+        *(client.execute_query("RETURN 1;") for client in clients for _ in range(RACERS))
+    )
+    turn = count()
 
     @asynccontextmanager
     async def scope() -> AsyncIterator[SurrealContentClient]:
-        yield client
+        yield clients[next(turn) % len(clients)]
 
     monkeypatch.setattr(surreal_system_settings, "surreal_content_client", scope)
     try:
-        yield client
+        yield clients[0]
     finally:
         if request.param == "live":
             with suppress(Exception):
-                await client.execute_query(f"REMOVE NAMESPACE IF EXISTS {namespace};")
-        await client.close()
+                await clients[0].execute_query(f"REMOVE NAMESPACE IF EXISTS {namespace};")
+        for client in clients:
+            await client.close()
 
 
 def _own_key_file(monkeypatch: pytest.MonkeyPatch, home: Path) -> None:
@@ -230,13 +245,11 @@ async def test_replicas_sharing_the_key_all_start(
     assert await _stored_fingerprints(settings_store) == [crypto.settings_key_fingerprint()]
 
 
-async def test_first_starts_racing_with_different_keys_admit_one_key(
-    settings_store: SurrealContentClient, monkeypatch: pytest.MonkeyPatch
-) -> None:
+async def _race_first_starts(monkeypatch: pytest.MonkeyPatch, fingerprints: list[str]) -> list[str]:
+    """Start one replica per fingerprint at once; return each one's outcome."""
     monkeypatch.setattr(settings, "coordination_backend", "redis")
     replica_fingerprint: ContextVar[str] = ContextVar("replica_fingerprint")
     monkeypatch.setattr(settings_key_module, "settings_key_fingerprint", replica_fingerprint.get)
-    fingerprints = [secrets.token_hex(32) for _ in range(6)]
 
     async def start(fingerprint: str) -> str:
         replica_fingerprint.set(fingerprint)
@@ -244,13 +257,33 @@ async def test_first_starts_racing_with_different_keys_admit_one_key(
             await verify_shared_settings_key()
         except crypto.SettingsKeyError:
             return "refused"
+        except Exception as exc:  # anything else is a replica that crashed
+            return f"crashed: {type(exc).__name__}: {exc}"
         return fingerprint
 
-    outcomes = await asyncio.gather(*(start(fingerprint) for fingerprint in fingerprints))
+    return list(await asyncio.gather(*(start(fingerprint) for fingerprint in fingerprints)))
+
+
+async def test_first_starts_racing_with_different_keys_admit_one_key(
+    settings_store: SurrealContentClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    outcomes = await _race_first_starts(monkeypatch, [secrets.token_hex(32) for _ in range(RACERS)])
 
     started = [outcome for outcome in outcomes if outcome != "refused"]
     assert len(started) == 1, outcomes
     assert await _stored_fingerprints(settings_store) == started
+
+
+async def test_replicas_sharing_a_key_all_start_when_they_boot_at_once(
+    settings_store: SurrealContentClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A fresh deployment's replicas start together; the race's losers read the winner."""
+    shared = secrets.token_hex(32)
+
+    outcomes = await _race_first_starts(monkeypatch, [shared] * RACERS)
+
+    assert outcomes == [shared] * RACERS
+    assert await _stored_fingerprints(settings_store) == [shared]
 
 
 async def test_one_process_records_and_checks_nothing(
