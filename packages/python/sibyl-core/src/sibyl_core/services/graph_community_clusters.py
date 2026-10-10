@@ -112,7 +112,7 @@ async def _native_type_based_clusters(
             client,
             organization_id,
             """
-            SELECT uuid
+            SELECT uuid, updated_at, created_at
             FROM entity
             WHERE group_id = $group_id
               AND entity_type = $entity_type
