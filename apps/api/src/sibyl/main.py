@@ -14,8 +14,9 @@ import structlog
 from mcp.server.transport_security import TransportSecuritySettings
 from starlette.applications import Starlette
 from starlette.requests import Request
-from starlette.responses import PlainTextResponse
-from starlette.routing import Mount, Route
+from starlette.responses import JSONResponse, PlainTextResponse
+from starlette.routing import Mount, Route, get_route_path
+from starlette.types import ASGIApp, Receive, Scope, Send
 
 from sibyl.config import settings
 from sibyl.runtime_services import RuntimeServices
@@ -117,19 +118,42 @@ def _mcp_transport_security(bind_host: str, bind_port: int) -> TransportSecurity
     )
 
 
-def mcp_http_app(mcp: "MCPServer", host: str, port: int) -> Starlette:
+_NO_STANDALONE_STREAM = JSONResponse(
+    {
+        "jsonrpc": "2.0",
+        "id": None,
+        "error": {"code": -32600, "message": "Method Not Allowed: no server-initiated stream"},
+    },
+    status_code=405,
+    headers={"Allow": "POST"},
+)
+
+
+def mcp_http_app(mcp: "MCPServer", host: str, port: int) -> ASGIApp:
     """Serve MCP over streamable HTTP with no per-process session state.
 
     Every request carries its own credential and protocol version, so any
     replica can answer any request and a load balancer needs no affinity.
     Sibyl's tools never call back into the client (no sampling, elicitation
     or server-initiated requests), which is all a stateful session would add.
+
+    With nothing to push, the server offers no standalone GET stream. The SDK
+    would otherwise hold one open, idle, per connected client; the spec's
+    answer for a server without one is 405.
     """
-    return mcp.streamable_http_app(
+    app = mcp.streamable_http_app(
         host=host,
         stateless_http=True,
         transport_security=_mcp_transport_security(host, port),
     )
+
+    async def serve(scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] == "http" and scope["method"] == "GET" and get_route_path(scope) == "/mcp":
+            await _NO_STANDALONE_STREAM(scope, receive, send)
+            return
+        await app(scope, receive, send)
+
+    return serve
 
 
 def create_combined_app(host: str | None = None, port: int | None = None) -> Starlette:

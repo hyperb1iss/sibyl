@@ -284,9 +284,18 @@ async def test_stateless_transport_mints_no_session(monkeypatch: pytest.MonkeyPa
             json={"jsonrpc": "2.0", "id": 2, "method": "ping"},
             headers={"mcp-session-id": "left-over", "mcp-protocol-version": "2025-06-18"},
         )
+        standalone = await client.get(
+            "/mcp", headers={"Accept": "text/event-stream", "mcp-protocol-version": "2025-06-18"}
+        )
+        discovery = await client.get("/.well-known/oauth-protected-resource/mcp")
 
     assert refused.status_code == 400
     assert initialized.status_code == 200
     assert "mcp-session-id" not in initialized.headers
     assert ping.status_code == 200
+    # Nothing is ever pushed, so the optional server-initiated stream is refused
+    # rather than parked open per client; other GET routes are untouched.
+    assert standalone.status_code == 405
+    assert standalone.headers["allow"] == "POST"
+    assert discovery.status_code != 405
     assert not mcp.session_manager._server_instances
