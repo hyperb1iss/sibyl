@@ -1,0 +1,219 @@
+"""A `curl` stand-in that answers like the SurrealDB 3.x HTTP API.
+
+The surrealdb chart's ops jobs are shell scripts that only reach the
+database through curl. Putting this script first on PATH lets a test run
+the rendered job scripts unchanged, with jq and sha256sum doing the real
+work, against servers described in a JSON state file
+(``FAKE_SURREAL_STATE``):
+
+    {"servers": {"http://source": {"user": "root:secret",
+                                   "version": "surrealdb-3.2.4",
+                                   "namespaces": {"ns": {"db": {"table": rows}}}}},
+     "empty_exports": ["ns/db"], "drop_on_import": ["ns/db"]}
+
+Response shapes mirror a real v3.2.4 server: ``/sql`` answers HTTP 200
+with one ``{"status", "result"}`` entry per statement, ``/import`` answers
+``[]`` on success, and ``/export`` of a database that does not exist
+still succeeds with only the ``OPTION IMPORT`` header.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import re
+import sys
+from pathlib import Path
+from typing import Any
+
+EXPORT_HEADER = "-- ------------------------------\n-- OPTION\n-- ------------------------------\n\nOPTION IMPORT;\n"
+TABLES_MARKER = "-- fake-surreal-tables "
+TABLE_ROWS_QUERY_PREFIX = "RETURN object::keys((INFO FOR DB).tables)"
+_VALUE_FLAGS = {"-u", "-H", "--data-binary", "-T", "-o", "-X", "-w"}
+
+
+class Request:
+    def __init__(self, argv: list[str]) -> None:
+        self.headers: dict[str, str] = {}
+        self.user = ""
+        self.body: str | None = None
+        self.upload: str | None = None
+        self.output: str | None = None
+        self.fail = False
+        self.url = ""
+        index = 0
+        while index < len(argv):
+            flag = argv[index]
+            if flag in _VALUE_FLAGS:
+                self._take(flag, argv[index + 1])
+                index += 2
+                continue
+            if flag.startswith("--"):
+                sys.exit(f"fake curl: unsupported flag {flag}")
+            if flag.startswith("-"):
+                self.fail = self.fail or "f" in flag
+            else:
+                self.url = flag
+            index += 1
+
+    def _take(self, flag: str, value: str) -> None:
+        if flag == "-H":
+            name, _, header_value = value.partition(":")
+            self.headers[name.strip().lower()] = header_value.strip()
+        elif flag == "-u":
+            self.user = value
+        elif flag == "--data-binary":
+            self.body = Path(value[1:]).read_text() if value.startswith("@") else value
+        elif flag == "-T":
+            self.upload = Path(value).read_text()
+        elif flag == "-o":
+            self.output = value
+
+
+def _ok(result: object) -> dict[str, object]:
+    return {"status": "OK", "result": result, "time": "1µs", "type": None}
+
+
+def _err(message: str) -> dict[str, object]:
+    return {"status": "ERR", "result": message, "time": "1µs", "type": None}
+
+
+type Namespaces = dict[str, dict[str, dict[str, int]]]
+
+
+def _info(namespaces: Namespaces, ns: str, statement: str) -> dict[str, object] | None:
+    if statement == "INFO FOR ROOT":
+        defined = {name: f"DEFINE NAMESPACE {name}" for name in namespaces}
+        return _ok({"namespaces": defined, "users": {}, "accesses": {}})
+    if statement != "INFO FOR NS":
+        return None
+    if ns not in namespaces:
+        return _err(f"The namespace '{ns}' does not exist")
+    defined = {name: f"DEFINE DATABASE {name}" for name in namespaces[ns]}
+    return _ok({"databases": defined, "users": {}, "accesses": {}})
+
+
+def _define(namespaces: Namespaces, ns: str, statement: str) -> dict[str, object] | None:
+    if match := re.fullmatch(r"DEFINE NAMESPACE IF NOT EXISTS (\w+)", statement):
+        namespaces.setdefault(match.group(1), {})
+        return _ok(None)
+    if match := re.fullmatch(r"DEFINE DATABASE IF NOT EXISTS (\w+)", statement):
+        namespaces.setdefault(ns, {}).setdefault(match.group(1), {})
+        return _ok(None)
+    return None
+
+
+def _count(namespaces: Namespaces, ns: str, db: str, statement: str) -> dict[str, object] | None:
+    match = re.fullmatch(r"SELECT count\(\) AS count FROM (\w+) GROUP ALL", statement)
+    if match is None:
+        return None
+    tables = namespaces.get(ns, {}).get(db, {})
+    if match.group(1) not in tables:
+        return _err(f"The table '{match.group(1)}' does not exist")
+    return _ok([{"count": tables[match.group(1)]}])
+
+
+def _statement(namespaces: Namespaces, ns: str, db: str, statement: str) -> dict[str, object]:
+    return (
+        _info(namespaces, ns, statement)
+        or _define(namespaces, ns, statement)
+        or _count(namespaces, ns, db, statement)
+        or _err(f"fake surreal: unsupported statement {statement!r}")
+    )
+
+
+def _sql(server: dict[str, Any], request: Request) -> list[dict[str, object]]:
+    namespaces: Namespaces = server.setdefault("namespaces", {})
+    ns = request.headers.get("surreal-ns", "")
+    db = request.headers.get("surreal-db", "")
+    body = (request.body or "").strip()
+    if body.startswith(TABLE_ROWS_QUERY_PREFIX):
+        tables = namespaces.get(ns, {}).get(db)
+        if tables is None:
+            return [_err(f"The database '{db}' does not exist")]
+        return [_ok([{"table": name, "rows": rows} for name, rows in sorted(tables.items())])]
+
+    results: list[dict[str, object]] = []
+    for statement in (part.strip() for part in body.split(";")):
+        if match := re.fullmatch(r"USE NS (\w+)", statement):
+            ns = match.group(1)
+            results.append(_ok({"namespace": ns, "database": None}))
+        elif statement:
+            results.append(_statement(namespaces, ns, db, statement))
+    return results
+
+
+def _export(state: dict[str, Any], server: dict[str, Any], request: Request) -> str:
+    namespace = request.headers.get("surreal-ns", "")
+    database = request.headers.get("surreal-db", "")
+    if f"{namespace}/{database}" in state.get("empty_exports", []):
+        return ""
+    tables = server.get("namespaces", {}).get(namespace, {}).get(database)
+    if tables is None:
+        return EXPORT_HEADER
+    return f"{EXPORT_HEADER}\n{TABLES_MARKER}{json.dumps(tables, sort_keys=True)}\n"
+
+
+def _import(state: dict[str, Any], server: dict[str, Any], request: Request) -> object:
+    namespace = request.headers.get("surreal-ns", "")
+    database = request.headers.get("surreal-db", "")
+    payload = request.upload if request.upload is not None else request.body or ""
+    if "OPTION IMPORT;" not in payload:
+        return {"code": 400, "information": "Import requires `OPTION IMPORT;`"}
+    namespaces = server.setdefault("namespaces", {})
+    if namespace not in namespaces:
+        return [_err(f"The namespace '{namespace}' does not exist")]
+    if database not in namespaces[namespace]:
+        return [_err(f"The database '{database}' does not exist")]
+    tables: dict[str, int] = {}
+    for line in payload.splitlines():
+        if line.startswith(TABLES_MARKER):
+            tables = json.loads(line[len(TABLES_MARKER) :])
+    if f"{namespace}/{database}" in state.get("drop_on_import", []):
+        tables = dict.fromkeys(tables, 0)
+    namespaces[namespace][database] = tables
+    return []
+
+
+def main(argv: list[str]) -> int:
+    request = Request(argv)
+    state_path = Path(os.environ["FAKE_SURREAL_STATE"])
+    state: dict[str, Any] = json.loads(state_path.read_text())
+    base, _, path = request.url.partition("://")
+    host, _, path = path.partition("/")
+    server = state["servers"].get(f"{base}://{host}")
+    if server is None:
+        sys.stderr.write(f"curl: (7) Failed to connect to {host}\n")
+        return 7
+
+    route = f"/{path}"
+    if route == "/health":
+        body: object = ""
+    elif route == "/version":
+        body = server.get("version", "surrealdb-3.2.4")
+    elif request.user != server.get("user"):
+        body = {"code": 401, "information": "There was a problem with authentication"}
+        if request.fail:
+            sys.stderr.write("curl: (22) The requested URL returned error: 401\n")
+            return 22
+    elif route == "/sql":
+        body = _sql(server, request)
+    elif route == "/export":
+        body = _export(state, server, request)
+    elif route == "/import":
+        body = _import(state, server, request)
+    else:
+        sys.stderr.write(f"fake curl: unsupported route {route}\n")
+        return 2
+
+    state_path.write_text(json.dumps(state))
+    text = body if isinstance(body, str) else json.dumps(body)
+    if request.output:
+        Path(request.output).write_text(text)
+    else:
+        sys.stdout.write(text)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

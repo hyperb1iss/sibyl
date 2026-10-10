@@ -96,7 +96,40 @@ spec:
                     return 0
                     {{- end }}
                   }
-                  trap 'notify_failure' ERR
+                  # EXIT, not ERR: busybox ash skips an ERR trap on an
+                  # explicit `exit 1` and on failures inside functions,
+                  # which are exactly the drill's validation failures.
+                  on_exit() {
+                    status=$?
+                    trap - EXIT
+                    if [ "$status" -ne 0 ]; then
+                      notify_failure || echo "restore drill failure notification failed" >&2
+                    fi
+                    exit "$status"
+                  }
+                  trap on_exit EXIT
+                  identifier='^[A-Za-z_][A-Za-z0-9_]*$'
+                  table_rows='RETURN object::keys((INFO FOR DB).tables).map(|$t| { table: $t, rows: (SELECT count() FROM type::table($t) GROUP ALL)[0].count ?? 0 });'
+                  work="$(mktemp -d)"
+                  # Same gate as the export: /sql answers HTTP 200 with a
+                  # status per statement. Prints the last statement's result.
+                  restore_sql() {
+                    scope_ns="$1"
+                    scope_db="$2"
+                    statement="$3"
+                    set -- -sS -u "$SURREAL_RESTORE_USER:$SURREAL_RESTORE_PASS" \
+                      -H "Accept: application/json" -H "Content-Type: text/plain"
+                    if [ -n "$scope_ns" ]; then set -- "$@" -H "surreal-ns: $scope_ns"; fi
+                    if [ -n "$scope_db" ]; then set -- "$@" -H "surreal-db: $scope_db"; fi
+                    response="$(curl "$@" --data-binary "$statement" "$SURREAL_RESTORE_ENDPOINT/sql")" || exit 1
+                    if ! printf '%s\n' "$response" \
+                      | jq -e 'type == "array" and length > 0 and all(.[]; .status == "OK")' >/dev/null 2>&1; then
+                      printf 'SurrealQL failed in %s/%s: %s\n%s\n' \
+                        "${scope_ns:-(root)}" "${scope_db:-(namespace)}" "$statement" "$response" >&2
+                      exit 1
+                    fi
+                    printf '%s\n' "$response" | jq -c '.[-1].result'
+                  }
                   ready=""
                   for _ in $(seq 1 30); do
                     if curl -fsS "$SURREAL_RESTORE_ENDPOINT/health" >/dev/null 2>&1; then
@@ -109,58 +142,98 @@ spec:
                     echo "restore server never became healthy at $SURREAL_RESTORE_ENDPOINT" >&2
                     exit 1
                   fi
-                  # SurrealDB 3.x does not auto-create namespaces over
-                  # HTTP, and export files assume their namespace exists,
-                  # so the scratch server needs the layout defined first.
-                  cat > /tmp/restore-preamble.surql <<'SQL'
-                  {{- range .Values.databases }}
-                  DEFINE NAMESPACE IF NOT EXISTS {{ .namespace }};
-                  USE NS {{ .namespace }};
-                  DEFINE DATABASE IF NOT EXISTS {{ .database }};
-                  {{- end }}
-                  SQL
-                  preamble_response="$(curl -fsS \
-                    -u "$SURREAL_RESTORE_USER:$SURREAL_RESTORE_PASS" \
-                    -H "Accept: application/json" \
-                    -H "Content-Type: text/plain" \
-                    --data-binary @/tmp/restore-preamble.surql \
-                    "$SURREAL_RESTORE_ENDPOINT/sql")"
-                  printf '%s\n' "$preamble_response" | jq -e 'all(.[]; .status == "OK")' >/dev/null || {
-                    printf 'restore preamble failed:\n%s\n' "$preamble_response" >&2
-                    exit 1
-                  }
-                  row_counts_json="{"
-                  row_counts_separator=""
-                  {{- range .Values.databases }}
-                  source_file="$(ls -1t "$SIBYL_RESTORE_SOURCE_PATH"/{{ $.Values.export.filePrefix }}-{{ .namespace }}-{{ .database }}-*.surql 2>/dev/null | head -n 1)"
-                  if [ -z "$source_file" ]; then
-                    echo "missing export for {{ .namespace }}/{{ .database }}" >&2
+                  # The export writes manifest.json last, so only run
+                  # directories that have one are complete. The glob sorts
+                  # by the UTC timestamp in the name; the last match wins.
+                  manifest=""
+                  for candidate in "$SIBYL_RESTORE_SOURCE_PATH/$SIBYL_EXPORT_FILE_PREFIX"-*/manifest.json; do
+                    if [ -f "$candidate" ]; then
+                      manifest="$candidate"
+                    fi
+                  done
+                  if [ -z "$manifest" ]; then
+                    echo "no complete export under $SIBYL_RESTORE_SOURCE_PATH (a run directory needs its manifest.json)" >&2
                     exit 1
                   fi
-                  import_response="$(curl -fsS \
-                    -u "$SURREAL_RESTORE_USER:$SURREAL_RESTORE_PASS" \
-                    -H "Accept: application/json" \
-                    -H "Content-Type: text/plain" \
-                    -H "surreal-ns: {{ .namespace }}" \
-                    -H "surreal-db: {{ .database }}" \
-                    --data-binary @"$source_file" \
-                    "$SURREAL_RESTORE_ENDPOINT/import")"
-                  printf '%s\n' "$import_response" \
-                    | jq -e 'if type == "array" then all(.[]; .status == "OK") else true end' >/dev/null || {
-                    printf 'import failed for {{ .namespace }}/{{ .database }}:\n%s\n' "$import_response" >&2
+                  run_dir="$(dirname "$manifest")"
+                  # Manifest names reach SurrealQL and file paths, so each
+                  # entry must name plain identifiers and its own file.
+                  if ! jq -e --arg re "$identifier" '
+                      (.databases | type == "array" and length > 0)
+                      and all(.databases[];
+                        (.namespace | test($re)) and (.database | test($re))
+                        and .file == "\(.namespace).\(.database).surql")' \
+                      "$manifest" >/dev/null; then
+                    echo "manifest $manifest lists no databases or names an unsafe file" >&2
                     exit 1
-                  }
-                  {{- end }}
+                  fi
+                  echo "restoring $(jq '.databases | length' "$manifest") databases from $manifest"
+                  : > "$work/databases.jsonl"
+                  database_count="$(jq '.databases | length' "$manifest")"
+                  index=0
+                  while [ "$index" -lt "$database_count" ]; do
+                    expected="$(jq -c --argjson index "$index" '.databases[$index]' "$manifest")"
+                    index=$((index + 1))
+                    namespace="$(printf '%s\n' "$expected" | jq -r '.namespace')"
+                    database="$(printf '%s\n' "$expected" | jq -r '.database')"
+                    file="$run_dir/$namespace.$database.surql"
+                    problem=""
+                    restored='[]'
+                    if [ ! -f "$file" ]; then
+                      problem="export file $file is missing"
+                    elif [ "$(wc -c < "$file" | tr -d ' ')" != "$(printf '%s\n' "$expected" | jq -r '.bytes')" ] \
+                      || [ "$(sha256sum "$file" | cut -d ' ' -f 1)" != "$(printf '%s\n' "$expected" | jq -r '.sha256')" ]; then
+                      problem="export file $file does not match the manifest's size and sha256"
+                    else
+                      # Export files assume their namespace and database
+                      # exist, and 3.x does not create them over HTTP.
+                      restore_sql "" "" "DEFINE NAMESPACE IF NOT EXISTS $namespace; USE NS $namespace; DEFINE DATABASE IF NOT EXISTS $database;" >/dev/null
+                      # -T streams the file instead of loading it into memory.
+                      import_response="$(curl -sS -X POST -T "$file" \
+                        -u "$SURREAL_RESTORE_USER:$SURREAL_RESTORE_PASS" \
+                        -H "Accept: application/json" \
+                        -H "Content-Type: text/plain" \
+                        -H "surreal-ns: $namespace" \
+                        -H "surreal-db: $database" \
+                        "$SURREAL_RESTORE_ENDPOINT/import")"
+                      if printf '%s\n' "$import_response" \
+                        | jq -e 'type == "array" and all(.[]; .status == "OK")' >/dev/null 2>&1; then
+                        restored="$(restore_sql "$namespace" "$database" "$table_rows")"
+                      else
+                        problem="import failed: $(printf '%s' "$import_response" | head -c 2000)"
+                      fi
+                    fi
+                    # Counts come from a separate read on a live server, so
+                    # a few rows of drift is expected. A table that vanished
+                    # or a database that restored no rows at all is not.
+                    printf '%s\n' "$expected" | jq -c --argjson restored "$restored" --arg problem "$problem" '
+                      ($restored | map({key: .table, value: .rows}) | from_entries) as $after
+                      | {namespace, database, file, bytes, sha256,
+                         rows_exported: .rows,
+                         rows_restored: ($restored | map(.rows) | add // 0),
+                         tables: (.tables | with_entries(.value = {exported: .value, restored: $after[.key]}))}
+                      | ([.tables | to_entries[] | select(.value.restored == null) | .key]) as $missing
+                      | .problem = (
+                          if $problem != "" then $problem
+                          elif ($missing | length) > 0 then "tables missing after import: \($missing | join(", "))"
+                          elif .rows_exported > 0 and .rows_restored == 0 then "restored no rows; the export counted \(.rows_exported)"
+                          else null end)
+                      | .status = (if .problem == null then "PASS" else "FAIL" end)
+                      | if .problem == null then del(.problem) else . end' \
+                      >> "$work/databases.jsonl"
+                  done
+                  failures="$(jq -r 'select(.status == "FAIL") | "restore failed for \(.namespace)/\(.database): \(.problem)"' "$work/databases.jsonl")"
+                  if [ -n "$failures" ]; then
+                    printf '%s\n' "$failures" >&2
+                    exit 1
+                  fi
+                  jq -r '"restored \(.namespace)/\(.database): \(.rows_restored) rows (export counted \(.rows_exported))"' \
+                    "$work/databases.jsonl"
+                  row_counts_json="{"
+                  row_counts_separator=""
                   {{- range .Values.restoreDrill.fixtureChecks }}
-                  count_result="$(curl -fsS \
-                    -u "$SURREAL_RESTORE_USER:$SURREAL_RESTORE_PASS" \
-                    -H "Accept: application/json" \
-                    -H "Content-Type: text/plain" \
-                    -H "surreal-ns: {{ .namespace }}" \
-                    -H "surreal-db: {{ .database }}" \
-                    --data-binary "SELECT count() AS count FROM {{ .table }} GROUP ALL;" \
-                    "$SURREAL_RESTORE_ENDPOINT/sql")"
-                  row_count="$(printf '%s\n' "$count_result" | jq -r '.[-1].result[0].count // 0')"
+                  count_result="$(restore_sql {{ .namespace }} {{ .database }} "SELECT count() AS count FROM {{ .table }} GROUP ALL;")"
+                  row_count="$(printf '%s\n' "$count_result" | jq -r '.[0].count // 0')"
                   if [ "${row_count:-0}" -lt {{ .minRows }} ]; then
                     echo "fixture {{ .namespace }}/{{ .database }}/{{ .table }} expected >= {{ .minRows }}, got ${row_count:-0}" >&2
                     exit 1
@@ -187,11 +260,16 @@ spec:
                   {{- end }}
                   receipt_dir="$(dirname "$SIBYL_RESTORE_RECEIPT_PATH")"
                   mkdir -p "$receipt_dir"
-                  printf '{"status":"PASS","runtime":"kubernetes:%s/%s","row_counts":%s,"recall_sample":%s}\n' \
-                    "${POD_NAMESPACE:-default}" \
-                    "{{ include "sibyl-surrealdb.fullname" . }}-restore-drill" \
-                    "$row_counts_json" \
-                    "$recall_sample_json" \
+                  jq -c '{path: input_filename, created_at, server_version, databases: (.databases | length)}' \
+                    "$manifest" > "$work/manifest-summary.json"
+                  jq -cn \
+                    --arg runtime "kubernetes:${POD_NAMESPACE:-default}/{{ include "sibyl-surrealdb.fullname" . }}-restore-drill" \
+                    --slurpfile manifest "$work/manifest-summary.json" \
+                    --slurpfile databases "$work/databases.jsonl" \
+                    --argjson row_counts "$row_counts_json" \
+                    --argjson recall_sample "$recall_sample_json" \
+                    '{status: "PASS", runtime: $runtime, manifest: $manifest[0], databases: $databases,
+                      row_counts: $row_counts, recall_sample: $recall_sample}' \
                     > "$SIBYL_RESTORE_RECEIPT_PATH"
                   echo "restore drill receipt: $SIBYL_RESTORE_RECEIPT_PATH"
                   echo "SIBYL_RESTORE_RECEIPT_JSON_BEGIN"
@@ -202,6 +280,8 @@ spec:
                   value: /tmp
                 - name: SIBYL_RESTORE_SOURCE_PATH
                   value: {{ .Values.restoreDrill.source.path | quote }}
+                - name: SIBYL_EXPORT_FILE_PREFIX
+                  value: {{ .Values.export.filePrefix | quote }}
                 - name: SURREAL_RESTORE_ENDPOINT
                   value: {{ .Values.restoreDrill.restore.endpoint | quote }}
                 - name: SURREAL_RESTORE_USER

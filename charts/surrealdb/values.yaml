@@ -52,6 +52,10 @@ connection:
   usernameKey: username
   passwordKey: password
 
+# Databases the strict-bootstrap Job defines as STRICT. The export and
+# restore drill do not read this list: they discover every namespace and
+# database on the server at run time, including each org's graph
+# namespace (org_<uuid>), which Sibyl creates as orgs appear.
 databases:
   - namespace: sibyl_auth
     database: auth
@@ -120,6 +124,12 @@ export:
     path: /backups
     # Informational URI for overlays that sync to object/blob storage.
     uri: ""
+  # Each run writes <destination.path>/<filePrefix>-<UTC timestamp>/ with
+  # one <namespace>.<database>.surql per database and a manifest.json
+  # written last; the restore drill reads the newest directory that has
+  # one. encryption.command runs once per file, manifest included, with
+  # the path in $SIBYL_EXPORT_FILE; syncCommand runs once at the end with
+  # the run directory in $SIBYL_EXPORT_RUN_DIR.
   filePrefix: sibyl
   encryption:
     enabled: false
@@ -145,7 +155,10 @@ restoreDrill:
     endpoint: http://127.0.0.1:8000
     username: drill
     password: drill
-    path: memory
+    # The drill restores every namespace, so the scratch server holds a
+    # full copy of the data. RocksDB on the pod's /tmp emptyDir keeps it
+    # on node disk rather than in memory; "memory" suits small datasets.
+    path: rocksdb:/tmp/restore-db
   # The scratch server runs as its own sidecar container, so a restore
   # path that lives on a volume (anything other than "memory" or a
   # path under /tmp) needs its mount declared here as well; the
