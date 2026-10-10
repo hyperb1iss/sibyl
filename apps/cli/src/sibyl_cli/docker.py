@@ -45,6 +45,23 @@ MANAGED_IMAGE_REPOSITORIES = (
 # Where the API and worker find the bundled Valkey. Settings read the host and
 # port; there is no URL setting, so a URL here would leave both on localhost.
 VALKEY_ADDRESS = {"SIBYL_REDIS_HOST": "valkey", "SIBYL_REDIS_PORT": "6379"}
+# The URL setting bundles before 1.5 wrote in its place, which Sibyl never read.
+LEGACY_VALKEY_URL = "redis://valkey:6379/0"
+SETTINGS_KEY_ENV = {"SIBYL_SETTINGS_KEY": "${SIBYL_SETTINGS_KEY:-}"}
+WORKER_SECRETS_ENV = {
+    "SIBYL_JWT_SECRET": "${SIBYL_JWT_SECRET}",
+    **SETTINGS_KEY_ENV,
+    "SIBYL_ENVIRONMENT": "production",
+}
+WORKER_COMMAND = ["sibyld", "worker", "--require-redis"]
+# The image's own healthcheck asks the API port, which a worker does not serve.
+WORKER_HEALTHCHECK = {
+    "test": ["CMD", "sibyld", "worker", "--check"],
+    "interval": "30s",
+    "timeout": "10s",
+    "retries": 3,
+    "start_period": "30s",
+}
 
 
 def compose_config(
@@ -77,7 +94,7 @@ def compose_config(
                 "SIBYL_JWT_SECRET": "${SIBYL_JWT_SECRET}",
                 # From the env file, so stored secrets survive the container
                 # being recreated and every process decrypts them alike.
-                "SIBYL_SETTINGS_KEY": "${SIBYL_SETTINGS_KEY:-}",
+                **SETTINGS_KEY_ENV,
                 "SIBYL_PUBLIC_URL": f"http://localhost:{web_port}",
                 "SIBYL_SERVER_HOST": "0.0.0.0",
                 "SIBYL_SERVER_PORT": "3334",
@@ -133,7 +150,7 @@ def compose_config(
         services["worker"] = {
             "image": deepcopy(api_image),
             "container_name": "sibyl-worker",
-            "command": ["sibyld", "worker"],
+            "command": list(WORKER_COMMAND),
             "depends_on": {
                 "api": {"condition": "service_started"},
                 "valkey": {"condition": "service_started"},
@@ -148,10 +165,9 @@ def compose_config(
                 "SIBYL_SURREAL_PASSWORD": "${SIBYL_SURREAL_PASSWORD}",
                 # The worker verifies the API's tokens and decrypts the
                 # settings it saved, so it carries the same two keys.
-                "SIBYL_JWT_SECRET": "${SIBYL_JWT_SECRET}",
-                "SIBYL_SETTINGS_KEY": "${SIBYL_SETTINGS_KEY:-}",
-                "SIBYL_ENVIRONMENT": "production",
+                **WORKER_SECRETS_ENV,
             },
+            "healthcheck": deepcopy(WORKER_HEALTHCHECK),
             "restart": "unless-stopped",
         }
         services["api"]["depends_on"]["valkey"] = {"condition": "service_started"}
@@ -258,6 +274,31 @@ def _plan_surreal_image(service: dict[str, Any]) -> None:
         warn(f"SIBYL_SURREAL_IMAGE keeps SurrealDB on {override}; this CLI runs {SURREAL_IMAGE}.")
 
 
+def _migrate_runtime_services(services: dict[str, Any]) -> None:
+    """Bring an older bundle's API and worker up to what init writes now.
+
+    Older bundles pointed both at Valkey through a URL setting Sibyl never
+    read, gave the worker no keys, and kept the settings key inside the API
+    container. Only what init itself wrote is rewritten; a value edited by
+    hand stays.
+    """
+    for name in ("api", "worker"):
+        service = services.get(name)
+        if not isinstance(service, dict) or not isinstance(service.get("environment"), dict):
+            continue
+        environment = service["environment"]
+        if environment.get("SIBYL_REDIS_URL") == LEGACY_VALKEY_URL:
+            del environment["SIBYL_REDIS_URL"]
+            for key, value in VALKEY_ADDRESS.items():
+                environment.setdefault(key, value)
+        for key, value in (WORKER_SECRETS_ENV if name == "worker" else SETTINGS_KEY_ENV).items():
+            environment.setdefault(key, value)
+        if name == "worker":
+            if service.get("command") == ["sibyld", "worker"]:
+                service["command"] = list(WORKER_COMMAND)
+            service.setdefault("healthcheck", deepcopy(WORKER_HEALTHCHECK))
+
+
 def upgraded_compose_config(config: dict[str, Any], image_tag: str | None) -> dict[str, Any]:
     """The compose config an upgrade moves to, leaving `config` as it is."""
     target = deepcopy(config)
@@ -270,7 +311,50 @@ def upgraded_compose_config(config: dict[str, Any], image_tag: str | None) -> di
             service["image"] = _retag_managed_image(image, image_tag)
         if name == "surrealdb":
             _plan_surreal_image(service)
+    _migrate_runtime_services(services)
     return target
+
+
+def _env_settings_key() -> str | None:
+    for line in SIBYL_DOCKER_ENV.read_text().splitlines():
+        key, sep, value = line.removeprefix("export ").partition("=")
+        if sep and key.strip() == "SIBYL_SETTINGS_KEY":
+            return value.strip().strip("\"'") or None
+    return None
+
+
+def _running_api_settings_key() -> str | None:
+    """The settings key an older bundle's running API generated for itself.
+
+    Such a key lives only inside the API container, so carrying it into the
+    env file keeps the secrets it encrypted readable after the upgrade.
+    """
+    result = subprocess.run(
+        compose_command(["exec", "-T", "api", "cat", "/home/sibyl/.sibyl/settings.key"]),
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    key = result.stdout.strip()
+    if result.returncode != 0 or len(key) != 44 or not key.endswith("="):
+        return None
+    return key
+
+
+def ensure_env_settings_key() -> None:
+    """Give the bundle's env file a settings key if it has none yet."""
+    if _env_settings_key() is not None:
+        return
+    key = _running_api_settings_key()
+    if key is not None:
+        info("Keeping the settings key the running API generated, in the env file")
+    else:
+        key = secrets.token_hex(32)
+        info("Writing a settings key to the env file")
+    content = SIBYL_DOCKER_ENV.read_text()
+    separator = "" if not content or content.endswith("\n") else "\n"
+    SIBYL_DOCKER_ENV.write_text(f"{content}{separator}SIBYL_SETTINGS_KEY={key}\n")
+    os.chmod(SIBYL_DOCKER_ENV, 0o600)
 
 
 def compose_command(args: list[str], compose_file: Path | None = None) -> list[str]:
@@ -416,6 +500,8 @@ def upgrade(
     """Pull current images and recreate containers."""
     require_configured()
     require_docker()
+    # Before anything is recreated: an older bundle's API holds its only copy.
+    ensure_env_settings_key()
     current = yaml.safe_load(SIBYL_DOCKER_COMPOSE.read_text()) or {}
     target = upgraded_compose_config(current, image_tag)
 

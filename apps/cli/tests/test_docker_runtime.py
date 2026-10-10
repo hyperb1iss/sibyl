@@ -67,6 +67,9 @@ def test_docker_compose_can_opt_into_worker_runtime() -> None:
         # Both decrypt the same stored settings and verify the same tokens.
         assert environment["SIBYL_SETTINGS_KEY"] == "${SIBYL_SETTINGS_KEY:-}"
         assert environment["SIBYL_JWT_SECRET"] == "${SIBYL_JWT_SECRET}"
+    # The worker refuses to idle beside a local API, and reports its own health.
+    assert services["worker"]["command"] == ["sibyld", "worker", "--require-redis"]
+    assert services["worker"]["healthcheck"]["test"] == ["CMD", "sibyld", "worker", "--check"]
 
 
 def test_quickstart_compose_persists_generated_runtime_secrets() -> None:
@@ -280,6 +283,84 @@ def test_docker_upgrade_tag_updates_pinned_compose_images(
     assert services["worker"]["image"] == "ghcr.io/hyperb1iss/sibyl-api-crawler:1.0.0-rc.8"
     assert services["web"]["image"] == "ghcr.io/hyperb1iss/sibyl-web:1.0.0-rc.8"
     assert services["surrealdb"]["image"] == "${SIBYL_SURREAL_IMAGE:-surrealdb/surrealdb:v3.2.4}"
+
+
+def _as_older_worker_bundle(compose_path: Path) -> None:
+    """Rewrite an initialized bundle the way --with-worker wrote it before 1.5."""
+    config = yaml.safe_load(compose_path.read_text())
+    services = config["services"]
+    for name in ("api", "worker"):
+        environment = services[name]["environment"]
+        for key in ("SIBYL_REDIS_HOST", "SIBYL_REDIS_PORT", "SIBYL_SETTINGS_KEY"):
+            environment.pop(key, None)
+        environment["SIBYL_REDIS_URL"] = "redis://valkey:6379/0"
+    for key in ("SIBYL_JWT_SECRET", "SIBYL_ENVIRONMENT"):
+        services["worker"]["environment"].pop(key)
+    services["worker"]["command"] = ["sibyld", "worker"]
+    del services["worker"]["healthcheck"]
+    compose_path.write_text(yaml.dump(config, sort_keys=False))
+    env_path = compose_path.parent / ".env"
+    env_path.write_text(
+        "\n".join(
+            line
+            for line in env_path.read_text().splitlines()
+            if not line.startswith("SIBYL_SETTINGS_KEY=")
+        )
+        + "\n"
+    )
+
+
+@pytest.mark.parametrize("running_key", ["A" * 43 + "=", None])
+def test_docker_upgrade_migrates_an_older_worker_bundle(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, running_key: str | None
+) -> None:
+    compose_path, _ = _docker_runtime(tmp_path, monkeypatch)
+    _as_older_worker_bundle(compose_path)
+    monkeypatch.setattr(docker_module, "_running_api_settings_key", lambda: running_key)
+
+    result = CliRunner().invoke(app, ["docker", "upgrade"])
+
+    assert result.exit_code == 0, result.output
+    services = yaml.safe_load(compose_path.read_text())["services"]
+    for name in ("api", "worker"):
+        environment = services[name]["environment"]
+        assert "SIBYL_REDIS_URL" not in environment
+        assert environment["SIBYL_REDIS_HOST"] == "valkey"
+        assert environment["SIBYL_REDIS_PORT"] == "6379"
+        assert environment["SIBYL_SETTINGS_KEY"] == "${SIBYL_SETTINGS_KEY:-}"
+    assert services["worker"]["environment"]["SIBYL_JWT_SECRET"] == "${SIBYL_JWT_SECRET}"
+    assert services["worker"]["command"] == ["sibyld", "worker", "--require-redis"]
+    assert services["worker"]["healthcheck"]["test"] == ["CMD", "sibyld", "worker", "--check"]
+    keys = [
+        line.removeprefix("SIBYL_SETTINGS_KEY=")
+        for line in (compose_path.parent / ".env").read_text().splitlines()
+        if line.startswith("SIBYL_SETTINGS_KEY=")
+    ]
+    assert len(keys) == 1
+    # The running API's own key is kept, so what it encrypted stays readable.
+    assert keys[0] == running_key if running_key else len(keys[0]) == 64
+
+
+def test_docker_upgrade_keeps_a_settings_key_and_hand_edits(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    compose_path, _ = _docker_runtime(tmp_path, monkeypatch)
+    config = yaml.safe_load(compose_path.read_text())
+    config["services"]["worker"]["environment"]["SIBYL_REDIS_HOST"] = "redis.internal"
+    compose_path.write_text(yaml.dump(config, sort_keys=False))
+    env_before = (compose_path.parent / ".env").read_text()
+    monkeypatch.setattr(
+        docker_module,
+        "_running_api_settings_key",
+        lambda: (_ for _ in ()).throw(AssertionError("an env key needs no running API")),
+    )
+
+    result = CliRunner().invoke(app, ["docker", "upgrade"])
+
+    assert result.exit_code == 0, result.output
+    assert (compose_path.parent / ".env").read_text() == env_before
+    worker = yaml.safe_load(compose_path.read_text())["services"]["worker"]
+    assert worker["environment"]["SIBYL_REDIS_HOST"] == "redis.internal"
 
 
 @pytest.mark.parametrize("tag_args", [[], ["--tag", "1.4.0"]])
