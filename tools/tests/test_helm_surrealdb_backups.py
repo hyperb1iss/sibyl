@@ -1181,7 +1181,8 @@ def test_helm_export_job_fails_fast_only_on_recorded_failures() -> None:
                     "operator": "In",
                     "values": [RECORDED_FAILURE_EXIT],
                 },
-            }
+            },
+            {"action": "Ignore", "onPodConditions": [{"type": "DisruptionTarget"}]},
         ]
     }
 
@@ -1352,6 +1353,14 @@ def test_helm_restore_drill_falls_back_to_one_count_for_older_manifests(
 
     assert result.returncode != 0
     assert "schema_version (0 of 1, emptied)" in result.stderr
+
+
+def test_helm_drill_job_replaces_pods_lost_to_disruption() -> None:
+    spec, _ = _raw_env("restore-drill")
+    assert spec["template"]["spec"]["restartPolicy"] == "Never"
+    assert spec["podFailurePolicy"] == {
+        "rules": [{"action": "Ignore", "onPodConditions": [{"type": "DisruptionTarget"}]}]
+    }
 
 
 @pytest.mark.parametrize(

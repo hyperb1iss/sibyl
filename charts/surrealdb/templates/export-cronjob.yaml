@@ -23,7 +23,8 @@ spec:
       activeDeadlineSeconds: {{ .Values.export.activeDeadlineSeconds }}
       # A run that recorded databases it could not export (exit 111) fails
       # the same way on every retry, so it fails the Job at once instead of
-      # rerunning the whole export. Any other failure is retried.
+      # rerunning the whole export. A pod lost to a drain or eviction is
+      # replaced without spending a retry. Any other failure is retried.
       podFailurePolicy:
         rules:
           - action: FailJob
@@ -31,6 +32,9 @@ spec:
               containerName: export
               operator: In
               values: [111]
+          - action: Ignore
+            onPodConditions:
+              - type: DisruptionTarget
       template:
         metadata:
           labels:

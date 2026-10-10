@@ -29,6 +29,13 @@ spec:
       # default to none; a drill failure wants a person, not a loop.
       backoffLimit: {{ .Values.restoreDrill.backoffLimit }}
       activeDeadlineSeconds: {{ .Values.restoreDrill.activeDeadlineSeconds }}
+      # A drill pod lost to a drain or eviction is replaced, not counted as a
+      # failed drill, so a node rotation does not page.
+      podFailurePolicy:
+        rules:
+          - action: Ignore
+            onPodConditions:
+              - type: DisruptionTarget
       template:
         metadata:
           labels:
