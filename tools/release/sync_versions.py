@@ -22,6 +22,7 @@ from __future__ import annotations
 import argparse
 import re
 import sys
+from collections.abc import Callable
 from pathlib import Path
 from typing import TextIO
 
@@ -58,7 +59,23 @@ def _pep440(version: str) -> str:
 # are anchored to Sibyl-specific surroundings (chart fields, the SIBYL_* image
 # defaults, sibyl image tags, the sibyl_version knob) to avoid touching other
 # versions that share a file.
-_Sub = tuple[str, str]
+_Sub = tuple[str, str | Callable[[re.Match[str]], str]]
+
+
+def _table_cell(version: str) -> Callable[[re.Match[str]], str]:
+    """Stamp a version into a padded Markdown table cell without moving its border.
+
+    The pattern captures (prefix, old version, closing backtick, padding, "|").
+    Prettier aligns table columns, so a version that changes length (1.4.9 ->
+    1.4.10) must give or take padding to keep the cell, and the table, aligned.
+    """
+
+    def repl(match: re.Match[str]) -> str:
+        prefix, old, tick, padding, border = match.groups()
+        pad = max(1, len(old) + len(padding) - len(version))
+        return f"{prefix}{version}{tick}{' ' * pad}{border}"
+
+    return repl
 
 
 def _targets(version: str) -> dict[str, list[_Sub]]:
@@ -93,7 +110,7 @@ def _targets(version: str) -> dict[str, list[_Sub]]:
             (rf"(--tag ){_VER}", rf"\g<1>{v}"),
         ],
         "docs/deployment/ansible.md": [
-            (rf"(`sibyl_version`\s*\|\s*`){_VER}", rf"\g<1>{v}"),
+            (rf"(`sibyl_version`\s*\|\s*`)({_VER})(`)( +)(\|)", _table_cell(v)),
         ],
         "docs/deployment/helm-chart.md": [
             (rf"(?m)^(version: ){_VER}$", rf"\g<1>{v}"),
