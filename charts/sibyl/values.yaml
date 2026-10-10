@@ -69,8 +69,11 @@ backend:
   # scheduled backups) are written once and read back. API and worker share
   # it, so any replica lists and downloads an archive any process wrote. Set
   # at most one of url or existingClaim; with neither, archives live in a
-  # backups directory on the validationReceipts claim, and one of them is
-  # required when receipts live in S3.
+  # backups directory on the validationReceipts claim, which suits a single
+  # replica and a small install (size the claim for them, see the chart
+  # docs), and one of them is required when receipts live in S3. At scale,
+  # use a dedicated claim or S3. SIBYL_BACKUP_FREE_SPACE_RESERVE_MB (via
+  # backend.env, default 512) stays free on a claim for receipts.
   backupArchives:
     # -- Amazon S3 location, s3://bucket[/prefix][?region=name], using the
     # pod's AWS identity like receipts. Use a prefix apart from receipts.

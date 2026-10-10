@@ -1186,8 +1186,42 @@ A claim is a shared directory only when every pod mounts it: a ReadWriteOnce cla
 and worker run on one node (the single-replica default, which rolls with `maxSurge: 0` for an
 archives claim exactly as for the receipts claim), and multi-node replicas need ReadWriteMany. Each
 archive is assembled in a hidden staging directory on the same volume and published with a hard
-link, so a listing never shows a half-written archive and a published archive is never replaced. A
-new archive directory is created private (`0700`) and each archive `0600`.
+link, so a listing never shows a half-written archive and a published archive is never replaced. The
+volume's filesystem must support hard links; each backup proves it with a probe before it exports
+anything, and fails with that reason on a filesystem that cannot. A new archive directory is created
+private (`0700`) and each archive `0600`. The scheduled cleanup removes staging directories left by
+a killed job once they are a day old, since they hold the export in plaintext.
+
+### Sizing a claim
+
+The receipts claim default suits a single replica and a small install: it keeps archives durable
+with no extra values, but they then share one volume with validation receipts. Receipts are small,
+but a receipt that cannot be written stops validation, so a full claim is an outage. At scale, give
+archives a dedicated claim (`backend.backupArchives.existingClaim`) or S3.
+
+Size an archives volume, or the receipts claim when it holds archives, for:
+
+- the archives kept: organizations backed up × backups per day × `SIBYL_BACKUP_RETENTION_DAYS` ×
+  archive size;
+- staging for the largest running backup: its export is written uncompressed on the same volume
+  before it is compressed, typically five to ten times the archive's size, plus the archive itself;
+- a reserve for everything else on the volume, `SIBYL_BACKUP_FREE_SPACE_RESERVE_MB` (default 512;
+  set it with `backend.env`).
+
+Before each backup on a directory store, Sibyl checks the volume's free space against eleven times
+that organization's last archive plus the reserve, and again against the staged export's real size
+before writing the archive. A backup that would eat into the reserve fails with the free space,
+estimate and reserve in its error before it writes anything more, so the reserve stays free for
+receipts.
+
+### Retried jobs
+
+Under Redis coordination a backup job that was cancelled, or whose worker died, runs again. A backup
+already recorded as completed is reported as such and not rebuilt. When an earlier attempt published
+the archive but died before recording it, the retry adopts that archive instead of exporting again,
+once it has matched the digest recorded at publish time (S3), passed the same inventory, checksum
+and organization checks a restore applies, and so proved to belong to this organization. Any other
+archive under the backup's name fails the backup and is left untouched.
 
 ### Archives in Amazon S3
 
@@ -1231,10 +1265,12 @@ Grant the pod role access to the archives prefix, alongside the receipts stateme
 ```
 
 `s3:ListBucket` serves retention, which lists the prefix to find archives past
-`SIBYL_BACKUP_RETENTION_DAYS`, and lets a missing archive answer 404 instead of 403.
+`SIBYL_BACKUP_RETENTION_DAYS`, and lets a missing archive answer 404 instead of 403; each backup
+also asks whether an earlier attempt already published its archive, which needs that answer.
 `s3:AbortMultipartUpload` lets a failed upload clean up after itself. Downloads are streamed from
 the bucket through the API in 1 MiB chunks, so no replica holds a whole archive in memory, and the
-browser never needs bucket access.
+browser never needs bucket access. A single `Range: bytes=` request gets `206 Partial Content` for
+that part, from either store, so an interrupted download resumes.
 
 How archives keep their guarantees in S3:
 
@@ -1248,7 +1284,14 @@ How archives keep their guarantees in S3:
 - **Checked as each backup begins.** Before any organization data is exported, the job creates a
   probe object under the prefix, confirms a second create is refused, confirms an unsigned read of
   it fails, and deletes it. An S3-compatible store that ignores `If-None-Match`, or a bucket that
-  serves objects to anonymous requests, fails the backup with that reason.
+  serves that probe to anonymous requests, fails the backup with that reason. The unsigned read is
+  best effort, as for receipts: it asks only for the probe key, and a timeout or any other
+  non-success answer counts as refused, so it catches a public bucket but is not an audit of the
+  bucket policy.
+- **Staged on the pod.** An S3 backup assembles its export and archive in the pod's `/tmp`, the
+  chart's `tmp` emptyDir, before uploading, which needs about eleven times the largest archive. Set
+  `ephemeral-storage` requests and limits on the worker (and on the backend under local
+  coordination) to match.
 
 **Archives hold secrets in the clear.** Unlike receipts, an archive is not encrypted by Sibyl: it
 carries the organization's memory, and its content payload carries the recovery keys that decrypt
@@ -1301,3 +1344,17 @@ for archive in /var/lib/sibyl-receipts/backups/sibyl_*.tar.gz; do
     --metadata "sha256=$(sha256sum "$archive" | cut -d' ' -f1)"
 done
 ```
+
+### Upgrading
+
+- **Receipts already on a claim.** Nothing to change: archives start landing in `backups` beside the
+  receipts on that claim. Backups could not be written under earlier charts, so expect the claim to
+  start filling once they succeed, and size it as above or move archives off it.
+- **Receipts in S3.** `helm upgrade` refuses to render until `backend.backupArchives.url` or
+  `backend.backupArchives.existingClaim` is set.
+- **Moving receipts to S3 and keeping their old claim for archives.** Archives live in `backups` on
+  the receipts claim but in `archives` on an archives claim. When `backupArchives.existingClaim`
+  takes over the old receipts claim, move `/var/lib/sibyl-backups/backups/*` to
+  `/var/lib/sibyl-backups/archives/` from a pod that mounts it, or existing backups stay listed but
+  answer 404 on download.
+- **Moving archives to S3.** Use the create-only copy above, then set `backupArchives.url`.

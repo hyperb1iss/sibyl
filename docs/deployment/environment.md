@@ -786,13 +786,14 @@ setting SMTP passwords in a Compose `.env` file, escape literal `$` characters a
 Scheduled archive backups run from the worker. See [Monitoring](monitoring.md) for operational
 detail.
 
-| Variable                      | Default            | Description                                                       |
-| ----------------------------- | ------------------ | ----------------------------------------------------------------- |
-| `SIBYL_BACKUP_ENABLED`        | `true`             | Enable scheduled automatic backups                                |
-| `SIBYL_BACKUP_DIR`            | `~/.sibyl/backups` | Archive directory, shared by every API and worker process         |
-| `SIBYL_BACKUP_ARCHIVE_URL`    | (empty)            | `s3://bucket[/prefix][?region=name]`; replaces the directory      |
-| `SIBYL_BACKUP_RETENTION_DAYS` | `30`               | Days to retain archives before the scheduled cleanup removes them |
-| `SIBYL_BACKUP_SCHEDULE`       | `0 2 * * *`        | Cron schedule for automatic backups (2 AM daily)                  |
+| Variable                             | Default            | Description                                                                           |
+| ------------------------------------ | ------------------ | ------------------------------------------------------------------------------------- |
+| `SIBYL_BACKUP_ENABLED`               | `true`             | Enable scheduled automatic backups                                                    |
+| `SIBYL_BACKUP_DIR`                   | `~/.sibyl/backups` | Archive directory, shared by every API and worker process                             |
+| `SIBYL_BACKUP_ARCHIVE_URL`           | (empty)            | `s3://bucket[/prefix][?region=name]`; replaces the directory                          |
+| `SIBYL_BACKUP_FREE_SPACE_RESERVE_MB` | `512`              | MiB a directory store keeps free on its volume; a backup that would use it is refused |
+| `SIBYL_BACKUP_RETENTION_DAYS`        | `30`               | Days to retain archives before the scheduled cleanup removes them                     |
+| `SIBYL_BACKUP_SCHEDULE`              | `0 2 * * *`        | Cron schedule for automatic backups (2 AM daily)                                      |
 
 A backup archive is written once by whichever process runs the backup job (the worker under Redis
 coordination, the API otherwise) and downloaded through any API replica, so every process must open
