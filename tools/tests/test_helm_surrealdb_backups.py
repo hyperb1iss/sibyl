@@ -1408,3 +1408,15 @@ def test_helm_export_keeps_the_organization_log_bounded(harness: OpsHarness) -> 
     )
     listed = [item["organization"] for item in _manifest(harness)["organizations"]["without_graph"]]
     assert listed == list(orphans)
+
+
+def test_helm_export_org_check_requires_the_graph_database(harness: OpsHarness) -> None:
+    """An org namespace holding some other database still has no graph."""
+    other = "org_" + ORPHAN_ORG.replace("-", "")
+    harness.serve(source={**_source(), other: {"scratch": {"t": 1}}}, org_uuids=(ORPHAN_ORG,))
+    result = harness.run("export")
+
+    assert result.returncode == 0, result.stderr
+    assert _manifest(harness)["organizations"]["without_graph"] == [
+        {"organization": ORPHAN_ORG, "namespace": other, "database": "graph"}
+    ]
