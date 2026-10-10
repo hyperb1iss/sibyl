@@ -8,6 +8,7 @@ from pydantic import SecretStr
 from starlette.requests import Request
 
 from sibyl.ai.llm import routes
+from sibyl.api.errors import http_exception_payload
 from sibyl_core.ai.llm.config import ConfigField, LLMSurface, ResolvedLLMConfig
 from sibyl_core.ai.validation import SurfaceTestResult
 
@@ -122,7 +123,11 @@ async def test_update_llm_surface_rejects_env_locked_field(
         )
 
     assert exc_info.value.status_code == 409
-    assert exc_info.value.detail["code"] == "LOCKED_BY_ENV"
+    payload = http_exception_payload(exc_info.value, "req")
+    assert payload["error"] == "locked_by_env"
+    assert payload["details"] == {
+        "fields": [{"field": "model", "env_var": "SIBYL_LLM_CRAWLER_MODEL"}]
+    }
 
 
 @pytest.mark.asyncio

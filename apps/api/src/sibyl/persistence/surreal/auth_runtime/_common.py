@@ -87,8 +87,13 @@ _SESSION_DATETIME_FIELDS = {
     "expires_at",
     "refresh_token_expires_at",
     "revoked_at",
+    "revocation_announced_at",
     "last_active_at",
 }
+# Revoking a session again re-announces it, which heals a replica that missed
+# the first announcement; at most once per this window per session, so
+# repeated logouts with one token cannot become a stream of announcements.
+REANNOUNCE_REVOCATION_AFTER = timedelta(seconds=30)
 _API_KEY_DATETIME_FIELDS = {
     "created_at",
     "updated_at",
@@ -755,7 +760,8 @@ class SurrealSessionRepository(_SurrealRepository):
     async def revoke_session(self, session_id: UUID, user_id: UUID) -> bool:
         now = _utcnow()
         result = await self._client.execute_query(
-            "UPDATE user_sessions SET revoked_at = $revoked_at, updated_at = $updated_at "
+            "UPDATE user_sessions SET revoked_at = $revoked_at, updated_at = $updated_at, "
+            "revocation_announced_at = $revoked_at "
             "WHERE uuid = $uuid AND user_id = $user_id AND revoked_at = NONE;",
             uuid=str(session_id),
             user_id=str(user_id),
@@ -766,20 +772,26 @@ class SurrealSessionRepository(_SurrealRepository):
         if error is not None:
             raise RuntimeError(error)
         revoked = bool(_normalize_records(result))
-        if revoked:
+        if revoked or await self._claim_reannouncement(session_id, user_id=user_id):
             access_session_cache.mark_revoked(session_id, user_id=user_id)
-        # Announced even when nothing changed: revoking again is how a peer
-        # that missed the first announcement gets healed.
-        await announce_sessions_invalidated(session_ids=[session_id])
+            await announce_sessions_invalidated(session_ids=[session_id])
         return revoked
 
     async def revoke_loaded_session(self, session: AuthSession) -> bool:
         if session.revoked_at is not None:
-            await announce_sessions_invalidated(session_ids=[session.id])
+            if await self._claim_reannouncement(session.id):
+                access_session_cache.mark_revoked(
+                    session.id,
+                    user_id=session.user_id,
+                    organization_id=session.organization_id,
+                    expires_at=session.refresh_token_expires_at or session.expires_at,
+                )
+                await announce_sessions_invalidated(session_ids=[session.id])
             return False
         now = _utcnow()
         result = await self._client.execute_query(
-            "UPDATE user_sessions SET revoked_at = $revoked_at, updated_at = $updated_at "
+            "UPDATE user_sessions SET revoked_at = $revoked_at, updated_at = $updated_at, "
+            "revocation_announced_at = $revoked_at "
             "WHERE uuid = $uuid;",
             uuid=str(session.id),
             revoked_at=now,
@@ -797,6 +809,32 @@ class SurrealSessionRepository(_SurrealRepository):
         await announce_sessions_invalidated(session_ids=[session.id])
         return True
 
+    async def _claim_reannouncement(self, session_id: UUID, *, user_id: UUID | None = None) -> bool:
+        """Claim the right to re-announce an already-revoked session.
+
+        One conditional UPDATE decides, so however many replicas see repeated
+        logouts at once, one of them re-announces per window.
+        """
+        now = _utcnow()
+        params: SurrealRecord = {
+            "uuid": str(session_id),
+            "now": now,
+            "cutoff": now - REANNOUNCE_REVOCATION_AFTER,
+        }
+        query = (
+            "UPDATE user_sessions SET revocation_announced_at = $now "
+            "WHERE uuid = $uuid AND revoked_at != NONE "
+            "AND (revocation_announced_at = NONE OR revocation_announced_at <= $cutoff)"
+        )
+        if user_id is not None:
+            query += " AND user_id = $user_id"
+            params["user_id"] = str(user_id)
+        result = await self._client.execute_query(query + ";", **params)
+        error = _query_error(result)
+        if error is not None:
+            raise RuntimeError(error)
+        return bool(_normalize_records(result))
+
     async def revoke_all_sessions(
         self, user_id: UUID, *, exclude_token_hash: str | None = None
     ) -> int:
@@ -807,7 +845,8 @@ class SurrealSessionRepository(_SurrealRepository):
             "updated_at": now,
         }
         query = (
-            "UPDATE user_sessions SET revoked_at = $revoked_at, updated_at = $updated_at "
+            "UPDATE user_sessions SET revoked_at = $revoked_at, updated_at = $updated_at, "
+            "revocation_announced_at = $revoked_at "
             "WHERE user_id = $user_id AND revoked_at = NONE"
         )
         if exclude_token_hash:

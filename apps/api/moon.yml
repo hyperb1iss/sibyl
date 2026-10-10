@@ -16,6 +16,8 @@ fileGroups:
     - src/**/*
   tests:
     - tests/**/*
+    # Error-body contracts the web tests share (tests/test_locked_by_env_contract.py).
+    - /apps/web/src/test/fixtures/api/**/*
   configs:
     - pyproject.toml
     - /pyproject.toml
@@ -284,7 +286,7 @@ tasks:
 
   # Live SurrealDB runtime tests (requires the CI SurrealDB service)
   test-live:
-    command: SIBYL_LIVE_SURREAL_TESTS=1 uv run pytest tests/test_surreal_live_runtime.py tests/test_surreal_live_raw_embedding_space.py tests/test_mcp_oauth_replicas.py tests/test_cache_invalidation.py tests/test_surreal_live_query_shapes.py --no-cov -v
+    command: SIBYL_LIVE_SURREAL_TESTS=1 uv run pytest tests/test_surreal_live_runtime.py tests/test_surreal_live_raw_embedding_space.py tests/test_mcp_oauth_replicas.py tests/test_cache_invalidation.py tests/test_surreal_live_query_shapes.py tests/test_session_reannouncement.py --no-cov -v
     inputs:
       - "@group(sources)"
       - tests/test_surreal_live_runtime.py
@@ -292,6 +294,7 @@ tasks:
       - tests/test_mcp_oauth_replicas.py
       - tests/test_cache_invalidation.py
       - tests/test_surreal_live_query_shapes.py
+      - tests/test_session_reannouncement.py
     options:
       cache: false
       runInCI: true

@@ -10,6 +10,7 @@ import structlog
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
+from sibyl.api.errors import locked_by_env
 from sibyl.cache_invalidation import announce_runtime_settings_changed
 from sibyl.crypto import mask_secret
 from sibyl.persistence.operations_runtime import (
@@ -62,14 +63,7 @@ def _unchanged_deployment_settings(requested: dict[str, object]) -> set[str]:
         else:
             conflicts.append({"field": key, "env_var": env_var})
     if conflicts:
-        raise HTTPException(
-            status_code=409,
-            detail={
-                "code": "LOCKED_BY_ENV",
-                "fields": conflicts,
-                "deployment_owned": _deployment_owned_settings(),
-            },
-        )
+        raise locked_by_env(conflicts, deployment_owned=_deployment_owned_settings())
     return unchanged
 
 

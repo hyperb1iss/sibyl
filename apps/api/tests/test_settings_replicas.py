@@ -31,6 +31,7 @@ from starlette.requests import Request
 from sibyl import cache_invalidation
 from sibyl.ai.llm import service as llm_service
 from sibyl.ai.llm.config_source import DBSettingsConfigSource
+from sibyl.api.errors import http_exception_payload
 from sibyl.api.routes import settings as settings_routes
 from sibyl.cache_invalidation import (
     RUNTIME_SETTINGS_TOPIC,
@@ -369,8 +370,8 @@ async def test_the_settings_route_refuses_a_setting_the_deployment_pins(
         )
 
     assert refused.value.status_code == 409
-    assert refused.value.detail == {
-        "code": "LOCKED_BY_ENV",
+    details = http_exception_payload(refused.value, "req")["details"]
+    assert details == {
         "fields": [{"field": field, "env_var": variable}],
         "deployment_owned": [{"field": field, "env_var": variable}],
     }
@@ -424,10 +425,11 @@ async def test_resubmitting_the_deployments_own_values_saves_only_the_rest(
                 embedding_model="text-embedding-3-small", embedding_dimensions=768
             ),
         )
-    assert refused.value.detail["fields"] == [
+    details = http_exception_payload(refused.value, "req")["details"]
+    assert details["fields"] == [
         {"field": "embedding_dimensions", "env_var": "SIBYL_EMBEDDING_DIMENSIONS"}
     ]
-    assert {owned["field"] for owned in refused.value.detail["deployment_owned"]} == {
+    assert {owned["field"] for owned in details["deployment_owned"]} == {
         "embedding_model",
         "embedding_dimensions",
     }

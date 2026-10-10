@@ -52,7 +52,7 @@ EXTENDED_AUTH_TABLES = (
     "oauth_authorization_requests",
 )
 AUTH_TABLES = (*CORE_AUTH_TABLES, *EXTENDED_AUTH_TABLES)
-AUTH_SCHEMA_CURRENT_VERSION = 9
+AUTH_SCHEMA_CURRENT_VERSION = 10
 AUTH_SCHEMA_NAME = "auth"
 _AUTH_ORGANIZATION_ROLE_VALUES = tuple(role.value for role in OrganizationRole)
 _AUTH_PROJECT_ROLE_VALUES = tuple(role.value for role in ProjectRole)
@@ -723,6 +723,12 @@ DEFINE INDEX IF NOT EXISTS idx_oauth_authorization_requests_expires
 ALTER TABLE IF EXISTS oauth_authorization_requests PERMISSIONS NONE;
 """
 
+# When a revoked session was last announced to the other replicas, so that
+# revoking it again re-announces at most once per window.
+AUTH_SESSION_REVOCATION_ANNOUNCED_DEFINITIONS = """
+DEFINE FIELD IF NOT EXISTS revocation_announced_at ON user_sessions TYPE option<datetime>;
+"""
+
 AUTH_SCHEMA_MIGRATIONS = (
     SchemaMigration(
         version=1,
@@ -772,6 +778,11 @@ AUTH_SCHEMA_MIGRATIONS = (
         version=9,
         name="auth_oauth_authorization_requests",
         statements=tuple(split_statements(AUTH_OAUTH_AUTHORIZATION_MIGRATION_DEFINITIONS)),
+    ),
+    SchemaMigration(
+        version=10,
+        name="auth_session_revocation_announced_at",
+        statements=tuple(split_statements(AUTH_SESSION_REVOCATION_ANNOUNCED_DEFINITIONS)),
     ),
 )
 
@@ -966,6 +977,7 @@ __all__ = [
     "AUTH_SCHEMA_DEFINITIONS",
     "AUTH_SCHEMA_MIGRATIONS",
     "AUTH_SCHEMA_NAME",
+    "AUTH_SESSION_REVOCATION_ANNOUNCED_DEFINITIONS",
     "AUTH_TABLES",
     "CORE_AUTH_TABLES",
     "EXTENDED_AUTH_TABLES",

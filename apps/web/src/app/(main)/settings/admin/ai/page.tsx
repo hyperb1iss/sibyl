@@ -50,6 +50,7 @@ import type {
   SettingsResponse,
   UpdateSettingsRequest,
 } from '@/lib/api';
+import { parseLockedByEnv } from '@/lib/api/errors';
 import {
   useDeleteSetting,
   useLLMRegistry,
@@ -183,18 +184,11 @@ function embeddingLocks(settings: SettingsResponse | undefined): EmbeddingLocks 
   return locks;
 }
 
-/** The deployment variables a 409 LOCKED_BY_ENV refusal names, if the error is one. */
+/** The deployment variables a 409 locked_by_env refusal names, if the error is one. */
 function lockedVariables(error: unknown): string[] {
-  if (!(error instanceof Error)) return [];
-  try {
-    const body = JSON.parse(error.message) as {
-      detail?: { code?: string; fields?: { env_var?: string }[] };
-    };
-    if (body.detail?.code !== 'LOCKED_BY_ENV') return [];
-    return (body.detail.fields ?? []).map(field => field.env_var ?? '').filter(Boolean);
-  } catch {
-    return [];
-  }
+  const locked = parseLockedByEnv(error);
+  if (!locked) return [];
+  return locked.fields.map(field => field.env_var ?? field.field);
 }
 
 function DeploymentOwnedNote({ envVar }: { envVar: string }) {

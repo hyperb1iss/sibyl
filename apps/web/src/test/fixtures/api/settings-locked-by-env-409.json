@@ -1,0 +1,12 @@
+{
+  "error": "locked_by_env",
+  "message": "This setting is set by the deployment environment.",
+  "remediation": "Change it in the deployment, or unset the variable to manage it here.",
+  "details": {
+    "fields": [{ "field": "embedding_model", "env_var": "SIBYL_EMBEDDING_MODEL" }],
+    "deployment_owned": [
+      { "field": "embedding_model", "env_var": "SIBYL_EMBEDDING_MODEL" },
+      { "field": "embedding_dimensions", "env_var": "SIBYL_EMBEDDING_DIMENSIONS" }
+    ]
+  }
+}
