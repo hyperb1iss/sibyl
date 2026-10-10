@@ -30,6 +30,7 @@ from sibyl.auth.jwt import (
     decode_token_unverified,
 )
 from sibyl.auth.session_cache import access_session_cache
+from sibyl.cache_invalidation import announce_sessions_invalidated
 from sibyl.persistence.surreal.auth import (
     SurrealAuthContextResolver,
     surreal_auth_client_scope,
@@ -765,6 +766,7 @@ class SurrealSessionRepository(_SurrealRepository):
         revoked = bool(_normalize_records(result))
         if revoked:
             access_session_cache.mark_revoked(session_id, user_id=user_id)
+            await announce_sessions_invalidated(session_ids=[session_id])
         return revoked
 
     async def revoke_loaded_session(self, session: AuthSession) -> bool:
@@ -787,6 +789,7 @@ class SurrealSessionRepository(_SurrealRepository):
             organization_id=session.organization_id,
             expires_at=session.refresh_token_expires_at or session.expires_at,
         )
+        await announce_sessions_invalidated(session_ids=[session.id])
         return True
 
     async def revoke_all_sessions(
@@ -811,6 +814,7 @@ class SurrealSessionRepository(_SurrealRepository):
             raise RuntimeError(error)
         records = _normalize_records(result)
         access_session_cache.invalidate_user(user_id)
+        await announce_sessions_invalidated(user_ids=[user_id])
         return len(records)
 
     async def cleanup_expired(self, *, older_than_days: int = 30) -> int:

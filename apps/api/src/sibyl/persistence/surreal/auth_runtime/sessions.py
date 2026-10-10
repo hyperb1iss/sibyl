@@ -13,6 +13,7 @@ from sibyl.auth.jwt import (
     create_refresh_token,
 )
 from sibyl.auth.session_cache import access_session_cache
+from sibyl.cache_invalidation import announce_sessions_invalidated
 from sibyl.persistence.surreal.auth_runtime._common import (
     RefreshRotation,
     SurrealRecord,
@@ -178,6 +179,8 @@ async def validate_access_session(token: str) -> bool:
         cached = access_session_cache.get(session_id)
         if cached is not None:
             return cached
+    # Read before the database so a revocation landing mid-read voids this fill.
+    generation = access_session_cache.generation
 
     async with _auth_client_scope() as client:
         sessions = SurrealSessionRepository.from_client(client)
@@ -186,7 +189,7 @@ async def validate_access_session(token: str) -> bool:
             if session is None:
                 access_session_cache.mark_revoked(session_id)
                 return False
-            access_session_cache.store_session(session)
+            access_session_cache.store_session(session, generation=generation)
             return True
         return await sessions.get_session_by_token(token) is not None
 
@@ -269,6 +272,7 @@ async def revoke_access_session(token: str) -> None:
         if existing is None:
             if session_id is not None:
                 access_session_cache.mark_revoked(session_id)
+                await announce_sessions_invalidated(session_ids=[session_id])
             return
         await sessions.revoke_loaded_session(existing)
         access_session_cache.mark_revoked(

@@ -3,7 +3,7 @@ from __future__ import annotations
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 from uuid import UUID, uuid4
 
 import pytest
@@ -157,12 +157,22 @@ async def test_surreal_delete_org_batches_authorization_and_deletes_directly(
         "sibyl.persistence.surreal.content.delete_crawl_source_record",
         delete_crawl_source,
     )
+    announced = AsyncMock()
+    monkeypatch.setattr(surreal_organization_runtime, "announce_sessions_invalidated", announced)
+    invalidated = MagicMock()
+    monkeypatch.setattr(
+        surreal_organization_runtime.access_session_cache, "invalidate_organization", invalidated
+    )
 
     await surreal_organization_runtime.delete_org(
         request=_request(),
         slug="electric-coven",
         user_id=user_id,
     )
+
+    # The org's sessions were deleted, so no replica may keep vouching for them.
+    invalidated.assert_called_once_with(org_id)
+    announced.assert_awaited_once_with(organization_ids=[org_id])
 
     lookup_query, lookup_params = fake_client.calls[0]
     assert "RETURN" in lookup_query

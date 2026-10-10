@@ -18,6 +18,8 @@ from sibyl import config as config_module
 from sibyl.auth.http import select_access_token
 from sibyl.auth.jwt import create_access_token, create_refresh_token
 from sibyl.auth.primitives import generate_invite_token, slugify
+from sibyl.auth.session_cache import access_session_cache
+from sibyl.cache_invalidation import announce_sessions_invalidated
 from sibyl.persistence.auth_runtime import log_audit_event
 from sibyl.persistence.organization_common import (
     InvitationAcceptance,
@@ -1041,6 +1043,10 @@ async def delete_org(*, request: Request, slug: str, user_id: UUID) -> None:
             """,
             organization_id=str(organization_id),
         )
+        # The sessions are gone from the database; no replica may keep
+        # vouching for them from its validity cache.
+        access_session_cache.invalidate_organization(organization_id)
+        await announce_sessions_invalidated(organization_ids=[organization_id])
 
 
 async def list_org_members(*, slug: str, actor_id: UUID) -> list[dict[str, object]]:
