@@ -285,6 +285,57 @@ async def test_announcing_never_waits_on_an_unreachable_channel(
     assert a.bus.status()["pending_announcements"] == 0
 
 
+async def test_an_overflowing_backlog_collapses_into_one_reset(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An outage longer than the queue holds costs peers one full reset, not a long drain."""
+    monkeypatch.setattr(invalidation_module, "MAX_PENDING_ANNOUNCEMENTS", 5)
+    monkeypatch.setattr(invalidation_module, "PUBLISH_ATTEMPT_TIMEOUT_SECONDS", 0.05)
+    monkeypatch.setattr(invalidation_module, "PUBLISH_RETRY_MAX_SECONDS", 0.05)
+    table = SessionTable()
+    channel = FakeChannel()
+    a = await _replica(table, None)
+    stalled = _StalledTransport(channel)
+    await a.bus.attach(stalled)
+    b = await _replica(table, channel)
+    b_resets = 0
+
+    def count_reset() -> None:
+        nonlocal b_resets
+        b_resets += 1
+
+    b.bus.on_reset(count_reset, name="count")
+    bystander = _session()  # cached on B, never announced by anyone
+    revoked = [_session() for _ in range(12)]
+    for session in (bystander, *revoked):
+        table.active[session.id] = session
+        assert await b.validate(session.id) is True
+
+    for session in revoked:
+        await a.revoke(session)
+    status = a.bus.status()
+    assert status["pending_announcements"] <= 5
+    assert status["collapsed_backlogs"] >= 1
+
+    late = _session()
+    table.active[late.id] = late
+    assert await b.validate(late.id) is True
+    await a.revoke(late)
+    # The revocation after the collapse waits behind one reset, not the backlog.
+    assert a.bus.status()["pending_announcements"] <= 5
+
+    stalled.healed.set()
+    await settle(a, b)
+
+    assert b_resets >= 1
+    assert b.cache.get(bystander.id) is None  # the reset dropped what nobody announced
+    assert all(b.cache.get(session.id) is None for session in revoked)
+    assert b.cache.get(late.id) is None
+    assert await b.validate(bystander.id) is True  # re-read, still valid
+    for session in revoked:
+        assert await b.validate(session.id) is False
+
+
 async def test_a_slow_topic_does_not_hold_up_session_revocations() -> None:
     table = SessionTable()
     channel = FakeChannel()

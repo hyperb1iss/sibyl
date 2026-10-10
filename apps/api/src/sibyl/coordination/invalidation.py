@@ -14,7 +14,10 @@ Three properties keep the bus from becoming a liability on the request path:
 
 - Announcing never waits on Redis. It queues the message and returns; a sender
   task publishes in order with bounded attempts and keeps retrying a message
-  until Redis takes it, so a partition delays peers but never a logout.
+  until Redis takes it, so a partition delays peers but never a logout. The
+  queue is bounded: past MAX_PENDING_ANNOUNCEMENTS it collapses into one
+  reset message, which has every peer forget everything it cached, so the
+  backlog after an outage stays short and new revocations go out promptly.
 - Each topic is applied by its own worker, so a slow handler (a runtime
   rebuild) cannot hold up a fast one (a session revocation).
 - Pub/sub does not replay messages a subscriber missed while disconnected, so
@@ -44,7 +47,11 @@ INVALIDATION_CHANNEL = "sibyl:cache:invalidations"
 # One publish attempt; a failed attempt is retried with backoff, not dropped.
 PUBLISH_ATTEMPT_TIMEOUT_SECONDS = 2.0
 PUBLISH_RETRY_INITIAL_SECONDS = 0.1
-PUBLISH_RETRY_MAX_SECONDS = 5.0
+PUBLISH_RETRY_MAX_SECONDS = 2.0
+# Announcements held while Redis is unreachable. One reset message replaces
+# a longer backlog: it does what every message in it would have done.
+MAX_PENDING_ANNOUNCEMENTS = 1000
+RESET_TOPIC = "invalidation.reset"
 
 type InvalidationPayload = dict[str, Any]
 type InvalidationHandler = Callable[[InvalidationPayload], Awaitable[None] | None]
@@ -118,6 +125,7 @@ class CacheInvalidationBus:
         self._sender: asyncio.Task[None] | None = None
         self._publish_failures = 0
         self._last_publish_error: str | None = None
+        self._collapsed_backlogs = 0
 
     @property
     def broadcasting(self) -> bool:
@@ -146,6 +154,7 @@ class CacheInvalidationBus:
         return {
             "state": state,
             "pending_announcements": len(self._outbox),
+            "collapsed_backlogs": self._collapsed_backlogs,
             "publish_failures": self._publish_failures,
             "last_error": self._last_publish_error or getattr(transport, "last_error", None),
         }
@@ -201,7 +210,10 @@ class CacheInvalidationBus:
         """
         if not self._broadcasting:
             return
-        self._outbox.append((topic, {"origin": self.origin, "payload": payload}))
+        if len(self._outbox) >= MAX_PENDING_ANNOUNCEMENTS:
+            self._collapse_backlog()
+        else:
+            self._outbox.append((topic, {"origin": self.origin, "payload": payload}))
         self._ensure_sender()
         if self._outbox_empty is not None:
             self._outbox_empty.clear()
@@ -233,6 +245,18 @@ class CacheInvalidationBus:
             except Exception:
                 log.exception("cache_invalidation_reset_failed")
 
+    def _collapse_backlog(self) -> None:
+        """Replace the backlog with one message that resets every peer."""
+        dropped = len(self._outbox)
+        self._outbox.clear()
+        self._outbox.append((RESET_TOPIC, {"origin": self.origin, "payload": {}}))
+        self._collapsed_backlogs += 1
+        log.warning(
+            "cache_invalidation_backlog_collapsed",
+            dropped=dropped,
+            collapsed_backlogs=self._collapsed_backlogs,
+        )
+
     def _ensure_sender(self) -> None:
         if self._transport is None:
             return
@@ -257,7 +281,8 @@ class CacheInvalidationBus:
             transport = self._transport
             if transport is None:
                 return
-            topic, message = self._outbox[0]
+            item = self._outbox[0]
+            topic, message = item
             try:
                 await asyncio.wait_for(
                     transport.publish(topic, message), PUBLISH_ATTEMPT_TIMEOUT_SECONDS
@@ -277,13 +302,20 @@ class CacheInvalidationBus:
                 await asyncio.sleep(delay)
                 delay = min(delay * 2, PUBLISH_RETRY_MAX_SECONDS)
                 continue
-            self._outbox.popleft()
+            # The backlog may have collapsed while this was in flight; only
+            # retire the message that was actually sent.
+            if self._outbox and self._outbox[0] is item:
+                self._outbox.popleft()
             self._last_publish_error = None
             delay = PUBLISH_RETRY_INITIAL_SECONDS
 
     async def _receive(self, topic: str, data: dict[str, Any], org_id: str | None) -> None:
         del org_id
         if data.get("origin") == self.origin:
+            return
+        if topic == RESET_TOPIC:
+            # A peer's backlog overflowed: whatever it held, forget everything.
+            await self.reset()
             return
         worker = self._workers.get(topic)
         if worker is None:
@@ -310,6 +342,8 @@ def build_invalidation_transport(bus: CacheInvalidationBus) -> InvalidationTrans
 
 __all__ = [
     "INVALIDATION_CHANNEL",
+    "MAX_PENDING_ANNOUNCEMENTS",
+    "RESET_TOPIC",
     "CacheInvalidationBus",
     "InvalidationHandler",
     "InvalidationPayload",
