@@ -24,7 +24,9 @@ Choose where completed validation receipts live before installation. An S3 bucke
 (`backend.validationReceipts.url`) lets API and worker run on any node with no shared volume. A
 persistent claim (`backend.validationReceipts.existingClaim`) must be shared by API and worker, and
 multi-node replicas then require ReadWriteMany storage. See
-[Durable Validation Receipts](#durable-validation-receipts).
+[Durable Validation Receipts](#durable-validation-receipts). Organization backup archives follow the
+same choice: by default they live on the receipts claim, and with receipts in S3 they need their own
+bucket prefix or claim. See [Backup Archives](#backup-archives).
 
 ```bash
 # From the published Helm repository (recommended)
@@ -849,6 +851,10 @@ backend:
     existingClaim: sibyl-validation-receipts
     # Or keep receipts in S3 and leave existingClaim empty:
     # url: "s3://sibyl-receipts/prod?region=us-west-2"
+  # Archives default to the receipts claim; with receipts in S3, name a
+  # separate prefix (or a claim) for them:
+  # backupArchives:
+  #   url: "s3://sibyl-backups/prod?region=us-west-2"
   surreal:
     url: "ws://prod-surrealdb.internal:8000/rpc"
     username: "root"
@@ -1154,3 +1160,144 @@ definition. Recover pending validation receipts with the current server before a
 retaining the receipt volume or bucket and a coherent database backup. Removing the receipt store
 loses outage recovery for pending results; replay still refuses to repeat an unresolved provider
 dispatch.
+
+## Backup Archives
+
+Organization backups (web settings, `/api/backups`, and the scheduled per-organization backups) are
+written as one `.tar.gz` archive per backup by whichever process runs the backup job: the worker
+under Redis coordination, or the API pod that took the job under local coordination. Any API replica
+then lists, downloads and deletes it, so every backend and worker pod must open the same archive
+store. The image's working directory is read-only under the chart and only per-pod storage could be
+written there, so the chart never leaves archives in the container.
+
+Where archives live:
+
+| Values                                 | Archive store                                           |
+| -------------------------------------- | ------------------------------------------------------- |
+| neither set (default)                  | `/var/lib/sibyl-receipts/backups` on the receipts claim |
+| `backend.backupArchives.existingClaim` | `/var/lib/sibyl-backups/archives` on that claim         |
+| `backend.backupArchives.url`           | the S3 prefix, through `SIBYL_BACKUP_ARCHIVE_URL`       |
+
+Set at most one of `url` and `existingClaim`. With receipts in S3 there is no claim to share, so the
+chart refuses to render until one of them is set. The chart sets `SIBYL_BACKUP_DIR` or
+`SIBYL_BACKUP_ARCHIVE_URL` on API and worker alike, and refuses either variable in `backend.env`.
+
+A claim is a shared directory only when every pod mounts it: a ReadWriteOnce claim works while API
+and worker run on one node (the single-replica default, which rolls with `maxSurge: 0` for an
+archives claim exactly as for the receipts claim), and multi-node replicas need ReadWriteMany. Each
+archive is assembled in a hidden staging directory on the same volume and published with a hard
+link, so a listing never shows a half-written archive and a published archive is never replaced. A
+new archive directory is created private (`0700`) and each archive `0600`.
+
+### Archives in Amazon S3
+
+```yaml
+serviceAccount:
+  annotations:
+    eks.amazonaws.com/role-arn: arn:aws:iam::<account-id>:role/sibyl
+
+backend:
+  validationReceipts:
+    url: "s3://<bucket>/sibyl/receipts?region=us-west-2"
+  backupArchives:
+    url: "s3://<bucket>/sibyl/backups?region=us-west-2"
+```
+
+The URL has the same shape and render-time checks as `backend.validationReceipts.url`, and uses the
+same client: credentials from the pod's AWS identity, `AWS_REGION` when the URL names no region,
+`backend.env.AWS_ENDPOINT_URL_S3` for an S3-compatible endpoint, and the same timeouts and retries.
+Archives and receipts may share a bucket but not a prefix, and neither prefix may contain the other;
+the chart and the server both refuse an overlap, because receipt export and archive retention each
+list their own prefix.
+
+Grant the pod role access to the archives prefix, alongside the receipts statement:
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": ["s3:PutObject", "s3:GetObject", "s3:DeleteObject", "s3:AbortMultipartUpload"],
+      "Resource": "arn:aws:s3:::<bucket>/sibyl/backups/*"
+    },
+    {
+      "Effect": "Allow",
+      "Action": "s3:ListBucket",
+      "Resource": "arn:aws:s3:::<bucket>"
+    }
+  ]
+}
+```
+
+`s3:ListBucket` serves retention, which lists the prefix to find archives past
+`SIBYL_BACKUP_RETENTION_DAYS`, and lets a missing archive answer 404 instead of 403.
+`s3:AbortMultipartUpload` lets a failed upload clean up after itself. Downloads are streamed from
+the bucket through the API in 1 MiB chunks, so no replica holds a whole archive in memory, and the
+browser never needs bucket access.
+
+How archives keep their guarantees in S3:
+
+- **Written once.** An archive up to 16 MiB is one `PutObject`, and a larger one a multipart upload
+  in 16 MiB parts; both carry `If-None-Match: *`. Each object records its SHA-256 in user metadata,
+  so a `412 Precondition Failed` is resolved by comparing digests: the same digest is a retried
+  write that already landed, a different one fails the backup and leaves the existing archive in
+  place. A `409` from a racing request retries the whole upload, as S3 documents.
+- **Never half visible.** S3 lists and serves a multipart upload only after
+  `CompleteMultipartUpload` succeeds. A failed upload is aborted while the endpoint still answers.
+- **Checked as each backup begins.** Before any organization data is exported, the job creates a
+  probe object under the prefix, confirms a second create is refused, confirms an unsigned read of
+  it fails, and deletes it. An S3-compatible store that ignores `If-None-Match`, or a bucket that
+  serves objects to anonymous requests, fails the backup with that reason.
+
+**Archives hold secrets in the clear.** Unlike receipts, an archive is not encrypted by Sibyl: it
+carries the organization's memory, and its content payload carries the recovery keys that decrypt
+its validation receipts. Keep the bucket's default encryption on (SSE-S3, or SSE-KMS with
+`kms:GenerateDataKey` and `kms:Decrypt` granted on the key; Sibyl sends no
+`x-amz-server-side-encryption` header, so rely on bucket default encryption rather than a policy
+that denies uploads without one), keep S3 Block Public Access on, grant read access to the prefix
+only to the Sibyl role and the people who restore backups, and consider a separate bucket or KMS key
+from receipts so read access to one does not imply the other. Sibyl logs archive names, sizes and
+locations, never their contents.
+
+Add a lifecycle rule for the prefix so an upload stranded by a dead pod or endpoint, or a readiness
+probe, does not linger:
+
+```json
+{
+  "Rules": [
+    {
+      "ID": "sibyl-backup-uploads",
+      "Status": "Enabled",
+      "Filter": { "Prefix": "sibyl/backups/" },
+      "AbortIncompleteMultipartUpload": { "DaysAfterInitiation": 1 },
+      "NoncurrentVersionExpiration": { "NoncurrentDays": 1 },
+      "Expiration": { "ExpiredObjectDeleteMarker": true }
+    },
+    {
+      "ID": "sibyl-backup-probes",
+      "Status": "Enabled",
+      "Filter": { "Prefix": "sibyl/backups/.probe-" },
+      "Expiration": { "Days": 1 }
+    }
+  ]
+}
+```
+
+Retention stays Sibyl's: the scheduled cleanup removes archives older than
+`SIBYL_BACKUP_RETENTION_DAYS` along with their backup records, and an organization admin's cleanup
+removes only that organization's expired archives. Do not add an expiration rule for archives
+themselves, or the web settings will list backups whose archive is gone.
+
+To move existing archives from a claim into the bucket, copy them under the same names with a
+create-only upload from a pod that mounts the claim (archives live in
+`/var/lib/sibyl-receipts/backups` on the default layout), then upgrade with `backupArchives.url`
+set:
+
+```bash
+for archive in /var/lib/sibyl-receipts/backups/sibyl_*.tar.gz; do
+  aws s3api put-object --bucket <bucket> --key "sibyl/backups/$(basename "$archive")" \
+    --body "$archive" --if-none-match '*' \
+    --metadata "sha256=$(sha256sum "$archive" | cut -d' ' -f1)"
+done
+```
