@@ -333,9 +333,15 @@ async def enqueue_backup(
     )
 
 
-async def enqueue_backup_cleanup(*, retention_days: int | None = None) -> str:
-    """Enqueue a backup cleanup job."""
-    return await get_queue().enqueue_backup_cleanup(retention_days=retention_days)
+async def enqueue_backup_cleanup(
+    *,
+    retention_days: int | None = None,
+    organization_id: str | None = None,
+) -> str:
+    """Enqueue a backup cleanup job, for one organization or the whole store."""
+    return await get_queue().enqueue_backup_cleanup(
+        retention_days=retention_days, organization_id=organization_id
+    )
 
 
 async def enqueue_consolidation(
