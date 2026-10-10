@@ -165,9 +165,11 @@ The backend and worker read the same `SIBYL_COORDINATION_BACKEND`, defaulting to
 idling while the backend runs every job itself. Use `local` or `redis` in these files rather than
 `auto`, because the compose files always set the Redis address and `auto` would resolve to `redis`.
 The worker's healthcheck runs `sibyld worker --check`, which passes while a worker heartbeat is live
-in Valkey. `sibyl docker upgrade` brings an older `--with-worker` bundle up to the same wiring and
-moves its settings key into the bundle's `.env`, keeping the key the running API generated when it
-can read it.
+in Valkey (the heartbeat belongs to the queue, so with several workers it shows that one is live,
+not which). `sibyl docker upgrade` brings an older `--with-worker` bundle up to the same wiring and
+moves its settings key into the bundle's `.env`, keeping the key the API container generated,
+whether that container is running or stopped. If a key exists but cannot be read, the upgrade stops
+without changing anything.
 
 The repo's `docker-compose.prod.yml` refuses to start without both `SIBYL_OPENAI_API_KEY` and
 `SIBYL_ANTHROPIC_API_KEY`, and it pins Anthropic as the language model, so switching providers there

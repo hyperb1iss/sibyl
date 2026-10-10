@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import io
 import os
 import secrets
 import subprocess
+import tarfile
 from copy import deepcopy
 from pathlib import Path
 from typing import Annotated, Any
@@ -323,34 +325,98 @@ def _env_settings_key() -> str | None:
     return None
 
 
-def _running_api_settings_key() -> str | None:
-    """The settings key an older bundle's running API generated for itself.
+# Where an older bundle's API kept the settings key it generated for itself.
+API_SETTINGS_KEY_PATH = "/home/sibyl/.sibyl/settings.key"
+_MISSING_PATH_MARKERS = ("could not find the file", "no such container:path")
 
-    Such a key lives only inside the API container, so carrying it into the
-    env file keeps the secrets it encrypted readable after the upgrade.
-    """
+
+class SettingsKeyUnreadableError(Exception):
+    """An API container exists, but the settings key in it could not be read."""
+
+
+def _api_container_ids() -> list[str]:
+    """The bundle's API containers, running or stopped."""
     result = subprocess.run(
-        compose_command(["exec", "-T", "api", "cat", "/home/sibyl/.sibyl/settings.key"]),
+        compose_command(["ps", "--all", "--quiet", "api"]),
         text=True,
         capture_output=True,
         check=False,
     )
-    key = result.stdout.strip()
-    if result.returncode != 0 or len(key) != 44 or not key.endswith("="):
-        return None
+    if result.returncode != 0:
+        raise SettingsKeyUnreadableError(result.stderr.strip() or "docker compose ps failed")
+    return [line.strip() for line in result.stdout.splitlines() if line.strip()]
+
+
+def _container_settings_key(container_id: str) -> str | None:
+    """The key file inside a container, or None if it has none.
+
+    ``docker cp`` reads a stopped container as well as a running one, which
+    ``docker compose exec`` cannot.
+    """
+    result = subprocess.run(
+        ["docker", "cp", f"{container_id}:{API_SETTINGS_KEY_PATH}", "-"],
+        capture_output=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        detail = result.stderr.decode(errors="replace").strip()
+        if any(marker in detail.lower() for marker in _MISSING_PATH_MARKERS):
+            return None
+        raise SettingsKeyUnreadableError(detail or f"docker cp exited {result.returncode}")
+    try:
+        with tarfile.open(fileobj=io.BytesIO(result.stdout)) as archive:
+            member = next(entry for entry in archive.getmembers() if entry.isfile())
+            content = archive.extractfile(member)
+            key = content.read().decode().strip() if content is not None else ""
+    except (tarfile.TarError, StopIteration, UnicodeDecodeError) as exc:
+        raise SettingsKeyUnreadableError(f"unreadable key file: {exc}") from exc
+    if len(key) != 44 or not key.endswith("="):
+        raise SettingsKeyUnreadableError("the key file does not hold a settings key")
     return key
 
 
+def _existing_api_settings_key() -> tuple[str | None, bool]:
+    """The key an older bundle's API generated, and whether an API container exists."""
+    container_ids = _api_container_ids()
+    for container_id in container_ids:
+        key = _container_settings_key(container_id)
+        if key is not None:
+            return key, True
+    return None, bool(container_ids)
+
+
 def ensure_env_settings_key() -> None:
-    """Give the bundle's env file a settings key if it has none yet."""
+    """Give the bundle's env file a settings key if it has none yet.
+
+    An older bundle's API generated its key inside its container. That key,
+    read from the container whether it is running or stopped, goes into the
+    env file so the secrets it encrypted stay readable. A key that exists
+    but cannot be read stops the upgrade instead of being replaced.
+    """
     if _env_settings_key() is not None:
         return
-    key = _running_api_settings_key()
+    try:
+        key, has_container = _existing_api_settings_key()
+    except SettingsKeyUnreadableError as exc:
+        error(f"Could not read the settings key the API container holds: {exc}")
+        info(
+            "Nothing was changed. Copy it into the env file yourself, as "
+            f"SIBYL_SETTINGS_KEY=<contents of {API_SETTINGS_KEY_PATH} in the API "
+            f"container> in {SIBYL_DOCKER_ENV}, then run the upgrade again."
+        )
+        raise typer.Exit(1) from exc
     if key is not None:
-        info("Keeping the settings key the running API generated, in the env file")
+        info("Keeping the settings key the API container generated, in the env file")
+    elif has_container:
+        key = secrets.token_hex(32)
+        info("The API never stored an encrypted setting; writing a new settings key")
     else:
         key = secrets.token_hex(32)
-        info("Writing a settings key to the env file")
+        warn(
+            "No API container is left to read an earlier settings key from, so a new "
+            "one is written. Provider keys saved in the web app before must be "
+            "entered again."
+        )
     content = SIBYL_DOCKER_ENV.read_text()
     separator = "" if not content or content.endswith("\n") else "\n"
     SIBYL_DOCKER_ENV.write_text(f"{content}{separator}SIBYL_SETTINGS_KEY={key}\n")

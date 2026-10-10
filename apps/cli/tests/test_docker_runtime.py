@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import io
 import json
 import shutil
 import subprocess
+import tarfile
 from pathlib import Path
 
 import pytest
@@ -316,7 +318,9 @@ def test_docker_upgrade_migrates_an_older_worker_bundle(
 ) -> None:
     compose_path, _ = _docker_runtime(tmp_path, monkeypatch)
     _as_older_worker_bundle(compose_path)
-    monkeypatch.setattr(docker_module, "_running_api_settings_key", lambda: running_key)
+    monkeypatch.setattr(
+        docker_module, "_existing_api_settings_key", lambda: (running_key, running_key is not None)
+    )
 
     result = CliRunner().invoke(app, ["docker", "upgrade"])
 
@@ -337,8 +341,89 @@ def test_docker_upgrade_migrates_an_older_worker_bundle(
         if line.startswith("SIBYL_SETTINGS_KEY=")
     ]
     assert len(keys) == 1
-    # The running API's own key is kept, so what it encrypted stays readable.
+    # The API container's own key is kept, so what it encrypted stays readable.
     assert keys[0] == running_key if running_key else len(keys[0]) == 64
+
+
+def _key_archive(content: bytes) -> bytes:
+    buffer = io.BytesIO()
+    with tarfile.open(fileobj=buffer, mode="w") as archive:
+        member = tarfile.TarInfo("settings.key")
+        member.size = len(content)
+        archive.addfile(member, io.BytesIO(content))
+    return buffer.getvalue()
+
+
+def _docker_cp_answers(
+    monkeypatch: pytest.MonkeyPatch, *, stdout: bytes = b"", stderr: bytes = b"", code: int = 0
+) -> list[list[str]]:
+    calls: list[list[str]] = []
+
+    def run(args, **_kwargs):
+        calls.append(list(args))
+        return subprocess.CompletedProcess(args, code, stdout=stdout, stderr=stderr)
+
+    monkeypatch.setattr(docker_module.subprocess, "run", run)
+    return calls
+
+
+def test_the_key_is_read_from_a_stopped_api_container(monkeypatch: pytest.MonkeyPatch) -> None:
+    key = "B" * 43 + "="
+    calls = _docker_cp_answers(monkeypatch, stdout=_key_archive(f"{key}\n".encode()))
+
+    assert docker_module._container_settings_key("c0ffee") == key
+    # docker cp, unlike compose exec, reads a container that is not running.
+    assert calls == [["docker", "cp", "c0ffee:/home/sibyl/.sibyl/settings.key", "-"]]
+
+
+def test_a_container_without_a_key_file_has_no_key(monkeypatch: pytest.MonkeyPatch) -> None:
+    _docker_cp_answers(
+        monkeypatch,
+        code=1,
+        stderr=b"Error response from daemon: Could not find the file "
+        b"/home/sibyl/.sibyl/settings.key in container c0ffee",
+    )
+
+    assert docker_module._container_settings_key("c0ffee") is None
+
+
+def test_a_key_that_cannot_be_read_stops_the_upgrade(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    compose_path, calls = _docker_runtime(tmp_path, monkeypatch)
+    _as_older_worker_bundle(compose_path)
+    env_before = (compose_path.parent / ".env").read_text()
+    compose_before = compose_path.read_text()
+    monkeypatch.setattr(docker_module, "_api_container_ids", lambda: ["c0ffee"])
+    _docker_cp_answers(monkeypatch, code=1, stderr=b"permission denied while reading the daemon")
+
+    result = CliRunner().invoke(app, ["docker", "upgrade"])
+
+    assert result.exit_code == 1
+    assert "SIBYL_SETTINGS_KEY" in " ".join(result.output.split())
+    assert (compose_path.parent / ".env").read_text() == env_before
+    assert compose_path.read_text() == compose_before
+    assert calls == []
+
+
+def test_an_api_that_never_stored_a_secret_gets_a_fresh_key(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    compose_path, _ = _docker_runtime(tmp_path, monkeypatch)
+    _as_older_worker_bundle(compose_path)
+    monkeypatch.setattr(docker_module, "_api_container_ids", lambda: ["c0ffee"])
+    monkeypatch.setattr(docker_module, "_container_settings_key", lambda _container: None)
+
+    result = CliRunner().invoke(app, ["docker", "upgrade"])
+
+    assert result.exit_code == 0, result.output
+    keys = [
+        line
+        for line in (compose_path.parent / ".env").read_text().splitlines()
+        if line.startswith("SIBYL_SETTINGS_KEY=")
+    ]
+    assert len(keys) == 1
+    assert len(keys[0].removeprefix("SIBYL_SETTINGS_KEY=")) == 64
 
 
 def test_docker_upgrade_keeps_a_settings_key_and_hand_edits(
@@ -351,8 +436,8 @@ def test_docker_upgrade_keeps_a_settings_key_and_hand_edits(
     env_before = (compose_path.parent / ".env").read_text()
     monkeypatch.setattr(
         docker_module,
-        "_running_api_settings_key",
-        lambda: (_ for _ in ()).throw(AssertionError("an env key needs no running API")),
+        "_existing_api_settings_key",
+        lambda: (_ for _ in ()).throw(AssertionError("an env key needs no API container")),
     )
 
     result = CliRunner().invoke(app, ["docker", "upgrade"])
