@@ -42,6 +42,11 @@ MANAGED_IMAGE_REPOSITORIES = (
 # was edited by hand, and upgrade leaves it alone.
 
 
+# Where the API and worker find the bundled Valkey. Settings read the host and
+# port; there is no URL setting, so a URL here would leave both on localhost.
+VALKEY_ADDRESS = {"SIBYL_REDIS_HOST": "valkey", "SIBYL_REDIS_PORT": "6379"}
+
+
 def compose_config(
     *,
     image_tag: str,
@@ -70,6 +75,9 @@ def compose_config(
                 "SIBYL_SURREAL_USERNAME": "${SIBYL_SURREAL_USERNAME:-root}",
                 "SIBYL_SURREAL_PASSWORD": "${SIBYL_SURREAL_PASSWORD}",
                 "SIBYL_JWT_SECRET": "${SIBYL_JWT_SECRET}",
+                # From the env file, so stored secrets survive the container
+                # being recreated and every process decrypts them alike.
+                "SIBYL_SETTINGS_KEY": "${SIBYL_SETTINGS_KEY:-}",
                 "SIBYL_PUBLIC_URL": f"http://localhost:{web_port}",
                 "SIBYL_SERVER_HOST": "0.0.0.0",
                 "SIBYL_SERVER_PORT": "3334",
@@ -134,15 +142,20 @@ def compose_config(
                 "SIBYL_STORE": "surreal",
                 "SIBYL_AUTH_STORE": "surreal",
                 "SIBYL_COORDINATION_BACKEND": "redis",
-                "SIBYL_REDIS_URL": "redis://valkey:6379/0",
+                **VALKEY_ADDRESS,
                 "SIBYL_SURREAL_URL": "ws://surrealdb:8000/rpc",
                 "SIBYL_SURREAL_USERNAME": "${SIBYL_SURREAL_USERNAME:-root}",
                 "SIBYL_SURREAL_PASSWORD": "${SIBYL_SURREAL_PASSWORD}",
+                # The worker verifies the API's tokens and decrypts the
+                # settings it saved, so it carries the same two keys.
+                "SIBYL_JWT_SECRET": "${SIBYL_JWT_SECRET}",
+                "SIBYL_SETTINGS_KEY": "${SIBYL_SETTINGS_KEY:-}",
+                "SIBYL_ENVIRONMENT": "production",
             },
             "restart": "unless-stopped",
         }
         services["api"]["depends_on"]["valkey"] = {"condition": "service_started"}
-        services["api"]["environment"]["SIBYL_REDIS_URL"] = "redis://valkey:6379/0"
+        services["api"]["environment"].update(VALKEY_ADDRESS)
 
     return {
         "services": services,
@@ -151,7 +164,13 @@ def compose_config(
     }
 
 
-def write_env_file(*, image_tag: str, surreal_password: str, jwt_secret: str) -> None:
+def write_env_file(
+    *,
+    image_tag: str,
+    surreal_password: str,
+    jwt_secret: str,
+    settings_key: str | None = None,
+) -> None:
     SIBYL_DOCKER_DIR.mkdir(parents=True, exist_ok=True)
     SIBYL_DOCKER_ENV.write_text(
         "\n".join(
@@ -162,6 +181,7 @@ def write_env_file(*, image_tag: str, surreal_password: str, jwt_secret: str) ->
                 "SIBYL_SURREAL_USERNAME=root",
                 f"SIBYL_SURREAL_PASSWORD={surreal_password}",
                 f"SIBYL_JWT_SECRET={jwt_secret}",
+                f"SIBYL_SETTINGS_KEY={settings_key or secrets.token_hex(32)}",
                 "",
             ]
         )
@@ -321,6 +341,7 @@ def init_docker(
         image_tag=image_tag,
         surreal_password=secrets.token_urlsafe(32),
         jwt_secret=secrets.token_hex(32),
+        settings_key=secrets.token_hex(32),
     )
     write_compose_file(config)
 

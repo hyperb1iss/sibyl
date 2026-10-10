@@ -57,7 +57,16 @@ def test_docker_compose_can_opt_into_worker_runtime() -> None:
     assert "valkey" in services
     assert services["api"]["environment"]["SIBYL_COORDINATION_BACKEND"] == "redis"
     assert services["api"]["image"] == "ghcr.io/hyperb1iss/sibyl-api-crawler:1.0.0-rc.1"
-    assert services["worker"]["environment"]["SIBYL_REDIS_URL"] == "redis://valkey:6379/0"
+    # API and worker reach the same Valkey through the settings Sibyl reads.
+    for name in ("api", "worker"):
+        environment = services[name]["environment"]
+        assert environment["SIBYL_COORDINATION_BACKEND"] == "redis"
+        assert environment["SIBYL_REDIS_HOST"] == "valkey"
+        assert environment["SIBYL_REDIS_PORT"] == "6379"
+        assert "SIBYL_REDIS_URL" not in environment
+        # Both decrypt the same stored settings and verify the same tokens.
+        assert environment["SIBYL_SETTINGS_KEY"] == "${SIBYL_SETTINGS_KEY:-}"
+        assert environment["SIBYL_JWT_SECRET"] == "${SIBYL_JWT_SECRET}"
 
 
 def test_quickstart_compose_persists_generated_runtime_secrets() -> None:
@@ -189,6 +198,9 @@ def test_docker_init_writes_runtime_files_and_context(
     env = (docker_dir / ".env").read_text()
     compose = yaml.safe_load((docker_dir / "docker-compose.yml").read_text())
     assert "SIBYL_IMAGE_TAG=1.2.3" in env
+    settings_keys = [line for line in env.splitlines() if line.startswith("SIBYL_SETTINGS_KEY=")]
+    assert len(settings_keys) == 1
+    assert len(settings_keys[0].removeprefix("SIBYL_SETTINGS_KEY=")) == 64
     assert compose["services"]["api"]["image"] == "ghcr.io/hyperb1iss/sibyl-api:1.2.3"
     ctx = config_store.get_active_context()
     assert ctx is not None
