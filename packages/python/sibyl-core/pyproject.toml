@@ -95,8 +95,8 @@ dev = [
     "pytest-xdist>=3.8.0",
     "ruff",
     # Test-only mirrors of the runtime extras the suite exercises directly:
-    # the graph backend, the numeric stack, the pydantic-ai client layer, and
-    # the S3 receipt store's botocore client.
+    # the graph backend, community detection, the numeric stack, the
+    # pydantic-ai client layer, and the S3 receipt store's botocore client.
     # They stay optional for the published package (graph/llm extras) but the
     # test env must install them or the graph/eval/ai modules fail collection.
     # The heavy reranking extra (sentence-transformers) is left out on purpose
@@ -107,6 +107,8 @@ dev = [
     "ty>=0.0.84",
     "cbor2>=6.1.5,<7",
     "boto3>=1.35.2,<2",
+    "networkx>=3.0",
+    "python-louvain>=0.16",
 ]
 
 [project.urls]
