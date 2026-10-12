@@ -13,10 +13,12 @@ replica can list, download and delete what any worker wrote.
 from __future__ import annotations
 
 import asyncio
+import gzip
 import hashlib
 import json
 import tarfile
 import tempfile
+import zlib
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -51,6 +53,7 @@ from sibyl.persistence.content_archive import export_content_archive_payload
 from sibyl_core.backends.archive_store import (
     ArchiveConflict,
     ArchiveStore,
+    Reservation,
     archive_name as archive_name_for,
     backup_id_of,
 )
@@ -168,6 +171,18 @@ _STALE_STAGING_AGE = timedelta(days=1)
 # Staged export JSON is typically five to ten times the size of its gzip
 # archive, and the archive itself is written beside it before publishing.
 _STAGING_EXPANSION = 11
+_GZIP_CHUNK = 1024 * 1024
+
+
+def _read_gzip_to_end(path: Path) -> None:
+    """Decompress a whole gzip stream in chunks, so its CRC and length are checked.
+
+    Raises EOFError for a truncated stream and BadGzipFile (an OSError) for a
+    CRC, length or trailing-data mismatch.
+    """
+    with gzip.open(path, "rb") as stream:
+        while stream.read(_GZIP_CHUNK):
+            pass
 
 
 def _verify_published_archive(
@@ -180,11 +195,13 @@ def _verify_published_archive(
 
     The name is derived from the backup id, so only an earlier attempt of
     this same backup writes it. Before that archive is adopted it must match
-    the digest the store recorded at publish time (S3 keeps one), load as an
-    API backup whose inventory, checksums and payloads pass the restore
-    validator, and belong to this organization. Anything else raises
-    ArchiveConflict and the archive is left untouched. None means there is
-    no archive under the name.
+    the digest the store recorded at publish time (S3 keeps one), decompress
+    to the end of its gzip stream (the restore loader stops at the tar end
+    marker and never reads the gzip CRC and length, so a truncated tail would
+    otherwise pass), load as an API backup whose inventory, checksums and
+    payloads pass the restore validator, and belong to this organization.
+    Anything else raises ArchiveConflict and the archive is left untouched.
+    None means there is no archive under the name.
     """
     from sibyl_core.migrate.archive import load_archive, validate_archive
 
@@ -198,13 +215,16 @@ def _verify_published_archive(
             for chunk in reader.chunks():
                 digest.update(chunk)
                 handle.write(chunk)
-        if reader.sha256 is not None and reader.sha256 != digest.hexdigest():
-            raise ArchiveConflict(f"{name} differs from the digest recorded when it was published")
+        # A damaged archive reads the same whichever store holds it, so the
+        # gzip stream is checked before the digest the directory store lacks.
         try:
+            _read_gzip_to_end(copy)
             loaded = load_archive(copy)
             problems = validate_archive(loaded)
-        except (ValueError, OSError, tarfile.TarError) as error:
+        except (ValueError, OSError, EOFError, zlib.error, tarfile.TarError) as error:
             raise ArchiveConflict(f"{name} is not a readable backup archive") from error
+        if reader.sha256 is not None and reader.sha256 != digest.hexdigest():
+            raise ArchiveConflict(f"{name} differs from the digest recorded when it was published")
         metadata = loaded.manifest.metadata.get("backup_metadata")
         if (
             problems
@@ -302,6 +322,7 @@ async def _build_and_publish(  # noqa: PLR0915
     organization_id: str,
     backup_id: str,
     options: BackupRuntimeOptions,
+    room: Reservation,
 ) -> PublishedArchive:
     """Export the organization, assemble its archive and publish it once."""
     import socket
@@ -314,6 +335,7 @@ async def _build_and_publish(  # noqa: PLR0915
     # hard link on one filesystem; otherwise in the system temp dir.
     with tempfile.TemporaryDirectory(prefix=".staging-", dir=staging) as tmpdir:
         tmp_path = Path(tmpdir)
+        await asyncio.to_thread(room.track, tmp_path)
         auth_file = tmp_path / "auth.json"
         content_file = tmp_path / "content.json"
         graph_file = tmp_path / "graph.json"
@@ -426,7 +448,7 @@ async def _build_and_publish(  # noqa: PLR0915
         # Step 5: Create tar.gz archive. The staged JSON bounds its size, and
         # on a directory store it shares the volume with everything else.
         archive_tmp_path = tmp_path / archive_name
-        await asyncio.to_thread(store.reserve, auth_size + content_size + graph_size)
+        await asyncio.to_thread(room.require, auth_size + content_size + graph_size)
 
         log.info("backup_archive_start", backup_id=backup_id)
 
@@ -576,16 +598,22 @@ async def run_backup(
             # recording it; its archive is complete, so keep it.
             log.info("backup_archive_adopted", backup_id=backup_id, reason="already_published")
         else:
+            # Concurrent backups on one directory store count each other's
+            # claims, so their exports together cannot overrun the volume.
             estimate = await _estimated_backup_bytes(organization_id)
-            await asyncio.to_thread(store.reserve, estimate)
-            published = await _build_and_publish(
-                store,
-                staging,
-                archive_name,
-                organization_id=organization_id,
-                backup_id=backup_id,
-                options=options,
-            )
+            room = await asyncio.to_thread(store.reserve, backup_id, estimate)
+            try:
+                published = await _build_and_publish(
+                    store,
+                    staging,
+                    archive_name,
+                    organization_id=organization_id,
+                    backup_id=backup_id,
+                    options=options,
+                    room=room,
+                )
+            finally:
+                await asyncio.to_thread(room.release)
         archive_size = published.size
         entity_count = published.entity_count
         relationship_count = published.relationship_count
