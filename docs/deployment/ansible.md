@@ -39,7 +39,7 @@ provisions a host end to end:
 | Variable                    | Default                   | Purpose                                         |
 | --------------------------- | ------------------------- | ----------------------------------------------- |
 | `sibyl_domain`              | `sibyl.example.com`       | Hostname Caddy serves                           |
-| `sibyl_version`             | `1.4.9`                   | ghcr.io image tag                               |
+| `sibyl_version`             | `1.4.10`                  | ghcr.io image tag                               |
 | `sibyl_dir`                 | `/opt/sibyl`              | Deployment directory                            |
 | `sibyl_proxy_interface`     | `tailscale0`              | Interface HTTP/HTTPS is exposed on              |
 | `sibyl_mcp_auth_mode`       | `auto`                    | MCP bearer-token enforcement                    |
@@ -115,7 +115,7 @@ Two things must be in place before the playbook runs end to end:
   collections:
     - name: https://github.com/hyperb1iss/sibyl.git#/infra/ansible
       type: git
-      version: v1.4.9
+      version: v1.4.10
   ```
 
   ```bash

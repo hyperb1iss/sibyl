@@ -44,7 +44,7 @@ services:
   # Sibyl Backend (API + MCP Server)
   # ==========================================================================
   api:
-    image: ghcr.io/hyperb1iss/sibyl-api:${SIBYL_IMAGE_TAG:-1.4.9}
+    image: ghcr.io/hyperb1iss/sibyl-api:${SIBYL_IMAGE_TAG:-1.4.10}
     container_name: sibyl-api
     ports:
       - "${SIBYL_SERVER_PORT:-3334}:3334"
@@ -106,7 +106,7 @@ services:
   # ==========================================================================
   worker:
     profiles: ["redis"]
-    image: ghcr.io/hyperb1iss/sibyl-api:${SIBYL_IMAGE_TAG:-1.4.9}
+    image: ghcr.io/hyperb1iss/sibyl-api:${SIBYL_IMAGE_TAG:-1.4.10}
     container_name: sibyl-worker
     command: ["sibyld", "worker", "--require-redis"]
     depends_on:
@@ -158,7 +158,7 @@ services:
   # Frontend (Next.js Web UI)
   # ==========================================================================
   web:
-    image: ghcr.io/hyperb1iss/sibyl-web:${SIBYL_IMAGE_TAG:-1.4.9}
+    image: ghcr.io/hyperb1iss/sibyl-web:${SIBYL_IMAGE_TAG:-1.4.10}
     container_name: sibyl-web
     ports:
       - "${SIBYL_WEB_PORT:-3337}:3337"

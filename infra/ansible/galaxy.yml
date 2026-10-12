@@ -4,7 +4,7 @@
 # tools/release/sync_versions.py; installs resolve the git ref, not this field.
 namespace: hyperb1iss
 name: sibyl
-version: 1.4.9
+version: 1.4.10
 readme: README.md
 authors:
   - Stefanie Jane <stef@hyperbliss.tech>

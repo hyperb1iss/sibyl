@@ -9,8 +9,8 @@ apiVersion: v2
 name: sibyl
 description: Knowledge graph and task workflow for durable development memory
 type: application
-version: 1.4.9
-appVersion: "1.4.9"
+version: 1.4.10
+appVersion: "1.4.10"
 ```
 
 Release builds update `version` and `appVersion` from the repository `VERSION` file.
@@ -841,7 +841,7 @@ backend:
   replicaCount: 3
   image:
     repository: ghcr.io/hyperb1iss/sibyl-api
-    tag: "1.4.9"
+    tag: "1.4.10"
     pullPolicy: Always
   existingSecret: sibyl-secrets
   # Only the ingress controller pods' own range, so each user gets their own login
