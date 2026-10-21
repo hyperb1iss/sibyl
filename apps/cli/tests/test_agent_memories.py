@@ -256,6 +256,9 @@ class FakeServer:
         self.keys: dict[str, tuple[str, str]] = {}
         self.refuse: set[str] = set()
         self.interrupt: str | None = None  # "after" or "before" the store
+        # Keys a reservation holds without a record, or another import holds now.
+        self.burned: set[str] = set()
+        self.in_progress: set[str] = set()
 
     def add(
         self,
@@ -309,6 +312,16 @@ class FakeServer:
         async def remember_raw_memory(**kwargs: Any) -> dict[str, Any]:
             key = kwargs["_idempotency_key"]
             body = (kwargs["source_id"], kwargs["raw_content"])
+            if key in self.in_progress:
+                raise SibylClientError(
+                    "still in progress", status_code=409, error_code="idempotency_in_progress"
+                )
+            if key in self.burned:
+                raise SibylClientError(
+                    "write may have landed",
+                    status_code=409,
+                    error_code="idempotency_reconciliation_required",
+                )
             if key in self.keys:
                 if self.keys[key] != body:
                     raise SibylClientError(
@@ -525,14 +538,35 @@ class TestImportOne:
         assert result.outcome == "failed"
         assert server.records == 0
 
-    async def test_a_create_the_server_only_replayed_is_not_reported_as_stored(self) -> None:
+    async def test_a_purged_memory_can_be_imported_again(self) -> None:
+        # Review finding: the first key's receipt outlives the memory, and a
+        # replay of it stores nothing, so the content key writes instead.
         server = FakeServer()
         item = _item(_memory(), project_id=None)
         assert (await am.import_one(server.client(), item, apply=True)).outcome == "created"
-        del server.sources[item.source_id]  # purged; the key's receipt remains
+        del server.sources[item.source_id]
+        result = await am.import_one(server.client(), item, apply=True)
+        assert result.outcome == "created"
+        assert server.records == 2
+        assert server.state(item.source_id) == "active"
+
+    async def test_a_reservation_that_never_wrote_does_not_strand_the_file(self) -> None:
+        # Review finding: every retry used to hit the same burned key.
+        server = FakeServer()
+        item = _item(_memory(), project_id=None)
+        server.burned.add(am._capture_keys(item)[0])
+        result = await am.import_one(server.client(), item, apply=True)
+        assert result.outcome == "created"
+        assert server.records == 1
+
+    async def test_a_write_still_in_progress_is_never_raced_with_another_key(self) -> None:
+        server = FakeServer()
+        item = _item(_memory(), project_id=None)
+        server.in_progress.add(am._capture_keys(item)[0])
         result = await am.import_one(server.client(), item, apply=True)
         assert result.outcome == "failed"
-        assert server.records == 1
+        assert "run the import again" in result.detail
+        assert server.records == 0
 
     async def test_a_deleted_unattached_copy_as_the_server_serves_it_blocks_the_link(
         self,
@@ -559,6 +593,43 @@ class TestImportOne:
         assert server.state(ATTACHED) == "superseded"
         replacement = server.sources[ATTACHED]["lifecycle"]["replacement_source_id"]
         assert server.find(replacement) == moved.source_id
+
+    async def test_a_project_copy_someone_deleted_is_not_recreated_elsewhere(self) -> None:
+        # Review finding: following the move must still respect its retirement.
+        server = FakeServer()
+        server.add(ATTACHED, "body", state="deleted")
+        server.add(UNATTACHED, "body", state="superseded", replacement=ATTACHED)
+        moved = _item(_memory(), project_id="project_2")
+        result = await am.import_one(server.client(), moved, apply=True)
+        assert result.outcome == "kept"
+        assert moved.source_id not in server.sources
+
+    async def test_each_move_retires_the_copy_before_it(self) -> None:
+        # Review finding: the walk stopped after one hop and left two live copies.
+        server = FakeServer()
+        second = _item(_memory(), project_id="project_2")
+        server.add(second.source_id, "body")
+        server.add(ATTACHED, "body", state="superseded", replacement=second.source_id)
+        server.add(UNATTACHED, "body", state="superseded", replacement=ATTACHED)
+        third = _item(_memory(), project_id="project_3")
+        result = await am.import_one(server.client(), third, apply=True)
+        assert result.outcome == "relinked"
+        assert server.state(third.source_id) == "active"
+        assert server.state(second.source_id) == "superseded"
+
+    async def test_a_rerun_repairs_two_live_copies(self) -> None:
+        server = FakeServer()
+        second = _item(_memory(), project_id="project_2")
+        third = _item(_memory(), project_id="project_3")
+        server.add(second.source_id, "body")
+        server.add(third.source_id, "body")
+        server.add(ATTACHED, "body", state="superseded", replacement=second.source_id)
+        server.add(UNATTACHED, "body", state="superseded", replacement=ATTACHED)
+        result = await am.import_one(server.client(), third, apply=True)
+        assert result.outcome == "relinked"
+        assert server.state(second.source_id) == "superseded"
+        assert server.state(third.source_id) == "active"
+        assert server.records == 0
 
     async def test_a_supersession_someone_else_chose_still_blocks_the_link(self) -> None:
         server = FakeServer()

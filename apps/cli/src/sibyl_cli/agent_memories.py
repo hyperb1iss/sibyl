@@ -442,17 +442,34 @@ def _metadata(item: PlannedImport) -> dict[str, Any]:
     }
 
 
-_CONFLICT_CODES = frozenset({"idempotency_reconciliation_required", "constraint_violation"})
+# Another import holds this key's lock right now, so its write may still land.
+_IN_PROGRESS = "idempotency_in_progress"
+_STRANDED_MESSAGE = (
+    "the server did not store this memory and another import may be writing it; "
+    "run the import again"
+)
+
+
+def _capture_keys(item: PlannedImport) -> list[str]:
+    """The idempotency keys one file's create may use, in order.
+
+    The first names the source alone, so concurrent imports of one file
+    contend for one lock whatever text each read. The second adds the
+    content and is only used once the server shows that nothing holds or
+    stored the first: a reservation interrupted before anything was written,
+    or a receipt left behind by a memory since purged.
+    """
+    base = hashlib.sha256(item.source_id.encode()).hexdigest()[:48]
+    versioned = hashlib.sha256(f"{item.source_id}\n{item.memory.content}".encode()).hexdigest()
+    return [f"agent-memory-import-{base}", f"agent-memory-import-{versioned[:48]}"]
 
 
 async def _capture(client: Any, item: PlannedImport) -> None:
     """Store one memory file as one raw memory under its stable source ID.
 
-    The idempotency key names the source alone, so two imports that both found
-    the memory missing contend for one server lock and at most one of them
-    writes, whatever text each read. Interrupted writes are never re-run
-    blindly: a reservation without a receipt is reconciled by looking for the
-    memory instead, and every create is confirmed by reading it back.
+    Interrupted writes are never re-run blindly, and every create is confirmed
+    by reading the memory back, so a replayed or refused write never counts as
+    stored.
     """
     memory = item.memory
     metadata: dict[str, Any] = {
@@ -463,33 +480,35 @@ async def _capture(client: Any, item: PlannedImport) -> None:
     }
     if item.project_id:
         metadata["project_id"] = item.project_id
-    key = hashlib.sha256(item.source_id.encode()).hexdigest()[:48]
-    try:
-        await client.remember_raw_memory(
-            title=memory.title,
-            raw_content=memory.content,
-            source_id=item.source_id,
-            memory_scope=item.scope,
-            scope_key=item.project_id if item.scope == "project" else None,
-            tags=[f"agent:{memory.agent}"],
-            metadata=metadata,
-            provenance={"remember_kind": memory.kind},
-            capture_surface=CAPTURE_SURFACE,
-            _idempotency_key=f"agent-memory-import-{key}",
-        )
-    except SibylClientError as exc:
-        if exc.status_code != 409 and exc.error_code not in _CONFLICT_CODES:
-            raise
-    landed = await _existing_source(client, item.source_id)
-    if landed is None:
-        msg = (
-            "the server did not store this memory (another import may hold it, "
-            "or an earlier write was interrupted); run the import again"
-        )
-        raise ValueError(msg)
-    if str(landed.get("raw_content") or "").strip() != memory.content.strip():
-        msg = "another import stored a different version of this file; run the import again"
-        raise ValueError(msg)
+    for key in _capture_keys(item):
+        try:
+            await client.remember_raw_memory(
+                title=memory.title,
+                raw_content=memory.content,
+                source_id=item.source_id,
+                memory_scope=item.scope,
+                scope_key=item.project_id if item.scope == "project" else None,
+                tags=[f"agent:{memory.agent}"],
+                metadata=metadata,
+                provenance={"remember_kind": memory.kind},
+                capture_surface=CAPTURE_SURFACE,
+                _idempotency_key=key,
+            )
+        except SibylClientError as exc:
+            if exc.status_code != 409:
+                raise
+            if exc.error_code == _IN_PROGRESS:
+                raise ValueError(_STRANDED_MESSAGE) from exc
+        landed = await _existing_source(client, item.source_id)
+        if landed is None:
+            # Nothing holds this key and nothing was stored under it: the
+            # next key may write, and only one import reaches this point.
+            continue
+        if str(landed.get("raw_content") or "").strip() != memory.content.strip():
+            msg = "another import stored a different version of this file; run the import again"
+            raise ValueError(msg)
+        return
+    raise ValueError(_STRANDED_MESSAGE)
 
 
 async def _correct(client: Any, source_id: str, **kwargs: Any) -> None:
@@ -514,6 +533,38 @@ async def _supersede(client: Any, source_id: str, item: PlannedImport, reason: s
     )
 
 
+# Moves between projects chain one copy to the next; this bounds the walk.
+_MAX_CHAIN = 32
+
+
+async def _current_copy(client: Any, item: PlannedImport) -> tuple[str, dict[str, Any] | None]:
+    """The newest earlier copy of this file, following its own moves.
+
+    Starts at the unattached copy and follows each supersession whose
+    replacement is another import of the same file (the server records a
+    replacement by its raw memory ID, so each hop is read back). It stops at
+    a copy that is not superseded, or that something other than this file's
+    import superseded; that copy's state then says whether a person retired
+    it.
+    """
+    if item.replaces_source_id is None:
+        return item.source_id, None
+    current_id = item.replaces_source_id
+    current = await _existing_source(client, current_id)
+    for _ in range(_MAX_CHAIN):
+        if current is None or _state(current) != "superseded":
+            break
+        replacement = _replacement(current)
+        if not replacement:
+            break
+        following = await _existing_source(client, replacement)
+        following_id = str(following.get("source_id") or "") if following else ""
+        if following is None or not following_id.startswith(_file_prefix(item)):
+            break
+        current_id, current = following_id, following
+    return current_id, current
+
+
 async def import_one(client: Any, item: PlannedImport, *, apply: bool) -> ImportResult:
     """Create, revise, or leave one memory; with apply False, only report which.
 
@@ -529,28 +580,13 @@ async def import_one(client: Any, item: PlannedImport, *, apply: bool) -> Import
         existing = await _existing_source(client, item.source_id)
         earlier: list[str] = []
         if item.replaces_source_id is not None:
-            unattached = await _existing_source(client, item.replaces_source_id)
-            if unattached is not None:
-                if _live(unattached):
-                    earlier.append(item.replaces_source_id)
-                else:
-                    # The server records a replacement by its raw memory ID, so
-                    # read it back to see whether an earlier import of this same
-                    # file chose it (a move between projects) or a person did.
-                    previous = None
-                    if _state(unattached) == "superseded" and _replacement(unattached):
-                        previous = await _existing_source(client, str(_replacement(unattached)))
-                    previous_id = str(previous.get("source_id") or "") if previous else ""
-                    if previous_id.startswith(_file_prefix(item)):
-                        if (
-                            previous_id != item.source_id
-                            and previous is not None
-                            and _live(previous)
-                        ):
-                            earlier.append(previous_id)
-                    elif existing is None:
-                        state = _state(unattached)
-                        return ImportResult(item, "kept", f"{state} in Sibyl; left as it is")
+            current_id, current = await _current_copy(client, item)
+            if current is not None and current_id != item.source_id:
+                if _live(current):
+                    earlier.append(current_id)
+                elif existing is None:
+                    state = _state(current)
+                    return ImportResult(item, "kept", f"{state} in Sibyl; left as it is")
 
         if existing is None:
             if apply:
