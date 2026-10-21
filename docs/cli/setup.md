@@ -2,8 +2,9 @@
 
 Connect this machine to a Sibyl server in one command. `setup` picks or creates the context for the
 server, signs you in through the browser, installs the Sibyl skill for your agents, and registers
-the Claude Code SessionStart hook when Claude Code is installed. Every step checks first, so
-re-running it only does what is missing.
+the Claude Code SessionStart hook when Claude Code is installed. When your coding agents already
+keep memories on this machine, it offers to import them. Every step checks first, so re-running it
+only does what is missing.
 
 Every install path ends with this command, and the web app's Connect card shows it with your
 server's URL filled in:
@@ -24,16 +25,24 @@ sibyl setup [url] [options]
 
 ## Options
 
-| Option       | Short | Default          | Description                                   |
-| ------------ | ----- | ---------------- | --------------------------------------------- |
-| `url`        |       | current server   | Server URL, such as `https://sibyl.acme.io`   |
-| `--yes`      | `-y`  | false            | Don't ask; for agents and scripts             |
-| `--context`  | `-c`  | server host name | Context name to use or create                 |
-| `--no-hooks` |       | false            | Skip the Claude Code SessionStart hook        |
-| `--insecure` | `-k`  | false            | Skip TLS verification; allow http off-machine |
+| Option                                       | Short | Default          | Description                                                 |
+| -------------------------------------------- | ----- | ---------------- | ----------------------------------------------------------- |
+| `url`                                        |       | current server   | Server URL, such as `https://sibyl.acme.io`                 |
+| `--yes`                                      | `-y`  | false            | Don't ask; for agents and scripts                           |
+| `--context`                                  | `-c`  | server host name | Context name to use or create                               |
+| `--no-hooks`                                 |       | false            | Skip the Claude Code SessionStart hook                      |
+| `--import-memories` / `--no-import-memories` |       | ask              | Import the memories your coding agents keep, or don't offer |
+| `--insecure`                                 | `-k`  | false            | Skip TLS verification; allow http off-machine               |
 
 Without a URL, `setup` connects the server the CLI already talks to: the selected context, or
 `http://localhost:3334`. Without a terminal, it runs as if `--yes` were passed.
+
+Once the required steps pass, setup looks for the memory files Claude Code and Codex keep on this
+machine and asks whether to import them into your private memory on the server it just connected
+(see [`sibyl ingest memories`](./ingest.md#ingest-memories)). With `--yes` or without a terminal it
+only reports how many it found, because importing them is your call; pass `--import-memories` to
+import without asking. The import is optional: when it fails, setup still succeeds and says how to
+retry.
 
 Plain `http://` is accepted only for this machine (`localhost`, `127.0.0.0/8`, `::1`), because
 sign-in sends a password or token over the connection. Use the server's https URL, or pass

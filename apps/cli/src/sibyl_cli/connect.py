@@ -23,7 +23,7 @@ from urllib.parse import urlsplit, urlunsplit
 import httpx
 import typer
 
-from sibyl_cli import config_store, doctor, setup
+from sibyl_cli import agent_memories, config_store, doctor, ingest, setup
 from sibyl_cli.auth import _login_auto, _settle_login_org
 from sibyl_cli.auth_store import credential_scope, normalize_api_url
 from sibyl_cli.client import SibylClient, SibylClientError, clear_client_cache
@@ -287,6 +287,62 @@ def ensure_hook() -> Step:
     return Step("Hook", True, "Claude Code SessionStart")
 
 
+def import_memories(ctx: config_store.Context, *, yes: bool, choice: bool | None) -> Step | None:
+    """Offer to import the memories this machine's coding agents already keep.
+
+    Asks when interactive; ``--import-memories`` imports without asking and
+    ``--no-import-memories`` skips the offer. Agents and scripts (``--yes``)
+    only hear how many there are, since an import is the person's call.
+    """
+    if choice is False:
+        return None
+    claude_home, claude_config, codex_home = ingest.agent_memory_paths(None, None)
+    found = agent_memories.discover(
+        agent_memories.AGENTS,
+        claude_home=claude_home,
+        claude_config=claude_config,
+        codex_home=codex_home,
+    )
+    count = len(found.memories)
+    if not count:
+        return None
+    later = "import them with: sibyl ingest memories"
+    if choice is None:
+        if yes or not interactive():
+            return Step("Memories", True, f"{count} found from your coding agents; {later}")
+        console.print()
+        question = (
+            f"  Import {count} memories your coding agents keep on this machine "
+            "(Claude Code, Codex) into your private Sibyl memory?"
+        )
+        if not typer.confirm(question, default=True):
+            return Step("Memories", True, f"skipped; {later}")
+
+    @run_async
+    async def run() -> agent_memories.MemoryImport | None:
+        return await ingest.run_memory_import(
+            agents=list(agent_memories.AGENTS),
+            claude_dir=None,
+            codex_dir=None,
+            share=False,
+            confirm=lambda job: True,
+            context_name=ctx.name,
+        )
+
+    try:
+        job = run()
+    except SibylClientError as exc:
+        return Step("Memories", False, f"import failed: {exc}; retry with sibyl ingest memories")
+    if job is None:
+        return None
+    counts = agent_memories.tally(job.outcomes())
+    imported = counts["created"] + counts["relinked"] + counts["updated"]
+    detail = f"{imported} imported, {counts['unchanged']} already there"
+    if counts["failed"]:
+        return Step("Memories", False, f"{detail}, {counts['failed']} failed; {later}")
+    return Step("Memories", True, detail)
+
+
 def setup_cmd(
     url: Annotated[
         str | None,
@@ -302,6 +358,13 @@ def setup_cmd(
     no_hooks: Annotated[
         bool, typer.Option("--no-hooks", help="Skip the Claude Code SessionStart hook")
     ] = False,
+    import_agent_memories: Annotated[
+        bool | None,
+        typer.Option(
+            "--import-memories/--no-import-memories",
+            help="Import the memories Claude Code and Codex keep on this machine (asks by default)",
+        ),
+    ] = None,
     insecure: Annotated[
         bool,
         typer.Option(
@@ -323,6 +386,7 @@ def setup_cmd(
             context=context,
             no_hooks=no_hooks,
             insecure=insecure,
+            import_agent_memories=import_agent_memories,
         )
 
 
@@ -334,6 +398,7 @@ def _run_setup(
     context: str | None,
     no_hooks: bool,
     insecure: bool,
+    import_agent_memories: bool | None = None,
 ) -> None:
 
     console.print()
@@ -410,6 +475,13 @@ def _run_setup(
         steps.append(ensure_hook())
     for step in steps:
         _print_step(step)
+
+    if all(step.ok for step in steps):
+        # Optional and after the required steps, so a failed import never
+        # reads as a failed setup.
+        memories = import_memories(ctx, yes=yes, choice=import_agent_memories)
+        if memories is not None:
+            _print_step(memories)
 
     console.print()
     if not all(step.ok for step in steps):
