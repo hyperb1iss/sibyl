@@ -331,7 +331,7 @@ def import_memories(ctx: config_store.Context, *, yes: bool, choice: bool | None
 
     try:
         job = run()
-    except SibylClientError as exc:
+    except (SibylClientError, ValueError) as exc:
         return Step("Memories", False, f"import failed: {exc}; retry with sibyl ingest memories")
     if job is None:
         return None

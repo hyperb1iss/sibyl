@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 from pathlib import Path
 from typing import Any
@@ -40,11 +41,12 @@ Outcome: success
 def _claude_home(tmp_path: Path, *, repo: str = REPO) -> tuple[Path, Path]:
     home = tmp_path / ".claude"
     memory = home / "projects" / am.claude_slug(repo) / "memory"
-    memory.mkdir(parents=True)
+    memory.mkdir(parents=True, exist_ok=True)
     (memory / "devbox.md").write_text(CLAUDE_FEEDBACK)
     (memory / "MEMORY.md").write_text("- [Devbox](devbox.md) — index line\n")
     (memory / "blank.md").write_text("---\nname: blank\n---\n\n")
-    (memory / "linked.md").symlink_to(memory / "devbox.md")
+    if not (memory / "linked.md").is_symlink():
+        (memory / "linked.md").symlink_to(memory / "devbox.md")
     config = tmp_path / ".claude.json"
     config.write_text(json.dumps({"projects": {repo: {}}}))
     return home, config
@@ -53,7 +55,7 @@ def _claude_home(tmp_path: Path, *, repo: str = REPO) -> tuple[Path, Path]:
 def _codex_home(tmp_path: Path) -> Path:
     home = tmp_path / ".codex"
     summaries = home / "memories" / "rollout_summaries"
-    summaries.mkdir(parents=True)
+    summaries.mkdir(parents=True, exist_ok=True)
     (summaries / "2026-10-19-fix.md").write_text(CODEX_SUMMARY)
     (home / "memories" / "memory_summary.md").write_text("## User Profile\n\nShips fast.\n")
     (home / "memories" / "MEMORY.md").write_text("# Task Group index\n")
@@ -140,10 +142,10 @@ class TestDiscovery:
         home, config = _claude_home(tmp_path)
         first = am.discover_claude_code(home, config).memories[0]
         again = am.discover_claude_code(home, config).memories[0]
-        assert first.source_id(None) == again.source_id(None)
-        assert first.source_id(None).endswith(":unlinked")
-        assert first.source_id("project_1").endswith(":project_1")
-        assert first.source_id(None).startswith("agent-memory:claude-code:")
+        assert first.source_id("u", None) == again.source_id("u", None)
+        assert first.source_id("u", None).endswith(":unlinked")
+        assert first.source_id("u", "project_1").endswith(":project_1")
+        assert first.source_id("u", None).startswith("agent-memory:")
 
 
 def _memory(
@@ -165,186 +167,291 @@ def _memory(
     )
 
 
-class TestPlan:
-    def _plan(self, memories: list[am.AgentMemory], **kwargs: Any) -> am.ImportPlan:
-        defaults: dict[str, Any] = {
-            "target_context": "team",
-            "known_projects": {"project_1"},
-            "share": False,
-            "project_for_path": lambda path: "project_1",
-            "context_for_path": lambda path: None,
-        }
-        defaults.update(kwargs)
-        return am.build_plan(memories, **defaults)
+OWNER = "user-1"
 
+
+def _plan(memories: list[am.AgentMemory], **kwargs: Any) -> am.ImportPlan:
+    defaults: dict[str, Any] = {
+        "owner": OWNER,
+        "target_context": "team",
+        "known_projects": {"project_1"},
+        "share": False,
+        "project_for_path": lambda path: "project_1",
+        "context_for_path": lambda path: None,
+    }
+    defaults.update(kwargs)
+    return am.build_plan(memories, **defaults)
+
+
+class TestPlan:
     def test_a_linked_repo_attaches_its_project_privately(self) -> None:
-        item = self._plan([_memory()]).imports[0]
+        item = _plan([_memory()]).imports[0]
         assert item.project_id == "project_1"
         assert item.scope == "private"
-        assert item.source_id.endswith(":project_1")
-        assert item.replaces_source_id is not None
-        assert item.replaces_source_id.endswith(":unlinked")
+        assert item.source_id == _memory().source_id(OWNER, "project_1")
+        assert item.replaces_source_id == _memory().source_id(OWNER, None)
 
     def test_share_makes_only_project_memories_visible(self) -> None:
-        plan = self._plan([_memory(), _memory(repo=None, title="Loose")], share=True)
+        plan = _plan([_memory(), _memory(repo=None, title="Loose")], share=True)
         scopes = {item.memory.title: item.scope for item in plan.imports}
         assert scopes == {"Note": "project", "Loose": "private"}
 
     def test_a_repo_pinned_to_another_context_is_left_for_that_server(self) -> None:
-        plan = self._plan([_memory()], context_for_path=lambda path: "personal")
+        plan = _plan([_memory()], context_for_path=lambda path: "personal")
+        assert plan.imports == []
+        assert plan.elsewhere == {"personal": 1}
+
+    def test_a_personal_memory_still_follows_its_repository_pin(self) -> None:
+        # Review finding: private on another server is still a copy there.
+        plan = _plan([_memory(memory_type="user")], context_for_path=lambda path: "personal")
         assert plan.imports == []
         assert plan.elsewhere == {"personal": 1}
 
     def test_a_repo_pinned_to_the_target_context_imports(self) -> None:
-        plan = self._plan([_memory()], context_for_path=lambda path: "team")
+        plan = _plan([_memory()], context_for_path=lambda path: "team")
         assert len(plan.imports) == 1
 
     def test_a_project_the_server_does_not_know_attaches_nothing(self) -> None:
-        item = self._plan([_memory()], known_projects=set()).imports[0]
+        item = _plan([_memory()], known_projects=set()).imports[0]
         assert item.project_id is None
         assert item.replaces_source_id is None
 
     def test_personal_memories_never_attach_or_share(self) -> None:
-        item = self._plan([_memory(memory_type="user")], share=True).imports[0]
+        item = _plan([_memory(memory_type="user")], share=True).imports[0]
         assert item.project_id is None
         assert item.scope == "private"
 
+    def test_the_same_file_twice_plans_one_import(self) -> None:
+        assert len(_plan([_memory(), _memory()]).imports) == 1
 
-def _not_found() -> SibylClientError:
-    return SibylClientError("memory_source_not_found", status_code=404)
+    def test_two_people_never_share_a_source_id(self) -> None:
+        # Review finding: every Codex profile sits at the same relative path.
+        memory = _memory(repo=None)
+        assert memory.source_id("alice", None) != memory.source_id("bob", None)
+
+    def test_asking_for_an_agent_twice_discovers_it_once(self, tmp_path: Path) -> None:
+        found = am.discover(
+            [am.CODEX, am.CODEX],
+            claude_home=tmp_path / "none",
+            claude_config=tmp_path / "none.json",
+            codex_home=_codex_home(tmp_path),
+        )
+        assert len(found.memories) == 2
 
 
-def _source(content: str, *, state: str = "active", revision: int = 3) -> dict[str, Any]:
-    return {
-        "source": {
+class FakeServer:
+    """Raw memory sources as the API keeps them, with its correction rules.
+
+    Stateful so a test reads back what persisted rather than which calls were
+    made: a refused correction answers ``applied: false`` and changes nothing,
+    and a create repeated under one idempotency key lands once.
+    """
+
+    def __init__(self) -> None:
+        self.sources: dict[str, dict[str, Any]] = {}
+        self.records = 0
+        self.keys: set[str] = set()
+        self.refuse: set[str] = set()
+
+    def add(
+        self, source_id: str, content: str, *, state: str = "active", scope: str = "private"
+    ) -> None:
+        self.sources[source_id] = {
             "raw_content": content,
-            "revision": revision,
+            "revision": 1,
+            "memory_scope": scope,
             "lifecycle": {"state": state},
         }
-    }
+
+    def state(self, source_id: str) -> str:
+        return self.sources[source_id]["lifecycle"]["state"]
+
+    def client(self) -> MagicMock:
+        client = MagicMock()
+
+        async def memory_blame(source_id: str) -> dict[str, Any]:
+            if source_id not in self.sources:
+                raise SibylClientError("memory_source_not_found", status_code=404)
+            return {"source": dict(self.sources[source_id])}
+
+        async def remember_raw_memory(**kwargs: Any) -> dict[str, Any]:
+            key = kwargs.get("_idempotency_key")
+            if key and key in self.keys:
+                return {"id": "replayed"}
+            if key:
+                self.keys.add(key)
+            self.records += 1
+            self.add(kwargs["source_id"], kwargs["raw_content"], scope=kwargs["memory_scope"])
+            return {"id": f"raw-{self.records}"}
+
+        async def correct_memory(source_id: str, **kwargs: Any) -> dict[str, Any]:
+            action = kwargs["action"]
+            source = self.sources[source_id]
+            if action in self.refuse:
+                return {"applied": False, "reason": "refused"}
+            if action == "supersede":
+                replacement = self.sources.get(kwargs["replacement_source_id"])
+                if replacement is None or replacement["lifecycle"]["state"] != "active":
+                    return {"applied": False, "reason": "replacement is not recallable"}
+                source["lifecycle"] = {"state": "superseded"}
+            elif action == "revise":
+                if kwargs["expected_revision"] != source["revision"]:
+                    raise SibylClientError("revision conflict", status_code=409)
+                source["raw_content"] = kwargs["revised_content"]
+                source["revision"] += 1
+            return {"applied": True}
+
+        client.memory_blame = AsyncMock(side_effect=memory_blame)
+        client.remember_raw_memory = AsyncMock(side_effect=remember_raw_memory)
+        client.correct_memory = AsyncMock(side_effect=correct_memory)
+        return client
 
 
-def _client(blame: dict[str, Any]) -> MagicMock:
-    """A client whose blame answers per source suffix (``:unlinked`` or the project)."""
-    client = MagicMock()
-
-    async def memory_blame(source_id: str) -> dict[str, Any]:
-        for suffix, answer in blame.items():
-            if source_id.endswith(suffix):
-                if isinstance(answer, Exception):
-                    raise answer
-                return answer
-        raise _not_found()
-
-    client.memory_blame = AsyncMock(side_effect=memory_blame)
-    client.correct_memory = AsyncMock(return_value={})
-    client.remember_raw_memory = AsyncMock(return_value={"id": "raw-1"})
-    return client
-
-
-def _item(memory: am.AgentMemory, project_id: str | None = "project_1") -> am.PlannedImport:
+def _item(
+    memory: am.AgentMemory, project_id: str | None = "project_1", scope: str = "private"
+) -> am.PlannedImport:
     return am.PlannedImport(
         memory=memory,
         project_id=project_id,
-        scope="private",
-        source_id=memory.source_id(project_id),
-        replaces_source_id=memory.source_id(None) if project_id else None,
+        scope=scope,
+        source_id=memory.source_id(OWNER, project_id),
+        replaces_source_id=memory.source_id(OWNER, None) if project_id else None,
     )
+
+
+ATTACHED = _memory().source_id(OWNER, "project_1")
+UNATTACHED = _memory().source_id(OWNER, None)
 
 
 class TestImportOne:
     async def test_a_new_memory_is_stored_raw_with_its_source_and_kind(self) -> None:
-        client = _client({})
-        result = await am.import_one(client, _item(_memory(memory_type="feedback")), apply=True)
+        server = FakeServer()
+        client = server.client()
+        item = _item(_memory(memory_type="feedback"))
+        result = await am.import_one(client, item, apply=True)
         assert result.outcome == "created"
+        assert server.sources[item.source_id]["raw_content"] == "body"
         kwargs = client.remember_raw_memory.await_args.kwargs
-        assert kwargs["source_id"].endswith(":project_1")
-        assert kwargs["raw_content"] == "body"
         assert kwargs["memory_scope"] == "private"
         assert kwargs["scope_key"] is None
         assert kwargs["capture_surface"] == am.CAPTURE_SURFACE
+        assert kwargs["_idempotency_key"].startswith("agent-memory-import-")
+        assert kwargs["_replay_interrupted"] is True
         metadata = kwargs["metadata"]
         assert metadata["remember_kind"] == "rule"
         assert metadata["project_id"] == "project_1"
         assert metadata["capture_mode"] == "import"
         assert metadata["agent_memory"]["type"] == "feedback"
-        client.correct_memory.assert_not_awaited()
 
     async def test_a_shared_memory_is_scoped_to_its_project(self) -> None:
-        client = _client({})
-        item = am.PlannedImport(
-            memory=_memory(),
-            project_id="project_1",
-            scope="project",
-            source_id=_memory().source_id("project_1"),
-        )
-        await am.import_one(client, item, apply=True)
+        client = FakeServer().client()
+        await am.import_one(client, _item(_memory(), scope="project"), apply=True)
         kwargs = client.remember_raw_memory.await_args.kwargs
         assert kwargs["memory_scope"] == "project"
         assert kwargs["scope_key"] == "project_1"
 
     async def test_an_unchanged_memory_writes_nothing(self) -> None:
-        client = _client({":project_1": _source("body\n")})
-        result = await am.import_one(client, _item(_memory()), apply=True)
+        server = FakeServer()
+        server.add(ATTACHED, "body\n")
+        result = await am.import_one(server.client(), _item(_memory()), apply=True)
         assert result.outcome == "unchanged"
-        client.remember_raw_memory.assert_not_awaited()
-        client.correct_memory.assert_not_awaited()
+        assert server.records == 0
+        assert server.sources[ATTACHED]["revision"] == 1
 
-    async def test_a_changed_memory_is_revised_at_its_revision(self) -> None:
-        client = _client({":project_1": _source("old body", revision=4)})
-        result = await am.import_one(client, _item(_memory(content="new body")), apply=True)
+    async def test_a_changed_memory_is_revised_in_place(self) -> None:
+        server = FakeServer()
+        server.add(ATTACHED, "old body")
+        result = await am.import_one(
+            server.client(), _item(_memory(content="new body")), apply=True
+        )
         assert result.outcome == "updated"
-        client.remember_raw_memory.assert_not_awaited()
-        args = client.correct_memory.await_args
-        assert args.args[0].endswith(":project_1")
-        assert args.kwargs["action"] == "revise"
-        assert args.kwargs["revised_content"] == "new body"
-        assert args.kwargs["expected_revision"] == 4
+        assert server.sources[ATTACHED]["raw_content"] == "new body"
+        assert server.sources[ATTACHED]["revision"] == 2
+        assert server.records == 0
+
+    async def test_a_private_run_never_revises_a_shared_memory(self) -> None:
+        # Review finding: the revision would publish new text to the project.
+        server = FakeServer()
+        server.add(ATTACHED, "old body", scope="project")
+        result = await am.import_one(
+            server.client(), _item(_memory(content="secret addition")), apply=True
+        )
+        assert result.outcome == "kept"
+        assert server.sources[ATTACHED]["raw_content"] == "old body"
 
     async def test_a_memory_retired_in_sibyl_is_left_alone(self) -> None:
-        client = _client({":project_1": _source("old", state="deleted")})
-        result = await am.import_one(client, _item(_memory(content="new")), apply=True)
-        assert result.outcome == "retired"
-        client.remember_raw_memory.assert_not_awaited()
-        client.correct_memory.assert_not_awaited()
+        server = FakeServer()
+        server.add(ATTACHED, "old", state="deleted")
+        result = await am.import_one(server.client(), _item(_memory(content="new")), apply=True)
+        assert result.outcome == "kept"
+        assert server.sources[ATTACHED]["raw_content"] == "old"
 
     async def test_attaching_a_project_supersedes_the_unattached_copy(self) -> None:
-        client = _client({":unlinked": _source("body")})
-        result = await am.import_one(client, _item(_memory()), apply=True)
+        server = FakeServer()
+        server.add(UNATTACHED, "body")
+        result = await am.import_one(server.client(), _item(_memory()), apply=True)
         assert result.outcome == "relinked"
-        client.remember_raw_memory.assert_awaited_once()
-        args = client.correct_memory.await_args
-        assert args.args[0].endswith(":unlinked")
-        assert args.kwargs["action"] == "supersede"
-        assert args.kwargs["replacement_source_id"].endswith(":project_1")
+        assert server.state(ATTACHED) == "active"
+        assert server.state(UNATTACHED) == "superseded"
 
-    async def test_an_attached_copy_already_in_place_still_retires_the_unattached_one(
-        self,
-    ) -> None:
-        # An import that stopped between the two writes finishes on the next run.
-        client = _client({":project_1": _source("body"), ":unlinked": _source("body")})
-        result = await am.import_one(client, _item(_memory()), apply=True)
+    async def test_an_interrupted_relink_finishes_on_the_next_run(self) -> None:
+        server = FakeServer()
+        server.add(ATTACHED, "body")
+        server.add(UNATTACHED, "body")
+        result = await am.import_one(server.client(), _item(_memory()), apply=True)
         assert result.outcome == "relinked"
-        client.remember_raw_memory.assert_not_awaited()
-        args = client.correct_memory.await_args
-        assert args.args[0].endswith(":unlinked")
-        assert args.kwargs["action"] == "supersede"
+        assert server.state(UNATTACHED) == "superseded"
+        assert server.records == 0
 
-    async def test_a_retired_unattached_copy_is_not_superseded_again(self) -> None:
-        client = _client({":unlinked": _source("body", state="superseded")})
-        result = await am.import_one(client, _item(_memory()), apply=True)
-        assert result.outcome == "created"
-        client.correct_memory.assert_not_awaited()
+    async def test_a_contested_attached_copy_is_not_used_as_a_replacement(self) -> None:
+        # Review finding: the server refuses a non-recallable replacement.
+        server = FakeServer()
+        server.add(ATTACHED, "body", state="contested")
+        server.add(UNATTACHED, "body")
+        result = await am.import_one(server.client(), _item(_memory()), apply=True)
+        assert result.outcome == "unchanged"
+        assert server.state(UNATTACHED) == "active"
+
+    async def test_a_refused_correction_is_a_failure_not_a_success(self) -> None:
+        # Review finding: a refused correction still answers 200.
+        server = FakeServer()
+        server.add(ATTACHED, "old")
+        server.refuse.add("revise")
+        result = await am.import_one(server.client(), _item(_memory(content="new")), apply=True)
+        assert result.outcome == "failed"
+        assert "not applied" in result.detail
+        assert server.sources[ATTACHED]["raw_content"] == "old"
+
+    async def test_a_retired_unattached_copy_keeps_the_link_from_recreating_it(self) -> None:
+        # Review finding: linking the repository brought deleted memories back.
+        server = FakeServer()
+        server.add(UNATTACHED, "body", state="deleted")
+        result = await am.import_one(server.client(), _item(_memory()), apply=True)
+        assert result.outcome == "kept"
+        assert ATTACHED not in server.sources
+        assert server.records == 0
+
+    async def test_two_imports_racing_on_one_memory_land_one_record(self) -> None:
+        # Review finding: both saw it missing; the shared key collapses them.
+        server = FakeServer()
+        item = _item(_memory(), project_id=None)
+        first, second = server.client(), server.client()
+        await asyncio.gather(
+            am.import_one(first, item, apply=True), am.import_one(second, item, apply=True)
+        )
+        assert server.records == 1
 
     async def test_a_preview_reports_without_writing(self) -> None:
-        client = _client({":unlinked": _source("body")})
-        result = await am.import_one(client, _item(_memory()), apply=False)
+        server = FakeServer()
+        server.add(UNATTACHED, "body")
+        result = await am.import_one(server.client(), _item(_memory()), apply=False)
         assert result.outcome == "relinked"
-        client.remember_raw_memory.assert_not_awaited()
-        client.correct_memory.assert_not_awaited()
+        assert server.records == 0
+        assert server.state(UNATTACHED) == "active"
 
     async def test_a_server_error_is_reported_as_a_failure(self) -> None:
-        client = _client({":project_1": SibylClientError("boom", status_code=500)})
+        client = FakeServer().client()
+        client.memory_blame = AsyncMock(side_effect=SibylClientError("boom", status_code=500))
         result = await am.import_one(client, _item(_memory()), apply=True)
         assert result.outcome == "failed"
         assert "boom" in result.detail
@@ -386,6 +493,7 @@ class TestCommand:
         claude_home, _ = _claude_home(tmp_path)
         codex_home = _codex_home(tmp_path)
         client.explore = AsyncMock(return_value={"entities": [{"id": "project_1"}]})
+        client._request = AsyncMock(return_value={"user": {"id": OWNER}})
         with (
             patch("sibyl_cli.ingest.get_client", return_value=_FakeClientContext(client)),
             patch("sibyl_cli.ingest.resolve_client_context_name", return_value="team"),
@@ -407,7 +515,7 @@ class TestCommand:
             )
 
     def test_a_dry_run_previews_every_memory_and_writes_nothing(self, tmp_path: Path) -> None:
-        client = _client({})
+        client = FakeServer().client()
         result = self._run(tmp_path, client, "--dry-run")
         assert result.exit_code == 0, result.output
         payload = _payload(result.output)
@@ -417,16 +525,19 @@ class TestCommand:
         assert payload["attached_to_projects"] == 2
         client.remember_raw_memory.assert_not_awaited()
 
-    def test_a_run_imports_new_memories(self, tmp_path: Path) -> None:
-        client = _client({})
-        result = self._run(tmp_path, client, "--yes")
+    def test_a_run_imports_new_memories_and_a_rerun_changes_nothing(self, tmp_path: Path) -> None:
+        server = FakeServer()
+        result = self._run(tmp_path, server.client(), "--yes")
         assert result.exit_code == 0, result.output
-        payload = _payload(result.output)
-        assert payload["applied"] is True
-        assert client.remember_raw_memory.await_count == 3
+        assert _payload(result.output)["applied"] is True
+        assert server.records == 3
+        again = self._run(tmp_path, server.client(), "--yes")
+        assert again.exit_code == 0, again.output
+        assert _payload(again.output)["outcomes"]["unchanged"] == 3
+        assert server.records == 3
 
     def test_the_import_never_buffers_writes_and_restores_the_client(self, tmp_path: Path) -> None:
-        client = _client({})
+        client = FakeServer().client()
         client.buffer_writes = True
         seen: list[bool] = []
 

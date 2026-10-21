@@ -55,17 +55,18 @@ PERSONAL_TYPES = frozenset({"user", "profile"})
 # Index files that only point at the memories themselves.
 CLAUDE_INDEX_FILES = frozenset({"MEMORY.md"})
 
-Outcome = Literal["created", "updated", "unchanged", "relinked", "retired", "failed"]
+Outcome = Literal["created", "updated", "unchanged", "relinked", "kept", "failed"]
 OUTCOMES: tuple[Outcome, ...] = (
     "created",
     "updated",
     "relinked",
     "unchanged",
-    "retired",
+    "kept",
     "failed",
 )
 WRITE_OUTCOMES = frozenset({"created", "updated", "relinked"})
-# Lifecycle states a person (or a correction) chose; an import never undoes them.
+# A contested memory is still live and can take a revision; it cannot stand in
+# as the replacement a supersession points recall at.
 _LIVE_STATES = frozenset({"active", "contested"})
 
 
@@ -93,8 +94,17 @@ class AgentMemory:
         identity = f"{self.agent}:{self.relative}".encode()
         return hashlib.sha256(identity).hexdigest()[:16]
 
-    def source_id(self, project_id: str | None) -> str:
-        return f"{SOURCE_PREFIX}:{self.agent}:{self.file_key}:{project_id or 'unlinked'}"
+    def source_id(self, owner: str, project_id: str | None) -> str:
+        """The memory's identity: whose it is, which file, and where it attached.
+
+        Source IDs resolve across the whole organization, and two people's agents
+        keep files at the same relative paths (every Codex profile is
+        ``memories/memory_summary.md``), so the owner is part of the identity.
+        """
+        owner_key = hashlib.sha256(owner.encode()).hexdigest()[:12]
+        return (
+            f"{SOURCE_PREFIX}:{owner_key}:{self.agent}:{self.file_key}:{project_id or 'unlinked'}"
+        )
 
 
 @dataclass(frozen=True)
@@ -321,7 +331,7 @@ def discover(
     codex_home: Path,
 ) -> Discovery:
     found = Discovery()
-    for agent in agents:
+    for agent in dict.fromkeys(agents):
         part = (
             discover_claude_code(claude_home, claude_config)
             if agent == CLAUDE_CODE
@@ -335,6 +345,7 @@ def discover(
 def build_plan(
     memories: Iterable[AgentMemory],
     *,
+    owner: str,
     target_context: str | None,
     known_projects: set[str],
     share: bool,
@@ -344,27 +355,35 @@ def build_plan(
     """Route each memory the way commands run in its repository would.
 
     A repository pinned to another context belongs to that server and is left
-    for a run against it. A linked project the target server does not know
-    (a link meant for another server) attaches nothing.
+    for a run against it, personal memories included: private on one server is
+    still a copy on a server the person did not pick. A linked project the
+    target server does not know (a link meant for another server) attaches
+    nothing, and personal memories never attach.
     """
     plan = ImportPlan()
+    seen: set[str] = set()
     for memory in memories:
         project_id: str | None = None
-        if memory.repo is not None and not memory.personal:
+        if memory.repo is not None:
             pinned = context_for_path(memory.repo)
             if pinned and pinned != target_context:
                 plan.elsewhere[pinned] = plan.elsewhere.get(pinned, 0) + 1
                 continue
-            linked = project_for_path(memory.repo)
-            project_id = linked if linked in known_projects else None
+            if not memory.personal:
+                linked = project_for_path(memory.repo)
+                project_id = linked if linked in known_projects else None
+        source_id = memory.source_id(owner, project_id)
+        if source_id in seen:
+            continue
+        seen.add(source_id)
         scope = "project" if share and project_id else "private"
         plan.imports.append(
             PlannedImport(
                 memory=memory,
                 project_id=project_id,
                 scope=scope,
-                source_id=memory.source_id(project_id),
-                replaces_source_id=memory.source_id(None) if project_id else None,
+                source_id=source_id,
+                replaces_source_id=memory.source_id(owner, None) if project_id else None,
             )
         )
     return plan
@@ -381,10 +400,14 @@ async def _existing_source(client: Any, source_id: str) -> dict[str, Any] | None
     return source if isinstance(source, dict) else None
 
 
-def _live(source: dict[str, Any]) -> bool:
+def _state(source: dict[str, Any]) -> str:
     lifecycle = source.get("lifecycle")
     state = lifecycle.get("state") if isinstance(lifecycle, dict) else None
-    return state is None or str(state) in _LIVE_STATES
+    return str(state) if state else "active"
+
+
+def _live(source: dict[str, Any]) -> bool:
+    return _state(source) in _LIVE_STATES
 
 
 def _metadata(item: PlannedImport) -> dict[str, Any]:
@@ -401,7 +424,11 @@ def _metadata(item: PlannedImport) -> dict[str, Any]:
 
 
 async def _capture(client: Any, item: PlannedImport) -> None:
-    """Store one memory file as one raw memory under its stable source ID."""
+    """Store one memory file as one raw memory under its stable source ID.
+
+    The idempotency key names the source and its content, so two imports that
+    both found the memory missing land one record instead of two.
+    """
     memory = item.memory
     metadata: dict[str, Any] = {
         "capture_mode": "import",
@@ -411,6 +438,7 @@ async def _capture(client: Any, item: PlannedImport) -> None:
     }
     if item.project_id:
         metadata["project_id"] = item.project_id
+    key = hashlib.sha256(f"{item.source_id}\n{memory.content}".encode()).hexdigest()
     await client.remember_raw_memory(
         title=memory.title,
         raw_content=memory.content,
@@ -421,13 +449,28 @@ async def _capture(client: Any, item: PlannedImport) -> None:
         metadata=metadata,
         provenance={"remember_kind": memory.kind},
         capture_surface=CAPTURE_SURFACE,
+        _idempotency_key=f"agent-memory-import-{key[:48]}",
+        _replay_interrupted=True,
     )
+
+
+async def _correct(client: Any, source_id: str, **kwargs: Any) -> None:
+    """Apply a correction, failing when the server declined to apply it.
+
+    A refused correction still answers 200, with ``applied`` false.
+    """
+    receipt = await client.correct_memory(source_id, **kwargs)
+    if isinstance(receipt, dict) and receipt.get("applied") is False:
+        reason = receipt.get("reason") or "correction not applied"
+        msg = f"{kwargs.get('action')} on {source_id} was not applied: {reason}"
+        raise ValueError(msg)
 
 
 async def _retire_unattached(client: Any, item: PlannedImport) -> None:
     if item.replaces_source_id is None:
         return
-    await client.correct_memory(
+    await _correct(
+        client,
         item.replaces_source_id,
         action="supersede",
         reason="imported again attached to its project",
@@ -438,9 +481,10 @@ async def _retire_unattached(client: Any, item: PlannedImport) -> None:
 async def import_one(client: Any, item: PlannedImport, *, apply: bool) -> ImportResult:
     """Create, revise, or leave one memory; with apply False, only report which.
 
-    Whenever the project-attached copy is in place, a still-live unattached
-    copy is superseded, so an import interrupted between the two finishes on
-    the next run.
+    Whenever the project-attached copy is in place and active, a still-live
+    unattached copy is superseded, so an import interrupted between the two
+    finishes on the next run. A copy someone retired stays retired, and an
+    import never changes a memory whose visibility differs from this run's.
     """
     memory = item.memory
     try:
@@ -448,34 +492,44 @@ async def import_one(client: Any, item: PlannedImport, *, apply: bool) -> Import
         unattached = None
         if item.replaces_source_id is not None:
             unattached = await _existing_source(client, item.replaces_source_id)
-            if unattached is not None and not _live(unattached):
-                unattached = None
 
         if existing is None:
+            if unattached is not None and not _live(unattached):
+                return ImportResult(item, "kept", f"{_state(unattached)} in Sibyl; left as it is")
+            relink = unattached is not None
             if apply:
                 await _capture(client, item)
-                if unattached is not None:
+                if relink:
                     await _retire_unattached(client, item)
-            return ImportResult(item, "relinked" if unattached is not None else "created")
+            return ImportResult(item, "relinked" if relink else "created")
 
         if not _live(existing):
-            return ImportResult(item, "retired", "retired in Sibyl; left as it is")
+            return ImportResult(item, "kept", f"{_state(existing)} in Sibyl; left as it is")
         stored = existing.get("raw_content")
         if stored is None:
-            return ImportResult(item, "retired", "content not readable; left as it is")
+            return ImportResult(item, "kept", "content not readable; left as it is")
+        current_scope = existing.get("memory_scope")
+        if current_scope and current_scope != item.scope:
+            return ImportResult(
+                item,
+                "kept",
+                f"{current_scope} in Sibyl, this run imports {item.scope}; left as it is",
+            )
         changed = str(stored).strip() != memory.content.strip()
+        relink = unattached is not None and _live(unattached) and _state(existing) == "active"
         if apply:
             if changed:
-                await client.correct_memory(
+                await _correct(
+                    client,
                     item.source_id,
                     action="revise",
                     reason=f"{memory.agent} memory file {memory.relative} changed",
                     revised_content=memory.content,
                     expected_revision=existing.get("revision"),
                 )
-            if unattached is not None:
+            if relink:
                 await _retire_unattached(client, item)
-        if unattached is not None:
+        if relink:
             return ImportResult(item, "relinked")
         return ImportResult(item, "updated" if changed else "unchanged")
     except (SibylClientError, ValueError) as exc:
@@ -545,11 +599,19 @@ async def plan_memory_import(
         codex_home=codex_home,
     )
     known: set[str] = set()
+    owner = ""
     if found.memories:
+        me = await client._request("GET", "/auth/me", _replay_pending=False)
+        user = me.get("user") if isinstance(me, dict) else None
+        owner = str(user.get("id") or "") if isinstance(user, dict) else ""
+        if not owner:
+            msg = "could not tell who is signed in; run sibyl auth login"
+            raise ValueError(msg)
         projects = await list_accessible_projects(client, limit=500)
         known = {str(project["id"]) for project in projects if project.get("id")}
     plan = build_plan(
         found.memories,
+        owner=owner,
         target_context=target_context,
         known_projects=known,
         share=share,

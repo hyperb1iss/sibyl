@@ -23,8 +23,14 @@ class ClientMemoryMixin:
         provenance: dict[str, Any] | None = None,
         capture_surface: str = "cli",
         _idempotency_key: str | None = None,
+        _replay_interrupted: bool = False,
     ) -> dict[str, Any]:
-        """Store verbatim raw memory."""
+        """Store verbatim raw memory.
+
+        With an idempotency key, ``_replay_interrupted`` lets the server re-run a
+        write whose earlier attempt never finished its receipt; leave it off
+        when the caller must reconcile such a write itself.
+        """
         data: dict[str, Any] = {
             "title": title,
             "raw_content": raw_content,
@@ -44,12 +50,12 @@ class ClientMemoryMixin:
         if project_id:
             data["project_id"] = project_id
         if _idempotency_key is not None:
-            # The migration owns durable retry identity across process restarts.
+            # The caller owns durable retry identity across process restarts.
             return await self._request(
                 "POST",
                 "/memory/raw",
                 json=data,
-                params={"replay_interrupted": "false"},
+                params={"replay_interrupted": "true" if _replay_interrupted else "false"},
                 _idempotency_key=_idempotency_key,
                 _buffer_pending=False,
             )

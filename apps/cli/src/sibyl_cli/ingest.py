@@ -257,7 +257,7 @@ _OUTCOME_LABELS = {
     "updated": "Changed",
     "relinked": "Attached",
     "unchanged": "Unchanged",
-    "retired": "Left alone",
+    "kept": "Left alone",
     "failed": "Failed",
 }
 
@@ -431,6 +431,9 @@ def ingest_memories(
         except SibylClientError as exc:
             handle_client_error(exc, invalid_request_label="Import rejected")
             return
+        except ValueError as exc:
+            error(str(exc))
+            raise typer.Exit(1) from exc
         if job is None:
             if json_out:
                 print_json({"found": 0})

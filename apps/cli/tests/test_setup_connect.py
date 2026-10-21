@@ -725,7 +725,7 @@ def _imported_job() -> agent_memories.MemoryImport:
         content="body",
     )
     item = agent_memories.PlannedImport(
-        memory=memory, project_id=None, scope="private", source_id=memory.source_id(None)
+        memory=memory, project_id=None, scope="private", source_id=memory.source_id("user-1", None)
     )
     return agent_memories.MemoryImport(
         discovery=agent_memories.Discovery(memories=[memory]),
