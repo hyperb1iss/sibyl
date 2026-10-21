@@ -188,8 +188,9 @@ add("OAuth redirect insight",
     category="authentication")
 ```
 
-Search returns previews; fetch the full record with `sibyl show <id>`. To seed memory from existing
-sessions, import transcripts with `sibyl ingest claude-code <path>` or `sibyl ingest codex <path>`.
+Search returns previews; fetch the full record with `sibyl show <id>`. To seed memory with what your
+agents already learned, import their memory files with `sibyl ingest memories`, or import whole
+transcripts with `sibyl ingest claude-code <path>` or `sibyl ingest codex <path>`.
 
 ## Tool Reference
 
