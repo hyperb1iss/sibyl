@@ -23,7 +23,7 @@ import asyncio
 import hashlib
 import json
 import re
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Literal
@@ -450,12 +450,14 @@ _STRANDED_MESSAGE = (
 )
 
 
-# How many keys one source may burn through (each an interrupted reservation
-# or the receipt of a purged memory) before its create gives up.
-_MAX_CAPTURE_KEYS = 32
+# How many keys one source may burn through before its create gives up. A
+# key burns only through a real event (a reservation interrupted before the
+# write, or the receipt of a memory since purged), and walking past one costs
+# a single request, so this bound exists only to guarantee the walk ends.
+_MAX_CAPTURE_KEYS = 1024
 
 
-def _capture_keys(item: PlannedImport) -> list[str]:
+def _capture_keys(item: PlannedImport) -> Iterator[str]:
     """The idempotency keys one file's create may use, in order.
 
     Every key names the source and an attempt number, never the content, and
@@ -466,11 +468,9 @@ def _capture_keys(item: PlannedImport) -> list[str]:
     under it (a reservation interrupted before the write, or the receipt of a
     memory since purged).
     """
-    keys = []
     for attempt in range(_MAX_CAPTURE_KEYS):
         identity = item.source_id if attempt == 0 else f"{item.source_id}#{attempt}"
-        keys.append(f"agent-memory-import-{hashlib.sha256(identity.encode()).hexdigest()[:48]}")
-    return keys
+        yield f"agent-memory-import-{hashlib.sha256(identity.encode()).hexdigest()[:48]}"
 
 
 async def _capture(client: Any, item: PlannedImport) -> None:
