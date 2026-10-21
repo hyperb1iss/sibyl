@@ -450,18 +450,27 @@ _STRANDED_MESSAGE = (
 )
 
 
+# How many keys one source may burn through (each an interrupted reservation
+# or the receipt of a purged memory) before its create gives up.
+_MAX_CAPTURE_KEYS = 32
+
+
 def _capture_keys(item: PlannedImport) -> list[str]:
     """The idempotency keys one file's create may use, in order.
 
-    The first names the source alone, so concurrent imports of one file
-    contend for one lock whatever text each read. The second adds the
-    content and is only used once the server shows that nothing holds or
-    stored the first: a reservation interrupted before anything was written,
-    or a receipt left behind by a memory since purged.
+    Every key names the source and an attempt number, never the content, and
+    every import walks the same sequence. Two imports of one file, whatever
+    text each read, therefore always contend for the same lock: a write under
+    any key makes the source exist for whoever comes next. A key is skipped
+    only once the server shows that nothing holds it and nothing was stored
+    under it (a reservation interrupted before the write, or the receipt of a
+    memory since purged).
     """
-    base = hashlib.sha256(item.source_id.encode()).hexdigest()[:48]
-    versioned = hashlib.sha256(f"{item.source_id}\n{item.memory.content}".encode()).hexdigest()
-    return [f"agent-memory-import-{base}", f"agent-memory-import-{versioned[:48]}"]
+    keys = []
+    for attempt in range(_MAX_CAPTURE_KEYS):
+        identity = item.source_id if attempt == 0 else f"{item.source_id}#{attempt}"
+        keys.append(f"agent-memory-import-{hashlib.sha256(identity.encode()).hexdigest()[:48]}")
+    return keys
 
 
 async def _capture(client: Any, item: PlannedImport) -> None:
@@ -501,8 +510,8 @@ async def _capture(client: Any, item: PlannedImport) -> None:
                 raise ValueError(_STRANDED_MESSAGE) from exc
         landed = await _existing_source(client, item.source_id)
         if landed is None:
-            # Nothing holds this key and nothing was stored under it: the
-            # next key may write, and only one import reaches this point.
+            # Nothing holds this key and nothing was stored under it. Every
+            # import moves on to the same next key, so they still contend.
             continue
         if str(landed.get("raw_content") or "").strip() != memory.content.strip():
             msg = "another import stored a different version of this file; run the import again"

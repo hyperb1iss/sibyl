@@ -559,6 +559,29 @@ class TestImportOne:
         assert result.outcome == "created"
         assert server.records == 1
 
+    async def test_racing_recoveries_of_two_versions_land_one_record(self) -> None:
+        # Review finding: content-keyed fallbacks took independent locks.
+        server = FakeServer()
+        old = _item(_memory(content="old"), project_id=None)
+        new = _item(_memory(content="new"), project_id=None)
+        server.burned.add(am._capture_keys(old)[0])
+        await asyncio.gather(
+            am.import_one(server.client(), old, apply=True),
+            am.import_one(server.client(), new, apply=True),
+        )
+        assert server.records == 1
+        assert am._capture_keys(old) == am._capture_keys(new)
+
+    async def test_repeated_purges_never_strand_an_unchanged_file(self) -> None:
+        # Review finding: two fixed keys ran out after two purges.
+        server = FakeServer()
+        item = _item(_memory(), project_id=None)
+        for round_ in range(4):
+            result = await am.import_one(server.client(), item, apply=True)
+            assert result.outcome == "created", round_
+            del server.sources[item.source_id]
+        assert server.records == 4
+
     async def test_a_write_still_in_progress_is_never_raced_with_another_key(self) -> None:
         server = FakeServer()
         item = _item(_memory(), project_id=None)
