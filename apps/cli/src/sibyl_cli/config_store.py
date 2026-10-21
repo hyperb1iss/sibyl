@@ -815,10 +815,15 @@ def resolve_project_from_cwd() -> str | None:
     """
     import os
 
+    return resolve_project_for_path(Path(os.getcwd()))
+
+
+def resolve_project_for_path(path: Path) -> str | None:
+    """Resolve the project a directory is linked to, as if commands ran there."""
     mappings = get_path_mappings()
     if not mappings:
         return None
-    return _match_link(Path(os.getcwd()).resolve(), mappings)[0]
+    return _match_link(path.resolve(), mappings)[0]
 
 
 def resolve_context_from_cwd() -> str | None:
@@ -835,10 +840,15 @@ def resolve_context_from_cwd() -> str | None:
     """
     import os
 
+    return resolve_context_for_path(Path(os.getcwd()))
+
+
+def resolve_context_for_path(path: Path) -> str | None:
+    """Resolve the context pin covering a directory, as if commands ran there."""
     mappings = get_path_context_mappings()
     if not mappings:
         return None
-    return _match_link(Path(os.getcwd()).resolve(), mappings)[0]
+    return _match_link(path.resolve(), mappings)[0]
 
 
 def get_current_context() -> tuple[str | None, str | None]:
