@@ -403,6 +403,11 @@ async def anyio_sleep(delay: float) -> None:
 class ClientTransportMixin:
     """Shared HTTP transport, error handling, and pending-write behavior."""
 
+    # A failed write is queued for replay unless this is False. A bulk import
+    # reports its failures and retries by re-running, so it turns this off
+    # rather than leaving a queue of writes the person never typed.
+    buffer_writes: bool = True
+
     def _get_insecure_from_context(self, context_name: str | None) -> bool:
         """Get insecure setting from context config."""
         from sibyl_cli import config_store
@@ -704,7 +709,12 @@ class ClientTransportMixin:
         pending_write_id = _pending_write_id
         pending_write_created = _pending_write_created
         idempotency_key = _idempotency_key
-        if _buffer_pending and pending_write_id is None and _should_buffer_request(method, path):
+        if (
+            _buffer_pending
+            and self.buffer_writes
+            and pending_write_id is None
+            and _should_buffer_request(method, path)
+        ):
             identity_failure: SibylClientError | None = None
             try:
                 await self._ensure_pending_identity()
