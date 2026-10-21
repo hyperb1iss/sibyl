@@ -240,28 +240,53 @@ class TestPlan:
 
 
 class FakeServer:
-    """Raw memory sources as the API keeps them, with its correction rules.
+    """Raw memory sources as the API serves them, with its correction rules.
 
     Stateful so a test reads back what persisted rather than which calls were
-    made: a refused correction answers ``applied: false`` and changes nothing,
-    and a create repeated under one idempotency key lands once.
+    made. It answers the way the real serializer does (a deleted source comes
+    back redacted, its state under ``visibility``; a superseded one names its
+    replacement), refuses a correction the way the API does (200 with
+    ``applied`` false), and keys creates the way the idempotency layer does:
+    the same key replays for the same body and conflicts for another.
     """
 
     def __init__(self) -> None:
         self.sources: dict[str, dict[str, Any]] = {}
         self.records = 0
-        self.keys: set[str] = set()
+        self.keys: dict[str, tuple[str, str]] = {}
         self.refuse: set[str] = set()
+        self.interrupt: str | None = None  # "after" or "before" the store
 
     def add(
-        self, source_id: str, content: str, *, state: str = "active", scope: str = "private"
+        self,
+        source_id: str,
+        content: str,
+        *,
+        state: str = "active",
+        scope: str = "private",
+        replacement: str | None = None,
     ) -> None:
+        lifecycle: dict[str, Any] = {"state": state}
+        if replacement:
+            # The API records a replacement by its raw memory ID, not its source ID.
+            target = self.sources.get(replacement)
+            lifecycle["replacement_source_id"] = target["id"] if target else replacement
         self.sources[source_id] = {
+            "id": f"raw:{len(self.sources) + 1}",
+            "source_id": source_id,
             "raw_content": content,
             "revision": 1,
             "memory_scope": scope,
-            "lifecycle": {"state": state},
+            "lifecycle": lifecycle,
         }
+
+    def find(self, reference: str) -> str | None:
+        """Resolve a source ID or raw memory ID, the way blame does."""
+        if reference in self.sources:
+            return reference
+        return next(
+            (key for key, source in self.sources.items() if source["id"] == reference), None
+        )
 
     def state(self, source_id: str) -> str:
         return self.sources[source_id]["lifecycle"]["state"]
@@ -270,18 +295,42 @@ class FakeServer:
         client = MagicMock()
 
         async def memory_blame(source_id: str) -> dict[str, Any]:
-            if source_id not in self.sources:
+            await asyncio.sleep(0)
+            found = self.find(source_id)
+            if found is None:
                 raise SibylClientError("memory_source_not_found", status_code=404)
-            return {"source": dict(self.sources[source_id])}
+            source = dict(self.sources[found])
+            if source["lifecycle"]["state"] == "deleted":
+                source.update(
+                    raw_content=None, lifecycle={}, visibility={"lifecycle_state": "deleted"}
+                )
+            return {"source": source}
 
         async def remember_raw_memory(**kwargs: Any) -> dict[str, Any]:
-            key = kwargs.get("_idempotency_key")
-            if key and key in self.keys:
+            key = kwargs["_idempotency_key"]
+            body = (kwargs["source_id"], kwargs["raw_content"])
+            if key in self.keys:
+                if self.keys[key] != body:
+                    raise SibylClientError(
+                        "Idempotency-Key was already used for a different request",
+                        status_code=409,
+                    )
                 return {"id": "replayed"}
-            if key:
-                self.keys.add(key)
+            self.keys[key] = body
+            if self.interrupt == "before":
+                raise SibylClientError(
+                    "write may have landed",
+                    status_code=409,
+                    error_code="idempotency_reconciliation_required",
+                )
             self.records += 1
             self.add(kwargs["source_id"], kwargs["raw_content"], scope=kwargs["memory_scope"])
+            if self.interrupt == "after":
+                raise SibylClientError(
+                    "write may have landed",
+                    status_code=409,
+                    error_code="idempotency_reconciliation_required",
+                )
             return {"id": f"raw-{self.records}"}
 
         async def correct_memory(source_id: str, **kwargs: Any) -> dict[str, Any]:
@@ -290,10 +339,14 @@ class FakeServer:
             if action in self.refuse:
                 return {"applied": False, "reason": "refused"}
             if action == "supersede":
-                replacement = self.sources.get(kwargs["replacement_source_id"])
+                target = self.find(kwargs["replacement_source_id"])
+                replacement = self.sources.get(target) if target else None
                 if replacement is None or replacement["lifecycle"]["state"] != "active":
                     return {"applied": False, "reason": "replacement is not recallable"}
-                source["lifecycle"] = {"state": "superseded"}
+                source["lifecycle"] = {
+                    "state": "superseded",
+                    "replacement_source_id": replacement["id"],
+                }
             elif action == "revise":
                 if kwargs["expected_revision"] != source["revision"]:
                     raise SibylClientError("revision conflict", status_code=409)
@@ -336,7 +389,6 @@ class TestImportOne:
         assert kwargs["scope_key"] is None
         assert kwargs["capture_surface"] == am.CAPTURE_SURFACE
         assert kwargs["_idempotency_key"].startswith("agent-memory-import-")
-        assert kwargs["_replay_interrupted"] is True
         metadata = kwargs["metadata"]
         assert metadata["remember_kind"] == "rule"
         assert metadata["project_id"] == "project_1"
@@ -435,11 +487,85 @@ class TestImportOne:
         # Review finding: both saw it missing; the shared key collapses them.
         server = FakeServer()
         item = _item(_memory(), project_id=None)
-        first, second = server.client(), server.client()
-        await asyncio.gather(
-            am.import_one(first, item, apply=True), am.import_one(second, item, apply=True)
+        results = await asyncio.gather(
+            am.import_one(server.client(), item, apply=True),
+            am.import_one(server.client(), item, apply=True),
         )
         assert server.records == 1
+        assert {result.outcome for result in results} <= {"created", "unchanged"}
+
+    async def test_racing_imports_of_two_versions_of_a_file_land_one_record(self) -> None:
+        # Review finding: the key used to carry the content, so each snapshot won.
+        server = FakeServer()
+        old = _item(_memory(content="old"), project_id=None)
+        new = _item(_memory(content="new"), project_id=None)
+        results = await asyncio.gather(
+            am.import_one(server.client(), old, apply=True),
+            am.import_one(server.client(), new, apply=True),
+        )
+        # Whichever lands first wins; the other either fails asking for a
+        # re-run or revises it in place. Never a second record.
+        assert server.records == 1
+        assert server.sources[old.source_id]["raw_content"] in {"old", "new"}
+        failed = [result for result in results if result.outcome == "failed"]
+        assert all("run the import again" in result.detail for result in failed)
+
+    async def test_an_interrupted_write_that_landed_counts_as_created(self) -> None:
+        server = FakeServer()
+        server.interrupt = "after"
+        result = await am.import_one(server.client(), _item(_memory()), apply=True)
+        assert result.outcome == "created"
+        assert server.records == 1
+
+    async def test_an_interrupted_write_is_never_repeated_blindly(self) -> None:
+        # Review finding: taking over the reservation wrote a second record.
+        server = FakeServer()
+        server.interrupt = "before"
+        result = await am.import_one(server.client(), _item(_memory()), apply=True)
+        assert result.outcome == "failed"
+        assert server.records == 0
+
+    async def test_a_create_the_server_only_replayed_is_not_reported_as_stored(self) -> None:
+        server = FakeServer()
+        item = _item(_memory(), project_id=None)
+        assert (await am.import_one(server.client(), item, apply=True)).outcome == "created"
+        del server.sources[item.source_id]  # purged; the key's receipt remains
+        result = await am.import_one(server.client(), item, apply=True)
+        assert result.outcome == "failed"
+        assert server.records == 1
+
+    async def test_a_deleted_unattached_copy_as_the_server_serves_it_blocks_the_link(
+        self,
+    ) -> None:
+        # Review finding: a redacted source carries its state under visibility.
+        server = FakeServer()
+        server.add(UNATTACHED, "body", state="deleted")
+        client = server.client()
+        blame = await client.memory_blame(UNATTACHED)
+        assert blame["source"]["lifecycle"] == {}
+        result = await am.import_one(client, _item(_memory()), apply=True)
+        assert result.outcome == "kept"
+        assert ATTACHED not in server.sources
+
+    async def test_moving_to_another_project_follows_the_earlier_import(self) -> None:
+        # Review finding: the importer's own supersession read as retirement.
+        server = FakeServer()
+        server.add(ATTACHED, "body")
+        server.add(UNATTACHED, "body", state="superseded", replacement=ATTACHED)
+        moved = _item(_memory(), project_id="project_2")
+        result = await am.import_one(server.client(), moved, apply=True)
+        assert result.outcome == "relinked"
+        assert server.state(moved.source_id) == "active"
+        assert server.state(ATTACHED) == "superseded"
+        replacement = server.sources[ATTACHED]["lifecycle"]["replacement_source_id"]
+        assert server.find(replacement) == moved.source_id
+
+    async def test_a_supersession_someone_else_chose_still_blocks_the_link(self) -> None:
+        server = FakeServer()
+        server.add(UNATTACHED, "body", state="superseded", replacement="note:hand-written")
+        result = await am.import_one(server.client(), _item(_memory()), apply=True)
+        assert result.outcome == "kept"
+        assert ATTACHED not in server.sources
 
     async def test_a_preview_reports_without_writing(self) -> None:
         server = FakeServer()
@@ -540,10 +666,11 @@ class TestCommand:
         client = FakeServer().client()
         client.buffer_writes = True
         seen: list[bool] = []
+        store = client.remember_raw_memory.side_effect
 
-        async def record(**_kwargs: object) -> dict[str, str]:
+        async def record(**kwargs: Any) -> dict[str, Any]:
             seen.append(client.buffer_writes)
-            return {"id": "raw"}
+            return await store(**kwargs)
 
         client.remember_raw_memory = AsyncMock(side_effect=record)
         result = self._run(tmp_path, client, "--yes")

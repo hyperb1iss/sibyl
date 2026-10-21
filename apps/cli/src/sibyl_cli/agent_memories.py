@@ -401,9 +401,28 @@ async def _existing_source(client: Any, source_id: str) -> dict[str, Any] | None
 
 
 def _state(source: dict[str, Any]) -> str:
+    """The source's lifecycle state.
+
+    A source whose content is redacted (a deleted one, say) comes back with an
+    empty ``lifecycle`` and its state under ``visibility`` instead.
+    """
     lifecycle = source.get("lifecycle")
     state = lifecycle.get("state") if isinstance(lifecycle, dict) else None
+    if not state:
+        visibility = source.get("visibility")
+        state = visibility.get("lifecycle_state") if isinstance(visibility, dict) else None
     return str(state) if state else "active"
+
+
+def _replacement(source: dict[str, Any]) -> str | None:
+    lifecycle = source.get("lifecycle")
+    value = lifecycle.get("replacement_source_id") if isinstance(lifecycle, dict) else None
+    return str(value) if value else None
+
+
+def _file_prefix(item: PlannedImport) -> str:
+    """Every source ID this file can have, whatever project it attached to."""
+    return item.source_id.rsplit(":", 1)[0] + ":"
 
 
 def _live(source: dict[str, Any]) -> bool:
@@ -423,11 +442,17 @@ def _metadata(item: PlannedImport) -> dict[str, Any]:
     }
 
 
+_CONFLICT_CODES = frozenset({"idempotency_reconciliation_required", "constraint_violation"})
+
+
 async def _capture(client: Any, item: PlannedImport) -> None:
     """Store one memory file as one raw memory under its stable source ID.
 
-    The idempotency key names the source and its content, so two imports that
-    both found the memory missing land one record instead of two.
+    The idempotency key names the source alone, so two imports that both found
+    the memory missing contend for one server lock and at most one of them
+    writes, whatever text each read. Interrupted writes are never re-run
+    blindly: a reservation without a receipt is reconciled by looking for the
+    memory instead, and every create is confirmed by reading it back.
     """
     memory = item.memory
     metadata: dict[str, Any] = {
@@ -438,20 +463,33 @@ async def _capture(client: Any, item: PlannedImport) -> None:
     }
     if item.project_id:
         metadata["project_id"] = item.project_id
-    key = hashlib.sha256(f"{item.source_id}\n{memory.content}".encode()).hexdigest()
-    await client.remember_raw_memory(
-        title=memory.title,
-        raw_content=memory.content,
-        source_id=item.source_id,
-        memory_scope=item.scope,
-        scope_key=item.project_id if item.scope == "project" else None,
-        tags=[f"agent:{memory.agent}"],
-        metadata=metadata,
-        provenance={"remember_kind": memory.kind},
-        capture_surface=CAPTURE_SURFACE,
-        _idempotency_key=f"agent-memory-import-{key[:48]}",
-        _replay_interrupted=True,
-    )
+    key = hashlib.sha256(item.source_id.encode()).hexdigest()[:48]
+    try:
+        await client.remember_raw_memory(
+            title=memory.title,
+            raw_content=memory.content,
+            source_id=item.source_id,
+            memory_scope=item.scope,
+            scope_key=item.project_id if item.scope == "project" else None,
+            tags=[f"agent:{memory.agent}"],
+            metadata=metadata,
+            provenance={"remember_kind": memory.kind},
+            capture_surface=CAPTURE_SURFACE,
+            _idempotency_key=f"agent-memory-import-{key}",
+        )
+    except SibylClientError as exc:
+        if exc.status_code != 409 and exc.error_code not in _CONFLICT_CODES:
+            raise
+    landed = await _existing_source(client, item.source_id)
+    if landed is None:
+        msg = (
+            "the server did not store this memory (another import may hold it, "
+            "or an earlier write was interrupted); run the import again"
+        )
+        raise ValueError(msg)
+    if str(landed.get("raw_content") or "").strip() != memory.content.strip():
+        msg = "another import stored a different version of this file; run the import again"
+        raise ValueError(msg)
 
 
 async def _correct(client: Any, source_id: str, **kwargs: Any) -> None:
@@ -466,14 +504,12 @@ async def _correct(client: Any, source_id: str, **kwargs: Any) -> None:
         raise ValueError(msg)
 
 
-async def _retire_unattached(client: Any, item: PlannedImport) -> None:
-    if item.replaces_source_id is None:
-        return
+async def _supersede(client: Any, source_id: str, item: PlannedImport, reason: str) -> None:
     await _correct(
         client,
-        item.replaces_source_id,
+        source_id,
         action="supersede",
-        reason="imported again attached to its project",
+        reason=reason,
         replacement_source_id=item.source_id,
     )
 
@@ -481,27 +517,47 @@ async def _retire_unattached(client: Any, item: PlannedImport) -> None:
 async def import_one(client: Any, item: PlannedImport, *, apply: bool) -> ImportResult:
     """Create, revise, or leave one memory; with apply False, only report which.
 
-    Whenever the project-attached copy is in place and active, a still-live
-    unattached copy is superseded, so an import interrupted between the two
-    finishes on the next run. A copy someone retired stays retired, and an
-    import never changes a memory whose visibility differs from this run's.
+    Whenever the project-attached copy is in place and active, an earlier copy
+    of the same file that is still live (the unattached one, or the copy for a
+    project the repository was linked to before) is superseded, so an import
+    interrupted between the two writes finishes on the next run. A copy
+    someone retired stays retired, and an import never changes a memory whose
+    visibility differs from this run's.
     """
     memory = item.memory
     try:
         existing = await _existing_source(client, item.source_id)
-        unattached = None
+        earlier: list[str] = []
         if item.replaces_source_id is not None:
             unattached = await _existing_source(client, item.replaces_source_id)
+            if unattached is not None:
+                if _live(unattached):
+                    earlier.append(item.replaces_source_id)
+                else:
+                    # The server records a replacement by its raw memory ID, so
+                    # read it back to see whether an earlier import of this same
+                    # file chose it (a move between projects) or a person did.
+                    previous = None
+                    if _state(unattached) == "superseded" and _replacement(unattached):
+                        previous = await _existing_source(client, str(_replacement(unattached)))
+                    previous_id = str(previous.get("source_id") or "") if previous else ""
+                    if previous_id.startswith(_file_prefix(item)):
+                        if (
+                            previous_id != item.source_id
+                            and previous is not None
+                            and _live(previous)
+                        ):
+                            earlier.append(previous_id)
+                    elif existing is None:
+                        state = _state(unattached)
+                        return ImportResult(item, "kept", f"{state} in Sibyl; left as it is")
 
         if existing is None:
-            if unattached is not None and not _live(unattached):
-                return ImportResult(item, "kept", f"{_state(unattached)} in Sibyl; left as it is")
-            relink = unattached is not None
             if apply:
                 await _capture(client, item)
-                if relink:
-                    await _retire_unattached(client, item)
-            return ImportResult(item, "relinked" if relink else "created")
+                for source_id in earlier:
+                    await _supersede(client, source_id, item, "imported again attached elsewhere")
+            return ImportResult(item, "relinked" if earlier else "created")
 
         if not _live(existing):
             return ImportResult(item, "kept", f"{_state(existing)} in Sibyl; left as it is")
@@ -516,7 +572,7 @@ async def import_one(client: Any, item: PlannedImport, *, apply: bool) -> Import
                 f"{current_scope} in Sibyl, this run imports {item.scope}; left as it is",
             )
         changed = str(stored).strip() != memory.content.strip()
-        relink = unattached is not None and _live(unattached) and _state(existing) == "active"
+        relink = bool(earlier) and _state(existing) == "active"
         if apply:
             if changed:
                 await _correct(
@@ -528,7 +584,8 @@ async def import_one(client: Any, item: PlannedImport, *, apply: bool) -> Import
                     expected_revision=existing.get("revision"),
                 )
             if relink:
-                await _retire_unattached(client, item)
+                for source_id in earlier:
+                    await _supersede(client, source_id, item, "imported again attached elsewhere")
         if relink:
             return ImportResult(item, "relinked")
         return ImportResult(item, "updated" if changed else "unchanged")
