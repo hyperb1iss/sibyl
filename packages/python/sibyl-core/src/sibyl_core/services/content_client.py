@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import AsyncIterator, Iterable
+from collections.abc import AsyncGenerator, Iterable
 from contextlib import asynccontextmanager, suppress
 from dataclasses import dataclass
 from typing import cast
@@ -105,7 +105,7 @@ async def close_shared_surreal_content_client() -> None:
 
 
 @asynccontextmanager
-async def surreal_content_client() -> AsyncIterator[SurrealContentClient]:
+async def surreal_content_client() -> AsyncGenerator[SurrealContentClient]:
     yield await get_shared_surreal_content_client()
 
 

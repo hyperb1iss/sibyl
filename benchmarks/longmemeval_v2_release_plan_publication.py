@@ -8,7 +8,7 @@ import os
 import signal
 import stat
 import sys
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Generator
 from contextlib import contextmanager, suppress
 from dataclasses import dataclass
 from pathlib import Path
@@ -35,7 +35,7 @@ class OwnedPathDirectory:
 
 
 @contextmanager
-def _defer_sigint() -> Iterator[None]:
+def _defer_sigint() -> Generator[None]:
     """Defer real SIGINT across raw-fd acquisition and ownership registration.
 
     Python dispatches process signals through the main-thread handler even when

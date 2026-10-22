@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import re
-from collections.abc import AsyncIterator, Awaitable, Callable
+from collections.abc import AsyncGenerator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from enum import StrEnum
@@ -425,7 +425,7 @@ async def open_native_transaction(
     authorize: Callable[[], Awaitable[NativeTransactionAuthorization]],
     credentials: Callable[[str], Awaitable[NativeCredentialProfile]],
     cancel_ack_timeout_seconds: float = 5.0,
-) -> AsyncIterator[NativeTransaction]:
+) -> AsyncGenerator[NativeTransaction]:
     """Open one host-authorized handle; never implicitly commit or retry.
 
     A positive finite host grace bounds only teardown CANCEL acknowledgment.

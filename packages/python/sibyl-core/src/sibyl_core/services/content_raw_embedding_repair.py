@@ -7,7 +7,7 @@ import hashlib
 import json
 import random
 import time
-from collections.abc import AsyncIterator, Awaitable, Mapping, Sequence
+from collections.abc import AsyncGenerator, Awaitable, Mapping, Sequence
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -634,7 +634,7 @@ async def _run_pass(
 @asynccontextmanager
 async def _content_session(
     client: SurrealContentClient | None,
-) -> AsyncIterator[SurrealContentClient]:
+) -> AsyncGenerator[SurrealContentClient]:
     if client is not None:
         yield client
         return

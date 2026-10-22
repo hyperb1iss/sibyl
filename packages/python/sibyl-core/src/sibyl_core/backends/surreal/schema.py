@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import AsyncIterator, Mapping
+from collections.abc import AsyncGenerator, Mapping
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from functools import partial
@@ -1276,7 +1276,7 @@ async def _renew_schema_ownership(ownership: SchemaOwnership) -> None:
 
 
 @asynccontextmanager
-async def _graph_schema_ownership(driver: SchemaDriver) -> AsyncIterator[SchemaOwnership]:
+async def _graph_schema_ownership(driver: SchemaDriver) -> AsyncGenerator[SchemaOwnership]:
     async with driver.schema_lease_executor() as lease_execute:
         ownership = await try_acquire_schema_ownership(
             lease_execute,

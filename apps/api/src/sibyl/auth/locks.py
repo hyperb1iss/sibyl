@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import hashlib
-from collections.abc import AsyncIterator
+from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 
 from sibyl.locks import entity_lock
@@ -18,19 +18,19 @@ def _digest(value: object) -> str:
 
 
 @asynccontextmanager
-async def first_user_admin_lock() -> AsyncIterator[str | None]:
+async def first_user_admin_lock() -> AsyncGenerator[str | None]:
     async with entity_lock(_AUTH_LOCK_SCOPE, _FIRST_USER_ADMIN_LOCK) as token:
         yield token
 
 
 @asynccontextmanager
-async def signup_email_lock(email: str) -> AsyncIterator[str | None]:
+async def signup_email_lock(email: str) -> AsyncGenerator[str | None]:
     async with entity_lock(_AUTH_LOCK_SCOPE, f"signup-email:{_digest(email)}") as token:
         yield token
 
 
 @asynccontextmanager
-async def oauth_identity_lock(provider: str, subject: object) -> AsyncIterator[str | None]:
+async def oauth_identity_lock(provider: str, subject: object) -> AsyncGenerator[str | None]:
     key = f"oauth:{provider.strip().lower()}:{_digest(subject)}"
     async with entity_lock(_AUTH_LOCK_SCOPE, key) as token:
         yield token

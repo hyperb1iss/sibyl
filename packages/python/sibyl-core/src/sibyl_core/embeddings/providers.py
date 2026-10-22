@@ -10,7 +10,7 @@ import os
 import threading
 import weakref
 from collections import OrderedDict
-from collections.abc import Iterator, Sequence
+from collections.abc import Generator, Sequence
 from contextlib import contextmanager, suppress
 from contextvars import ContextVar
 from dataclasses import asdict, dataclass, replace
@@ -558,7 +558,7 @@ def embedding_usage_snapshot(
 @contextmanager
 def capture_embedding_usage(
     provider: EmbeddingProvider | None,
-) -> Iterator[dict[str, str | int | float]]:
+) -> Generator[dict[str, str | int | float]]:
     usage = {} if provider is None else _empty_embedding_usage(provider.metadata)
     token = _embedding_usage_collector.set(usage)
     try:

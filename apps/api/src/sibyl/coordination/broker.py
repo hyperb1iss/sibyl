@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from enum import StrEnum
 from hashlib import sha256
-from typing import Any, Literal, Protocol, cast
+from typing import Any, Literal, Protocol, TypedDict, cast
 from uuid import UUID
 
 from arq.connections import RedisSettings
@@ -100,6 +100,12 @@ def memory_extraction_job_id(
         source_ids = [str(source.get("id") or "") for source in sources_data]
     digest = sha256("|".join([group_id, *source_ids]).encode()).hexdigest()[:16]
     return f"extract_memory:{digest}"
+
+
+class OperationalSourceKwargs(TypedDict, total=False):
+    """Operational source evidence, present only when the capture carries it."""
+
+    operational_source: dict[str, Any]
 
 
 def operational_note_distillation_job_id(

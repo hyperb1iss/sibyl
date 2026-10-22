@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import AsyncIterator, Sequence
+from collections.abc import AsyncGenerator, Sequence
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from typing import Protocol
@@ -81,7 +81,7 @@ async def get_surreal_graph_runtime(
 
 
 @asynccontextmanager
-async def background_graph_runtime(group_id: str) -> AsyncIterator[GraphRuntime]:
+async def background_graph_runtime(group_id: str) -> AsyncGenerator[GraphRuntime]:
     """Bind background managers to their own network pool for this operation."""
     async with background_graph_client(group_id) as background:
         await prepare_graph_schema(background)

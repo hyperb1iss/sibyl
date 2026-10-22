@@ -5,7 +5,7 @@ import time
 from collections.abc import Awaitable, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, TypedDict
 
 import structlog
 
@@ -640,6 +640,10 @@ def _raw_memory_search_result(
     )
 
 
+class _RawRecallProjects(TypedDict, total=False):
+    project_ids: Sequence[str]
+
+
 async def _search_raw_memories(
     *,
     query: str,
@@ -661,6 +665,7 @@ async def _search_raw_memories(
     include_content: bool,
     content_max_chars: int,
 ) -> RawMemorySearchFetch:
+    projects: _RawRecallProjects = {"project_ids": project_ids} if project_ids is not None else {}
     recall_result = await recall_raw_memory(
         organization_id=organization_id,
         principal_id=principal_id,
@@ -669,7 +674,7 @@ async def _search_raw_memories(
         memory_scope=memory_scope,
         scope_key=scope_key,
         project_id=project_id,
-        **({"project_ids": project_ids} if project_ids is not None else {}),
+        **projects,
         source_ids=[source_id] if source_id else None,
         participants=participants,
         labels=labels,

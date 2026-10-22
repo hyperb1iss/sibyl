@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import time
 from collections import OrderedDict
-from collections.abc import AsyncIterator
+from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from typing import Any, cast
@@ -221,7 +221,7 @@ async def _release_background_lease(group_id: str, lease: _BackgroundLease) -> N
 
 
 @asynccontextmanager
-async def background_graph_client(group_id: str) -> AsyncIterator[SurrealGraphClient]:
+async def background_graph_client(group_id: str) -> AsyncGenerator[SurrealGraphClient]:
     """Share one network pool across overlapping background operations per org.
 
     The active-lease registry is separate from the foreground LRU. The pool

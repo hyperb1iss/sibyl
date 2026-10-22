@@ -8,7 +8,7 @@ import json
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from functools import lru_cache
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, TypedDict
 
 import structlog
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, ValidationError
@@ -33,9 +33,14 @@ from sibyl_core.tasks.memory_validation import (
 from sibyl_core.tasks.procedure_review import review_digest
 
 if TYPE_CHECKING:
+    from sibyl_core.backends.surreal.schema_version import SurrealExecute
     from sibyl_core.services.graph_read_validation import GraphReadValidation
 
 log = structlog.get_logger()
+
+
+class _ExecutionReadKwargs(TypedDict, total=False):
+    read_execute_query: SurrealExecute
 
 
 def _sha(value: str) -> str:
@@ -139,18 +144,20 @@ async def validation_binding_current(
         # A binding this build cannot parse binds nothing it can check.
         _report_unreadable_binding(memory.organization_id, memory.id)
         return False
+    execute_query = read.content_execute_query if read is not None else None
+    query_kwargs: _ExecutionReadKwargs = (
+        {"read_execute_query": execute_query} if execute_query is not None else {}
+    )
     execution = ValidationExecution(
         binding.execution_id,
         memory.organization_id,
         memory.principal_id,
+        **query_kwargs,
         **(
-            {
-                "read_execute_query": read.content_execute_query,
-                **read._publication_execution_kwargs(
-                    SourceIdentity(memory.organization_id, SourceKind.RAW_CAPTURE, memory.id)
-                ),
-            }
-            if read is not None and read.content_execute_query is not None
+            read._publication_execution_kwargs(
+                SourceIdentity(memory.organization_id, SourceKind.RAW_CAPTURE, memory.id)
+            )
+            if read is not None and execute_query is not None
             else {}
         ),
     )

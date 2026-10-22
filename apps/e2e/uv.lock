@@ -819,7 +819,7 @@ dev = [
     { name = "python-louvain", specifier = ">=0.16" },
     { name = "ruff" },
     { name = "surrealdb", specifier = ">=2.0.0,<3.0" },
-    { name = "ty", specifier = ">=0.0.84" },
+    { name = "ty", specifier = ">=0.0.86" },
 ]
 
 [[package]]

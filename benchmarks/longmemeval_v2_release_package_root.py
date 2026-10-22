@@ -5,7 +5,7 @@ from __future__ import annotations
 import fcntl
 import os
 import stat
-from collections.abc import Iterator
+from collections.abc import Generator
 from contextlib import contextmanager, suppress
 from dataclasses import dataclass
 from pathlib import Path
@@ -219,7 +219,7 @@ def _lock_path(owner: OwnedDirectory) -> Path:
 
 
 @contextmanager
-def publication_lock(owner: OwnedDirectory) -> Iterator[None]:
+def publication_lock(owner: OwnedDirectory) -> Generator[None]:
     """Serialize sibling publication metadata outside the immutable package root."""
 
     require_owned_directory(owner, name="official packages root")

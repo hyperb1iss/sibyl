@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import hashlib
-from collections.abc import AsyncIterator, Mapping, Sequence
+from collections.abc import AsyncGenerator, Mapping, Sequence
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta
 from types import SimpleNamespace
@@ -208,7 +208,7 @@ def _hash_invitation_token(token: str) -> str:
 
 
 @asynccontextmanager
-async def _auth_client_scope() -> AsyncIterator[QueryClient]:
+async def _auth_client_scope() -> AsyncGenerator[QueryClient]:
     async with surreal_auth_client_scope() as client:
         yield client
 

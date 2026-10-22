@@ -6,7 +6,7 @@ import fcntl
 import json
 import os
 import re
-from collections.abc import Iterator
+from collections.abc import Generator
 from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
@@ -482,7 +482,7 @@ def _require_declared_tree(plan: dict[str, Any], *, output_root: Path) -> None:
 
 
 @contextmanager
-def stage_lock(output_root: Path) -> Iterator[None]:
+def stage_lock(output_root: Path) -> Generator[None]:
     lock_path = output_root / "runner.lock"
     with lock_path.open("a+", encoding="utf-8") as handle:
         try:

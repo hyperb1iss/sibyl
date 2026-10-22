@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import re
-from collections.abc import Awaitable, Callable, Iterator
+from collections.abc import Awaitable, Callable, Generator
 from contextlib import contextmanager
 from contextvars import ContextVar
 from importlib.metadata import version
@@ -55,7 +55,7 @@ _observer: ContextVar[TransportObserver | None] = ContextVar("llm_transport_obse
 
 
 @contextmanager
-def observe_transport_attempts(observer: TransportObserver) -> Iterator[None]:
+def observe_transport_attempts(observer: TransportObserver) -> Generator[None]:
     """Observe supported SDK hops independently of in-memory extraction receipts."""
     token = _observer.set(observer)
     try:
@@ -72,7 +72,7 @@ _reserve_attempt: ContextVar[Callable[[], Awaitable[None]] | None] = ContextVar(
 @contextmanager
 def reserve_uncovered_transport_attempts(
     covered: int, reserve_extra: Callable[[], Awaitable[None]]
-) -> Iterator[None]:
+) -> Generator[None]:
     """Reserve unexpected HTTP hops before dispatch beyond the initial envelope."""
     claimed = 0
     denied: Exception | None = None
@@ -103,7 +103,7 @@ def reserve_uncovered_transport_attempts(
 
 
 @contextmanager
-def collect_transport_attempts() -> Iterator[list[TransportAttempt]]:
+def collect_transport_attempts() -> Generator[list[TransportAttempt]]:
     attempts: list[TransportAttempt] = []
     token = _attempts.set(attempts)
     try:
