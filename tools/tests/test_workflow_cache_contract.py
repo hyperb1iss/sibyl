@@ -1,11 +1,11 @@
 from __future__ import annotations
 
 import re
+import tomllib
 from collections.abc import Iterable, Iterator
 from pathlib import Path
 from typing import Any
 
-import tomllib
 import yaml
 
 REPO_ROOT = Path(__file__).parents[2]

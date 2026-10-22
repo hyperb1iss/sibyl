@@ -180,7 +180,9 @@ def classify(
     return "FALSE_POSITIVE", verbs_used, summaries
 
 
-async def run_one(prompt: EvalPrompt, *, model: str, timeout: float) -> PromptResult:
+# The deadline lives here, not in the caller, so a timed-out session still
+# classifies the tool uses it collected before the cutoff.
+async def run_one(prompt: EvalPrompt, *, model: str, timeout: float) -> PromptResult:  # noqa: ASYNC109
     """Run a single agent session and capture tool-use intent."""
     try:
         from claude_agent_sdk import (  # type: ignore[import-not-found]
