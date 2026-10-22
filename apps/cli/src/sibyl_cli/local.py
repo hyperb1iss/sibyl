@@ -16,7 +16,7 @@ import subprocess
 import tempfile
 import time
 import webbrowser
-from collections.abc import Iterator
+from collections.abc import Generator
 from contextlib import contextmanager
 from dataclasses import dataclass
 from importlib.metadata import PackageNotFoundError
@@ -736,7 +736,7 @@ def _remove_orphaned_staged_files() -> None:
 
 
 @contextmanager
-def _upgrade_lock() -> Iterator[None]:
+def _upgrade_lock() -> Generator[None]:
     """Hold the local upgrade lock, or stop cleanly when another upgrade has it."""
     SIBYL_LOCAL_DIR.mkdir(parents=True, exist_ok=True)
     with open(SIBYL_LOCAL_DIR / ".upgrade.lock", "w") as handle:

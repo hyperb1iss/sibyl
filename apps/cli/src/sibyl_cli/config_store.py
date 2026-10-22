@@ -12,7 +12,7 @@ from __future__ import annotations
 import os
 import tempfile
 import tomllib
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Generator
 from contextlib import contextmanager, suppress
 from dataclasses import dataclass
 from pathlib import Path
@@ -124,7 +124,7 @@ def ensure_config_dir() -> Path:
 
 
 @contextmanager
-def _config_file_lock(path: Path | None = None) -> Iterator[None]:
+def _config_file_lock(path: Path | None = None) -> Generator[None]:
     """Serialize read-modify-write operations through a sidecar lock file."""
     target = path or config_path()
     target.parent.mkdir(parents=True, exist_ok=True)

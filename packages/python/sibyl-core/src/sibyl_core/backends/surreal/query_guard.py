@@ -1,6 +1,6 @@
 """Task-local guards at the final prepared native query boundary."""
 
-from collections.abc import Awaitable, Callable, Iterator
+from collections.abc import Awaitable, Callable, Generator
 from contextlib import contextmanager
 from contextvars import ContextVar
 
@@ -14,7 +14,7 @@ _native_query_guard: ContextVar[NativeQueryGuard | None] = ContextVar(
 
 
 @contextmanager
-def guard_native_query_requests(guard: NativeQueryGuard) -> Iterator[None]:
+def guard_native_query_requests(guard: NativeQueryGuard) -> Generator[None]:
     """Bind a guard to this operation without changing a shared client's policy."""
     token = _native_query_guard.set(guard)
     try:

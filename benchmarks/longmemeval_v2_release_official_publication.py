@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Iterator
+from collections.abc import Generator
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
@@ -99,7 +99,7 @@ def open_claimed_official_arm_package(
     packages_root: Path,
     expected: dict[str, Any],
     packaging_status: dict[str, Any],
-) -> Iterator[dict[str, Any]]:
+) -> Generator[dict[str, Any]]:
     """Retain canonical arm authority handles through score-aware semantics."""
 
     package.require_claimed_executed_snapshot(executed, packaging_status)
@@ -142,7 +142,7 @@ def _open_locked_publication(
     *,
     packaging_status: dict[str, Any] | None,
     expected: dict[str, Any] | None,
-) -> Iterator[dict[str, Any]]:
+) -> Generator[dict[str, Any]]:
     """Consume one authority while sibling metadata cannot be thawed."""
 
     parent_fd = package_root.open_owned_directory(

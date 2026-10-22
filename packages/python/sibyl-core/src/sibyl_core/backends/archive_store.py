@@ -30,7 +30,7 @@ import shutil
 import stat
 import tempfile
 import time
-from collections.abc import Iterator
+from collections.abc import Generator, Iterator
 from contextlib import contextmanager, suppress
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -438,7 +438,7 @@ class DirectoryArchiveStore:
         self._reserve_bytes = reserve_bytes
 
     @contextmanager
-    def _refusals(self, action: str) -> Iterator[None]:
+    def _refusals(self, action: str) -> Generator[None]:
         """Report any filesystem failure as the store being unavailable."""
         try:
             yield

@@ -12,7 +12,7 @@ from __future__ import annotations
 import hashlib
 import logging
 import secrets
-from collections.abc import AsyncIterator, Awaitable, Mapping
+from collections.abc import AsyncGenerator, Awaitable, Mapping
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import datetime, timedelta
@@ -477,7 +477,7 @@ def _password_reset_namespace(record: SurrealRecord | None) -> SimpleNamespace |
 
 
 @asynccontextmanager
-async def _auth_client_scope() -> AsyncIterator[SurrealAuthClient]:
+async def _auth_client_scope() -> AsyncGenerator[SurrealAuthClient]:
     async with surreal_auth_client_scope() as client:
         yield client
 

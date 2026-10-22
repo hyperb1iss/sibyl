@@ -13,7 +13,7 @@ import os
 import re
 import subprocess
 import sys
-from collections.abc import Iterator, Mapping, Sequence
+from collections.abc import Generator, Mapping, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -4349,7 +4349,7 @@ def _dispatch_capture_command(args: argparse.Namespace) -> int | None:
 
 
 @contextmanager
-def _evidence_lock(evidence_dir: Path) -> Iterator[None]:
+def _evidence_lock(evidence_dir: Path) -> Generator[None]:
     evidence_dir.mkdir(parents=True, exist_ok=True)
     lock_path = evidence_dir / LOCK_FILENAME
     with lock_path.open("a+", encoding="utf-8") as lock_file:

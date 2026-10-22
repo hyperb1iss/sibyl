@@ -13,7 +13,7 @@ import os
 import shlex
 import shutil
 import sys
-from collections.abc import Iterator
+from collections.abc import Generator
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
@@ -169,7 +169,7 @@ def _warn_if_pinned_elsewhere(ctx: config_store.Context) -> None:
 
 
 @contextmanager
-def only_target_credentials(server_url: str) -> Iterator[None]:
+def only_target_credentials(server_url: str) -> Generator[None]:
     """Keep an automation token away from a server it was not issued for.
 
     SIBYL_AUTH_TOKEN wins over stored logins, and without a paired

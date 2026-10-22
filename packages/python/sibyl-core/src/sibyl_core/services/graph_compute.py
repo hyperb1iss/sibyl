@@ -33,7 +33,7 @@ import asyncio
 import contextvars
 import functools
 import threading
-from collections.abc import Callable, Coroutine, Iterator
+from collections.abc import Callable, Coroutine, Generator
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from typing import Any
@@ -55,7 +55,7 @@ _pools_lock = threading.Lock()
 
 
 @contextmanager
-def graph_build_steps() -> Iterator[None]:
+def graph_build_steps() -> Generator[None]:
     """Run the compute steps started in this context on the graph build pool.
 
     Tasks created inside inherit the mark, so a build's gathered batches

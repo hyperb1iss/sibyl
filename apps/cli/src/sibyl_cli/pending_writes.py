@@ -7,7 +7,7 @@ import os
 import re
 import stat
 import tempfile
-from collections.abc import Iterator
+from collections.abc import Generator
 from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
@@ -136,7 +136,7 @@ def pending_metrics_path() -> Path:
 
 
 @contextmanager
-def pending_replay_lock() -> Iterator[bool]:
+def pending_replay_lock() -> Generator[bool]:
     """Try to serialize pending-write replay without delaying the caller."""
     root = pending_writes_dir()
     _ensure_secure_dir(root)

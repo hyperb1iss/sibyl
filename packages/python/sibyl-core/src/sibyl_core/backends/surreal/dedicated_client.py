@@ -9,7 +9,7 @@ import os
 import random
 import sys
 import time
-from collections.abc import AsyncIterator, Awaitable, Callable
+from collections.abc import AsyncGenerator, AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Protocol, cast
@@ -688,7 +688,7 @@ class DedicatedSurrealClient:
         )
 
     @asynccontextmanager
-    async def schema_lease_executor(self) -> AsyncIterator[SurrealExecute]:
+    async def schema_lease_executor(self) -> AsyncGenerator[SurrealExecute]:
         """Reserve renewal capacity without competing with graph query sockets."""
         if is_embedded_surreal_url(self._url):
             yield self.execute_query
@@ -867,7 +867,7 @@ class DedicatedSurrealClient:
     @asynccontextmanager
     async def live_table(
         self, table: str, *, diff: bool = False
-    ) -> AsyncIterator[AsyncIterator[object]]:
+    ) -> AsyncGenerator[AsyncIterator[object]]:
         if not self.supports_live_queries:
             raise RuntimeError("SurrealDB live queries require a WebSocket URL")
 

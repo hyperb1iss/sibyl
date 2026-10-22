@@ -15,7 +15,7 @@ captures speak for every chunk plane and nothing written since counts.
 
 from __future__ import annotations
 
-from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
+from collections.abc import AsyncGenerator, Awaitable, Callable, Sequence
 from contextlib import asynccontextmanager
 from typing import Any
 
@@ -138,7 +138,7 @@ async def require_content_sweep_schema(client: SurrealContentClient) -> None:
 @asynccontextmanager
 async def content_session(
     client: SurrealContentClient | None,
-) -> AsyncIterator[SurrealContentClient]:
+) -> AsyncGenerator[SurrealContentClient]:
     if client is not None:
         yield client
         return

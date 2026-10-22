@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterator, Sequence
+from collections.abc import Generator, Sequence
 from contextlib import contextmanager
 from contextvars import ContextVar, Token
 from dataclasses import dataclass
@@ -193,7 +193,7 @@ def llm_budget_context(
     *,
     user_id: str | None = None,
     organization_id: str | None = None,
-) -> Iterator[LLMBudgetContext]:
+) -> Generator[LLMBudgetContext]:
     token = set_llm_budget_context(
         user_id=user_id,
         organization_id=organization_id,
@@ -206,7 +206,7 @@ def llm_budget_context(
 
 
 @contextmanager
-def llm_run_spend_ledger(cap_tokens: int | None) -> Iterator[LLMRunSpendLedger]:
+def llm_run_spend_ledger(cap_tokens: int | None) -> Generator[LLMRunSpendLedger]:
     """Count every reservation and settlement made inside against one run's ceiling."""
     if cap_tokens is not None and cap_tokens <= 0:
         raise ValueError("run token ceiling must be positive")
@@ -219,7 +219,7 @@ def llm_run_spend_ledger(cap_tokens: int | None) -> Iterator[LLMRunSpendLedger]:
 
 
 @contextmanager
-def collect_llm_reservations() -> Iterator[list[LLMReservation]]:
+def collect_llm_reservations() -> Generator[list[LLMReservation]]:
     """Record every reservation made inside, so one call can settle exactly what it took."""
     reservations: list[LLMReservation] = []
     token = _reservation_log.set(reservations)

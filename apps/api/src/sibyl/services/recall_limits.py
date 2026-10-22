@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import os
 import time
-from collections.abc import AsyncIterator
+from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 
 from sibyl_core.auth import OrganizationRole
@@ -52,7 +52,7 @@ class RecallConcurrencyLimiter:
         organization_id: str,
         user_id: str,
         organization_role: OrganizationRole | str | None,
-    ) -> AsyncIterator[None]:
+    ) -> AsyncGenerator[None]:
         if _is_owner(organization_role):
             yield
             return
@@ -119,7 +119,7 @@ async def recall_concurrency_slot(
     organization_id: str,
     user_id: str,
     organization_role: OrganizationRole | str | None,
-) -> AsyncIterator[None]:
+) -> AsyncGenerator[None]:
     async with _recall_concurrency_limiter.slot(
         organization_id=organization_id,
         user_id=user_id,
