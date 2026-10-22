@@ -10,7 +10,7 @@ import { useMe, useOrgs, useSwitchOrg } from '@/lib/hooks/auth';
 
 export function UserMenu() {
   const router = useRouter();
-  const { data: me } = useMe();
+  const { data: me, isLoading: meLoading } = useMe();
   const { data: orgsData } = useOrgs();
   const switchOrg = useSwitchOrg();
   const [isOpen, setIsOpen] = useState(false);
@@ -62,6 +62,16 @@ export function UserMenu() {
   );
 
   if (!user) {
+    // A profile still in flight is not a signed-out user; showing "Sign in"
+    // here flashes a false logged-out header on every slow /auth/me.
+    if (meLoading) {
+      return (
+        <div role="status" aria-label="Loading account" className="px-2.5 py-1.5">
+          <div className="w-8 h-8 rounded-full border-2 border-sc-fg-subtle/20 bg-sc-bg-highlight animate-pulse" />
+        </div>
+      );
+    }
+
     return (
       <Link
         href="/login"
