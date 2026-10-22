@@ -10,7 +10,7 @@ import hashlib
 import json
 from collections import defaultdict
 from dataclasses import dataclass, field
-from typing import Any, Literal
+from typing import Any, Literal, cast
 from uuid import UUID
 
 from pydantic import BaseModel
@@ -26,6 +26,7 @@ from sibyl_core.migrate.archive_operator_native_root import PreparedArchiveOpera
 from sibyl_core.migrate.archive_phase_receipts import (
     ArchivePhaseControl,
     ArchivePhaseCounts,
+    ArchivePhaseCredential,
     ArchivePhaseKey,
     ArchivePhaseReceipt,
     ArchiveRetirementEvidence,
@@ -283,7 +284,8 @@ def _text(row: dict[str, Any], fields: tuple[str, ...]) -> None:
 def _project(value: object, model: type[BaseModel]) -> dict[str, Any]:
     if type(value) is not dict:
         raise ValueError("history evidence requires objects")
-    return {name: value[name] for name in model.model_fields if name in value}
+    row = cast("dict[str, Any]", value)
+    return {name: row[name] for name in model.model_fields if name in row}
 
 
 def _pairs(tables: dict[str, tuple[_Row, ...]]) -> dict[str, dict[str, Any]]:
@@ -423,7 +425,9 @@ def _pairs(tables: dict[str, tuple[_Row, ...]]) -> dict[str, dict[str, Any]]:
             artifact_sha256=plan.artifact_sha256,
             mappings_sha256=archive_digest("sibyl-archive-mappings-v1", plan.mappings),
             checked_plan_sha256=pair.checked_plan_sha256,
-            credential=plan.credential.model_dump(mode="python"),
+            credential=ArchivePhaseCredential.model_validate(
+                plan.credential.model_dump(mode="python")
+            ),
         )
         result[run_id] = {"binding": binding, "run": run, "artifact": item}
         referenced.add(pair.artifact_id)
