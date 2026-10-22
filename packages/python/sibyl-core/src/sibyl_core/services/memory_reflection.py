@@ -12,7 +12,7 @@ import re
 from collections.abc import Iterable, Sequence
 from dataclasses import replace
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, TypedDict
 
 import structlog
 
@@ -108,6 +108,13 @@ from sibyl_core.tools.responses import AddResponse
 log = structlog.get_logger()
 
 _PROMOTED_REVIEW_STATE = "promoted"
+
+
+class _ConsolidationSave(TypedDict, total=False):
+    """Eval consolidation arguments to save_raw_memory, omitted for other promotions."""
+
+    publication_operation_id: str
+    source_observations: Sequence[RawMemory]
 
 
 def _publication_source_recallable(memory: RawMemory, candidate_id: str | None = None) -> bool:
@@ -1104,6 +1111,11 @@ async def _reserve_promotion(
             )
         if validation_promotion is None:
             return plan
+    consolidation: _ConsolidationSave = (
+        {"publication_operation_id": str(memory.metadata[EVAL_CONSOLIDATION_METADATA_KEY])}
+        if memory.metadata.get(EVAL_CONSOLIDATION_METADATA_KEY)
+        else {}
+    )
     try:
         reserved = await save_raw_memory(
             replace(
@@ -1119,11 +1131,7 @@ async def _reserve_promotion(
             expected_revision=memory.revision,
             validation_promotion=validation_promotion,
             validation_derivation=_validation_derivation(plan) if validation_promotion else None,
-            **(
-                {"publication_operation_id": str(memory.metadata[EVAL_CONSOLIDATION_METADATA_KEY])}
-                if memory.metadata.get(EVAL_CONSOLIDATION_METADATA_KEY)
-                else {}
-            ),
+            **consolidation,
         )
     except SourceObservationConflictError:
         return _promotion_denied(
@@ -1212,6 +1220,11 @@ async def _mark_promotion_plan_promoted(
             lifecycle_source_id=lifecycle_source_id,
             lifecycle_reason=lifecycle_reason,
         )
+        consolidation: _ConsolidationSave = (
+            {"source_observations": plan.input_memories}
+            if plan.candidate_memory.metadata.get(EVAL_CONSOLIDATION_METADATA_KEY)
+            else {}
+        )
         try:
             await save_raw_memory(
                 replace(
@@ -1221,11 +1234,7 @@ async def _mark_promotion_plan_promoted(
                 ),
                 expected_revision=plan.candidate_memory.revision,
                 validation_promotion=validation_promotion,
-                **(
-                    {"source_observations": plan.input_memories}
-                    if plan.candidate_memory.metadata.get(EVAL_CONSOLIDATION_METADATA_KEY)
-                    else {}
-                ),
+                **consolidation,
             )
         except SourceObservationConflictError:
             return _promotion_write_denied(

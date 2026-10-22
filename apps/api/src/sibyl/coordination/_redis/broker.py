@@ -23,6 +23,7 @@ from sibyl.coordination.broker import (
     RECENT_JOB_INDEX_LIMIT,
     JobInfo,
     JobStatus,
+    OperationalSourceKwargs,
     backup_cleanup_job_id,
     crawl_job_id,
     entity_embedding_job_id,
@@ -344,13 +345,14 @@ class RedisQueueBroker:
         operational_source: dict[str, Any] | None = None,
     ) -> str:
         """Enqueue LLM distillation for one operational experience."""
+        source_kwargs: OperationalSourceKwargs = (
+            {"operational_source": operational_source} if operational_source is not None else {}
+        )
         job_id = operational_note_distillation_job_id(
             experience_data,
             group_id,
             content_hash=content_hash,
-            **(
-                {"operational_source": operational_source} if operational_source is not None else {}
-            ),
+            **source_kwargs,
         )
         result = await self._enqueue_unique(
             "distill_operational_experience_notes",
@@ -358,9 +360,7 @@ class RedisQueueBroker:
             group_id,
             job_id=job_id,
             content_hash=content_hash,
-            **(
-                {"operational_source": operational_source} if operational_source is not None else {}
-            ),
+            **source_kwargs,
             created_by=created_by,
             max_tokens=max_tokens,
         )

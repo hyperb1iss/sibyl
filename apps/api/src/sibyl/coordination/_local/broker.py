@@ -22,6 +22,7 @@ from sibyl.coordination.broker import (
     RECENT_JOB_INDEX_LIMIT,
     JobInfo,
     JobStatus,
+    OperationalSourceKwargs,
     backup_cleanup_job_id,
     crawl_job_id,
     entity_embedding_job_id,
@@ -421,13 +422,14 @@ class LocalQueueBroker:
         max_tokens: int = 2_048,
         operational_source: dict[str, Any] | None = None,
     ) -> str:
+        source_kwargs: OperationalSourceKwargs = (
+            {"operational_source": operational_source} if operational_source is not None else {}
+        )
         job_id = operational_note_distillation_job_id(
             experience_data,
             group_id,
             content_hash=content_hash,
-            **(
-                {"operational_source": operational_source} if operational_source is not None else {}
-            ),
+            **source_kwargs,
         )
         result = await self._enqueue_unique(
             "distill_operational_experience_notes",
@@ -436,9 +438,7 @@ class LocalQueueBroker:
             job_id=job_id,
             queue_priority=_DERIVED_QUEUE_PRIORITY,
             content_hash=content_hash,
-            **(
-                {"operational_source": operational_source} if operational_source is not None else {}
-            ),
+            **source_kwargs,
             created_by=created_by,
             max_tokens=max_tokens,
         )

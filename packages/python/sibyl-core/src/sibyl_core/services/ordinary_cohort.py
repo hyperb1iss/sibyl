@@ -10,7 +10,7 @@ from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
 from functools import partial
 from threading import Event
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, TypedDict
 
 from pydantic import TypeAdapter
 from pydantic_ai import Agent, NativeOutput
@@ -93,6 +93,10 @@ COHORT_GUARD = (
     + "LET $source_states_to_fence=$states;"
     + SOURCE_STATE_WRITE_WITNESS
 )
+
+
+class _ReplayEmbedding(TypedDict, total=False):
+    embedding_provider: None
 
 
 @dataclass(frozen=True)
@@ -483,7 +487,7 @@ async def _run_cohort(org, principal, original, resolver, extractor, policy, aut
             raise SourceUnavailableError()
         write = ValidationCandidateWrite(identity, row["result_json"], COHORT_GUARD, params)
         replay = await get_raw_memory(organization_id=org, memory_id=write.id)
-        embedding = {"embedding_provider": None} if replay is not None else {}
+        embedding: _ReplayEmbedding = {"embedding_provider": None} if replay is not None else {}
         memory = await remember_reflection_candidate_review(
             **embedding,
             organization_id=org,
