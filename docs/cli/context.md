@@ -142,7 +142,8 @@ sibyl context "how synthesis verification works" \
 
 # Verbatim raw memories from a team scope, time-bounded
 sibyl context "auth outage timeline" \
-  --raw --scope team --scope-key platform --occurred-after 2026-07-01
+  --raw --scope team --scope-key 0f8b6c52-4d2e-4a7a-9c1d-6e5b2a9f3d10 \
+  --occurred-after 2026-07-01
 ```
 
 ---
