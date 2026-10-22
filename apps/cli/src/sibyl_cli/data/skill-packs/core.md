@@ -676,8 +676,10 @@ sibyl crawl documents list --source source_a1b2c3d4e5f6
 sibyl crawl documents show doc_a1b2c3d4e5f6
 ```
 
-**Transcript ingestion:** Pull agent session history into memory with `sibyl ingest claude-code` or
-`sibyl ingest codex`.
+**Agent memories:** Import the memory files Claude Code and Codex already keep on this machine with
+`sibyl ingest memories` (private by default, attached to each repository's linked project, safe to
+re-run). **Transcript ingestion:** Pull agent session history into memory with
+`sibyl ingest claude-code` or `sibyl ingest codex`.
 
 **Document collections:** Manage indexed documents directly with `sibyl docs add`,
 `sibyl docs paste`, and `sibyl docs list` when you have content to index outside a crawl.

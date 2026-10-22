@@ -196,6 +196,26 @@ async def test_mutating_request_survives_connect_drop_and_replays(
 
 
 @pytest.mark.asyncio
+async def test_a_client_that_does_not_buffer_writes_queues_nothing(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(pending_writes.Path, "home", lambda: tmp_path)
+
+    def dropped(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("api down", request=request)
+
+    client = _client_with_transport(httpx.MockTransport(dropped))
+    client.buffer_writes = False
+
+    with pytest.raises(SibylClientError):
+        await client.post("/entities", json={"name": "Not queued", "content": "Body"})
+
+    await client.close()
+    assert pending_writes.list_pending_writes() == []
+
+
+@pytest.mark.asyncio
 async def test_successful_api_request_replays_buffered_writes_automatically(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

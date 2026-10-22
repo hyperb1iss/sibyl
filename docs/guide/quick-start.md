@@ -101,8 +101,10 @@ sibyl context "review prior async concurrency lessons" --intent review --all
 
 Semantic search finds that memory even though you searched with different words.
 
-Pull the full record back with `sibyl show <id>`. You can also seed memory from past agent sessions:
-`sibyl ingest claude-code <path>` and `sibyl ingest codex <path>` import transcript JSONL.
+Pull the full record back with `sibyl show <id>`. You can also seed memory with what your agents
+already know: `sibyl ingest memories` imports the memory files Claude Code and Codex keep on this
+machine, and `sibyl ingest claude-code <path>` and `sibyl ingest codex <path>` import transcript
+JSONL.
 
 ## Step 4: Use Sibyl from your agent
 

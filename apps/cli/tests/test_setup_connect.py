@@ -13,7 +13,7 @@ import pytest
 import typer
 from typer.testing import CliRunner
 
-from sibyl_cli import config_store, connect, doctor, setup, state
+from sibyl_cli import agent_memories, config_store, connect, doctor, setup, state
 from sibyl_cli.main import app
 
 # The server fixture replaces connect.login; one test needs the real one.
@@ -705,3 +705,101 @@ def test_a_stored_login_for_another_context_is_never_sent(
         _run(target.url, "--yes")
 
     assert all("prod-stored" not in auth for auth in target.authorizations())
+
+
+def _with_agent_memory(home: Path) -> None:
+    memory = home / ".claude" / "projects" / "-work-acme" / "memory"
+    memory.mkdir(parents=True)
+    (memory / "note.md").write_text("---\nname: a-note\nmetadata:\n  type: project\n---\n\nbody\n")
+
+
+def _imported_job() -> agent_memories.MemoryImport:
+    memory = agent_memories.AgentMemory(
+        agent=agent_memories.CLAUDE_CODE,
+        file=Path("note.md"),
+        relative="projects/-work-acme/memory/note.md",
+        repo=None,
+        memory_type="project",
+        kind="note",
+        title="A note",
+        content="body",
+    )
+    item = agent_memories.PlannedImport(
+        memory=memory, project_id=None, scope="private", source_id=memory.source_id("user-1", None)
+    )
+    return agent_memories.MemoryImport(
+        discovery=agent_memories.Discovery(memories=[memory]),
+        plan=agent_memories.ImportPlan(imports=[item]),
+        preview=[agent_memories.ImportResult(item, "created")],
+    )
+
+
+def test_setup_for_agents_only_counts_agent_memories(
+    home: Path, server: FakeServer, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _with_agent_memory(home)
+
+    async def refuse(**_kwargs: object) -> None:
+        raise AssertionError("setup --yes must not import on its own")
+
+    monkeypatch.setattr(connect.ingest, "run_memory_import", refuse)
+
+    result = _run(SERVER, "--yes")
+
+    assert result.exit_code == 0, result.output
+    assert "1 found from your coding agents" in _flat(result.output)
+    assert "sibyl ingest memories" in _flat(result.output)
+
+
+def test_setup_import_memories_imports_into_the_new_context(
+    home: Path, server: FakeServer, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _with_agent_memory(home)
+    calls: list[dict[str, object]] = []
+
+    async def fake_import(**kwargs: object) -> agent_memories.MemoryImport:
+        calls.append(kwargs)
+        return _imported_job()
+
+    monkeypatch.setattr(connect.ingest, "run_memory_import", fake_import)
+
+    result = _run(SERVER, "--yes", "--import-memories")
+
+    assert result.exit_code == 0, result.output
+    assert [call["context_name"] for call in calls] == ["sibyl.example.com"]
+    assert calls[0]["share"] is False
+    assert "1 imported, 0 already there" in _flat(result.output)
+
+
+def test_setup_no_import_memories_never_looks(
+    home: Path, server: FakeServer, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _with_agent_memory(home)
+
+    def refuse(*_args: object, **_kwargs: object) -> None:
+        raise AssertionError("--no-import-memories must not scan for memories")
+
+    monkeypatch.setattr(connect.agent_memories, "discover", refuse)
+
+    result = _run(SERVER, "--yes", "--no-import-memories")
+
+    assert result.exit_code == 0, result.output
+    assert "Memories" not in result.output
+
+
+def test_interactive_setup_can_decline_the_memory_import(
+    home: Path, server: FakeServer, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _with_agent_memory(home)
+    monkeypatch.setattr(connect, "interactive", lambda: True)
+
+    async def refuse(**_kwargs: object) -> None:
+        raise AssertionError("a declined import must not run")
+
+    monkeypatch.setattr(connect.ingest, "run_memory_import", refuse)
+
+    result = _run(SERVER, input="\nn\n")
+
+    assert result.exit_code == 0, result.output
+    assert "Import 1 memories" in _flat(result.output)
+    assert "skipped; import them with: sibyl ingest memories" in _flat(result.output)

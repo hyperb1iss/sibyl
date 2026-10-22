@@ -3,13 +3,15 @@
 from __future__ import annotations
 
 import asyncio
+import sys
 import time
 from pathlib import Path
 from typing import Annotated, Any, cast
 
 import typer
 
-from sibyl_cli.client import SibylClientError, get_client
+from sibyl_cli import agent_memories
+from sibyl_cli.client import SibylClientError, get_client, resolve_client_context_name
 from sibyl_cli.common import (
     CORAL,
     console,
@@ -20,11 +22,12 @@ from sibyl_cli.common import (
     print_json,
     run_async,
     success,
+    warn,
 )
 
 app = typer.Typer(
     name="ingest",
-    help="Import local source archives into raw memory",
+    help="Import local agent memories and source archives",
     no_args_is_help=True,
 )
 
@@ -245,5 +248,209 @@ def ingest_codex(
             timeout=timeout,
             json_out=json_out,
         )
+
+    _run()
+
+
+_OUTCOME_LABELS = {
+    "created": "New",
+    "updated": "Changed",
+    "relinked": "Attached",
+    "unchanged": "Unchanged",
+    "kept": "Left alone",
+    "failed": "Failed",
+}
+
+
+def agent_memory_paths(claude_dir: Path | None, codex_dir: Path | None) -> tuple[Path, Path, Path]:
+    """The Claude Code home, its ``.claude.json``, and the Codex home."""
+    home = Path.home()
+    claude_home = (claude_dir or home / ".claude").expanduser()
+    claude_config = claude_home.parent / ".claude.json"
+    codex_home = (codex_dir or home / ".codex").expanduser()
+    return claude_home, claude_config, codex_home
+
+
+def _memory_summary(job: agent_memories.MemoryImport) -> dict[str, Any]:
+    outcomes = job.outcomes()
+    by_agent: dict[str, dict[str, int]] = {}
+    for result in outcomes:
+        counts = by_agent.setdefault(result.item.memory.agent, dict.fromkeys(_OUTCOME_LABELS, 0))
+        counts[result.outcome] += 1
+    return {
+        "found": len(job.discovery.memories),
+        "outcomes": agent_memories.tally(outcomes),
+        "by_agent": by_agent,
+        "elsewhere": dict(job.plan.elsewhere),
+        "skipped_files": [
+            {"file": str(skip.file), "reason": skip.reason} for skip in job.discovery.skipped
+        ],
+        "failures": [
+            {"file": str(result.item.memory.file), "error": result.detail}
+            for result in outcomes
+            if result.outcome == "failed"
+        ],
+        "attached_to_projects": sum(1 for result in outcomes if result.item.project_id),
+    }
+
+
+def _print_memory_summary(job: agent_memories.MemoryImport, *, title: str) -> None:
+    summary = _memory_summary(job)
+    table = create_table(title, "Agent", *_OUTCOME_LABELS.values(), expand=False)
+    for agent, counts in sorted(summary["by_agent"].items()):
+        table.add_row(agent, *(str(counts[key]) for key in _OUTCOME_LABELS))
+    console.print(table)
+    attached = summary["attached_to_projects"]
+    if attached:
+        info(f"{attached} memories attach to the Sibyl project their repository is linked to")
+    for context, count in sorted(summary["elsewhere"].items()):
+        info(
+            f"{count} memories come from repositories pinned to context '{context}': "
+            f"sibyl -C {context} ingest memories"
+        )
+    if summary["skipped_files"]:
+        info(f"{len(summary['skipped_files'])} files skipped (symlinks, empty, or too large)")
+    for failure in summary["failures"][:10]:
+        warn(f"{failure['file']}: {failure['error']}")
+
+
+async def run_memory_import(
+    *,
+    agents: list[str],
+    claude_dir: Path | None,
+    codex_dir: Path | None,
+    share: bool,
+    confirm: Any,
+    context_name: str | None = None,
+) -> agent_memories.MemoryImport | None:
+    """Plan an import, ask ``confirm`` (a callable taking the plan), then apply.
+
+    Imports into ``context_name``, or the context this CLI talks to here.
+    Returns None when nothing was found. ``confirm`` returning False stops
+    after the preview.
+    """
+    claude_home, claude_config, codex_home = agent_memory_paths(claude_dir, codex_dir)
+    target = context_name or resolve_client_context_name()
+    async with get_client(context_name) as client:
+        # Clients are cached per context, so restore buffering for whatever
+        # else this process sends.
+        buffering = client.buffer_writes
+        client.buffer_writes = False
+        try:
+            job = await agent_memories.plan_memory_import(
+                client,
+                agents=agents,
+                claude_home=claude_home,
+                claude_config=claude_config,
+                codex_home=codex_home,
+                target_context=target,
+                share=share,
+            )
+            if not job.discovery.memories:
+                return None
+            if job.pending and confirm(job):
+                await agent_memories.apply_memory_import(client, job)
+            return job
+        finally:
+            client.buffer_writes = buffering
+
+
+@app.command("memories")
+def ingest_memories(
+    agent: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--from",
+            help="Agent to import from: claude-code or codex (repeatable; default both)",
+        ),
+    ] = None,
+    share: Annotated[
+        bool,
+        typer.Option(
+            "--share",
+            help=(
+                "Make memories from linked repositories visible to that project "
+                "instead of private (personal memories always stay private)"
+            ),
+        ),
+    ] = False,
+    dry_run: Annotated[
+        bool, typer.Option("--dry-run", help="Show what would change without writing")
+    ] = False,
+    yes: Annotated[bool, typer.Option("--yes", "-y", help="Don't ask before writing")] = False,
+    claude_dir: Annotated[
+        Path | None,
+        typer.Option("--claude-dir", help="Claude Code home (default ~/.claude)"),
+    ] = None,
+    codex_dir: Annotated[
+        Path | None,
+        typer.Option("--codex-dir", help="Codex home (default ~/.codex)"),
+    ] = None,
+    json_out: Annotated[
+        bool, typer.Option("--json", "-j", help="JSON output for scripting")
+    ] = False,
+) -> None:
+    """Import the memory files Claude Code and Codex keep on this machine.
+
+    Each Claude Code memory file and Codex session summary lands as one raw
+    memory carrying its kind (feedback as a rule, a reference as an artifact,
+    a session as a session), private by default. A memory attaches to the
+    project its repository is linked to. Re-running revises changed files in
+    place and skips unchanged ones.
+    """
+    agents = agent or list(agent_memories.AGENTS)
+    unknown = [name for name in agents if name not in agent_memories.AGENTS]
+    if unknown:
+        error(f"Unknown agent: {', '.join(unknown)} (choose claude-code or codex)")
+        raise typer.Exit(1)
+
+    def confirm(job: agent_memories.MemoryImport) -> bool:
+        if dry_run:
+            return False
+        if yes or json_out or not (sys.stdin.isatty() and sys.stdout.isatty()):
+            return True
+        _print_memory_summary(job, title="Agent Memories (preview)")
+        counts = agent_memories.tally(job.preview)
+        new = counts["created"] + counts["relinked"]
+        visibility = "visible to their linked projects" if share else "private to you"
+        return typer.confirm(
+            f"Import {new} new and update {counts['updated']} memories, {visibility}?",
+            default=True,
+        )
+
+    @run_async
+    async def _run() -> None:
+        try:
+            job = await run_memory_import(
+                agents=agents,
+                claude_dir=claude_dir,
+                codex_dir=codex_dir,
+                share=share,
+                confirm=confirm,
+            )
+        except SibylClientError as exc:
+            handle_client_error(exc, invalid_request_label="Import rejected")
+            return
+        except ValueError as exc:
+            error(str(exc))
+            raise typer.Exit(1) from exc
+        if job is None:
+            if json_out:
+                print_json({"found": 0})
+            else:
+                info("No Claude Code or Codex memory files found on this machine")
+            return
+        summary = _memory_summary(job)
+        if json_out:
+            print_json({**summary, "dry_run": dry_run, "applied": bool(job.results)})
+        else:
+            title = "Agent Memories (dry run)" if dry_run else "Agent Memories"
+            _print_memory_summary(job, title=title)
+            if job.results:
+                success("Imported agent memories")
+            elif not job.pending:
+                success("Agent memories are already up to date")
+        if summary["outcomes"]["failed"]:
+            raise typer.Exit(1)
 
     _run()
