@@ -95,7 +95,7 @@ a memory in one command.
 ```bash
 sibyl synthesis remember "Auth token refresh design" \
   --tags auth,design \
-  --scope team --scope-key proj_auth
+  --scope team --scope-key 0f8b6c52-4d2e-4a7a-9c1d-6e5b2a9f3d10
 ```
 
 The artifact becomes a first-class memory. Later recall and further synthesis can cite it, so
