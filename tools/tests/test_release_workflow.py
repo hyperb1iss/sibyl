@@ -4,11 +4,11 @@ import json
 import os
 import re
 import subprocess
+import tomllib
 from shutil import which
 from typing import Any, cast
 
 import pytest
-import tomllib
 import yaml
 from packaging.requirements import Requirement
 from tools.release.aur_pkgbuild import render_pkgbuild as render_aur_pkgbuild

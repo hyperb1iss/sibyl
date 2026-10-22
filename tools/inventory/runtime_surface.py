@@ -6,12 +6,11 @@ import re
 import shutil
 import subprocess
 import sys
+import tomllib
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, TextIO
-
-import tomllib
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 APP_PATH = REPO_ROOT / "apps/api/src/sibyl/api/app.py"
