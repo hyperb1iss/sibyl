@@ -10,7 +10,7 @@ Install it straight from this repository, pinned to a release tag:
 collections:
   - name: https://github.com/hyperb1iss/sibyl.git#/infra/ansible
     type: git
-    version: v1.4.10
+    version: v1.4.11
 ```
 
 ```bash

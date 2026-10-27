@@ -2,7 +2,7 @@ apiVersion: v2
 name: sibyl-surrealdb
 description: Sibyl-owned SurrealDB wrapper with backup and restore operations
 type: application
-version: 1.4.10
+version: 1.4.11
 appVersion: "3.2.4"
 # The restore drill runs its scratch SurrealDB as a native sidecar (an init
 # container with restartPolicy Always, on by default from 1.29), and the
