@@ -39,8 +39,15 @@ interface RememberInput {
 
   // Metadata
   metadata?: Record<string, any>; // Additional structured metadata
+
+  // Lifetime
+  expires?: string; // Retire after a duration like "2h" (1 minute to 30 days)
 }
 ```
+
+`expires` is for live state that should leave every pack once it is over, such as an active
+incident. When the deadline passes, a scheduled sweep marks the memory stale with the reason
+`expired`. Leave it unset for durable knowledge.
 
 ### Memory Kinds
 

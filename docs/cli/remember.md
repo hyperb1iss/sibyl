@@ -48,6 +48,7 @@ Content is read from stdin when the positional argument is omitted.
 | `--basis`             |       | (none)    | `observed`, `inferred`, `told`, or `assumed`             |
 | `--propose-scope`     |       | (none)    | Nominate the memory for audited team promotion           |
 | `--propose-scope-key` |       | (none)    | Team UUID the nomination targets                         |
+| `--expires`           |       | (none)    | Retire the memory after a duration (`30m`, `2h`, `1d`)   |
 
 ## Memory Kinds
 
@@ -134,6 +135,20 @@ sibyl remember "Review ritual" "Verifier passes are mandatory." --kind rule \
 
 `--scope org` and `--scope organization` are refused before any request is sent: organization-wide
 memory has no read or write policy yet. Use `project` or `team` instead.
+
+### Post a Time-Boxed Team Notice
+
+`--expires` retires the memory after a duration between one minute and 30 days. It is meant for live
+state the whole team needs now, like an active incident, never for durable knowledge. The memory is
+stored verbatim like `--raw`, packs show it with an `expires=` marker, and when the deadline passes
+a scheduled sweep marks it stale with the reason `expired`. Resolve it early with
+`sibyl correct <raw-memory-id> --action stale --reason resolved`. See
+[time-boxed team notices](../users/sharing-memory.md#time-boxed-team-notices).
+
+```bash
+sibyl remember "Checkout outage" "Checkout is returning 502s; hold all deploys." \
+  --scope team --scope-key <team-uuid> --expires 2h
+```
 
 ### Store an Agent Diary Entry
 

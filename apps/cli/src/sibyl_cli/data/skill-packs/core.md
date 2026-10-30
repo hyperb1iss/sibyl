@@ -405,6 +405,26 @@ belongs to the project but not the current task. `--content-file` rejects symlin
 content, and files larger than 1 MiB by default; use `--max-size` or `--follow-symlinks` only when
 that is intentional.
 
+### Time-boxed team notices
+
+Live state the whole team needs right now, and nobody needs once it is over, gets an expiry instead
+of a cleanup chore: an active incident, a deploy freeze, a migration window.
+
+```bash
+# Every teammate's context pack carries it, marked `expires=...`, until the deadline
+sibyl remember "Checkout outage" "Checkout returns 502s; hold all deploys." \
+  --scope team --scope-key <team-uuid> --expires 2h
+
+# Over early? Retire it now; the sweep leaves an already-retired notice alone
+sibyl correct <raw-memory-id> --action stale --reason resolved
+```
+
+`--expires` takes `30m`, `2h`, `1d` or `1h30m`, from one minute up to 30 days, and stores the notice
+verbatim like `--raw`. When the deadline passes, a scheduled sweep marks it stale with the reason
+`expired`, so it leaves every pack, search and recall lane. `--action restore` keeps a notice alive
+past its deadline. Never time-box durable knowledge: once the incident is over, capture the lesson
+as a normal `remember`.
+
 ---
 
 ### Reflect - Session Consolidation
