@@ -38,6 +38,15 @@ class RawMemoryRememberRequest(BaseModel):
     metadata: dict[str, Any] = Field(default_factory=dict, description="Auxiliary metadata")
     provenance: dict[str, Any] = Field(default_factory=dict, description="Source provenance")
     capture_surface: str = Field(default="api", description="Capture surface")
+    expires_in: str | None = Field(
+        default=None,
+        max_length=32,
+        description="Retire the capture after this long, such as 30m, 2h or 1d (at most 30d)",
+    )
+    expires_at: datetime | None = Field(
+        default=None,
+        description="Retire the capture at this instant, with a UTC offset (at most 30d out)",
+    )
 
 
 class RawMemoryRecallRequest(BaseModel):

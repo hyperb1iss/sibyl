@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterator
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
@@ -3985,4 +3985,58 @@ async def test_remember_raw_refuses_a_scope_key_without_a_scope() -> None:
         )
 
     assert exc_info.value.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_remember_raw_stamps_a_validated_expiry() -> None:
+    org = _org()
+    before = datetime.now(UTC)
+    with (
+        patch(
+            "sibyl.api.routes.memory_raw.remember_raw_memory",
+            AsyncMock(return_value=_memory(organization_id=str(org.id), source_id="incident")),
+        ) as remember,
+        patch("sibyl.api.routes.memory_auth.log_memory_audit_event", AsyncMock()),
+        patch("sibyl.api.routes.memory_raw.publish_raw_capture_changed", AsyncMock()),
+    ):
+        await remember_raw(
+            RawMemoryRememberRequest(
+                title="Checkout outage",
+                raw_content="Checkout is down; hold every deploy.",
+                source_id="incident",
+                expires_in="2h",
+                metadata={"expires_at": "2099-01-01T00:00:00Z"},
+            ),
+            http_request=_http_request(),
+            org=org,
+            ctx=_ctx(),
+        )
+
+    kwargs = remember.await_args.kwargs
+    expires_at = kwargs["expires_at"]
+    assert timedelta(hours=2) - timedelta(seconds=5) <= expires_at - before
+    assert expires_at - before <= timedelta(hours=2, seconds=5)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("expires_in", ["45d", "soon", "10s"])
+async def test_remember_raw_rejects_an_expiry_outside_the_cap(expires_in: str) -> None:
+    org = _org()
+    remember = AsyncMock()
+    with (
+        patch("sibyl.api.routes.memory_raw.remember_raw_memory", remember),
+        pytest.raises(HTTPException) as raised,
+    ):
+        await remember_raw(
+            RawMemoryRememberRequest(
+                title="Outage",
+                raw_content="Body",
+                expires_in=expires_in,
+            ),
+            http_request=_http_request(),
+            org=org,
+            ctx=_ctx(),
+        )
+
+    assert raised.value.status_code == 400
     remember.assert_not_awaited()

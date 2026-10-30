@@ -41,6 +41,7 @@ from sibyl_core.auth.memory_policy import (
     MemoryPolicyAction,
 )
 from sibyl_core.observability import elapsed_ms, telemetry_registry
+from sibyl_core.services.memory_expiry import resolve_capture_expiry
 from sibyl_core.services.memory_source_validation import SourceReadAuthority
 from sibyl_core.services.surreal_content import (
     AGENT_DIARY_CAPTURE_SURFACE,
@@ -72,6 +73,14 @@ _ARCHIVEABLE_REFLECTION_EXCEPTION_REASONS = frozenset(
 
 
 router = APIRouter(prefix="/memory", tags=["memory"])
+
+
+def _capture_expiry(request: RawMemoryRememberRequest) -> dict[str, Any]:
+    expires_at = resolve_capture_expiry(
+        expires_in=request.expires_in,
+        expires_at=request.expires_at,
+    )
+    return {} if expires_at is None else {"expires_at": expires_at}
 
 
 @router.post(
@@ -199,6 +208,7 @@ async def remember_raw(
             provenance=request.provenance,
             capture_surface=capture_surface,
             **source_context,
+            **_capture_expiry(request),
         )
         await memory_auth.log_memory_audit(
             action="memory.remember",
