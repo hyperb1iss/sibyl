@@ -615,6 +615,10 @@ _SCOPE_READERS_THAT_DO_NOT_AUTHORIZE = {
     "services/content_raw_persistence.py::save_raw_memory": "Reject creation or reclassification into the retired shared scope.",
     "services/memory_identity.py::reflection_identity": "binds evidence identity to its authorized scope",
     "audit/filters.py::audit_event_matches_resource": "filters an audit log by a recorded value",
+    "backends/surreal/schema_capture_project.py::_raw_memory_project": (
+        "migration: reads a project-scoped memory's key as the project to file "
+        "its private sidecar under; does not decide who may see either row"
+    ),
     "memory_pipeline/capture.py::MemoryCaptureService.capture": (
         "write stamp: copies the scope the authorized raw write landed in onto its graph row"
     ),
