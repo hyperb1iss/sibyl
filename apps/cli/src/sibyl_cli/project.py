@@ -134,6 +134,22 @@ def list_projects(
     _list()
 
 
+_DEFAULT_SCOPE_LABELS = {
+    "private": "private (each writer's captures stay their own)",
+    "project": "project (captures are shared with the project's readers)",
+}
+
+
+async def _default_memory_scope(client, project_id: str) -> str | None:
+    try:
+        settings = await client.get_project_settings(project_id)
+    except SibylClientError:
+        # Older servers have no settings route; the panel just omits the line.
+        return None
+    scope = settings.get("default_memory_scope")
+    return str(scope) if scope else None
+
+
 @app.command("show")
 def show_project(
     project_id: Annotated[str, typer.Argument(help="Project ID")],
@@ -229,6 +245,13 @@ def show_project(
                         f"{task.get('name', '')} [{CORAL}]{task.get('id', '')}[/{CORAL}]"
                     )
 
+            default_scope = await _default_memory_scope(client, str(entity.get("id") or project_id))
+            if default_scope:
+                lines.append(
+                    f"\n[{ELECTRIC_PURPLE}]Default write scope:[/{ELECTRIC_PURPLE}] "
+                    f"{_DEFAULT_SCOPE_LABELS.get(default_scope, default_scope)}"
+                )
+
             panel = create_panel("\n".join(lines), title=f"Project {entity.get('id', '')}")
             console.print(panel)
 
@@ -283,6 +306,54 @@ def create_project(
             _handle_client_error(e)
 
     _create()
+
+
+@app.command("update")
+def update_project(
+    project_id: Annotated[str, typer.Argument(help="Project ID or name")],
+    default_scope: Annotated[
+        str,
+        typer.Option(
+            "--default-scope",
+            help=(
+                "Where captures that name no scope land: private (default) or project. "
+                "Project shares them with everyone who can read the project."
+            ),
+        ),
+    ],
+    json_out: Annotated[
+        bool, typer.Option("--json", "-j", help="JSON output (for scripting)")
+    ] = False,
+) -> None:
+    """Change project settings. Requires project owner, maintainer, or org admin."""
+    normalized = default_scope.strip().lower()
+    if normalized not in _DEFAULT_SCOPE_LABELS:
+        error("--default-scope must be private or project")
+        raise typer.Exit(code=1)
+
+    @run_async
+    async def _update() -> None:
+        client = get_client()
+        try:
+            resolved = await resolve_project_reference(client, project_id)
+            settings = await client.update_project_settings(
+                resolved, default_memory_scope=normalized
+            )
+        except SibylClientError as e:
+            _handle_client_error(e)
+            return
+        if json_out:
+            print_json(settings)
+            return
+        scope = str(settings.get("default_memory_scope") or normalized)
+        success(f"Default write scope: {_DEFAULT_SCOPE_LABELS.get(scope, scope)}")
+        if scope == "project":
+            info(
+                "Captures here without --scope now reach every project reader. "
+                "Writers without contributor access still land private."
+            )
+
+    _update()
 
 
 @app.command("progress")

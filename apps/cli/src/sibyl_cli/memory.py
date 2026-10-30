@@ -110,11 +110,14 @@ def remember_memory(
     diary: bool = typer.Option(False, "--diary", help="Store a private agent diary entry"),
     agent: str | None = typer.Option(None, "--agent", help="Agent identity for diary entries"),
     source_id: str | None = typer.Option(None, "--source-id", help="Raw memory source ID"),
-    memory_scope: str = typer.Option(
-        "private",
+    memory_scope: str | None = typer.Option(
+        None,
         "--scope",
         callback=capture_support.normalize_memory_scope,
-        help=capture_support.MEMORY_SCOPE_HELP,
+        help=(
+            f"{capture_support.MEMORY_SCOPE_HELP}. Default: the project's default write "
+            "scope (private unless the project owner shared it)"
+        ),
     ),
     scope_key: str | None = typer.Option(None, "--scope-key", help="Project/team/shared scope key"),
     pin: bool = typer.Option(False, "--pin", help="Exempt this memory from ordinary decay"),

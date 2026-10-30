@@ -103,7 +103,9 @@ def normalize_memory_proposal_scope_key(value: str | None) -> str | None:
         raise typer.BadParameter(f"{value!r} is not a team UUID; see `sibyl team list`") from exc
 
 
-def normalize_memory_scope(value: str) -> str:
+def normalize_memory_scope(value: str | None) -> str | None:
+    if value is None:
+        return None
     normalized = value.strip().lower()
     if normalized in UNAVAILABLE_MEMORY_SCOPE_VALUES:
         raise typer.BadParameter(
@@ -185,7 +187,7 @@ async def write_memory_capture(
     capture_mode: str,
     surface: str,
     wait_searchable: bool,
-    memory_scope: str = "private",
+    memory_scope: str | None = None,
     scope_key: str | None = None,
     source_id: str | None = None,
     skip_conflicts: bool = False,

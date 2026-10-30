@@ -42,6 +42,8 @@ PUBLIC_METHOD_OWNERS = {
         "remove_team_member",
         "link_team_project",
         "unlink_team_project",
+        "get_project_settings",
+        "update_project_settings",
     },
     ClientGraphMixin: {
         "list_entities",
@@ -128,7 +130,7 @@ def test_public_methods_resolve_directly_to_one_canonical_owner() -> None:
         if not name.startswith("_")
     }
 
-    assert len(expected) == 88
+    assert len(expected) == 90
     assert actual == expected
     assert {
         name
