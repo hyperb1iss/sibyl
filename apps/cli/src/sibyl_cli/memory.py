@@ -130,6 +130,12 @@ def remember_memory(
         callback=capture_support.normalize_memory_proposal_scope,
         help="Nominate this memory for audited promotion to team scope",
     ),
+    propose_scope_key: str | None = typer.Option(
+        None,
+        "--propose-scope-key",
+        callback=capture_support.normalize_memory_proposal_scope_key,
+        help="Team UUID the --propose-scope nomination targets",
+    ),
     spans_json: str | None = typer.Option(
         None,
         "--spans-json",
@@ -196,8 +202,13 @@ def remember_memory(
         capture_metadata["pinned"] = True
     if basis:
         capture_metadata["basis"] = basis
+    if propose_scope_key and not propose_scope:
+        error("--propose-scope-key names the team for --propose-scope team; pass both.")
+        raise typer.Exit(code=1)
     if propose_scope:
         capture_metadata["suggested_memory_scope"] = propose_scope
+    if propose_scope_key:
+        capture_metadata["suggested_scope_key"] = propose_scope_key
     metadata.update(capture_metadata)
     if domain:
         metadata["domain"] = domain

@@ -45,9 +45,9 @@ These rules exist because real agent sessions consistently fail without them.
    produces the same message and login cannot fix it. Sibyl retries buffered writes automatically
    after the next successful API request. Use `sibyl pending-writes list` to inspect anything still
    queued. Older read-like entries are not replayed, because reads should be rerun instead. Remove
-   those with `sibyl pending-writes discard --read-like`. In a sandboxed environment, `sibyl config
-   context --quick` succeeding from local state while context retrieval or health cannot connect
-   means blocked network egress, not a server outage.
+   those with `sibyl pending-writes discard --read-like`. In a sandboxed environment,
+   `sibyl config context --quick` succeeding from local state while context retrieval or health
+   cannot connect means blocked network egress, not a server outage.
 
 6. **Never invent subcommands, flags, or enum values.** If you're unsure whether a command exists,
    run `sibyl <group> --help`. Do not guess, and do not pass any flag you have not seen in this
@@ -70,15 +70,15 @@ These rules exist because real agent sessions consistently fail without them.
    phantom exit-1 that makes a successful sibyl call look failed.
 
 8. **A failed write needs a receipt.** A non-zero exit from `remember` does not confirm a server
-   save. If the CLI says the write was buffered, do not rerun it with a new idempotency key. Wait for
-   automatic replay or inspect it with `sibyl pending-writes list`. Retry exactly once after applying
-   the printed remediation only when the failure was not buffered. If that retry still fails,
-   include the unsaved learning verbatim in your final message so the user can capture it. Never
-   claim a memory was stored unless you can quote the returned entity ID (e.g.
+   save. If the CLI says the write was buffered, do not rerun it with a new idempotency key. Wait
+   for automatic replay or inspect it with `sibyl pending-writes list`. Retry exactly once after
+   applying the printed remediation only when the failure was not buffered. If that retry still
+   fails, include the unsaved learning verbatim in your final message so the user can capture it.
+   Never claim a memory was stored unless you can quote the returned entity ID (e.g.
    `error_pattern_5f40ca...`) as the receipt. On an unbuffered `internal_error`, retry once at most,
-   then walk the fallback ladder instead of spiraling: for a completion, `task complete` → `task
-   update <id> -s done` plus a separate `remember` for the learnings. Never silently drop a capture
-   because the server is sick. Write the body to a scratch file and say so.
+   then walk the fallback ladder instead of spiraling: for a completion, `task complete` →
+   `task update <id> -s done` plus a separate `remember` for the learnings. Never silently drop a
+   capture because the server is sick. Write the body to a scratch file and say so.
 
 9. **Fetch IDs fresh.** Re-run the list command immediately before `show`/`update`/`complete`; never
    reuse an entity or task UUID remembered from earlier in a long session, and never run the list
@@ -353,7 +353,8 @@ sibyl remember "CSS diagnostic" --content-file ./snippet.css --kind artifact
 sibyl remember "Moon gates" "Use moon for monorepo checks." --kind rule --pin --basis observed
 
 # Nominate a private memory for audited team promotion; this does not share it immediately
-sibyl remember "Review ritual" "Verifier passes are mandatory." --kind rule --propose-scope team
+sibyl remember "Review ritual" "Verifier passes are mandatory." --kind rule \
+  --propose-scope team --propose-scope-key <team-uuid>
 ```
 
 `remember` has **no** `--title`, `--type`, or `--summary` flags. Title and body are positional
@@ -371,15 +372,17 @@ wider legacy enum is accepted but not preferred. The natural words agents reach 
 Map them: `insight`/`discovery` → `episode`, `gotcha` → `error_pattern`, `learning` → `note`. If
 `--kind` is rejected, pick from the advertised list; never invent one. Use `--pin` only when
 ordinary decay would be harmful. `--basis` records whether the memory was observed, inferred, told,
-or assumed. `--propose-scope team` nominates the capture for the audited promotion pipeline; it
-never bypasses scope policy. These optional fields are usage-gated: if any remains null on more than
-95 percent of writes after one release, rework or demote that surface. Remember whenever future
-agents should not have to rediscover a detail. Project scoping stores both `metadata.project_id` and
-a project edge, and `remember` links to the single active `doing` task when exactly one exists.
-Future context can find the memory from graph retrieval, traversal, or task context. Use
-`--no-active-task` when the memory belongs to the project but not the current task. `--content-file`
-rejects symlinks, non-UTF-8 content, and files larger than 1 MiB by default; use `--max-size` or
-`--follow-symlinks` only when that is intentional.
+or assumed. `--propose-scope team` nominates the capture for the audited promotion pipeline, and
+`--propose-scope-key <team-uuid>` (from `sibyl team list`) names the team; neither bypasses scope
+policy. `--scope org` is not enabled yet and the CLI refuses it; use `project` or `team`. These
+optional fields are usage-gated: if any remains null on more than 95 percent of writes after one
+release, rework or demote that surface. Remember whenever future agents should not have to
+rediscover a detail. Project scoping stores both `metadata.project_id` and a project edge, and
+`remember` links to the single active `doing` task when exactly one exists. Future context can find
+the memory from graph retrieval, traversal, or task context. Use `--no-active-task` when the memory
+belongs to the project but not the current task. `--content-file` rejects symlinks, non-UTF-8
+content, and files larger than 1 MiB by default; use `--max-size` or `--follow-symlinks` only when
+that is intentional.
 
 ---
 

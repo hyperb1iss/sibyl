@@ -574,6 +574,36 @@ async def test_owner_sees_their_private_activity(seeded) -> None:
     assert person(payload, team.bob)["counts"]["captures"] == 1
 
 
+@pytest.mark.parametrize("role", ["admin", "owner"])
+async def test_org_admin_cannot_see_a_members_private_activity(seeded, role: str) -> None:
+    """An organization role grants no read on another member's private memory."""
+    team = seeded
+    await team.auth.execute_query(
+        "UPDATE organization_members SET role = $role "
+        "WHERE organization_id = $org AND user_id = $user;",
+        role=role,
+        org=team.org,
+        user=team.carol,
+    )
+    response = await read_activity(team, team.carol)
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert person(payload, team.carol)["role"] == role
+
+    text = json.dumps(payload)
+    private_row = team.rows["private_decision"]
+    private_capture = team.captures["alice_private"]
+    assert private_row.id not in text
+    assert private_row.name not in text
+    assert str(private_capture.id) not in text
+    assert private_capture.title not in text
+    # Nor do they leak as counts: the owner's own view counts both.
+    owner_counts = person((await read_activity(team, team.alice)).json(), team.alice)["counts"]
+    admin_counts = person(payload, team.alice)["counts"]
+    assert admin_counts["decisions"] <= owner_counts["decisions"] - 1
+    assert admin_counts["captures"] <= owner_counts["captures"] - 1
+
+
 async def test_every_member_is_listed_and_ordered_by_activity(seeded) -> None:
     team = seeded
     payload = (await read_activity(team, team.bob)).json()

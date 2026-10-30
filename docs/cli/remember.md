@@ -21,32 +21,33 @@ Content is read from stdin when the positional argument is omitted.
 
 ## Options
 
-| Option              | Short | Default   | Description                                              |
-| ------------------- | ----- | --------- | -------------------------------------------------------- |
-| `--content`         |       | (none)    | Memory body (alternative to positional)                  |
-| `--content-file`    |       | (none)    | Read content from a file                                 |
-| `--max-size`        |       | 1048576   | Maximum content file size in bytes                       |
-| `--follow-symlinks` |       | false     | Allow `--content-file` to read through symlinks          |
-| `--kind`            | `-k`  | `episode` | Entity type to create (see [entity](./entity.md))        |
-| `--domain`          | `-d`  | (none)    | Domain/category                                          |
-| `--project`         | `-p`  | (auto)    | Project ID                                               |
-| `--all-projects`    |       | false     | Do not auto-scope to the linked project                  |
-| `--tags`            |       | (none)    | Comma-separated tags                                     |
-| `--related-to`      |       | (none)    | Comma-separated entity IDs to connect with `RELATED_TO`  |
-| `--task`            |       | (none)    | Comma-separated task IDs to connect with `RELATED_TO`    |
-| `--active-task`     |       | on        | Auto-link to the single active task (`--no-active-task`) |
-| `--surface`         |       | `cli`     | Capture surface metadata                                 |
-| `--wait-searchable` |       | false     | Wait until the memory is persisted and retrievable       |
-| `--json`            | `-j`  | false     | Output as JSON                                           |
-| `--raw`             |       | false     | Store verbatim raw memory only                           |
-| `--diary`           |       | false     | Store a private agent diary entry                        |
-| `--agent`           |       | (none)    | Agent identity for diary entries                         |
-| `--source-id`       |       | (none)    | Raw memory source ID                                     |
-| `--scope`           |       | `private` | Raw memory scope                                         |
-| `--scope-key`       |       | (none)    | Project/team/org scope key                               |
-| `--pin`             |       | false     | Exempt the memory from ordinary decay                    |
-| `--basis`           |       | (none)    | `observed`, `inferred`, `told`, or `assumed`             |
-| `--propose-scope`   |       | (none)    | Nominate the memory for audited team promotion           |
+| Option                | Short | Default   | Description                                              |
+| --------------------- | ----- | --------- | -------------------------------------------------------- |
+| `--content`           |       | (none)    | Memory body (alternative to positional)                  |
+| `--content-file`      |       | (none)    | Read content from a file                                 |
+| `--max-size`          |       | 1048576   | Maximum content file size in bytes                       |
+| `--follow-symlinks`   |       | false     | Allow `--content-file` to read through symlinks          |
+| `--kind`              | `-k`  | `episode` | Entity type to create (see [entity](./entity.md))        |
+| `--domain`            | `-d`  | (none)    | Domain/category                                          |
+| `--project`           | `-p`  | (auto)    | Project ID                                               |
+| `--all-projects`      |       | false     | Do not auto-scope to the linked project                  |
+| `--tags`              |       | (none)    | Comma-separated tags                                     |
+| `--related-to`        |       | (none)    | Comma-separated entity IDs to connect with `RELATED_TO`  |
+| `--task`              |       | (none)    | Comma-separated task IDs to connect with `RELATED_TO`    |
+| `--active-task`       |       | on        | Auto-link to the single active task (`--no-active-task`) |
+| `--surface`           |       | `cli`     | Capture surface metadata                                 |
+| `--wait-searchable`   |       | false     | Wait until the memory is persisted and retrievable       |
+| `--json`              | `-j`  | false     | Output as JSON                                           |
+| `--raw`               |       | false     | Store verbatim raw memory only                           |
+| `--diary`             |       | false     | Store a private agent diary entry                        |
+| `--agent`             |       | (none)    | Agent identity for diary entries                         |
+| `--source-id`         |       | (none)    | Raw memory source ID                                     |
+| `--scope`             |       | `private` | Raw memory scope                                         |
+| `--scope-key`         |       | (none)    | Project or team scope key                                |
+| `--pin`               |       | false     | Exempt the memory from ordinary decay                    |
+| `--basis`             |       | (none)    | `observed`, `inferred`, `told`, or `assumed`             |
+| `--propose-scope`     |       | (none)    | Nominate the memory for audited team promotion           |
+| `--propose-scope-key` |       | (none)    | Team UUID the nomination targets                         |
 
 ## Memory Kinds
 
@@ -102,6 +103,21 @@ are read back with `context --raw` and reviewed before promotion.
 ```bash
 sibyl remember "Deploy runbook" --raw --scope project --scope-key proj_abc123
 ```
+
+### Nominate a Memory for a Team
+
+`--propose-scope team` asks the audited promotion pipeline to consider the memory for team scope. It
+does not share anything immediately. Add `--propose-scope-key` with the team's UUID (from
+`sibyl team list`) so the nomination names its team. Promotion still checks team membership; the key
+is a hint, never a grant.
+
+```bash
+sibyl remember "Review ritual" "Verifier passes are mandatory." --kind rule \
+  --propose-scope team --propose-scope-key 0f8b6c52-4d2e-4a7a-9c1d-6e5b2a9f3d10
+```
+
+`--scope org` and `--scope organization` are refused before any request is sent: organization-wide
+memory has no read or write policy yet. Use `project` or `team` instead.
 
 ### Store an Agent Diary Entry
 
