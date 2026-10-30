@@ -109,7 +109,8 @@ Sibyl is the agent's durable brain. Use it as a loop, not a lookup box:
    or unused context as misleading.
 3. **Remember while learning.** Run `sibyl remember "Title" "What matters" --kind <type>` whenever
    future agents should not rediscover a decision, plan, idea, claim, artifact, session, procedure,
-   or error pattern. In a linked repo, `remember` automatically scopes the memory to that project.
+   or error pattern. In a linked repo, `remember` files the memory under that project; who can
+   read it is a separate question, answered under "Who sees a memory" below.
 4. **Reflect at clean breakpoints.** Run `sibyl reflect "<raw notes>" --title "<session>"` to
    extract reviewable candidates. Add `--persist` to write candidates and preserve the raw session
    source as provenance. On task completion, still use `sibyl task complete --learnings "..."`.
@@ -125,6 +126,26 @@ Prefer these verbs:
 - `show`: retrieve full source memory from a graph entity or raw memory ID.
 - `cite`: mark only the memory that materially informed an answer, task completion, or reflection.
 - `correct`: mark raw memory wrong, stale, duplicate, or superseded, or revise its canonical body.
+
+### Who sees a memory
+
+Filing a memory under a project and sharing it are different things. Scope decides the audience:
+
+- **No `--scope`** lands in the project's default write scope. That is `private` (only you) unless
+  a project owner shared the project with `sibyl project update <project> --default-scope project`.
+  `sibyl project show <project>` prints the current default. The write receipt reports where the
+  memory landed (`memory_scope`) and why (`scope_resolution`); read it instead of assuming.
+- **`--scope private`** keeps a personal note yours even inside a shared project.
+- **`--scope project`** shares with everyone who can read the project. In a linked repo the key
+  fills in from the link. Writing it needs contributor access; a viewer's unscoped capture in a
+  shared project lands private, and the receipt says so.
+- **`--scope team --scope-key <team-uuid>`** reaches a team across all its projects and rides in
+  every team member's context pack, so keep it to curated, cross-project knowledge.
+  `sibyl team list` shows team keys.
+
+Reading mirrors this. In a linked repo, `context` and `search` return your private memories, that
+project's shared memories, and your teams' memories. Another project's memories stay out until you
+ask with `--project <id>` or `--all`.
 
 ### Correction loop
 

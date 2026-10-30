@@ -36,7 +36,9 @@ def test_organization_runtime_exports_neutral_runtime_surface() -> None:
         "OrgSummary",
         "ProjectMemberChange",
         "ProjectMembersResult",
+        "ProjectMemorySettings",
         "can_manage_project_members",
+        "can_manage_project_settings",
     ]
     assert "list_orgs" in organization_runtime.__all__
     assert "list_org_ids" in organization_runtime.__all__

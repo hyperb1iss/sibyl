@@ -42,7 +42,7 @@ Content is read from stdin when the positional argument is omitted.
 | `--diary`             |       | false     | Store a private agent diary entry                        |
 | `--agent`             |       | (none)    | Agent identity for diary entries                         |
 | `--source-id`         |       | (none)    | Raw memory source ID                                     |
-| `--scope`             |       | `private` | Raw memory scope                                         |
+| `--scope`             |       | (project) | Memory scope; default is the project's default scope     |
 | `--scope-key`         |       | (none)    | Project or team scope key                                |
 | `--pin`               |       | false     | Exempt the memory from ordinary decay                    |
 | `--basis`             |       | (none)    | `observed`, `inferred`, `told`, or `assumed`             |
@@ -103,6 +103,22 @@ are read back with `context --raw` and reviewed before promotion.
 ```bash
 sibyl remember "Deploy runbook" --raw --scope project --scope-key proj_abc123
 ```
+
+### Choose Who Sees It
+
+Without `--scope`, the memory lands in the linked project's default write scope, which is private
+unless the project owner shared the project. The receipt reports where it landed. Name a scope to
+decide yourself:
+
+```bash
+# Share with everyone who can read the project
+sibyl remember "Checkout 500s" "Payments pool exhausts under retry storms." --kind error_pattern --scope project
+
+# Keep it yours, even in a shared project
+sibyl remember "My shell alias" "alias k=kubectl" --kind note --scope private
+```
+
+See [Sharing Memory](../users/sharing-memory.md) for every scope and who reads it.
 
 ### Nominate a Memory for a Team
 

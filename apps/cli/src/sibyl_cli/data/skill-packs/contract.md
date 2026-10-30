@@ -44,6 +44,8 @@ agent instructions. Human and operator surfaces live outside this compact contra
 
 Useful write flags:
 
+- No `--scope` lands in the project's default write scope: private unless the project was shared.
+  The receipt's `memory_scope` says where it landed; pass `--scope project` to share explicitly.
 - `--pin` preserves a memory from ordinary decay.
 - `--basis <value>` records how the claim was learned.
 - `--propose-scope team --propose-scope-key <team-uuid>` nominates a capture for audited promotion

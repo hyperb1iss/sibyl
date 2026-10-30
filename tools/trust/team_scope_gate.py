@@ -650,7 +650,7 @@ async def _seed_memories(requests: Sequence[MemoryCaptureRequest]) -> list[Seede
             source_id=request.source_id or request.title,
             raw_content=request.content,
             title=request.title,
-            memory_scope=request.memory_scope,
+            memory_scope=request.memory_scope or "private",
             scope_key=request.scope_key,
             metadata=dict(request.metadata),
             capture_surface=request.capture_surface,
@@ -676,7 +676,7 @@ async def _seed_memories(requests: Sequence[MemoryCaptureRequest]) -> list[Seede
         seeded.append(
             SeededMemory(
                 label=_SEED_LABELS[source_id],
-                memory_scope=request.memory_scope,
+                memory_scope=request.memory_scope or "private",
                 scope_key=request.scope_key,
                 owner_label="member",
                 title=request.title,

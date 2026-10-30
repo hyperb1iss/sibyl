@@ -30,11 +30,13 @@ from sibyl.persistence.organization_common import (
     OrgSummary,
     ProjectMemberChange,
     ProjectMembersResult,
+    ProjectMemorySettings,
     can_manage_project_members,
+    can_manage_project_settings,
 )
 from sibyl.persistence.surreal.auth import surreal_auth_client_scope
 from sibyl.persistence.surreal.auth_runtime import SurrealSessionRepository
-from sibyl_core.auth import AuthUser, OrganizationRole, ProjectRole
+from sibyl_core.auth import AuthUser, OrganizationRole, ProjectRole, ProjectVisibility
 from sibyl_core.backends.surreal.records import (
     coerce_datetime as _coerce_datetime,
     coerce_uuid as _coerce_uuid,
@@ -44,6 +46,7 @@ from sibyl_core.backends.surreal.records import (
     raise_on_error as _raise_on_error,
     utcnow as _utcnow,
 )
+from sibyl_core.models.memory_scope import PROJECT_DEFAULT_MEMORY_SCOPES, MemoryScope
 
 log = structlog.get_logger()
 type SurrealRecord = dict[str, object]
@@ -2029,6 +2032,108 @@ async def update_project_member_role(
             user_id=target_user_id,
             role=role,
         )
+
+
+def _project_default_memory_scope(project: object) -> MemoryScope:
+    raw = getattr(project, "default_memory_scope", None)
+    try:
+        scope = MemoryScope(str(raw)) if raw else MemoryScope.PRIVATE
+    except ValueError:
+        return MemoryScope.PRIVATE
+    return scope if scope in PROJECT_DEFAULT_MEMORY_SCOPES else MemoryScope.PRIVATE
+
+
+def _project_memory_settings(
+    project: SimpleNamespace,
+    *,
+    can_manage: bool,
+) -> ProjectMemorySettings:
+    return ProjectMemorySettings(
+        graph_project_id=str(getattr(project, "graph_project_id", "") or ""),
+        default_memory_scope=_project_default_memory_scope(project),
+        can_manage=can_manage,
+    )
+
+
+async def get_project_memory_settings(
+    *,
+    project_id: str,
+    actor,
+    org_id: UUID,
+    org_role: OrganizationRole | None,
+) -> ProjectMemorySettings:
+    async with _auth_client_scope() as client:
+        project, user_role = await _get_project_and_user_role(
+            client=client,
+            project_id=project_id,
+            user_id=actor.id,
+            org_id=org_id,
+        )
+    can_manage = can_manage_project_settings(user_role, project, actor, org_role)
+    readable = (
+        can_manage
+        or user_role is not None
+        or getattr(project, "visibility", None) == ProjectVisibility.ORG.value
+    )
+    if not readable:
+        # A project the caller cannot open reads as absent, not forbidden.
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=_project_not_found_detail(project_id),
+        )
+    return _project_memory_settings(project, can_manage=can_manage)
+
+
+async def update_project_memory_settings(
+    *,
+    request: Request,
+    project_id: str,
+    actor,
+    org_id: UUID,
+    org_role: OrganizationRole | None,
+    default_memory_scope: MemoryScope,
+) -> ProjectMemorySettings:
+    if default_memory_scope not in PROJECT_DEFAULT_MEMORY_SCOPES:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="invalid_default_memory_scope",
+        )
+    async with _auth_client_scope() as client:
+        project, user_role = await _get_project_and_user_role(
+            client=client,
+            project_id=project_id,
+            user_id=actor.id,
+            org_id=org_id,
+        )
+        if not can_manage_project_settings(user_role, project, actor, org_role):
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
+        previous = _project_default_memory_scope(project)
+        update_result = await client.execute_query(
+            "UPDATE projects SET default_memory_scope = $default_memory_scope, "
+            "updated_at = $updated_at "
+            "WHERE organization_id = $organization_id AND uuid = $uuid;",
+            default_memory_scope=default_memory_scope.value,
+            updated_at=_utcnow(),
+            organization_id=str(org_id),
+            uuid=str(project.id),
+        )
+        error = _query_error(update_result)
+        if error is not None:
+            raise RuntimeError(error)
+
+        await log_audit_event(
+            action="project.settings.update",
+            user_id=actor.id,
+            organization_id=org_id,
+            request=request,
+            details={
+                "project_id": str(project_id),
+                "default_memory_scope": default_memory_scope.value,
+                "previous_default_memory_scope": previous.value,
+            },
+        )
+    project.default_memory_scope = default_memory_scope.value
+    return _project_memory_settings(project, can_manage=True)
 
 
 async def remove_project_member(

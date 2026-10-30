@@ -113,12 +113,13 @@ async def _remember_mcp_memory(
     # or the caller's corrected retry would replay the rejection.
     build_memory_structure(content.strip(), spans=spans, atomic=atomic, probes=probes)
 
-    memory_scope = "project" if project else "private"
+    resolved_scope = await mcp_policy.resolve_capture_default_scope(ctx, project=project)
+    memory_scope = resolved_scope.memory_scope.value
     write_decision = await mcp_policy.authorize_memory_request(
         ctx=ctx,
         write=True,
         memory_scope=memory_scope,
-        scope_key=project,
+        scope_key=resolved_scope.scope_key,
         surface="mcp_remember",
     )
     resolved_links = await mcp_policy.resolve_capture_links(
@@ -194,7 +195,7 @@ async def _remember_mcp_memory(
         provenance={"remember_kind": kind, "related_to": resolved_links or []},
         source_id=f"mcp:remember:{kind}",
         memory_scope=memory_scope,
-        scope_key=project,
+        scope_key=resolved_scope.scope_key,
         principal_id=ctx.user_id,
         capture_surface="mcp",
         spans=spans,
@@ -215,7 +216,7 @@ async def _remember_mcp_memory(
             source_id=request.source_id,
             raw_content=request.content,
             title=request.title,
-            memory_scope=request.memory_scope,
+            memory_scope=memory_scope,
             scope_key=request.scope_key,
             tags=list(request.tags) if request.tags is not None else None,
             metadata=dict(request.metadata),
@@ -292,6 +293,8 @@ async def _remember_mcp_memory(
     if capture_result.raw_policy_reason is None:
         payload.pop("raw_policy_reason", None)
     payload["policy_reason"] = write_decision.reason
+    payload["memory_scope"] = memory_scope
+    payload["scope_resolution"] = resolved_scope.reason
     affected_records = (
         [f"raw_captures:{capture_result.raw_memory_id}"] if capture_result.raw_memory_id else []
     )
@@ -349,8 +352,9 @@ async def _reflect_mcp_memory(
         active_task=active_task and persist,
         accessible_projects=accessible_projects,
     )
-    memory_scope = "project" if project else "private"
-    scope_key = project
+    resolved_scope = await mcp_policy.resolve_capture_default_scope(ctx, project=project)
+    memory_scope = resolved_scope.memory_scope.value
+    scope_key = resolved_scope.scope_key
     if persist:
         await mcp_policy.authorize_memory_request(
             ctx=ctx,
@@ -464,8 +468,15 @@ async def _add_mcp_entity(
         project,
         require_project_when_restricted=True,
     )
-    memory_scope = "project" if project else "private"
-    scope_key = project
+    if normalized_entity_type in _UNSCOPED_ENTITY_TYPES:
+        # Work items carry no scope; the project is their audience, so the
+        # write is authorized as a project write whatever the default says.
+        memory_scope = "project" if project else "private"
+        scope_key = project
+    else:
+        resolved_scope = await mcp_policy.resolve_capture_default_scope(ctx, project=project)
+        memory_scope = resolved_scope.memory_scope.value
+        scope_key = resolved_scope.scope_key
     write_decision = await mcp_policy.authorize_memory_request(
         ctx=ctx,
         write=True,

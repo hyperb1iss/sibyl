@@ -57,6 +57,38 @@ sibyl remember "On-call escalation" \
 API keys can also be limited to project IDs and memory-space IDs so MCP clients only recall the
 memory they should see.
 
+## Project Default Scope
+
+A capture that names no scope lands in its project's default write scope. Every project starts at
+`private`, so nothing is shared until someone decides it should be. A project owner, a maintainer,
+or an organization admin can share a project once instead of every agent passing `--scope project`:
+
+```bash
+sibyl project update proj_oncall --default-scope project
+sibyl project show proj_oncall    # prints the current default
+```
+
+The web app has the same switch under **Memory sharing** on the project page. With the project
+shared, a contributor's unscoped capture lands in project scope. A viewer's capture still lands
+private, because only contributors may write project memory. The receipt reports where each capture
+landed and why, and an explicit `--scope` always wins.
+
+The default governs memories and reflections. Task learnings recorded with
+`sibyl task complete --learnings` belong to the task, so they follow the task's project like the
+task itself does.
+
+MCP tools take no scope argument, so an MCP agent shares only through this setting. Before this
+setting existed, MCP captures in a project always landed in project scope; they now land private
+until the project is shared.
+
+Projects default to organization visibility, so every organization member can read a project and its
+project-scoped memory. Shared project memory therefore reaches the whole organization unless the
+project is private and granted to specific people or teams.
+
+Reads follow the working project. In a linked repo, `sibyl context` and `sibyl search` return your
+private memories, that project's shared memories, and your teams' memories. Another project's
+memories appear only when you ask for them with `--project <id>` or `--all`.
+
 ## Choosing A Scope
 
 Use private memory when the note is about your workflow, credentials, local machine, or unfinished

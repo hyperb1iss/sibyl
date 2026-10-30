@@ -110,7 +110,27 @@ def print_memory_capture_result(
         console.print(f"  [dim]Raw: {raw_memory_id}[/dim]")
     if raw_policy_reason := data.get("raw_policy_reason"):
         console.print(f"  [dim]Policy: {raw_policy_reason}[/dim]")
+    print_memory_scope(data)
     _print_probe_rehearsal(data)
+
+
+_SCOPE_RESOLUTION_NOTES = {
+    "default_scope_project": "the project shares new memories",
+    "default_scope_credential": "this key can only write project memory",
+    "default_scope_project_private": "the project keeps new memories private",
+    "default_scope_requires_contributor": "sharing here needs contributor access",
+    "default_scope_api_key_denied": "this key is not granted project memory",
+}
+
+
+def print_memory_scope(data: Mapping[str, Any]) -> None:
+    """Say who can read the memory, and why when the caller named no scope."""
+    scope = data.get("memory_scope")
+    if not scope:
+        return
+    note = _SCOPE_RESOLUTION_NOTES.get(str(data.get("scope_resolution") or ""))
+    suffix = f" ({note})" if note else ""
+    console.print(f"  [dim]Scope: {scope}{suffix}[/dim]")
 
 
 def print_reflection_persistence_summary(

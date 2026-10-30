@@ -89,6 +89,7 @@ async def test_memory_capture_service_writes_raw_source_before_graph_entity() ->
         "raw_memory_id": "raw_123",
         "raw_source_id": "cli:manual",
         "raw_policy_reason": "private_principal_bound",
+        "memory_scope": "private",
         "mutation_receipt": {
             "operation_id": "remember-1",
             "applied": True,
@@ -202,3 +203,97 @@ async def test_memory_capture_service_stamps_non_private_scope_and_key() -> None
     assert captured["memory_scope"] == "project"
     assert captured["scope_key"] == "project_123"
     assert captured["principal_id"] == "user-alice"
+
+
+@pytest.mark.asyncio
+async def test_graph_row_takes_the_scope_the_raw_write_landed_in() -> None:
+    """An unscoped capture resolves on the raw write; the graph row must match.
+
+    The server picks the scope from the project's default, so a graph row
+    stamped from the request alone would read as private while its raw capture
+    reads as project, and the two halves of one memory would serve different
+    audiences.
+    """
+    captured: dict[str, Any] = {}
+
+    async def remember_raw_memory(request: MemoryCaptureRequest) -> Mapping[str, Any]:
+        assert request.memory_scope is None
+        return {
+            "id": "raw_shared_1",
+            "source_id": "cli:manual",
+            "memory_scope": "project",
+            "scope_key": "project_oncall",
+        }
+
+    async def create_graph_entity(
+        _request: MemoryCaptureRequest,
+        metadata: Mapping[str, Any],
+    ) -> Mapping[str, Any]:
+        captured.update(metadata)
+        return {"id": "note_1"}
+
+    service = MemoryCaptureService(
+        remember_raw_memory=remember_raw_memory,
+        create_graph_entity=create_graph_entity,
+    )
+
+    await service.capture(
+        MemoryCaptureRequest(
+            title="Payments pool runbook",
+            content="Restart the pool before failing over.",
+            metadata={"project_id": "project_oncall"},
+            principal_id="user-alice",
+        )
+    )
+
+    assert captured["memory_scope"] == "project"
+    assert captured["scope_key"] == "project_oncall"
+
+
+@pytest.mark.asyncio
+async def test_unresolved_capture_stamps_private_not_unscoped() -> None:
+    captured: dict[str, Any] = {}
+
+    async def remember_raw_memory(_request: MemoryCaptureRequest) -> Mapping[str, Any]:
+        return {"id": "raw_1", "source_id": "cli:manual"}
+
+    async def create_graph_entity(
+        _request: MemoryCaptureRequest,
+        metadata: Mapping[str, Any],
+    ) -> Mapping[str, Any]:
+        captured.update(metadata)
+        return {"id": "note_1"}
+
+    await MemoryCaptureService(
+        remember_raw_memory=remember_raw_memory,
+        create_graph_entity=create_graph_entity,
+    ).capture(MemoryCaptureRequest(title="t", content="c", principal_id="user-alice"))
+
+    assert captured["memory_scope"] == "private"
+
+
+@pytest.mark.asyncio
+async def test_capture_payload_reports_where_the_memory_landed() -> None:
+    async def remember_raw_memory(_request: MemoryCaptureRequest) -> Mapping[str, Any]:
+        return {
+            "id": "raw_1",
+            "source_id": "cli:manual",
+            "memory_scope": "project",
+            "scope_key": "project_oncall",
+            "scope_resolution": "default_scope_project",
+        }
+
+    async def create_graph_entity(
+        _request: MemoryCaptureRequest,
+        _metadata: Mapping[str, Any],
+    ) -> Mapping[str, Any]:
+        return {"id": "note_1"}
+
+    result = await MemoryCaptureService(
+        remember_raw_memory=remember_raw_memory,
+        create_graph_entity=create_graph_entity,
+    ).capture(MemoryCaptureRequest(title="t", content="c", principal_id="user-alice"))
+
+    payload = result.to_payload()
+    assert payload["memory_scope"] == "project"
+    assert payload["scope_resolution"] == "default_scope_project"
