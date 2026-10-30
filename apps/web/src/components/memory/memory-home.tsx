@@ -57,7 +57,8 @@ function normalizeMemoryScope(value: string | null | undefined): MemoryScope | n
 
 function captureScope(capture: RawCaptureSummary): MemoryScope | null {
   return normalizeMemoryScope(
-    stringFromMetadata(capture.metadata, ['memory_scope', 'target_memory_scope', 'scope'])
+    capture.memory_scope ??
+      stringFromMetadata(capture.metadata, ['memory_scope', 'target_memory_scope', 'scope'])
   );
 }
 
