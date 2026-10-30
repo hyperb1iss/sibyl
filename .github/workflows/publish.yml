@@ -836,7 +836,11 @@ jobs:
   # =========================================================================
   helm-publish:
     name: "► Helm: Publish repository"
-    needs: [helm-package, python, homebrew, aur, docker-sign]
+    # A chart is only its package and the images it names, so it waits on the
+    # signed images (which already sit behind the scan) and nothing else.
+    # PyPI, Homebrew and AUR are separate channels: an expired tap token must
+    # not hold back Helm users. Release promotion still waits on every channel.
+    needs: [helm-package, docker-sign]
     if: ${{ !inputs.dry_run }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
