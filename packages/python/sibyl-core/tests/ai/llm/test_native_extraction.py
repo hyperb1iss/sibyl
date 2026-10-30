@@ -110,7 +110,8 @@ async def test_native_extraction_wire_feedback_and_routing(monkeypatch, recover,
             assert len(error.value.details["extraction_usage"]["transport_attempts"]) == 3
     # One attempt up front; retries reserve as they dispatch (was the 9-attempt envelope).
     assert reserve.await_args.kwargs["attempt_envelope"] == 1
-    schema = extraction.extraction_schema(EvidenceProposal, "native_strict")
+    # The wire carries the schema the extractor records, shaped by the model's profile.
+    schema = await extractor.output_schema()
     for request in requests:
         assert request["text"]["format"]["schema"] == schema
         assert request["text"]["format"]["strict"] is True
