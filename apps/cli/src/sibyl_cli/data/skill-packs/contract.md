@@ -38,15 +38,16 @@ agent instructions. Human and operator surfaces live outside this compact contra
 - Intents: `build`, `plan`, `ideate`, `research`, `review`, `debug`, `decide`, `learn`, `general`.
 - Kinds: `episode`, `decision`, `procedure`, `error_pattern`, `rule`, `plan`, `idea`, `claim`,
   `artifact`, `session`, `note`.
-- Scopes: `private`, `project`, `team`, `org`. Scope policy still gates every read, write, and
-  promotion; naming a scope never grants access.
+- Scopes: `private`, `project`, `team`. `org` is not enabled yet and the CLI refuses it. Scope
+  policy still gates every read, write, and promotion; naming a scope never grants access.
 - Epistemic basis: `observed`, `inferred`, `told`, `assumed`.
 
 Useful write flags:
 
 - `--pin` preserves a memory from ordinary decay.
 - `--basis <value>` records how the claim was learned.
-- `--propose-scope team` nominates a capture for audited promotion; it does not share immediately.
+- `--propose-scope team --propose-scope-key <team-uuid>` nominates a capture for audited promotion
+  to that team; it does not share immediately.
 - `sibyl cite <id...> --misled` records negative feedback only when memory materially led the answer
   astray. Irrelevant or unused context is not misleading.
 

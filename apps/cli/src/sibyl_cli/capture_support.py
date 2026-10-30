@@ -37,7 +37,9 @@ ADVERTISED_ENTITY_TYPE_VALUES = (
     "session",
     "note",
 )
-ADVERTISED_MEMORY_SCOPE_VALUES = ("private", "project", "team", "org")
+ADVERTISED_MEMORY_SCOPE_VALUES = ("private", "project", "team")
+# Org-wide memory has no read or write policy yet; the server refuses it.
+UNAVAILABLE_MEMORY_SCOPE_VALUES = ("org", MemoryScope.ORGANIZATION.value)
 MEMORY_BASIS_VALUES = ("observed", "inferred", "told", "assumed")
 MEMORY_PROPOSAL_SCOPE_VALUES = ("team",)
 ENTITY_TYPE_HELP = f"Memory kind: {', '.join(ADVERTISED_ENTITY_TYPE_VALUES)}"
@@ -91,10 +93,22 @@ def normalize_memory_proposal_scope(value: str | None) -> str | None:
     raise typer.BadParameter(f"{value!r} is not one of: {choices}")
 
 
+def normalize_memory_proposal_scope_key(value: str | None) -> str | None:
+    if value is None:
+        return None
+    candidate = value.strip()
+    try:
+        return str(UUID(candidate))
+    except ValueError as exc:
+        raise typer.BadParameter(f"{value!r} is not a team UUID; see `sibyl team list`") from exc
+
+
 def normalize_memory_scope(value: str) -> str:
     normalized = value.strip().lower()
-    if normalized == "org":
-        return "organization"
+    if normalized in UNAVAILABLE_MEMORY_SCOPE_VALUES:
+        raise typer.BadParameter(
+            "organization scope isn't enabled yet; use project or team instead"
+        )
     try:
         return MemoryScope(normalized).value
     except ValueError as exc:

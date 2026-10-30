@@ -21,7 +21,8 @@ memory reaches search, context packs, MCP, or an agent.
 | `public`       | Future public memory                                           | Disabled until explicit policy ships                   |
 
 Private, delegated, project, and team scopes are the day-to-day production scopes. Organization and
-public scopes stay reserved until their review and promotion workflows are fully explicit.
+public scopes stay reserved until their review and promotion workflows are fully explicit. The CLI
+refuses `--scope org` (or `organization`) before sending anything; use `project` or `team` instead.
 
 ## Capture Into A Scope
 
@@ -74,6 +75,16 @@ blindly copying raw notes. Good promotion answers:
 - Why does it matter later?
 - What command, file, or setting proves it?
 - What should a future agent do differently?
+
+To nominate a private memory for a team without sharing it yet, propose the scope and name the team.
+The capture stays where you wrote it until the audited promotion pipeline accepts it, and promotion
+checks team membership again at that point:
+
+```bash
+sibyl remember "Review ritual" "Verifier passes are mandatory." --kind rule \
+  --propose-scope team \
+  --propose-scope-key 0f8b6c52-4d2e-4a7a-9c1d-6e5b2a9f3d10
+```
 
 Sibyl records policy and audit metadata around memory operations so recall can stay useful without
 leaking private project or user content.
