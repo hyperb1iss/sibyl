@@ -11,17 +11,19 @@ from sibyl_cli.common import read_content_file
 
 
 @pytest.fixture
-def root_owned_links(monkeypatch: pytest.MonkeyPatch) -> set[Path]:
-    """Report the links added to the returned set as owned by root.
+def root_owned_links(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> set[Path]:
+    """Stand tmp_path in for `/` and report links added to the set as root's.
 
-    Only root can create a root-owned link, so a test cannot make a real one.
-    Ownership is the single fact faked here; the CLI runs as an ordinary user.
+    Only root can create a root-owned link or write to the real `/`, so a test
+    can make neither. Ownership and the root's location are the only facts
+    faked here; the CLI runs as an ordinary user.
     """
     owned: set[Path] = set()
     real_owner = common._link_owner
     monkeypatch.setattr(
         common, "_link_owner", lambda link: 0 if link in owned else real_owner(link)
     )
+    monkeypatch.setattr(common, "_filesystem_root", lambda link: tmp_path)
     monkeypatch.setattr(os, "geteuid", lambda: 501, raising=False)
     return owned
 
@@ -84,6 +86,25 @@ def test_read_content_file_rejects_a_user_link_below_a_system_dir(
     (checkout / "docs").symlink_to(outside, target_is_directory=True)
 
     planted = root / "tmp" / "checkout" / "docs"
+    with pytest.raises(ValueError, match=f"Refusing to read symlink.*{re.escape(str(planted))}"):
+        read_content_file(str(planted / "secret.txt"))
+
+
+def test_read_content_file_rejects_a_root_owned_link_inside_a_checkout(
+    tmp_path: Path, root_owned_links: set[Path]
+) -> None:
+    # A checkout or archive unpacked with sudo carries root-owned links, so
+    # below the filesystem root, ownership alone proves nothing.
+    root = _macos_root(tmp_path, root_owned_links)
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "secret.txt").write_text("secret", encoding="utf-8")
+    checkout = root / "private" / "tmp" / "checkout"
+    checkout.mkdir()
+    (checkout / "docs").symlink_to(outside, target_is_directory=True)
+
+    planted = root / "tmp" / "checkout" / "docs"
+    root_owned_links.add(planted)
     with pytest.raises(ValueError, match=f"Refusing to read symlink.*{re.escape(str(planted))}"):
         read_content_file(str(planted / "secret.txt"))
 

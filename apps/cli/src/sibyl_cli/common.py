@@ -98,17 +98,23 @@ def _link_owner(link: Path) -> int:
     return link.lstat().st_uid
 
 
+def _filesystem_root(link: Path) -> Path:
+    return Path(link.anchor)
+
+
 def _is_system_link(link: Path) -> bool:
     """Whether a directory link was laid down by the OS, like macOS /tmp or /var.
 
-    Only root can create a root-owned link, so a cloned repo or an unpacked
-    archive cannot forge one. Running as root erases that distinction, and
-    without POSIX ownership no link qualifies.
+    The OS's own links sit directly under the filesystem root and belong to
+    root, and only root can create either. A cloned repo or an unpacked archive
+    cannot forge one, and a root-owned link deeper down (a checkout made with
+    sudo) still counts as planted. Running as root erases the ownership signal,
+    and without POSIX ownership no link qualifies.
     """
     geteuid = getattr(os, "geteuid", None)
     if geteuid is None or geteuid() == 0:
         return False
-    return _link_owner(link) == 0
+    return link.parent == _filesystem_root(link) and _link_owner(link) == 0
 
 
 def read_content_file(
