@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
+from dataclasses import replace
+from datetime import UTC, datetime, timedelta
 from uuid import UUID, uuid4
 
 import pytest
@@ -269,3 +271,56 @@ async def test_mcp_link_marks_the_raw_memory_without_hiding_it_from_review(
     assert stored.metadata["projected_entity_id"] == "decision_abc123"
     captures, _ = await _list(org)
     assert raw.id in {capture.id for capture in captures}
+
+
+@pytest.mark.asyncio
+async def test_private_owner_filter_keeps_foreign_private_rows_out_of_the_page(
+    content_client,
+) -> None:
+    """A page of other principals' private rows must not starve the reader's own."""
+    org = uuid4()
+    base = datetime(2026, 10, 30, 12, 0, 0, tzinfo=UTC)
+    mine = replace(_capture(org, title="mine", principal_id="reader"), created_at=base)
+    foreign = [
+        replace(
+            _capture(org, title=f"theirs {minute}", principal_id="someone-else"),
+            created_at=base + timedelta(minutes=minute),
+        )
+        for minute in range(1, 4)
+    ]
+    unstamped = replace(
+        _capture(org, title="legacy, no principal", principal_id=""),
+        created_at=base + timedelta(minutes=5),
+    )
+    shared = replace(
+        _capture(org, title="project row", principal_id="someone-else"),
+        memory_scope="project",
+        scope_key="project_1",
+        created_at=base + timedelta(minutes=6),
+    )
+    await _save(mine, *foreign, unstamped, shared)
+
+    unfiltered, has_more = await surreal_content.list_raw_captures(
+        None,
+        organization_id=org,
+        entity_type=None,
+        capture_surface=None,
+        review_state=None,
+        limit=3,
+        offset=0,
+    )
+    assert mine.id not in {capture.id for capture in unfiltered}
+    assert has_more is True
+
+    page, has_more = await surreal_content.list_raw_captures(
+        None,
+        organization_id=org,
+        entity_type=None,
+        capture_surface=None,
+        review_state=None,
+        private_owner="reader",
+        limit=3,
+        offset=0,
+    )
+    assert [capture.id for capture in page] == [shared.id, unstamped.id, mine.id]
+    assert has_more is False

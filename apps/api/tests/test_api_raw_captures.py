@@ -108,6 +108,7 @@ async def test_list_raw_captures_returns_paginated_summaries() -> None:
         review_state=None,
         limit=2,
         offset=0,
+        private_owner=str(reader_id),
     )
 
 

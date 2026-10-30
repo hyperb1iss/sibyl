@@ -126,6 +126,7 @@ async def list_raw_captures(
         review_state=review_state,
         limit=limit,
         offset=offset,
+        private_owner=ctx.user_id,
         **({"project_ids": project_ids} if project_ids is not None else {}),
     )
     captures = [
