@@ -154,7 +154,7 @@ CONTENT_TABLES = (
     *RAW_LEXICAL_TABLES,
     RAW_LEXICAL_STATE_TABLE,
 )
-CONTENT_SCHEMA_CURRENT_VERSION = 56
+CONTENT_SCHEMA_CURRENT_VERSION = 57
 CONTENT_SCHEMA_NAME = "content"
 _SCHEMA_CHECK_BATCH_SIZE = 128
 _CONTENT_MEMORY_SCOPE_VALUES = tuple(scope.value for scope in MemoryScope)
@@ -1283,6 +1283,18 @@ def _content_schema_migrations(*, url: str) -> tuple[SchemaMigration, ...]:
             name="content_raw_capture_index_prune",
             statements=tuple(
                 split_statements(CONTENT_RAW_CAPTURE_INDEX_PRUNE_MIGRATION_DEFINITIONS)
+            ),
+        ),
+        SchemaMigration(
+            version=57,
+            name="content_raw_capture_expiry_index",
+            # The expiry sweep ranges over every organization's due captures
+            # once a minute. Only time-boxed captures carry the stamp, and the
+            # sweep moves it off a capture once handled, so the range holds
+            # just the captures still waiting to expire.
+            statements=(
+                "DEFINE INDEX IF NOT EXISTS idx_raw_captures_expires_at "
+                "ON raw_captures FIELDS metadata.expires_at",
             ),
         ),
     )

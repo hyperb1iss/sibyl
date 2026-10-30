@@ -189,6 +189,8 @@ def _render_item(
         item_id=item.id,
         pack_project=pack_project,
     )
+    if expires := _compact_metadata_value(item.metadata.get("expires_at")):
+        quality = "; ".join(part for part in (quality, f"expires={expires}") if part)
     quality_label = f" _{quality}_" if quality else ""
     lines = [f"- **{item.name}**{type_label} `{item.id}`{quality_label}"]
     provenance = outcome_context(item.metadata)
