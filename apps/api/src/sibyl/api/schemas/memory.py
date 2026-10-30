@@ -20,7 +20,13 @@ class RawMemoryRememberRequest(BaseModel):
     title: str = Field(default="", max_length=300, description="Optional human title")
     raw_content: str = Field(..., min_length=1, max_length=500000, description="Verbatim memory")
     source_id: str | None = Field(default=None, description="Stable source/provenance ID")
-    memory_scope: MemoryScopeLiteral = Field(default="private", description="Retrieval scope")
+    memory_scope: MemoryScopeLiteral | None = Field(
+        default=None,
+        description=(
+            "Retrieval scope. Omitted resolves against the project's default write "
+            "scope (private unless the project opted into project scope)"
+        ),
+    )
     scope_key: str | None = Field(default=None, description="Project/team/shared scope key")
     diary: bool = Field(default=False, description="Store as a private agent diary entry")
     agent_id: str | None = Field(default=None, description="Agent identity for diary entries")
@@ -90,6 +96,10 @@ class RawMemoryResponse(BaseModel):
     score: float = Field(default=0.0, description="Recall score")
     snippet: str | None = Field(default=None, description="Highlighted recall snippet")
     policy_reason: str | None = Field(default=None, description="Memory policy decision reason")
+    scope_resolution: str | None = Field(
+        default=None,
+        description="How an omitted scope was resolved; absent when the caller named one",
+    )
     revision: int = Field(default=1, ge=1, description="Monotonic storage revision")
     mutation_receipt: MutationReceipt | None = None
 

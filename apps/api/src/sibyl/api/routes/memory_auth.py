@@ -11,22 +11,26 @@ from sibyl.api.routes import memory_serialization as serialization
 from sibyl.api.schemas import (
     MemorySharePreviewRequest,
     RawMemoryRecallRequest,
+    RawMemoryRememberRequest,
     ReflectionPromotionRequest,
 )
 from sibyl.auth.api_key_common import api_key_memory_scope_key
 from sibyl.auth.authorization import verify_entity_project_access
 from sibyl.auth.context import AuthContext
 from sibyl.persistence.auth_runtime import (
+    get_project_default_memory_scope,
     list_accessible_project_graph_ids,
     list_accessible_team_scope_keys,
     log_memory_audit_event,
 )
 from sibyl_core.auth import MemoryPolicyContext, OrganizationRole, ProjectRole
 from sibyl_core.auth.memory_policy import (
+    DefaultWriteScope,
     MemoryPolicyAction,
     MemoryPolicyDecision,
     authorize_memory_read,
     authorize_memory_write,
+    resolve_default_write_scope,
 )
 from sibyl_core.services.memory import (
     ReflectionPromotionResult,
@@ -147,6 +151,52 @@ async def team_accessible_for_policy(
         return None
     accessible_teams = await list_accessible_team_scope_keys(ctx)
     return {str(team_id) for team_id in accessible_teams or set()}
+
+
+def capture_project_hint(request: RawMemoryRememberRequest) -> str | None:
+    """The project an unscoped capture was made in, if the caller said.
+
+    The CLI files a capture's project under metadata; API callers may name it
+    as project_id. Either is only a hint: the default it selects still has to
+    pass the writer's own contributor check.
+    """
+    if request.project_id:
+        return request.project_id
+    hinted = request.metadata.get("project_id")
+    return str(hinted) if isinstance(hinted, str) and hinted.strip() else None
+
+
+async def resolve_capture_default_scope(
+    *,
+    ctx: AuthContext,
+    project_id: str | None,
+) -> DefaultWriteScope:
+    if not project_id or ctx.organization_id is None:
+        return resolve_default_write_scope(
+            project_id=None,
+            project_default=None,
+            writable_projects=None,
+            project_scope_granted=False,
+        )
+    project_default = await get_project_default_memory_scope(
+        organization_id=ctx.organization_id,
+        graph_project_id=project_id,
+    )
+    private_granted = api_key_memory_scope_allowed(ctx, memory_scope="private", scope_key=None)
+    writable = (
+        await list_accessible_project_graph_ids(ctx, required_role=ProjectRole.CONTRIBUTOR)
+        if project_default.value == "project" or not private_granted
+        else None
+    )
+    return resolve_default_write_scope(
+        project_id=project_id,
+        project_default=project_default,
+        writable_projects=writable,
+        project_scope_granted=api_key_memory_scope_allowed(
+            ctx, memory_scope="project", scope_key=project_id
+        ),
+        private_scope_granted=private_granted,
+    )
 
 
 async def authorize_project_scope_write(

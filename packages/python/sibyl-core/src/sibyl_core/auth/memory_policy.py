@@ -609,6 +609,52 @@ def authorize_memory_reflect(
     )
 
 
+@dataclass(frozen=True, slots=True)
+class DefaultWriteScope:
+    """The scope a capture that named none resolves to, and why."""
+
+    memory_scope: MemoryScope
+    scope_key: str | None
+    reason: str
+
+
+def resolve_default_write_scope(
+    *,
+    project_id: str | None,
+    project_default: MemoryScope | None,
+    writable_projects: Iterable[str] | None,
+    project_scope_granted: bool,
+    private_scope_granted: bool = True,
+) -> DefaultWriteScope:
+    """Resolve an unscoped capture against its project's default write scope.
+
+    Private unless the project opted into project scope and this writer could
+    have written there explicitly. A writer that could not falls back to
+    private rather than failing every remember in a project it can only read.
+
+    A credential narrowed to project memory with no private grant is the one
+    case that lands in the project regardless of the default: private would
+    refuse every write, and narrowing the key to that project is already the
+    owner's explicit choice of audience.
+
+    The reason says which rule applied, so the receipt can tell the caller.
+    """
+    private = MemoryScope.PRIVATE
+    if not project_id:
+        return DefaultWriteScope(private, None, "default_scope_no_project")
+    writable = _string_set(writable_projects)
+    can_write_project = writable is not None and project_id in writable and project_scope_granted
+    if project_default is not MemoryScope.PROJECT:
+        if not private_scope_granted and can_write_project:
+            return DefaultWriteScope(MemoryScope.PROJECT, project_id, "default_scope_credential")
+        return DefaultWriteScope(private, None, "default_scope_project_private")
+    if writable is None or project_id not in writable:
+        return DefaultWriteScope(private, None, "default_scope_requires_contributor")
+    if not project_scope_granted:
+        return DefaultWriteScope(private, None, "default_scope_api_key_denied")
+    return DefaultWriteScope(MemoryScope.PROJECT, project_id, "default_scope_project")
+
+
 def _optional_str(value: object) -> str | None:
     if value is None or value == "":
         return None
@@ -807,6 +853,7 @@ __all__ = [
     "MEMORY_PROVENANCE_METADATA_KEYS",
     "SERVER_OWNED_METADATA_KEYS",
     "WORK_ITEM_ACTOR_METADATA_KEYS",
+    "DefaultWriteScope",
     "MemoryPolicyAction",
     "MemoryPolicyDecision",
     "authorize_memory_read",
@@ -817,6 +864,7 @@ __all__ = [
     "memory_row_project_id",
     "memory_scope_policy_key",
     "private_scope_granted_for",
+    "resolve_default_write_scope",
     "server_provenance_metadata",
     "stamp_memory_scope_metadata",
     "work_item_actor_metadata",

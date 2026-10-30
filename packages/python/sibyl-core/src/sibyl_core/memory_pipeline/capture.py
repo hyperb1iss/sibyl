@@ -29,7 +29,9 @@ class MemoryCaptureRequest:
     metadata: Mapping[str, Any] = field(default_factory=dict)
     provenance: Mapping[str, Any] = field(default_factory=dict)
     source_id: str | None = None
-    memory_scope: str = "private"
+    # None defers to the raw write, which resolves the project's default write
+    # scope; the graph row then takes whatever that write landed in.
+    memory_scope: str | None = None
     scope_key: str | None = None
     principal_id: str | None = None
     capture_surface: str = "cli"
@@ -125,11 +127,21 @@ class MemoryCaptureService:
         # as unscoped and is served to every principal in the organization, and
         # an owner field surviving from request.metadata names whoever the
         # caller chose rather than whoever the capture was authorized for.
+        # The raw write is authoritative for scope: when the caller named none
+        # it resolved one, and the graph row must read as the same audience.
+        # A response without a scope keeps the request's, and an unresolved
+        # request falls to private rather than to the unscoped fail-open.
+        landed_scope = _optional_str(raw_memory.get("memory_scope"))
+        if landed_scope is not None:
+            graph_scope, graph_scope_key = landed_scope, _optional_str(raw_memory.get("scope_key"))
+        else:
+            graph_scope = request.memory_scope or "private"
+            graph_scope_key = request.scope_key
         graph_metadata = normalize_memory_quality_metadata(
             stamp_memory_scope_metadata(
                 request.metadata,
-                memory_scope=request.memory_scope,
-                scope_key=request.scope_key,
+                memory_scope=graph_scope,
+                scope_key=graph_scope_key,
                 principal_id=request.principal_id,
             )
         )
