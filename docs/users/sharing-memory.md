@@ -70,18 +70,19 @@ sibyl project show proj_oncall    # prints the current default
 
 The web app has the same switch under **Memory sharing** on the project page. With the project
 shared, a contributor's unscoped capture lands in project scope. A viewer's capture still lands
-private, because only contributors may write project memory. The receipt reports where each
-capture landed and why, and an explicit `--scope` always wins.
+private, because only contributors may write project memory. The receipt reports where each capture
+landed and why, and an explicit `--scope` always wins.
 
-The default governs memories and reflections. Task learnings recorded with `sibyl task complete
---learnings` belong to the task, so they follow the task's project like the task itself does.
+The default governs memories and reflections. Task learnings recorded with
+`sibyl task complete --learnings` belong to the task, so they follow the task's project like the
+task itself does.
 
 MCP tools take no scope argument, so an MCP agent shares only through this setting. Before this
 setting existed, MCP captures in a project always landed in project scope; they now land private
 until the project is shared.
 
-Projects default to organization visibility, so every organization member can read a project and
-its project-scoped memory. Shared project memory therefore reaches the whole organization unless the
+Projects default to organization visibility, so every organization member can read a project and its
+project-scoped memory. Shared project memory therefore reaches the whole organization unless the
 project is private and granted to specific people or teams.
 
 Reads follow the working project. In a linked repo, `sibyl context` and `sibyl search` return your

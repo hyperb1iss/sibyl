@@ -185,16 +185,15 @@ sibyl project update <project> --default-scope <private|project> [options]
 
 ### Options
 
-| Option            | Short | Description                                                        |
-| ----------------- | ----- | ------------------------------------------------------------------ |
-| `--default-scope` |       | Where captures that name no scope land: `private` or `project`     |
-| `--json`          | `-j`  | JSON output                                                        |
+| Option            | Short | Description                                                    |
+| ----------------- | ----- | -------------------------------------------------------------- |
+| `--default-scope` |       | Where captures that name no scope land: `private` or `project` |
+| `--json`          | `-j`  | JSON output                                                    |
 
-`private` is the default for every project: each writer's memories stay their own. `project`
-shares unscoped captures with everyone who can read the project, which is the whole organization
-for a project with organization visibility. Writers need contributor access for a capture to land
-in the project; anyone else's capture still lands private. An explicit `--scope` on `remember`
-always wins.
+`private` is the default for every project: each writer's memories stay their own. `project` shares
+unscoped captures with everyone who can read the project, which is the whole organization for a
+project with organization visibility. Writers need contributor access for a capture to land in the
+project; anyone else's capture still lands private. An explicit `--scope` on `remember` always wins.
 
 ### Example
 
