@@ -46,8 +46,8 @@ Each entry falls in exactly one class, and only the first moves on its own:
   buffered with nobody signed in all land here. Use `adopt` or `discard`.
 - **foreign_server:** the write targets another server URL, so no command against this one will ever
   send it. Select that server's context, or discard it.
-- **read_like:** a search buffered by an older CLI that treated it as a mutation. Re-run the command
-  instead.
+- **read_like:** a search, preview, or debug query buffered by an older CLI that treated it as a
+  mutation. Re-run the command instead.
 - **corrupt:** the file must be repaired or explicitly discarded before it can be used.
 
 Commands report the queue at completion, and only when a person has to act. Nothing prints while
@@ -123,6 +123,6 @@ Discard permanently removes the named local copies without replay. Export or cop
 need before discarding it. Nothing is ever discarded on the CLI's own initiative.
 
 Each selector is explicit, and only one can be used per run. `--read-like` removes requests buffered
-by older CLI versions that incorrectly treated some searches as mutations. `--foreign` removes
-writes whose destination is not the current server. `--rejected` removes writes the server refused
-with a 4xx that the payload cannot pass, which a replay of the same request can never fix.
+by older CLI versions that incorrectly treated some reads as mutations. `--foreign` removes writes
+whose destination is not the current server. `--rejected` removes writes the server refused with a
+4xx that the payload cannot pass, which a replay of the same request can never fix.

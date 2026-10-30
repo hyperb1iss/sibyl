@@ -106,12 +106,17 @@ READ_LIKE_POST_PATHS = (
     # offline debug query must fail now, not park in the queue where one bad
     # query blocks every later one behind a pending_dependency.
     "/admin/debug/query",
+    # Plans a synthesis from search and context packs without storing the run.
+    # /synthesis/draft stays buffered because it can remember its artifact.
+    "/synthesis/plan",
 )
 
 
-# A correction preview validates a change and writes nothing, so it is a read
-# even though it is a POST. Its path carries the memory id, hence a suffix.
-READ_LIKE_POST_SUFFIXES = ("/corrections/preview",)
+# Every server route ending in /preview (corrections, promotion, sharing, space
+# access) validates a change, writes nothing but an audit entry, and has its
+# own commit route that stays buffered. Replaying one later answers nobody, so
+# it is a read even though it is a POST. Several carry an id, hence a suffix.
+READ_LIKE_POST_SUFFIXES = ("/preview",)
 
 
 def is_read_like_post(path: str) -> bool:

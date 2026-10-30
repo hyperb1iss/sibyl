@@ -228,6 +228,12 @@ def test_read_like_posts_are_not_buffered() -> None:
         "/context/pack",
         "/memory/raw/recall",
         "/admin/debug/query",
+        "/synthesis/plan",
+        "/memory/promote/preview",
+        "/memory/reflection/promote/preview",
+        "/memory/share/preview",
+        "/memory/spaces/space-a/members/preview",
+        "/memory/inspect/mem-a/corrections/preview",
     ):
         assert client_transport._should_buffer_request("POST", path) is False, path
 
@@ -235,7 +241,19 @@ def test_read_like_posts_are_not_buffered() -> None:
 def test_durable_writes_are_still_buffered() -> None:
     # Genuine writes (including persist-capable reflect and raw memory) keep
     # their offline buffer + replay semantics.
-    for path in ("/memory/raw", "/context/reflect", "/tasks", "/entities"):
+    for path in (
+        "/memory/raw",
+        "/context/reflect",
+        "/tasks",
+        "/entities",
+        # Each preview's own commit route, and a draft that may remember its
+        # artifact, still change state.
+        "/synthesis/draft",
+        "/memory/promote",
+        "/memory/reflection/promote",
+        "/memory/share",
+        "/memory/inspect/mem-a/corrections",
+    ):
         assert client_transport._should_buffer_request("POST", path) is True, path
     # Reads and auth never buffer.
     assert client_transport._should_buffer_request("GET", "/search") is False
@@ -866,10 +884,21 @@ def test_an_explicit_retry_gives_a_parked_write_a_fresh_streak(
     assert after["status"] == "pending"
 
 
-def test_a_correction_preview_is_a_read_and_never_buffered() -> None:
+def test_a_preview_is_a_read_and_never_buffered() -> None:
     assert pending_writes.is_read_like_post("/memory/inspect/mem-a/corrections/preview")
     assert pending_writes.is_read_like_post("/memory/inspect/mem-a/corrections/preview/")
+    assert pending_writes.is_read_like_post("/memory/share/preview?dry=1")
     assert not pending_writes.is_read_like_post("/memory/inspect/mem-a/corrections")
+    assert not pending_writes.is_read_like_post("/memory/previews")
+
+
+def test_a_preview_an_older_cli_buffered_is_triaged_as_read_like() -> None:
+    # Earlier clients queued previews as writes; reclassifying them lets
+    # `pending-writes discard --read-like` sweep them instead of leaving a
+    # needs-attention entry nobody can act on.
+    queued_preview = {"method": "POST", "path": "/memory/promote/preview"}
+
+    assert pending_writes.is_buffered_read_like(queued_preview)
 
 
 def test_corrections_to_different_memories_are_independent_resources() -> None:
