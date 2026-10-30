@@ -275,6 +275,7 @@ async def test_attention_entry_blocks_its_resource_on_subsequent_replay(identity
     first = queued(identity, method="PATCH", path="/tasks/123")
     later = queued(identity, path="/tasks/123/complete")
     capture = queued(identity)
+    pending_writes.increment_attempts(first["id"])
     pending_writes.record_pending_failure(first["id"], category="rejected", status_code=404)
     sent = []
 
@@ -311,6 +312,7 @@ async def test_unresolved_bulk_is_barrier_for_later_writes(identity: dict) -> No
 @pytest.mark.asyncio
 async def test_new_mutation_waits_for_older_related_attention(identity: dict) -> None:
     prior = queued(identity, method="PATCH", path="/tasks/123")
+    pending_writes.increment_attempts(prior["id"])
     pending_writes.record_pending_failure(prior["id"], category="rejected", status_code=404)
     mutations = []
 

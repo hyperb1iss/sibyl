@@ -27,6 +27,7 @@ from sibyl_cli.pending_identity import (
     stored_replay_identity,
 )
 from sibyl_cli.pending_writes import (
+    PendingFailureCategory,
     PendingMetric,
     bind_pending_write_identity,
     create_pending_write,
@@ -363,6 +364,28 @@ def _requires_initialized_context(method: str, path: str) -> bool:
     return not path.startswith("/auth/")
 
 
+def _failure_category(exc: SibylClientError) -> PendingFailureCategory:
+    status = exc.status_code
+    if exc.error_code == "pending_dependency":
+        return "dependency"
+    if exc.error_code == "replay_identity_mismatch":
+        # This refusal is the CLI's own: the request never left the machine,
+        # so it is an ownership problem to adopt or discard, not a payload
+        # the server rejected.
+        return "authentication"
+    if status == 401 or exc.error_code == "token_refresh_failed":
+        return "authentication"
+    if status == 409 and exc.error_code in {"idempotency_in_progress", "entity_locked"}:
+        return "server"
+    if status == 409:
+        return "conflict"
+    if status is not None and 400 <= status < 500 and status not in {408, 429}:
+        return "rejected"
+    if status is not None:
+        return "server"
+    return "transport"
+
+
 def _resolve_pending_write(write_id: str | None, outcome: PendingMetric | None) -> None:
     """Drop a buffered write from the queue and record why it left.
 
@@ -554,25 +577,7 @@ class ClientTransportMixin:
         if write_id is None:
             return
         status = exc.status_code
-        if exc.error_code == "pending_dependency":
-            category = "dependency"
-        elif exc.error_code == "replay_identity_mismatch":
-            # This refusal is the CLI's own: the request never left the machine,
-            # so it is an ownership problem to adopt or discard, not a payload
-            # the server rejected.
-            category = "authentication"
-        elif status == 401 or exc.error_code == "token_refresh_failed":
-            category = "authentication"
-        elif status == 409 and exc.error_code in {"idempotency_in_progress", "entity_locked"}:
-            category = "server"
-        elif status == 409:
-            category = "conflict"
-        elif status is not None and 400 <= status < 500 and status not in {408, 429}:
-            category = "rejected"
-        elif status is not None:
-            category = "server"
-        else:
-            category = "transport"
+        category = _failure_category(exc)
         with suppress(FileNotFoundError):
             record_pending_failure(
                 write_id,
@@ -895,11 +900,17 @@ class ClientTransportMixin:
                         raise exc
                     _resolve_pending_write(pending_write_id, None)
                     return {}
-                if pending_write_created and payload.error == "revision_conflict":
-                    # A write pinned to a revision the resource has left can
-                    # never apply, so queueing it only blocks the rerun that
-                    # would draw a fresh plan. A replay that meets the same
-                    # answer parks with the server's reason instead.
+                if pending_write_created and (
+                    _failure_category(exc) == "rejected" or payload.error == "revision_conflict"
+                ):
+                    # The server refused this first attempt for good, and the
+                    # caller is here to read why. Sending the same payload
+                    # again draws the same refusal, so a queued copy could
+                    # only park and ask for a decision nobody needs to make.
+                    # Other conflicts stay: a 409 can also mean the write may
+                    # have landed without its receipt. A replay that meets a
+                    # refusal parks with the reason, since its caller has
+                    # moved on.
                     _resolve_pending_write(pending_write_id, "dropped")
                     raise exc
                 self._record_pending_failure(pending_write_id, exc)

@@ -355,6 +355,7 @@ async def test_buffered_reflection_does_not_block_a_new_task(
         params=None,
         replay_scope=client._replay_scope,
     )
+    pending_writes.increment_attempts(reflection["id"])
     pending_writes.record_pending_failure(reflection["id"], category="rejected", status_code=404)
 
     result = await client.post("/tasks", json={"name": "Independent task"})
@@ -649,75 +650,79 @@ async def test_mutating_request_keeps_pending_write_on_auth_failure(
     assert exc.value.remediation == client_module.PENDING_WRITE_REMEDIATION
 
 
+@pytest.mark.parametrize(
+    ("status_code", "error"),
+    [
+        (400, "validation_error"),
+        (403, "forbidden"),
+        (404, "not_found"),
+        (410, "gone"),
+        (413, "payload_too_large"),
+        (422, "validation_error"),
+    ],
+)
 @pytest.mark.asyncio
-async def test_mutating_request_parks_pending_write_on_validation_error(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(pending_writes.Path, "home", lambda: tmp_path)
-    transport = httpx.MockTransport(
-        lambda _request: httpx.Response(
-            400,
-            json={"error": "validation_error", "message": "Bad payload"},
-        )
-    )
-    client = _client_with_transport(transport)
-
-    with pytest.raises(SibylClientError):
-        await client.post("/entities", json={"name": "Invalid"})
-
-    await client.close()
-    item = pending_writes.list_pending_writes()[0]
-    assert item["status"] == "attention"
-    assert item["last_failure"]["category"] == "rejected"
-    assert pending_writes.read_pending_metrics()["dropped"] == 0
-
-
-@pytest.mark.parametrize("status_code", [400, 422])
-@pytest.mark.asyncio
-async def test_mutating_request_preserves_rejected_payload_for_inspection(
+async def test_a_first_write_the_server_refuses_reports_it_and_is_not_queued(
     status_code: int,
+    error: str,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """The caller reads the refusal; a queued copy could only park forever.
+
+    A buffered write the server refused on its first attempt never left the
+    queue on its own, so one wrong project id nagged every later command.
+    """
     monkeypatch.setattr(pending_writes.Path, "home", lambda: tmp_path)
     client_module._FAILURE_WINDOWS.clear()
     transport = httpx.MockTransport(
         lambda _request: httpx.Response(
             status_code,
-            json={"error": "validation_error", "message": "Bad payload"},
+            json={"error": error, "message": "Project not found: project_elsewhere"},
         )
     )
     client = _client_with_transport(transport)
 
-    with pytest.raises(SibylClientError):
-        await client.post("/memory/raw", json={"title": "Doomed", "raw_content": "Body"})
+    with pytest.raises(SibylClientError) as exc:
+        await client.post("/entities", json={"name": "Misrouted"})
 
     await client.close()
-    item = pending_writes.list_pending_writes()[0]
-    assert item["status"] == "attention"
-    assert item["last_failure"]["category"] == "rejected"
-    assert pending_writes.read_pending_metrics()["dropped"] == 0
+    assert exc.value.status_code == status_code
+    assert "Project not found" in str(exc.value.detail)
+    assert pending_writes.list_pending_writes() == []
+    assert pending_writes.read_pending_metrics()["dropped"] == 1
 
 
+@pytest.mark.parametrize(
+    ("status_code", "error"),
+    [
+        (401, "unauthorized"),
+        (408, "timeout"),
+        (409, "idempotency_reconciliation_required"),
+        (409, "idempotency_in_progress"),
+        (409, "entity_locked"),
+        (409, "conflict"),
+        (429, "rate_limited"),
+        (500, "internal_error"),
+        (503, "unavailable"),
+    ],
+)
 @pytest.mark.asyncio
-async def test_mutating_request_keeps_pending_write_on_idempotency_conflict(
+async def test_a_first_write_with_an_unsettled_outcome_stays_queued(
+    status_code: int,
+    error: str,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """Auth, throttling, server errors and conflicts can all mean try again.
+
+    A 409 can also say the write may have landed without its receipt, which
+    the queue exists to reconcile, so no conflict is dropped on sight.
+    """
     monkeypatch.setattr(pending_writes.Path, "home", lambda: tmp_path)
     client_module._FAILURE_WINDOWS.clear()
     transport = httpx.MockTransport(
-        lambda _request: httpx.Response(
-            409,
-            json={
-                "error": "conflict",
-                "message": (
-                    "Idempotent operation is still in progress or was interrupted "
-                    "before its receipt completed"
-                ),
-            },
-        )
+        lambda _request: httpx.Response(status_code, json={"error": error, "message": "later"})
     )
     client = _client_with_transport(transport)
 
@@ -725,35 +730,64 @@ async def test_mutating_request_keeps_pending_write_on_idempotency_conflict(
         await client.post("/memory/raw", json={"title": "Keep me", "raw_content": "Body"})
 
     await client.close()
-    pending = pending_writes.list_pending_writes()
-    assert len(pending) == 1
-    assert pending[0]["json"] == {"title": "Keep me", "raw_content": "Body"}
+    (item,) = pending_writes.list_pending_writes()
+    assert item["path"] == "/memory/raw"
     assert pending_writes.read_pending_metrics()["dropped"] == 0
 
 
-@pytest.mark.parametrize("status_code", [401, 403, 404, 405, 408, 409, 410, 413, 429, 500, 503])
-@pytest.mark.asyncio
-async def test_mutating_request_keeps_pending_write_unless_payload_is_unusable(
-    status_code: int,
+def test_reading_the_queue_clears_writes_refused_on_their_first_attempt(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """Older CLIs parked first-attempt refusals; reading the queue drops them."""
     monkeypatch.setattr(pending_writes.Path, "home", lambda: tmp_path)
-    client_module._FAILURE_WINDOWS.clear()
-    transport = httpx.MockTransport(
-        lambda _request: httpx.Response(
-            status_code,
-            json={"error": "failed", "message": "Not applied, or unknowable"},
-        )
+    legacy = pending_writes.create_pending_write(
+        method="POST",
+        path="/entities",
+        base_url="https://sibyl.test/api",
+        json_payload={},
+        params=None,
     )
-    client = _client_with_transport(transport)
+    pending_writes.record_pending_failure(
+        str(legacy["id"]), category="rejected", status_code=404, error_code="not_found"
+    )
+    replayed = pending_writes.create_pending_write(
+        method="POST",
+        path="/entities",
+        base_url="https://sibyl.test/api",
+        json_payload={},
+        params=None,
+    )
+    pending_writes.increment_attempts(str(replayed["id"]))
+    pending_writes.record_pending_failure(
+        str(replayed["id"]), category="rejected", status_code=404, error_code="not_found"
+    )
+    waiting = pending_writes.create_pending_write(
+        method="POST",
+        path="/memory/raw",
+        base_url="https://sibyl.test/api",
+        json_payload={},
+        params=None,
+    )
+    pending_writes.record_pending_failure(str(waiting["id"]), category="transport")
+    unconfirmed = pending_writes.create_pending_write(
+        method="POST",
+        path="/memory/raw",
+        base_url="https://sibyl.test/api",
+        json_payload={},
+        params=None,
+    )
+    pending_writes.record_pending_failure(
+        str(unconfirmed["id"]),
+        category="conflict",
+        status_code=409,
+        error_code="idempotency_reconciliation_required",
+    )
 
-    with pytest.raises(SibylClientError):
-        await client.post("/memory/raw", json={"title": "Keep me", "raw_content": "Body"})
+    remaining = {item["id"] for item in pending_writes.list_pending_writes()}
 
-    await client.close()
-    assert len(pending_writes.list_pending_writes()) == 1
-    assert pending_writes.read_pending_metrics()["dropped"] == 0
+    assert remaining == {replayed["id"], waiting["id"], unconfirmed["id"]}
+    assert pending_writes.read_pending_metrics()["dropped"] == 1
 
 
 @pytest.mark.asyncio
@@ -848,6 +882,7 @@ async def test_a_preview_queued_by_an_older_client_blocks_no_correction(
         json_payload={"action": "hide", "reason": "r"},
         params=None,
     )
+    pending_writes.increment_attempts(str(stale["id"]))
     pending_writes.record_pending_failure(str(stale["id"]), category="rejected", status_code=404)
 
     client = _client_with_transport(
@@ -968,6 +1003,8 @@ async def test_a_replayed_write_that_meets_a_revision_conflict_parks_with_the_re
     with pytest.raises(SibylClientError):
         await client.correct_memory("mem-a", action="hide", reason="r", expected_revision=3)
     (queued,) = pending_writes.list_pending_writes()
+    # Replays count their attempt before sending, as flush and auto-replay do.
+    pending_writes.increment_attempts(str(queued["id"]))
     with pytest.raises(SibylClientError):
         await client._request(
             "POST",

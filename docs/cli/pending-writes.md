@@ -4,6 +4,11 @@ Inspect and recover writes whose server outcome is not confirmed. The CLI keeps 
 original idempotency key in a local directory restricted to your user. A timeout can happen after
 the server applies a write, so a buffered entry does not prove that the server saved nothing.
 
+A write the server refuses on its first attempt (a 4xx other than 401, 408, 409, or 429) is not
+kept: the command reports the refusal, and resending the same payload would draw it again. Entries
+an older CLI parked that way are cleared the next time the queue is read. Conflicts stay queued,
+because a 409 can mean the write landed without its receipt.
+
 ## Ownership and reauthentication
 
 New writes record a server-confirmed identity: the database instance, user, organization, and
@@ -40,8 +45,8 @@ Each entry falls in exactly one class, and only the first moves on its own:
 
 - **retrying:** this login owns it and the destination is the current server. Replay is attempted
   after a successful API request, with backoff between attempts.
-- **needs_attention:** the server rejected it or left a conflict unresolved. Automatic replay skips
-  it until the cause is fixed and `retry` re-enables it.
+- **needs_attention:** the server rejected a replay or left a conflict unresolved. Automatic replay
+  skips it until the cause is fixed and `retry` re-enables it.
 - **unowned:** no credential this login can prove owns it. A rotated login, an older CLI, or a write
   buffered with nobody signed in all land here. Use `adopt` or `discard`.
 - **foreign_server:** the write targets another server URL, so no command against this one will ever
