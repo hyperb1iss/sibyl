@@ -279,6 +279,76 @@ async def test_remember_capture_creates_raw_archive_record(monkeypatch: pytest.M
     assert archive.capture_surface == "cli"
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("memory_scope", ["private", "project", "team", ["not", "a", "scope"]])
+async def test_remember_sidecar_is_filed_under_the_verified_project(
+    monkeypatch: pytest.MonkeyPatch,
+    memory_scope: object,
+) -> None:
+    """The sidecar lands in its project and stays private to its writer.
+
+    It has no lifecycle of its own, so whatever audience the memory declares,
+    widening the sidecar would serve it past corrections to the memory.
+    """
+    from sibyl.config import settings
+
+    monkeypatch.setattr(settings, "store", "legacy")
+    org = MagicMock()
+    org.id = uuid4()
+
+    ctx = MagicMock()
+    ctx.user.id = uuid4()
+
+    entity = EntityCreate(
+        name="Scoped decision",
+        description="",
+        content="Captures carry the project they were written in.",
+        entity_type=EntityType.DECISION,
+        metadata={
+            "capture_mode": "remember",
+            "capture_surface": "cli",
+            "remember_kind": "decision",
+            "project_id": "project_abc",
+            "memory_scope": memory_scope,
+            # Forged owner fields never reach the sidecar.
+            "scope_key": "project_forged",
+            "principal_id": "someone-else",
+        },
+    )
+
+    add_result = MagicMock()
+    add_result.success = True
+    add_result.id = "decision_scoped"
+    add_result.message = "ok"
+
+    save_capture = AsyncMock(side_effect=lambda _session, *, capture: capture)
+    verify_project = AsyncMock()
+
+    with (
+        patch("sibyl_core.tools.core.add", AsyncMock(return_value=add_result)),
+        patch("sibyl.api.routes.entity_mutations.broadcast_event", AsyncMock()),
+        patch("sibyl.api.routes.entity_mutations.verify_entity_project_access", verify_project),
+        patch("sibyl.api.routes.entity_captures.save_raw_capture_record", save_capture),
+    ):
+        await create_entity(
+            request=_request(),
+            entity=entity,
+            org=org,
+            ctx=ctx,
+            content_session=_session(),
+            sync=False,
+        )
+
+    verify_project.assert_awaited_once()
+    archive = save_capture.await_args.kwargs["capture"]
+    assert archive.project_id == "project_abc"
+    assert archive.memory_scope == "private"
+    assert archive.scope_key is None
+    assert archive.principal_id == str(ctx.user.id)
+    for owner_key in ("project_id", "memory_scope", "scope_key", "principal_id"):
+        assert owner_key not in archive.metadata
+
+
 def _reader_ctx(
     *,
     user_id: str = "reader-1",

@@ -321,6 +321,7 @@ async def test_archive_raw_capture_stamps_the_raw_memory_it_projects() -> None:
             entity_type="error_pattern",
             tags=[],
             metadata={"capture_mode": "remember"},
+            project_id=None,
             source_capture_id="raw-1",
         )
 
@@ -358,6 +359,7 @@ async def test_archive_raw_capture_leaves_unprojected_quick_captures_alone() -> 
             entity_type="note",
             tags=[],
             metadata={"capture_mode": "quick"},
+            project_id=None,
         )
 
     mark.assert_not_awaited()

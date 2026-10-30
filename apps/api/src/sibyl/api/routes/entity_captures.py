@@ -51,9 +51,17 @@ async def archive_raw_capture(
     entity_type: str,
     tags: list[str],
     metadata: dict[str, object],
+    project_id: str | None,
     source_capture_id: str | None = None,
 ) -> None:
     """Persist the write-once capture sidecar.
+
+    The sidecar is private to its writer: it has no lifecycle of its own, so
+    corrections to the memory never reach it, and raw recall would serve it
+    to any wider audience. The graph row and the raw memory carry the
+    audience. ``project_id`` is the project the route verified, which files
+    the sidecar where its writer will look for it; ``metadata`` has every
+    server-owned key stripped and cannot supply it.
 
     The optional source capture requests queue folding under the writer's
     identity. The identifier is queue bookkeeping, not evidence provenance,
@@ -63,13 +71,7 @@ async def archive_raw_capture(
     capture = RawCaptureRecord(
         organization_id=organization_id,
         principal_id=str(user_id) if user_id else "",
-        memory_scope=str(metadata.get("memory_scope") or "private"),
-        scope_key=str(metadata["scope_key"]) if metadata.get("scope_key") else None,
-        agent_id=str(metadata["agent_id"]) if metadata.get("agent_id") else None,
-        project_id=str(metadata["project_id"]) if metadata.get("project_id") else None,
-        review_state=serialization.normalized_raw_capture_review_state(
-            metadata.get("review_state")
-        ),
+        project_id=project_id or None,
         entity_id=entity_id,
         title=entity_name,
         raw_content=entity_content,
