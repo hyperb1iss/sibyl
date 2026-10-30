@@ -39,6 +39,7 @@ constraint-dependencies = [
     "dnspython>=2.9.0",
     "filelock>=4.2.1",
     "nltk>=3.10.4",
+    "joserfc>=1.7.6",
 ]
 
 [tool.uv.workspace]
