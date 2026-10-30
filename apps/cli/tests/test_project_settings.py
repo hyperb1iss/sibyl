@@ -78,3 +78,25 @@ def test_project_show_omits_the_default_on_servers_without_settings(get_client) 
 
     assert result.exit_code == 0, result.output
     assert "Default write scope" not in result.output
+
+
+@patch("sibyl_cli.memory.get_client")
+def test_remember_refuses_a_scope_key_without_a_scope(get_client) -> None:
+    result = CliRunner().invoke(
+        app, ["remember", "Title", "Body", "--kind", "note", "--scope-key", "team-uuid"]
+    )
+
+    assert result.exit_code == 1
+    assert "--scope-key needs --scope" in result.output
+    get_client.assert_not_called()
+
+
+def test_capture_output_says_who_can_read_the_memory(capsys) -> None:
+    from sibyl_cli.memory_views import print_memory_scope
+
+    print_memory_scope({"memory_scope": "project", "scope_resolution": "default_scope_project"})
+    print_memory_scope({"memory_scope": "private"})
+
+    out = capsys.readouterr().out
+    assert "Scope: project (the project shares new memories)" in out
+    assert "Scope: private" in out

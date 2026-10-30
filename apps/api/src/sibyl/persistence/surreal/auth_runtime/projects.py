@@ -36,6 +36,7 @@ from sibyl_core.backends.surreal.records import (
     coerce_uuid as _coerce_uuid,
     normalize_record as _normalize_record,
     normalize_records as _normalize_records,
+    query_error as _query_error,
     utcnow as _utcnow,
 )
 from sibyl_core.models.memory_scope import PROJECT_DEFAULT_MEMORY_SCOPES, MemoryScope
@@ -396,20 +397,32 @@ async def update_project_record(
         if existing is None:
             return False
 
-        updated = dict(existing)
         project_uuid = _coerce_uuid(existing.get("uuid"), field_name="projects.uuid")
+        # Only the fields this call owns are written. Replacing the whole row
+        # from the read above would put back any setting another request
+        # changed in between, such as the default write scope.
+        changes: dict[str, object] = {"updated_at": _utcnow()}
         if name is not None and name != existing.get("name"):
-            updated["name"] = name
-            updated["slug"] = await _generate_unique_project_slug(
+            changes["name"] = name
+            changes["slug"] = await _generate_unique_project_slug(
                 repo,
                 organization_id=organization_id,
                 name=name,
                 exclude_uuid=project_uuid,
             )
         if description is not None:
-            updated["description"] = description[:2000] if description else None
-        updated["updated_at"] = _utcnow()
-        await repo.replace_record("projects", uuid=project_uuid, record=updated)
+            changes["description"] = description[:2000] if description else None
+        assignments = ", ".join(f"{field} = ${field}" for field in changes)
+        # Field names come from the fixed keys above; values are bound.
+        result = await client.execute_query(
+            f"UPDATE projects SET {assignments} "  # noqa: S608
+            "WHERE organization_id = $organization_id AND uuid = $uuid;",
+            organization_id=str(organization_id),
+            uuid=str(project_uuid),
+            **changes,
+        )
+        if (error := _query_error(result)) is not None:
+            raise RuntimeError(error)
         return True
 
 

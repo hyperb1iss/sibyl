@@ -102,6 +102,10 @@ async def remember_raw(
         # project's default changed still finds its first response.
         request_body = request.model_dump(mode="json")
         scope_resolution: str | None = None
+        if request.memory_scope is None and request.scope_key:
+            # The default decides the key along with the scope, so a key on
+            # its own would be silently replaced; refuse it instead.
+            raise HTTPException(status_code=422, detail="scope_key requires memory_scope")
         if request.memory_scope is None:
             resolved = await memory_auth.resolve_capture_default_scope(
                 ctx=ctx,

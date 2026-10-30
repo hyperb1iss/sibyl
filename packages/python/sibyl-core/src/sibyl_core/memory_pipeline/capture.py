@@ -76,11 +76,19 @@ class MemoryCaptureResult:
     raw_source_id: str | None
     raw_policy_reason: str | None
     mutation_receipt: dict[str, Any] | None = None
+    # Where the memory landed and, when the caller named no scope, which rule
+    # put it there. The caller reads these instead of assuming its default.
+    memory_scope: str | None = None
+    scope_resolution: str | None = None
 
     def to_payload(self) -> dict[str, Any]:
         payload = dict(self.payload)
         if self.mutation_receipt is not None:
             payload["mutation_receipt"] = dict(self.mutation_receipt)
+        if self.memory_scope is not None:
+            payload["memory_scope"] = self.memory_scope
+        if self.scope_resolution is not None:
+            payload["scope_resolution"] = self.scope_resolution
         return payload
 
 
@@ -167,6 +175,8 @@ class MemoryCaptureService:
             raw_source_id=raw_source_id,
             raw_policy_reason=raw_policy_reason,
             mutation_receipt=mutation_receipt,
+            memory_scope=graph_scope,
+            scope_resolution=_optional_str(raw_memory.get("scope_resolution")),
         )
 
 

@@ -618,6 +618,9 @@ _SCOPE_READERS_THAT_DO_NOT_AUTHORIZE = {
     "memory_pipeline/capture.py::MemoryCaptureService.capture": (
         "write stamp: copies the scope the authorized raw write landed in onto its graph row"
     ),
+    "memory_pipeline/capture.py::MemoryCaptureResult.to_payload": (
+        "receipt: reports the scope a completed write landed in"
+    ),
     "migrate/personal_archive_candidates.py::_audience": (
         "classifies untrusted source scopes into mapped or quarantine candidates; "
         "does not authorize destination visibility"

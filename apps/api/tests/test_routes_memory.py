@@ -3969,3 +3969,20 @@ async def test_remember_raw_diary_never_consults_the_project_default() -> None:
 
     lookup.assert_not_awaited()
     assert remember.await_args.kwargs["memory_scope"] == "private"
+
+
+@pytest.mark.asyncio
+async def test_remember_raw_refuses_a_scope_key_without_a_scope() -> None:
+    with (
+        patch("sibyl.api.routes.memory_raw.remember_raw_memory", AsyncMock()) as remember,
+        pytest.raises(HTTPException) as exc_info,
+    ):
+        await remember_raw(
+            RawMemoryRememberRequest(raw_content="note", scope_key="team-uuid"),
+            http_request=_http_request(),
+            org=_org(),
+            ctx=_ctx(),
+        )
+
+    assert exc_info.value.status_code == 422
+    remember.assert_not_awaited()
