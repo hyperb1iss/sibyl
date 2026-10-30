@@ -38,6 +38,7 @@ from sibyl_core.backends.surreal.records import (
     normalize_records as _normalize_records,
     utcnow as _utcnow,
 )
+from sibyl_core.models.memory_scope import PROJECT_DEFAULT_MEMORY_SCOPES, MemoryScope
 
 
 async def _generate_unique_project_slug(
@@ -337,6 +338,7 @@ async def create_project_record(
             "graph_project_id": graph_project_id,
             "visibility": ProjectVisibility.ORG.value,
             "default_role": ProjectRole.VIEWER.value,
+            "default_memory_scope": MemoryScope.PRIVATE.value,
             "settings": {},
             "created_at": now,
             "updated_at": now,
@@ -346,6 +348,33 @@ async def create_project_record(
             uuid=_coerce_uuid(record["uuid"], field_name="projects.uuid"),
             record=record,
         )
+
+
+async def get_project_default_memory_scope(
+    *,
+    organization_id: UUID | str,
+    graph_project_id: str,
+) -> MemoryScope:
+    """Where a capture in this project lands when the writer names no scope.
+
+    Anything but a recognized project default reads as private, including a
+    project with no auth record, so a lookup miss never widens a write.
+    """
+    async with _auth_client_scope() as client:
+        repo = _SurrealRepository(client)
+        record = await repo.select_one(
+            "SELECT default_memory_scope FROM projects "
+            "WHERE organization_id = $organization_id AND graph_project_id = $graph_project_id "
+            "LIMIT 1;",
+            organization_id=str(organization_id),
+            graph_project_id=graph_project_id,
+        )
+    raw = record.get("default_memory_scope") if record else None
+    try:
+        scope = MemoryScope(str(raw)) if raw else MemoryScope.PRIVATE
+    except ValueError:
+        return MemoryScope.PRIVATE
+    return scope if scope in PROJECT_DEFAULT_MEMORY_SCOPES else MemoryScope.PRIVATE
 
 
 async def update_project_record(
