@@ -1145,6 +1145,7 @@ def test_remember_command_can_store_raw_memory(
         },
         provenance={"remember_kind": "episode"},
         capture_surface="cli",
+        expires_in=None,
     )
     assert "Remembered raw memory" in result.stdout
     assert "Policy: private_principal_bound" in result.stdout
@@ -1368,6 +1369,7 @@ def test_remember_command_can_store_agent_diary(
         },
         provenance={"remember_kind": "episode"},
         capture_surface="cli",
+        expires_in=None,
     )
     assert "Remembered diary entry for nova" in result.stdout
     mock_resolve_project_from_cwd.assert_called_once_with()
@@ -3300,3 +3302,54 @@ def test_memory_review_dream_help_omits_obsolete_archive_controls() -> None:
     assert result.exit_code == 0
     assert "--keep-exceptions" not in result.stdout
     assert "--archive-exceptions" not in result.stdout
+
+
+@patch("sibyl_cli.memory.resolve_project_from_cwd", return_value=None)
+@patch("sibyl_cli.memory.get_client")
+def test_remember_expires_stores_a_time_boxed_raw_capture(
+    mock_get_client: MagicMock,
+    _mock_resolve_project_from_cwd: MagicMock,
+) -> None:
+    mock_client = _mock_capture_client()
+    mock_get_client.return_value = _FakeClientContext(mock_client)
+
+    result = CliRunner().invoke(
+        app,
+        [
+            "remember",
+            "Checkout outage",
+            "Checkout is down; hold every deploy.",
+            "--scope",
+            "team",
+            "--scope-key",
+            "team-uuid",
+            "--expires",
+            "2h",
+        ],
+    )
+
+    assert result.exit_code == 0, result.stdout
+    payload = mock_client.remember_raw_memory.await_args.kwargs
+    assert payload["expires_in"] == "2h"
+    assert payload["memory_scope"] == "team"
+    assert payload["scope_key"] == "team-uuid"
+    mock_client.create_entity.assert_not_called()
+
+
+def test_remember_expires_refuses_graph_only_options() -> None:
+    result = CliRunner().invoke(app, ["remember", "Outage", "Body", "--expires", "1h", "--atomic"])
+
+    assert result.exit_code == 1
+    assert "--expires" in _strip_ansi(result.stdout + (result.stderr or ""))
+
+
+async def test_raw_remember_client_sends_expiry_only_when_given() -> None:
+    client = SibylClient(base_url="http://example.test/api", auth_token="token")
+    client._request = AsyncMock(return_value={})  # type: ignore[method-assign]
+
+    await client.remember_raw_memory(title="t", raw_content="c", expires_in="30m")
+    await client.remember_raw_memory(title="t", raw_content="c")
+
+    sent = [call.kwargs["json"] for call in client._request.await_args_list]
+    assert sent[0]["expires_in"] == "30m"
+    assert "expires_in" not in sent[1]

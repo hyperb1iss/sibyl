@@ -22,6 +22,7 @@ class ClientMemoryMixin:
         metadata: dict[str, Any] | None = None,
         provenance: dict[str, Any] | None = None,
         capture_surface: str = "cli",
+        expires_in: str | None = None,
         _idempotency_key: str | None = None,
     ) -> dict[str, Any]:
         """Store verbatim raw memory.
@@ -48,6 +49,8 @@ class ClientMemoryMixin:
             data["agent_id"] = agent_id
         if project_id:
             data["project_id"] = project_id
+        if expires_in:
+            data["expires_in"] = expires_in
         if _idempotency_key is not None:
             # The migration owns durable retry identity across process restarts.
             return await self._request(
