@@ -26,11 +26,11 @@ All endpoints require authentication via:
 
 ## Role Requirements
 
-| Operation group                                     | Required Roles               |
-| --------------------------------------------------- | ---------------------------- |
-| Read (recall, context pack, import status)          | Owner, Admin, Member, Viewer |
-| Write (remember, reflect, share preview, promotion) | Owner, Admin, Member         |
-| Admin (memory spaces, audit, inspect, corrections)  | Owner, Admin                 |
+| Operation group                                                  | Required Roles               |
+| ---------------------------------------------------------------- | ---------------------------- |
+| Read (recall, context pack, import status)                       | Owner, Admin, Member, Viewer |
+| Write (remember, reflect, share preview, promotion, corrections) | Owner, Admin, Member         |
+| Admin (memory spaces, audit, inspect)                            | Owner, Admin                 |
 
 ## Memory Scopes
 
@@ -377,8 +377,13 @@ Owner or Admin role.
 | POST   | `/api/memory/share/preview`                           | Preview memory sharing without enabling a share |
 | GET    | `/api/memory/source-imports/{import_id}`              | Get source-safe import progress                 |
 
-Memory corrections support actions such as `delete` and `hide` for lifecycle management. Audit and
-inspection endpoints require Owner or Admin role; `source-imports` status is readable by any member.
+Memory corrections support actions such as `delete` and `hide` for lifecycle management. A private
+memory answers only to the principal who captured it. A project memory needs `project_contributor`
+on its project, and correcting one someone else captured needs `project_maintainer`, the same bar a
+graph delete clears; org owners and admins hold it on every project. Every correction action counts,
+because each one retires, rewrites, or restores the memory. A refused correction returns
+`applied: false` with the reason `project_maintainer_required`. Audit and inspection endpoints
+require Owner or Admin role; `source-imports` status is readable by any member.
 
 ## Error Responses
 

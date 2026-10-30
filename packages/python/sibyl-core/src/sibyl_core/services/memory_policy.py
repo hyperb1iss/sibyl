@@ -293,9 +293,19 @@ def _authorize_correction_source_write(
     memory: RawMemory,
     principal_id: str | None,
     accessible_projects: Iterable[str] | None,
+    maintained_projects: Iterable[str] | None = None,
     accessible_teams: Iterable[str] | None = None,
     accessible_delegations: Iterable[str] | None = None,
 ) -> MemoryPolicyDecision:
+    """Whether the caller may correct this capture.
+
+    Every correction action retires, rewrites, or restores the capture, so a
+    project contributor may correct only what they captured themselves.
+    Someone else's project capture takes a maintainer grant on its project,
+    the same bar a graph delete clears. ``maintained_projects`` lists the
+    projects where the caller holds project maintainer or higher; omitting it
+    grants none.
+    """
     if memory.memory_scope is MemoryScope.PRIVATE and memory.principal_id != principal_id:
         return MemoryPolicyDecision(
             action=MemoryPolicyAction.WRITE,
@@ -304,7 +314,7 @@ def _authorize_correction_source_write(
             memory_scope=memory.memory_scope,
             scope_key=memory.scope_key,
         )
-    return authorize_memory_write(
+    decision = authorize_memory_write(
         principal_id=principal_id,
         memory_scope=memory.memory_scope,
         scope_key=memory.scope_key,
@@ -312,6 +322,20 @@ def _authorize_correction_source_write(
         accessible_teams=accessible_teams,
         accessible_delegations=accessible_delegations,
     )
+    if (
+        decision.allowed
+        and memory.memory_scope is MemoryScope.PROJECT
+        and memory.principal_id != principal_id
+        and memory.scope_key not in set(maintained_projects or ())
+    ):
+        return MemoryPolicyDecision(
+            action=MemoryPolicyAction.WRITE,
+            allowed=False,
+            reason="project_maintainer_required",
+            memory_scope=memory.memory_scope,
+            scope_key=memory.scope_key,
+        )
+    return decision
 
 
 def _policy_denial_reason(metadata: Mapping[str, Any]) -> str:

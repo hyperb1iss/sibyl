@@ -239,6 +239,7 @@ async def preview_memory_correction(
     reason: str | None = None,
     accessible_projects: Iterable[str] | None = None,
     writable_projects: Iterable[str] | None = None,
+    maintained_projects: Iterable[str] | None = None,
     accessible_teams: Iterable[str] | None = None,
     accessible_delegations: Iterable[str] | None = None,
     allowed_memory_scope_keys: Iterable[str] | None = None,
@@ -256,6 +257,7 @@ async def preview_memory_correction(
         reason=reason,
         accessible_projects=accessible_projects,
         writable_projects=writable_projects,
+        maintained_projects=maintained_projects,
         accessible_teams=accessible_teams,
         accessible_delegations=accessible_delegations,
         allowed_memory_scope_keys=allowed_memory_scope_keys,
@@ -275,6 +277,7 @@ async def _preview_loaded_memory_correction(
     reason: str | None = None,
     accessible_projects: Iterable[str] | None = None,
     writable_projects: Iterable[str] | None = None,
+    maintained_projects: Iterable[str] | None = None,
     accessible_teams: Iterable[str] | None = None,
     accessible_delegations: Iterable[str] | None = None,
     allowed_memory_scope_keys: Iterable[str] | None = None,
@@ -324,6 +327,7 @@ async def _preview_loaded_memory_correction(
         accessible_projects=(
             accessible_projects if writable_projects is None else tuple(writable_projects)
         ),
+        maintained_projects=maintained_projects,
         accessible_teams=accessible_teams,
         accessible_delegations=accessible_delegations,
     )
@@ -670,6 +674,7 @@ async def apply_memory_correction(
     reason: str | None = None,
     accessible_projects: Iterable[str] | None = None,
     writable_projects: Iterable[str] | None = None,
+    maintained_projects: Iterable[str] | None = None,
     accessible_teams: Iterable[str] | None = None,
     accessible_delegations: Iterable[str] | None = None,
     allowed_memory_scope_keys: Iterable[str] | None = None,
@@ -697,6 +702,7 @@ async def apply_memory_correction(
         reason=reason,
         accessible_projects=accessible_projects,
         writable_projects=writable_projects,
+        maintained_projects=maintained_projects,
         accessible_teams=accessible_teams,
         accessible_delegations=accessible_delegations,
         allowed_memory_scope_keys=allowed_memory_scope_keys,

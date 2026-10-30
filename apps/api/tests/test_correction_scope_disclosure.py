@@ -18,6 +18,7 @@ from sibyl_core.services.surreal_content import MemoryScope, RawMemory
 @pytest.fixture
 def correction_disclosure_rows(monkeypatch):
     monkeypatch.setattr(context, "get_writable_projects", AsyncMock(return_value=set()))
+    monkeypatch.setattr(context, "get_maintained_projects", AsyncMock(return_value=set()))
     monkeypatch.setattr(memory_sources.memory_auth, "authorize_project_scope_write", AsyncMock())
     org = str(uuid4())
     root = RawMemory(
@@ -244,7 +245,9 @@ async def test_correction_scope_fresh_entry_points_forward_grants(
 
     readable = {"project-a", "project-b", "project-c"}
     writable = {"project-a", "project-b"}
+    maintained = {"project-b"}
     monkeypatch.setattr(context, "get_writable_projects", AsyncMock(return_value=writable))
+    monkeypatch.setattr(context, "get_maintained_projects", AsyncMock(return_value=maintained))
     root = correction_disclosure_rows
     keys = ["project\x1fproject-a"]
     preview = MemoryCorrectionPreview(
@@ -292,9 +295,11 @@ async def test_correction_scope_fresh_entry_points_forward_grants(
             memory_sources.memory_auth,
             "list_accessible_project_graph_ids",
             AsyncMock(
-                side_effect=lambda ctx, required_role=None: (
-                    writable if required_role == ProjectRole.CONTRIBUTOR else readable
-                )
+                side_effect=lambda ctx, required_role=None: {
+                    None: readable,
+                    ProjectRole.CONTRIBUTOR: writable,
+                    ProjectRole.MAINTAINER: maintained,
+                }[required_role]
             ),
         )
         monkeypatch.setattr(
@@ -326,6 +331,7 @@ async def test_correction_scope_fresh_entry_points_forward_grants(
     assert apply.await_args.kwargs["allowed_memory_scope_keys"] == keys
 
     assert apply.await_args.kwargs["writable_projects"] == writable
+    assert apply.await_args.kwargs["maintained_projects"] == maintained
     assert apply.await_args.kwargs["accessible_projects"] == readable
 
 
@@ -582,3 +588,47 @@ async def test_mcp_writable_projects_resolves_roles_and_intersects_key(monkeypat
     assert await context.get_accessible_projects(ctx) == {"project-b", "read-only"}
     load.assert_awaited_once_with(auth_ctx)
     resolve.assert_awaited_once()
+
+
+@pytest.mark.parametrize("org_role", ["member", "admin"])
+async def test_mcp_maintained_projects_resolves_roles_and_intersects_key(monkeypatch, org_role):
+    from sibyl.persistence.surreal.auth_runtime import projects
+    from sibyl_core.auth import ProjectRole
+
+    authority = SimpleNamespace(
+        organization=object(), org_role=org_role, user=SimpleNamespace(id=uuid4())
+    )
+    records = [
+        {
+            "uuid": name,
+            "graph_project_id": name,
+            "visibility": "org",
+            "default_role": role.value,
+        }
+        for name, role in (
+            ("maintained", ProjectRole.MAINTAINER),
+            ("owned", ProjectRole.OWNER),
+            ("contributed", ProjectRole.CONTRIBUTOR),
+            ("unkeyed", ProjectRole.MAINTAINER),
+        )
+    ]
+    monkeypatch.setattr(
+        projects, "_load_project_access_records", AsyncMock(return_value=(records, {}))
+    )
+    ctx = McpContext(
+        org_id="org",
+        user_id="owner",
+        scopes=["mcp"],
+        api_key_project_ids=["maintained", "owned", "contributed"],
+        authority=authority,
+    )
+    expected = {"maintained", "owned"} | ({"contributed"} if org_role == "admin" else set())
+    assert await context.get_maintained_projects(ctx) == expected
+
+
+async def test_mcp_maintained_projects_grant_nothing_without_an_authority(monkeypatch):
+    resolve = AsyncMock(return_value=None)
+    monkeypatch.setattr(context, "_resolve_principal_authority", resolve)
+    ctx = McpContext(org_id="org", user_id="owner", scopes=["mcp"])
+    assert await context.get_maintained_projects(ctx) == set()
+    resolve.assert_awaited_once_with(user_id="owner", org_id="org", scopes=["mcp"])

@@ -1168,6 +1168,9 @@ async def test_manage_memory_correction_returns_audited_receipt(monkeypatch) -> 
     monkeypatch.setattr(
         "sibyl.mcp_tools.context.get_writable_projects", AsyncMock(return_value=set())
     )
+    monkeypatch.setattr(
+        "sibyl.mcp_tools.context.get_maintained_projects", AsyncMock(return_value=set())
+    )
     ctx = McpContext(org_id="org-1", user_id="user-1", scopes=["mcp"])
     memory = SimpleNamespace(
         id="raw-1",
@@ -1231,6 +1234,7 @@ async def test_manage_memory_correction_returns_audited_receipt(monkeypatch) -> 
         accessible_projects={"project-a"},
         accessible_teams=None,
         writable_projects=set(),
+        maintained_projects=set(),
         replacement_source_id=None,
         duplicate_of_source_id=None,
         revised_content=None,
