@@ -218,6 +218,17 @@ def _job_needs(job: dict[str, Any]) -> list[str]:
     return [needs] if isinstance(needs, str) else list(needs)
 
 
+def _upstream_jobs(jobs: dict[str, Any], name: str) -> set[str]:
+    upstream: set[str] = set()
+    pending = _job_needs(jobs[name])
+    while pending:
+        job = pending.pop()
+        if job not in upstream:
+            upstream.add(job)
+            pending.extend(_job_needs(jobs[job]))
+    return upstream
+
+
 def _steps_by_name(job: dict[str, Any]) -> dict[str, dict[str, Any]]:
     return {step["name"]: step for step in job["steps"] if "name" in step}
 
@@ -852,6 +863,26 @@ def test_publish_workflow_packages_and_publishes_immutable_helm_charts() -> None
     assert "sibyl-helm-${{ inputs.tag }}" in workflow
     assert "Download Helm charts" in workflow
     assert "-name '*.tgz'" in workflow
+
+
+def test_helm_publication_waits_only_on_the_chart_and_its_images() -> None:
+    # An expired Homebrew tap token once failed the tap job, and because Helm
+    # waited on every channel, it held back charts whose package and images
+    # had already shipped. A chart needs its package and the signed images it
+    # names; the other channels gate promotion, not Helm.
+    jobs = cast("dict[str, Any]", yaml.safe_load(_publish_workflow())["jobs"])
+
+    assert set(_job_needs(jobs["helm-publish"])) == {"helm-package", "docker-sign"}
+
+    upstream = _upstream_jobs(jobs, "helm-publish")
+    # The chart never names an image the RC gate and the scan have not passed.
+    assert {"rc-gate", "docker-security", "docker-sign"} <= upstream
+    assert upstream.isdisjoint({"python", "homebrew", "aur"})
+
+    # Promotion is still the one job that waits on every channel.
+    assert {"python", "homebrew", "aur", "docker-sign", "helm-publish"} <= set(
+        _job_needs(jobs["release"])
+    )
 
 
 def test_publish_workflow_summary_links_all_package_channels() -> None:
