@@ -31,6 +31,7 @@ from sibyl_core.memory_pipeline.source_lifecycle import (
     SOURCE_BINDINGS_KEY,
     source_revision_bindings,
 )
+from sibyl_core.services.memory_expiry import capture_expiry_metadata, resolve_capture_expiry
 
 log = structlog.get_logger()
 
@@ -72,6 +73,15 @@ async def _claim_remember_idempotency(
     return None, replayed
 
 
+def _normalized_idempotency_key(idempotency_key: str | None) -> str | None:
+    if idempotency_key is None:
+        return None
+    key = idempotency_key.strip()
+    if not key or len(key) > 255:
+        raise ValueError("idempotency_key must be a non-empty string up to 255 characters")
+    return key
+
+
 @mcp_idempotency.serialize_request("mcp/remember")
 async def _remember_mcp_memory(
     *,
@@ -93,7 +103,6 @@ async def _remember_mcp_memory(
     expires: str | None = None,
 ) -> dict[str, Any]:
     from sibyl_core.memory_pipeline.structure import build_memory_structure
-    from sibyl_core.services.memory_expiry import capture_expiry_metadata, resolve_capture_expiry
     from sibyl_core.services.surreal_content import remember_raw_memory
     from sibyl_core.tools.core import add
 
@@ -106,10 +115,7 @@ async def _remember_mcp_memory(
     if not ctx.user_id:
         raise ValueError("User context required to remember raw source material.")
     principal_id = ctx.user_id
-    if idempotency_key is not None:
-        idempotency_key = idempotency_key.strip()
-        if not idempotency_key or len(idempotency_key) > 255:
-            raise ValueError("idempotency_key must be a non-empty string up to 255 characters")
+    idempotency_key = _normalized_idempotency_key(idempotency_key)
     expires_at = resolve_capture_expiry(expires_in=expires)
 
     # Ahead of the idempotency claim: a refused plan must not consume the key,
@@ -226,8 +232,8 @@ async def _remember_mcp_memory(
             metadata=dict(request.metadata),
             provenance=dict(request.provenance),
             capture_surface=request.capture_surface,
-            expires_at=expires_at,
             **source_context,
+            **({} if expires_at is None else {"expires_at": expires_at}),
         )
         raw_revision = getattr(raw_memory, "revision", 1)
         return {

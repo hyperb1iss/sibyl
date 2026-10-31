@@ -3985,6 +3985,7 @@ async def test_remember_raw_refuses_a_scope_key_without_a_scope() -> None:
         )
 
     assert exc_info.value.status_code == 422
+    remember.assert_not_awaited()
 
 
 @pytest.mark.asyncio
