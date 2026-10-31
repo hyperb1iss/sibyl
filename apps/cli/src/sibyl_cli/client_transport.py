@@ -29,7 +29,6 @@ from sibyl_cli.pending_writes import (
     create_pending_write,
     delete_pending_write,
     increment_attempts,
-    is_buffered_read_like,
     is_corrupt_pending_write,
     is_read_like_post,
     list_pending_writes,
@@ -276,16 +275,12 @@ def _is_refresh_revoked(message: str | None) -> bool:
     )
 
 
-def _is_read_like_post(path: str) -> bool:
-    return is_read_like_post(path)
-
-
 def _should_buffer_request(method: str, path: str) -> bool:
     if method.upper() not in BUFFERED_WRITE_METHODS:
         return False
     if path.startswith("/auth/"):
         return False
-    return not _is_read_like_post(path)
+    return not is_read_like_post(path)
 
 
 def _ready_for_auto_replay(item: dict[str, Any]) -> bool:
@@ -570,10 +565,6 @@ class ClientTransportMixin:
                         self._replay_scope,
                         cached_identity=self._owner_identity,
                     )
-                    and not (
-                        str(item.get("method") or "").upper() == "POST"
-                        and _is_read_like_post(str(item.get("path") or ""))
-                    )
                 ]
                 matching.sort(key=lambda item: str(item.get("created_at") or ""))
                 blocked: set[str] = set()
@@ -721,9 +712,6 @@ class ClientTransportMixin:
                 for earlier in list_pending_writes():
                     if (
                         is_corrupt_pending_write(earlier)
-                        # A buffered read (a preview queued by an older client)
-                        # changed nothing, so nothing can depend on it.
-                        or is_buffered_read_like(earlier)
                         or earlier.get("base_url") != self.base_url
                         or not pending_identity_matches(
                             earlier,

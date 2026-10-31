@@ -6,8 +6,9 @@ the server applies a write, so a buffered entry does not prove that the server s
 
 A write the server refuses on its first attempt (a 4xx other than 401, 408, 409, or 429) is not
 kept: the command reports the refusal, and resending the same payload would draw it again. Entries
-an older CLI parked that way are cleared the next time the queue is read. Conflicts stay queued,
-because a 409 can mean the write landed without its receipt.
+an older CLI parked that way are cleared the next time the queue is read, as are searches and
+previews an older CLI queued as if they were writes. Conflicts stay queued, because a 409 can mean
+the write landed without its receipt.
 
 ## Ownership and reauthentication
 
@@ -51,8 +52,6 @@ Each entry falls in exactly one class, and only the first moves on its own:
   buffered with nobody signed in all land here. Use `adopt` or `discard`.
 - **foreign_server:** the write targets another server URL, so no command against this one will ever
   send it. Select that server's context, or discard it.
-- **read_like:** a search, preview, or debug query buffered by an older CLI that treated it as a
-  mutation. Re-run the command instead.
 - **corrupt:** the file must be repaired or explicitly discarded before it can be used.
 
 Commands report the queue at completion, and only when a person has to act. Nothing prints while
@@ -116,7 +115,6 @@ through its own context.
 
 ```bash
 sibyl pending-writes discard <write-id>...
-sibyl pending-writes discard --read-like
 sibyl pending-writes discard --foreign
 sibyl pending-writes discard --rejected
 ```
@@ -125,9 +123,8 @@ Offline drafts retain their last verified owner. Replacing the database does not
 drafts to the new instance. Keep their payloads for inspection before deciding how to recover them.
 
 Discard permanently removes the named local copies without replay. Export or copy any payload you
-need before discarding it. Nothing is ever discarded on the CLI's own initiative.
+need before discarding it. The CLI never discards on its own a write whose outcome is still unknown.
 
-Each selector is explicit, and only one can be used per run. `--read-like` removes requests buffered
-by older CLI versions that incorrectly treated some reads as mutations. `--foreign` removes writes
-whose destination is not the current server. `--rejected` removes writes the server refused with a
-4xx that the payload cannot pass, which a replay of the same request can never fix.
+Each selector is explicit, and only one can be used per run. `--foreign` removes writes whose
+destination is not the current server. `--rejected` removes writes the server refused with a 4xx
+that the payload cannot pass, which a replay of the same request can never fix.

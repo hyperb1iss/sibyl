@@ -618,14 +618,12 @@ def test_classification_separates_the_queues_five_real_states(
     legacy = queued(replay_scope="credential:a-login-that-rotated-away")
     other_owner = queued(replay_identity=other_identity)
     foreign = queued(base_url=OTHER_BASE_URL, replay_identity=identity)
-    read_like = queued(path="/search", replay_identity=identity)
 
     assert _classified(owned, identity=identity) == "retrying"
     assert _classified(attention, identity=identity) == "needs_attention"
     assert _classified(legacy, identity=identity) == "unowned"
     assert _classified(other_owner, identity=identity) == "unowned"
     assert _classified(foreign, identity=identity) == "foreign_server"
-    assert _classified(read_like, identity=identity) == "read_like"
     # A legacy write still owned by the live credential lineage keeps retrying.
     assert (
         _classified(legacy, identity=identity, replay_scope="credential:a-login-that-rotated-away")
@@ -892,10 +890,9 @@ def test_a_preview_is_a_read_and_never_buffered() -> None:
     assert not pending_writes.is_read_like_post("/memory/previews")
 
 
-def test_a_preview_an_older_cli_buffered_is_triaged_as_read_like() -> None:
-    # Earlier clients queued previews as writes; reclassifying them lets
-    # `pending-writes discard --read-like` sweep them instead of leaving a
-    # needs-attention entry nobody can act on.
+def test_a_preview_an_older_cli_buffered_counts_as_a_queued_read() -> None:
+    # Earlier clients queued previews as writes; recognizing them lets the
+    # queue drop them on read instead of leaving an entry nobody can act on.
     queued_preview = {"method": "POST", "path": "/memory/promote/preview"}
 
     assert pending_writes.is_buffered_read_like(queued_preview)
