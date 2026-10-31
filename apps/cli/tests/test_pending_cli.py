@@ -209,21 +209,19 @@ def test_pending_writes_discard_removes_by_prefix(
     assert pending_writes.read_pending_metrics()["discarded"] == 1
 
 
-def test_pending_writes_discard_read_like_removes_only_read_replays(
+def test_reading_the_queue_drops_reads_an_older_cli_buffered(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """A queued search changed nothing, so it leaves without anyone deciding."""
     monkeypatch.setattr(pending_writes.Path, "home", lambda: tmp_path)
-    read_like = _create_pending("/search")
+    _create_pending("/search")
     durable = _create_pending("/memory/raw")
 
-    result = CliRunner().invoke(pending.app, ["discard", "--read-like"])
-
-    assert result.exit_code == 0
     remaining = pending_writes.list_pending_writes()
+
     assert [item["id"] for item in remaining] == [durable["id"]]
-    assert read_like["id"] != durable["id"]
-    assert pending_writes.read_pending_metrics()["discarded"] == 1
+    assert pending_writes.read_pending_metrics()["dropped"] == 1
 
 
 def test_pending_writes_claim_binds_and_retries_legacy_entries(
@@ -278,7 +276,7 @@ def test_pending_writes_claim_binds_and_retries_legacy_entries(
         lambda: "local",
     )
 
-    result = CliRunner().invoke(pending.app, ["claim", "--yes"])
+    result = CliRunner().invoke(pending.app, ["adopt", "--yes"])
 
     assert result.exit_code == 0
     assert "bliss@example.test" in result.stdout
@@ -331,7 +329,7 @@ def test_pending_writes_claim_fails_when_replay_lock_is_busy(
     monkeypatch.setattr(pending, "pending_replay_lock", lambda: nullcontext(False))
     monkeypatch.setattr("sibyl_cli.config_store.resolve_context_name", lambda: "local")
 
-    result = CliRunner().invoke(pending.app, ["claim", "--yes"])
+    result = CliRunner().invoke(pending.app, ["adopt", "--yes"])
 
     assert result.exit_code == 1
     assert "claim did not run" in result.stdout
@@ -392,7 +390,7 @@ def test_pending_writes_claim_reports_a_concurrent_queue_change(
     monkeypatch.setattr(pending, "claim_pending_write_replay_scope", fail_claim)
     monkeypatch.setattr("sibyl_cli.config_store.resolve_context_name", lambda: "local")
 
-    result = CliRunner().invoke(pending.app, ["claim", "--yes"])
+    result = CliRunner().invoke(pending.app, ["adopt", "--yes"])
 
     assert result.exit_code == 1
     assert "Could not claim" in result.stdout
@@ -484,7 +482,7 @@ def test_pending_writes_flush_replays_and_deletes(
     assert pending_writes.read_pending_metrics()["replayed"] == 1
 
 
-def test_pending_writes_flush_skips_read_like_replays(
+def test_pending_writes_flush_replays_writes_and_drops_queued_reads(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -520,10 +518,8 @@ def test_pending_writes_flush_skips_read_like_replays(
 
     assert result.exit_code == 0
     assert calls == ["/memory/raw"]
-    remaining = pending_writes.list_pending_writes()
-    assert [item["id"] for item in remaining] == [read_like["id"]]
+    assert pending_writes.list_pending_writes() == []
     assert read_like["id"] != durable["id"]
-    assert "Skipped 1 read-like pending request" in result.stdout
 
 
 def test_pending_writes_flush_reuses_client_per_base_url(
@@ -685,19 +681,6 @@ def test_pending_writes_discard_exits_zero_when_it_removes_what_was_named(
     assert pending_writes.list_pending_writes() == []
 
 
-def test_pending_writes_discard_read_like_exits_zero_when_nothing_matches(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """No read-like leftovers is an empty result, not a refusal."""
-    monkeypatch.setattr(pending_writes.Path, "home", lambda: tmp_path)
-    _create_pending()
-
-    result = CliRunner().invoke(pending.app, ["discard", "--read-like"])
-
-    assert result.exit_code == 0
-
-
 def test_pending_writes_discard_counts_a_repeated_id_once(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -763,7 +746,7 @@ def test_unverified_adoption_requires_explicit_ids(
 ) -> None:
     monkeypatch.setattr(Path, "home", lambda: tmp_path)
     item = _create_pending()
-    result = CliRunner().invoke(pending.app, ["claim", "--unverified", "--yes"])
+    result = CliRunner().invoke(pending.app, ["adopt", "--unverified", "--yes"])
     assert result.exit_code == 1
     assert "explicit write IDs" in result.stdout
     assert pending_writes.read_pending_write(item["id"])["replay_scope"] == TEST_REPLAY_SCOPE
@@ -778,7 +761,7 @@ def test_explicit_unverified_adoption_preserves_key_and_replays_only_selected(
     untouched = _create_pending()
     calls: list[httpx.Request] = []
     _mock_authenticated_client(monkeypatch, calls)
-    result = CliRunner().invoke(pending.app, ["claim", selected["id"], "--unverified", "--yes"])
+    result = CliRunner().invoke(pending.app, ["adopt", selected["id"], "--unverified", "--yes"])
     assert result.exit_code == 0, result.stdout
     assert "Original ownership cannot be verified" in result.stdout
     mutations = [request for request in calls if request.method == "POST"]
@@ -802,7 +785,7 @@ def test_unverified_adoption_never_reassigns_verified_owner(
     )
     calls: list[httpx.Request] = []
     _mock_authenticated_client(monkeypatch, calls)
-    CliRunner().invoke(pending.app, ["claim", item["id"], "--unverified", "--yes"])
+    CliRunner().invoke(pending.app, ["adopt", item["id"], "--unverified", "--yes"])
     assert not calls
     assert pending_writes.read_pending_write(item["id"])["replay_identity"] == foreign
 
@@ -882,7 +865,7 @@ def test_unverified_adoption_requires_server_identity(
 
     monkeypatch.setattr(pending, "SibylClient", factory)
     monkeypatch.setattr("sibyl_cli.config_store.resolve_context_name", lambda: None)
-    result = CliRunner().invoke(pending.app, ["claim", item["id"], "--unverified", "--yes"])
+    result = CliRunner().invoke(pending.app, ["adopt", item["id"], "--unverified", "--yes"])
     assert result.exit_code == 1
     assert "Upgrade the server" in result.stdout
     assert pending_writes.resolve_pending_write_path(item["id"]).read_bytes() == original
@@ -1022,7 +1005,7 @@ def test_pending_writes_discard_selectors_never_touch_a_healthy_queue(
     _signed_in()
     _queued(identity=TEST_IDENTITY)
 
-    for flag in ("--foreign", "--rejected", "--read-like"):
+    for flag in ("--foreign", "--rejected"):
         result = CliRunner().invoke(pending.app, ["discard", flag])
         assert result.exit_code == 0
         assert "No pending writes matched" in result.stdout

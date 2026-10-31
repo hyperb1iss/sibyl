@@ -58,7 +58,6 @@ UNLINKED_ENTRY_POINTS = [
     (["recall", "goal"], "context_pack"),
     (["search", "goal"], "context_pack"),
     (["brief", "goal"], "context_pack"),
-    (["graph-search", "goal"], "search"),
 ]
 
 

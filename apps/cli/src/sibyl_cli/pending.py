@@ -17,7 +17,6 @@ from sibyl_cli.client import (
     SibylClient,
     SibylClientError,
     _auth_replay_scope,
-    _is_read_like_post,
 )
 from sibyl_cli.common import (
     console,
@@ -117,25 +116,6 @@ def _selected_writes(write_ids: list[str]) -> list[dict[str, Any]]:
     if not write_ids:
         return list_pending_writes()
     return [read_pending_write(write_id) for write_id in write_ids]
-
-
-def _is_buffered_read_like(item: dict[str, Any]) -> bool:
-    return str(item.get("method") or "").upper() == "POST" and _is_read_like_post(
-        str(item.get("path") or "")
-    )
-
-
-def _partition_replayable(
-    items: list[dict[str, Any]],
-) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
-    replayable: list[dict[str, Any]] = []
-    skipped: list[dict[str, Any]] = []
-    for item in items:
-        if _is_buffered_read_like(item):
-            skipped.append(item)
-        else:
-            replayable.append(item)
-    return replayable, skipped
 
 
 def _context_name_for_base_url(
@@ -257,13 +237,6 @@ def discard_writes(
         list[str] | None,
         typer.Argument(help="Pending write IDs or prefixes"),
     ] = None,
-    read_like: Annotated[
-        bool,
-        typer.Option(
-            "--read-like",
-            help="Discard buffered read-like requests from older CLI versions.",
-        ),
-    ] = False,
     foreign: Annotated[
         bool,
         typer.Option(
@@ -281,22 +254,18 @@ def discard_writes(
 ) -> None:
     """Discard buffered writes without replaying them.
 
-    Every selector is explicit. Nothing is ever discarded on the CLI's own
-    initiative, because a discarded payload is gone and the queue is the only
-    copy.
+    Every selector is explicit. The CLI never discards on its own a write whose
+    outcome is unknown, because a discarded payload is gone and the queue is
+    the only copy.
     """
-    selectors = [flag for flag in (read_like, foreign, rejected) if flag]
+    selectors = [flag for flag in (foreign, rejected) if flag]
     if len(selectors) > 1:
-        error("Choose one of --read-like, --foreign, or --rejected per run.")
+        error("Choose one of --foreign or --rejected per run.")
         raise typer.Exit(code=1)
     if selectors and write_ids:
         error("Name write IDs or use a selector flag, not both.")
         raise typer.Exit(code=1)
-    if read_like:
-        selected = [
-            str(item["id"]) for item in list_pending_writes() if _is_buffered_read_like(item)
-        ]
-    elif foreign or rejected:
+    if foreign or rejected:
         base_url, replay_scope, identity = current_pending_owner()
         if base_url is None:
             error("The current server could not be resolved, so neither selector can be scoped.")
@@ -332,7 +301,7 @@ def discard_writes(
     # Deduplicated, since the same id named twice discards once and the second
     # pass would otherwise count as a miss.
     selected = list(dict.fromkeys(selected))
-    selector_used = bool(read_like or foreign or rejected)
+    selector_used = bool(foreign or rejected)
     removed = 0
     missed = 0
     for write_id in selected:
@@ -354,10 +323,7 @@ def discard_writes(
         raise typer.Exit(code=1)
 
 
-# `adopt` is the word the notices use, because it says what the verb does to a
-# write whose original owner is gone. `claim` stays for existing muscle memory.
 @app.command("adopt")
-@app.command("claim")
 def claim_writes(
     write_ids: Annotated[
         list[str] | None,
@@ -388,7 +354,6 @@ def claim_writes(
         item
         for item in selected
         if not is_corrupt_pending_write(item)
-        and not _is_buffered_read_like(item)
         and item.get("replay_identity") is None
         and (_legacy_claim_candidate(item) or unverified)
     ]
@@ -558,13 +523,7 @@ def flush_writes(
         else:
             warn(f"Inspect and remove this exact file manually: {path}")
 
-    replayable, skipped = _partition_replayable(valid)
-    if skipped:
-        warn(
-            f"Skipped {len(skipped)} read-like pending request"
-            f"{'s' if len(skipped) != 1 else ''}; rerun those commands instead."
-        )
-        warn("To drop them from the queue: sibyl pending-writes discard --read-like")
+    replayable = valid
     if not replayable:
         if corrupt:
             raise typer.Exit(code=1)
@@ -593,8 +552,7 @@ def flush_writes(
                 blocked_resources = blocked.setdefault(lane, set())
                 resources = pending_write_resources(item)
                 if write_id not in selected_ids:
-                    if not _is_buffered_read_like(item):
-                        blocked_resources.update(resources)
+                    blocked_resources.update(resources)
                     continue
                 if (
                     pending_resources_overlap(resources, blocked_resources)

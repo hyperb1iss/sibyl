@@ -7,9 +7,9 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from typer.testing import CliRunner
 
+from sibyl_cli.capture_support import derive_capture_title
 from sibyl_cli.client import SibylClient, SibylClientError
 from sibyl_cli.command_support import parse_id_args
-from sibyl_cli.capture_support import derive_capture_title
 from sibyl_cli.main import app
 
 _ANSI_ESCAPE_RE = re.compile(r"\x1b\[[0-9;]*m")
@@ -488,7 +488,7 @@ def test_add_command_waits_for_direct_readiness(
     runner = CliRunner()
     result = runner.invoke(
         app,
-        ["add", "Waitable Pattern", "Pattern body", "--type", "pattern", "--wait-searchable"],
+        ["add", "Waitable Pattern", "Pattern body", "--kind", "pattern", "--wait-searchable"],
     )
 
     assert result.exit_code == 0
@@ -500,94 +500,6 @@ def test_add_command_waits_for_direct_readiness(
     assert payload["sync"] is True
     assert payload["metadata"]["capture_mode"] == "remember"
     assert "Remembered pattern" in result.stdout
-    mock_resolve_project_from_cwd.assert_called_once_with()
-
-
-def test_add_alias_rejects_conflicting_kind_flags() -> None:
-    result = CliRunner().invoke(
-        app,
-        ["add", "Memory", "Body", "--kind", "decision", "--type", "claim"],
-    )
-
-    assert result.exit_code == 1
-    assert "--kind and the legacy --type alias must match" in result.stdout
-
-    explicit_default = CliRunner().invoke(
-        app,
-        ["add", "Memory", "Body", "--kind", "episode", "--type", "claim"],
-    )
-
-    assert explicit_default.exit_code == 1
-    assert "--kind and the legacy --type alias must match" in explicit_default.stdout
-
-
-@patch("sibyl_cli.capture.resolve_project_from_cwd", return_value=None)
-@patch("sibyl_cli.capture.get_client")
-def test_add_command_can_skip_conflict_detection(
-    mock_get_client: MagicMock,
-    mock_resolve_project_from_cwd: MagicMock,
-) -> None:
-    mock_client = _mock_capture_client("pattern_123")
-    mock_get_client.return_value = _FakeClientContext(mock_client)
-
-    runner = CliRunner()
-    result = runner.invoke(
-        app,
-        [
-            "graph-add",
-            "Fast Pattern",
-            "Pattern body",
-            "--type",
-            "pattern",
-            "--skip-conflicts",
-        ],
-    )
-
-    assert result.exit_code == 0
-    assert mock_client.create_entity.await_args.kwargs["skip_conflicts"] is True
-    mock_resolve_project_from_cwd.assert_called_once_with()
-
-
-@patch("sibyl_cli.capture.resolve_project_from_cwd", return_value=None)
-@patch("sibyl_cli.capture.get_client")
-def test_add_command_accepts_title_and_content_options(
-    mock_get_client: MagicMock,
-    mock_resolve_project_from_cwd: MagicMock,
-) -> None:
-    mock_client = _mock_capture_client("episode_123")
-    mock_get_client.return_value = _FakeClientContext(mock_client)
-
-    runner = CliRunner()
-    result = runner.invoke(
-        app,
-        ["graph-add", "--title", "Option title", "--content", "Option body"],
-    )
-
-    assert result.exit_code == 0
-    payload = mock_client.create_entity.await_args.kwargs
-    assert payload["name"] == "Option title"
-    assert payload["content"] == "Option body"
-    assert payload["entity_type"] == "episode"
-    assert payload["metadata"]["raw_memory_id"] == "raw_123"
-    assert "Queued episode" in result.stdout
-    mock_resolve_project_from_cwd.assert_called_once_with()
-
-
-@patch("sibyl_cli.capture.resolve_project_from_cwd", return_value=None)
-@patch("sibyl_cli.capture.get_client")
-def test_add_command_reads_content_from_stdin(
-    mock_get_client: MagicMock,
-    mock_resolve_project_from_cwd: MagicMock,
-) -> None:
-    mock_client = _mock_capture_client("episode_123")
-    mock_get_client.return_value = _FakeClientContext(mock_client)
-
-    runner = CliRunner()
-    result = runner.invoke(app, ["graph-add", "Stdin title", "-"], input="Stdin body\n")
-
-    assert result.exit_code == 0
-    mock_client.create_entity.assert_awaited_once()
-    assert mock_client.create_entity.await_args.kwargs["content"] == "Stdin body"
     mock_resolve_project_from_cwd.assert_called_once_with()
 
 
@@ -604,7 +516,7 @@ def test_add_command_uses_full_memory_pipeline_with_active_task_link(
     runner = CliRunner()
     result = runner.invoke(
         app,
-        ["add", "Capture active task", "Write raw and graph memory.", "--type", "decision"],
+        ["add", "Capture active task", "Write raw and graph memory.", "--kind", "decision"],
     )
 
     assert result.exit_code == 0
@@ -1046,33 +958,6 @@ def test_remember_command_forwards_repeated_retrieval_keys(
         "connection reset, by peer",
     ]
     assert mock_resolve_project_from_cwd.called
-
-
-@patch("sibyl_cli.memory.resolve_project_from_cwd", return_value=None)
-@patch("sibyl_cli.memory.get_client")
-def test_remember_command_accepts_gotcha_alias(
-    mock_get_client: MagicMock,
-    mock_resolve_project_from_cwd: MagicMock,
-) -> None:
-    mock_client = MagicMock()
-    mock_client.remember_raw_memory = AsyncMock(
-        return_value={"id": "raw_123", "source_id": "cli:manual"}
-    )
-    mock_client.create_entity = AsyncMock(return_value={"id": "error_pattern_123"})
-    mock_client.explore = AsyncMock()
-    mock_get_client.return_value = _FakeClientContext(mock_client)
-
-    runner = CliRunner()
-    result = runner.invoke(
-        app,
-        ["remember", "Bad default", "Capture the gotcha.", "--kind", "gotcha"],
-    )
-
-    assert result.exit_code == 0
-    assert "--kind=gotcha is deprecated; using error_pattern." in result.stdout
-    assert mock_client.create_entity.await_args.kwargs["entity_type"] == "error_pattern"
-    mock_client.explore.assert_not_called()
-    mock_resolve_project_from_cwd.assert_called_once_with()
 
 
 @patch("sibyl_cli.memory.resolve_project_from_cwd")

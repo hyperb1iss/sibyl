@@ -12,17 +12,12 @@ import typer
 
 from sibyl_cli import command_support
 from sibyl_cli.client import SibylClientError
-from sibyl_cli.common import warn
 from sibyl_cli.project_refs import resolve_project_reference
 from sibyl_core.memory_pipeline.capture import MemoryCaptureRequest, MemoryCaptureService
 from sibyl_core.models.entities import EntityType
 from sibyl_core.models.memory_scope import MemoryScope
 
 CAPTURE_TITLE_CHARS = 72
-ENTITY_TYPE_ALIASES = {
-    "gotcha": EntityType.ERROR_PATTERN.value,
-    "learning": EntityType.NOTE.value,
-}
 ENTITY_TYPE_VALUES = [entity_type.value for entity_type in EntityType]
 ADVERTISED_ENTITY_TYPE_VALUES = (
     "episode",
@@ -46,11 +41,8 @@ ENTITY_TYPE_HELP = f"Memory kind: {', '.join(ADVERTISED_ENTITY_TYPE_VALUES)}"
 MEMORY_SCOPE_HELP = f"Memory scope: {', '.join(ADVERTISED_MEMORY_SCOPE_VALUES)}"
 
 
-def normalize_entity_type(value: str, *, option_name: str) -> str:
+def normalize_entity_type(value: str) -> str:
     normalized = value.strip().lower()
-    if alias := ENTITY_TYPE_ALIASES.get(normalized):
-        warn(f"{option_name}={normalized} is deprecated; using {alias}.")
-        return alias
     if normalized in ENTITY_TYPE_VALUES:
         return normalized
     choices = ", ".join(ENTITY_TYPE_VALUES)
@@ -58,19 +50,13 @@ def normalize_entity_type(value: str, *, option_name: str) -> str:
 
 
 def normalize_add_type(value: str) -> str:
-    return normalize_entity_type(value, option_name="--type")
+    return normalize_entity_type(value)
 
 
 def normalize_memory_kind(value: str | None) -> str | None:
     if value is None:
         return None
-    return normalize_entity_type(value, option_name="--kind")
-
-
-def normalize_legacy_memory_kind(value: str | None) -> str | None:
-    if value is None:
-        return None
-    return normalize_entity_type(value, option_name="--type")
+    return normalize_entity_type(value)
 
 
 def normalize_memory_basis(value: str | None) -> str | None:

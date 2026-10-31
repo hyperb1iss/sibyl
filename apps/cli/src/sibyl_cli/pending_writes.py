@@ -64,9 +64,7 @@ _REPLAYABLE_METHODS = {"POST", "PATCH", "DELETE"}
 # A queued write belongs to exactly one of these classes, and only the operator
 # can move it out of the three terminal ones. Reporting the total instead of the
 # classes is what made a healthy command look broken for two weeks.
-PendingWriteClass = Literal[
-    "retrying", "needs_attention", "unowned", "foreign_server", "read_like", "corrupt"
-]
+PendingWriteClass = Literal["retrying", "needs_attention", "unowned", "foreign_server", "corrupt"]
 PENDING_WRITE_CLASSES: tuple[PendingWriteClass, ...] = get_args(PendingWriteClass)
 # Enough of the server's own words to name the offending field, short enough
 # that a queue file cannot become a transcript of response bodies.
@@ -407,11 +405,13 @@ def _refused_on_first_attempt(item: dict[str, Any]) -> bool:
 
 
 def list_pending_writes() -> list[dict[str, Any]]:
-    """Read the queue, dropping writes the server refused on their first attempt.
+    """Read the queue, dropping entries nothing can resolve.
 
-    The command that made such a write already reported the refusal, and the
-    same payload would draw it again, so nothing can resolve it. Older CLIs
-    kept them anyway, parked for a decision; reading the queue clears them.
+    Two kinds only older CLIs left behind: a write the server refused on its
+    first attempt, whose command already reported the refusal and whose payload
+    would draw it again, and a read-only request (a search or preview) queued
+    as if it were a write, which changed nothing and is answered by rerunning
+    its command.
     """
     root = pending_writes_dir()
     if not root.exists():
@@ -419,7 +419,8 @@ def list_pending_writes() -> list[dict[str, Any]]:
     writes = []
     for path in sorted(root.glob("*.json")):
         item = _read_pending_path(path)
-        if _refused_on_first_attempt(item) and delete_pending_write(str(item["id"])):
+        stranded = _refused_on_first_attempt(item) or is_buffered_read_like(item)
+        if stranded and delete_pending_write(str(item["id"])):
             record_pending_metric("dropped")
             continue
         writes.append(item)
@@ -771,8 +772,6 @@ def classify_pending_write(
         base_url
     ):
         return "foreign_server"
-    if is_buffered_read_like(item):
-        return "read_like"
     owner = normalize_replay_identity(item.get("replay_identity"))
     if owner is not None:
         # An owner from a different user, org, or server instance can never be

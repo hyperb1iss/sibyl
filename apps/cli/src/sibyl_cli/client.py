@@ -9,11 +9,8 @@ from sibyl_cli.client_graph import ClientGraphMixin
 from sibyl_cli.client_memory import ClientMemoryMixin
 from sibyl_cli.client_sources import ClientSourcesMixin
 from sibyl_cli.client_transport import (
-    _FAILURE_WINDOWS,
     BUFFERED_WRITE_METHODS,
     DEFAULT_SERVER_PORT,
-    FAILURE_THRESHOLD,
-    FAILURE_WINDOW_SECONDS,
     INIT_REMEDIATION,
     PENDING_WRITE_REMEDIATION,
     ClientTransportMixin,
@@ -22,12 +19,10 @@ from sibyl_cli.client_transport import (
     _auth_credential_scope,
     _auth_replay_scope,
     _environment_auth_token,
-    _is_read_like_post,
     _is_refresh_revoked,
     _load_default_auth_token,
     _load_default_replay_scope,
     _paired_automation_api_url,
-    anyio_sleep,
     resolve_api_base_url,
 )
 from sibyl_cli.client_work import ClientWorkMixin
@@ -37,18 +32,13 @@ from sibyl_cli.pending_writes import READ_LIKE_POST_PATHS
 __all__ = [
     "BUFFERED_WRITE_METHODS",
     "DEFAULT_SERVER_PORT",
-    "FAILURE_THRESHOLD",
-    "FAILURE_WINDOW_SECONDS",
     "INIT_REMEDIATION",
     "PENDING_WRITE_REMEDIATION",
     "READ_LIKE_POST_PATHS",
-    "_FAILURE_WINDOWS",
     "ErrorPayload",
     "SibylClient",
     "SibylClientError",
-    "_is_read_like_post",
     "_is_refresh_revoked",
-    "anyio_sleep",
     "clear_client_cache",
     "get_client",
     "resolve_api_base_url",

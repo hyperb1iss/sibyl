@@ -256,7 +256,6 @@ _PENDING_CLASS_LABELS: tuple[tuple[str, str], ...] = (
     ("needs_attention", "rejected or stuck on the server"),
     ("unowned", "with no owner this login can replay"),
     ("foreign_server", "for another server"),
-    ("read_like", "re-runnable reads"),
     ("corrupt", "corrupt"),
 )
 

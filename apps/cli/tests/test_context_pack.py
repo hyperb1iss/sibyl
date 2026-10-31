@@ -270,7 +270,7 @@ def test_context_pack_json_uses_detected_project(
     runner = CliRunner()
     result = runner.invoke(
         app,
-        ["contexts", "pack", "ship faster", "--domain", "agent memory", "--json"],
+        ["config", "context", "pack", "ship faster", "--domain", "agent memory", "--json"],
     )
 
     assert result.exit_code == 0
@@ -305,7 +305,7 @@ def test_context_pack_all_projects_omits_project_scope(
     mock_get_client.return_value = _FakeClientContext(mock_client)
 
     runner = CliRunner()
-    result = runner.invoke(app, ["contexts", "pack", "ship faster", "--all"])
+    result = runner.invoke(app, ["config", "context", "pack", "ship faster", "--all"])
 
     assert result.exit_code == 0
     assert "Use context packs" in result.stdout
@@ -336,7 +336,7 @@ def test_context_pack_markdown_outputs_server_rendering(
     mock_get_client.return_value = _FakeClientContext(mock_client)
 
     runner = CliRunner()
-    result = runner.invoke(app, ["contexts", "pack", "ship faster", "--markdown"])
+    result = runner.invoke(app, ["config", "context", "pack", "ship faster", "--markdown"])
 
     assert result.exit_code == 0
     assert "# Sibyl Context Pack: ship faster" in result.stdout
@@ -354,7 +354,7 @@ def test_context_pack_can_request_agent_diary(
     mock_get_client.return_value = _FakeClientContext(mock_client)
 
     runner = CliRunner()
-    result = runner.invoke(app, ["contexts", "pack", "ship faster", "--agent", "nova"])
+    result = runner.invoke(app, ["config", "context", "pack", "ship faster", "--agent", "nova"])
 
     assert result.exit_code == 0
     mock_client.context_pack.assert_called_once_with(
@@ -387,7 +387,7 @@ def test_context_pack_refuses_to_read_every_project_by_accident(
     mock_get_client.return_value = _FakeClientContext(mock_client)
 
     runner = CliRunner()
-    result = runner.invoke(app, ["contexts", "pack", "ship faster"])
+    result = runner.invoke(app, ["config", "context", "pack", "ship faster"])
 
     assert result.exit_code == 1
     assert "No project for this directory" in result.output
@@ -419,7 +419,7 @@ def test_context_pack_falls_back_to_the_context_default_project_with_a_notice(
     mock_get_client.return_value = _FakeClientContext(mock_client)
 
     runner = CliRunner()
-    result = runner.invoke(app, ["contexts", "pack", "ship faster"])
+    result = runner.invoke(app, ["config", "context", "pack", "ship faster"])
 
     assert result.exit_code == 0, result.output
     assert "using the context default project_default" in result.output
@@ -440,7 +440,7 @@ def test_context_pack_labels_a_cross_project_read(
     mock_get_client.return_value = _FakeClientContext(mock_client)
 
     runner = CliRunner()
-    result = runner.invoke(app, ["contexts", "pack", "ship faster", "--all"])
+    result = runner.invoke(app, ["config", "context", "pack", "ship faster", "--all"])
 
     assert result.exit_code == 0, result.output
     assert "all accessible projects" in result.output

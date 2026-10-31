@@ -513,7 +513,6 @@ def _display_task_panel(entity: dict) -> None:
     console.print(panel)
 
 
-@app.command("get", hidden=True)
 @app.command("show")
 def show_task(
     task_id: Annotated[str, typer.Argument(help="Task ID or unambiguous prefix")],
@@ -971,14 +970,6 @@ def create_task(
     depends_on: Annotated[
         str | None, typer.Option("--depends-on", help="Comma-separated task IDs this depends on")
     ] = None,
-    sync: Annotated[
-        bool,
-        typer.Option(
-            "--sync",
-            hidden=True,
-            help="Wait for task creation (kept as a compatibility alias)",
-        ),
-    ] = False,
     json_out: Annotated[
         bool, typer.Option("--json", "-j", help="JSON output (for scripting)")
     ] = False,
@@ -1002,7 +993,6 @@ def create_task(
         client = get_client()
 
         try:
-            _ = sync
             tech_list = [t.strip() for t in technologies.split(",")] if technologies else None
             tag_list = [t.strip() for t in tags.split(",")] if tags else None
             assignee_list = [assignee] if assignee else None

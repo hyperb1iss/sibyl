@@ -745,14 +745,7 @@ app.add_typer(memory_review.app, name="review")
 
 
 def register_root_commands(root: typer.Typer) -> None:
-    """Register legacy top-level memory spellings and hidden group aliases."""
-    root.add_typer(memory_space.app, name="memory-space", hidden=True)
-    root.add_typer(memory_review.app, name="memory-review", hidden=True)
-    root.command("memory-audit", hidden=True)(memory_audit)
+    """Register the memory verbs agents run at the root."""
     root.command("cite")(cite_memories)
-    root.command("memory-inspect", hidden=True)(memory_inspect)
     root.command("blame", hidden=True)(blame_memory)
     root.command("correct")(correct_memory)
-    root.command("memory-import-status", hidden=True)(memory_import_status)
-    root.command("memory-promote", hidden=True)(memory_promote)
-    root.command("memory-share", hidden=True)(memory_share)

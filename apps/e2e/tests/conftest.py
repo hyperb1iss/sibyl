@@ -138,14 +138,8 @@ class CLIRunner:
         project_id: str,
         priority: str = "medium",
         feature: str | None = None,
-        sync: bool = True,
     ) -> CLIResult:
-        """Create a task.
-
-        Args:
-            sync: Wait for task creation to complete. Defaults to True for E2E tests
-                  since workflow operations (start, complete) require the task to exist.
-        """
+        """Create a task."""
         args = [
             "task",
             "create",
@@ -159,8 +153,6 @@ class CLIRunner:
         ]
         if feature:
             args.extend(["--feature", feature])
-        if sync:
-            args.append("--sync")
         return self.run(*args)
 
     def task_list(

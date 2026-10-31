@@ -44,8 +44,7 @@ These rules exist because real agent sessions consistently fail without them.
    `Run 'sibyl auth login'`. Do NOT run `auth login` while `sibyl health` fails; a down server
    produces the same message and login cannot fix it. Sibyl retries buffered writes automatically
    after the next successful API request. Use `sibyl pending-writes list` to inspect anything still
-   queued. Older read-like entries are not replayed, because reads should be rerun instead. Remove
-   those with `sibyl pending-writes discard --read-like`. In a sandboxed environment,
+   queued. In a sandboxed environment,
    `sibyl config context --quick` succeeding from local state while context retrieval or health
    cannot connect means blocked network egress, not a server outage.
 
@@ -1030,7 +1029,6 @@ it first.
 | `sibyl context ... \|\| true`       | `sibyl context ...` (let errors surface)          |
 | `sibyl config`                      | `sibyl config show`                               |
 | `sibyl auth token`                  | Not a real command: use `sibyl auth status`       |
-| Using `--kind gotcha` or `learning` | Deprecated aliases: use `error_pattern`/`note`    |
 | `--kind insight` / `discovery`      | Not kinds: use `episode` (or `note`)              |
 | `remember --title` / `--body`       | Title and body are positional arguments           |
 | `--intent explore` / `verify`       | Use `research` / `review`                         |

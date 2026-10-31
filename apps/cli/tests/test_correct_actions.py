@@ -353,12 +353,10 @@ def test_a_change_between_preview_and_apply_is_refused_and_leaves_the_rerun_free
 
     import httpx
 
-    import sibyl_cli.client_transport as client_transport_module
     from sibyl_cli import pending_writes
     from sibyl_cli.client import SibylClient
 
     monkeypatch.setattr(pending_writes.Path, "home", lambda: tmp_path)
-    client_transport_module._FAILURE_WINDOWS.clear()
     revision = {"current": 3}
     applied: list[int | None] = []
 
