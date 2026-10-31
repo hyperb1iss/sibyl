@@ -80,38 +80,6 @@ def test_handle_client_error_renders_request_id(capsys: pytest.CaptureFixture[st
 
 
 @pytest.mark.asyncio
-async def test_client_circuit_breaker_sleeps_after_repeated_failures(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    client_module._FAILURE_WINDOWS.clear()
-    monkeypatch.setattr(client_transport_module.sys, "argv", ["sibyl", "add"])
-    sleep = AsyncMock()
-    monkeypatch.setattr(client_transport_module, "anyio_sleep", sleep)
-    transport = httpx.MockTransport(
-        lambda _request: httpx.Response(
-            500,
-            json={
-                "error": "internal_error",
-                "message": "An internal error occurred. Please try again later.",
-                "request_id": "req_failure",
-            },
-        )
-    )
-    client = _client_with_transport(transport)
-
-    for _ in range(3):
-        with pytest.raises(SibylClientError):
-            await client.get("/entities")
-
-    with pytest.raises(SibylClientError):
-        await client.get("/entities")
-
-    await client.close()
-    sleep.assert_awaited_once()
-    client_module._FAILURE_WINDOWS.clear()
-
-
-@pytest.mark.asyncio
 async def test_mutating_request_buffers_and_deletes_on_success(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -296,10 +264,7 @@ async def test_automatic_replay_attempts_independent_writes_after_transient_fail
 ) -> None:
     monkeypatch.setattr(pending_writes.Path, "home", lambda: tmp_path)
     monkeypatch.setattr(client_transport_module, "AUTO_REPLAY_GRACE_SECONDS", 0.0)
-    monkeypatch.setattr(client_transport_module, "time", SimpleNamespace(monotonic=lambda: 100.0))
-    client_transport_module._FAILURE_WINDOWS.clear()
     posts = 0
-    monkeypatch.setattr(client_transport_module, "anyio_sleep", AsyncMock())
 
     def healthy_then_unavailable(request: httpx.Request) -> httpx.Response:
         nonlocal posts
@@ -329,9 +294,6 @@ async def test_automatic_replay_attempts_independent_writes_after_transient_fail
     assert result == {"status": "healthy"}
     assert posts == 8
     assert attempts == [1] * 8
-    key = client_transport_module._failure_key(client.base_url)
-    assert len(client_transport_module._FAILURE_WINDOWS[key]) == 8
-    client_transport_module._FAILURE_WINDOWS.clear()
 
 
 @pytest.mark.asyncio
@@ -674,7 +636,6 @@ async def test_a_first_write_the_server_refuses_reports_it_and_is_not_queued(
     queue on its own, so one wrong project id nagged every later command.
     """
     monkeypatch.setattr(pending_writes.Path, "home", lambda: tmp_path)
-    client_module._FAILURE_WINDOWS.clear()
     transport = httpx.MockTransport(
         lambda _request: httpx.Response(
             status_code,
@@ -720,7 +681,6 @@ async def test_a_first_write_with_an_unsettled_outcome_stays_queued(
     the queue exists to reconcile, so no conflict is dropped on sight.
     """
     monkeypatch.setattr(pending_writes.Path, "home", lambda: tmp_path)
-    client_module._FAILURE_WINDOWS.clear()
     transport = httpx.MockTransport(
         lambda _request: httpx.Response(status_code, json={"error": error, "message": "later"})
     )
@@ -844,7 +804,6 @@ async def test_a_failed_correction_preview_queues_nothing_and_blocks_nothing(
     each later correction on any memory failed with a pending dependency.
     """
     monkeypatch.setattr(pending_writes.Path, "home", lambda: tmp_path)
-    client_module._FAILURE_WINDOWS.clear()
     sent: list[str] = []
 
     def respond(request: httpx.Request) -> httpx.Response:
@@ -874,7 +833,6 @@ async def test_a_preview_queued_by_an_older_client_blocks_no_correction(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(pending_writes.Path, "home", lambda: tmp_path)
-    client_module._FAILURE_WINDOWS.clear()
     stale = pending_writes.create_pending_write(
         method="POST",
         path="/memory/inspect/mem-a/corrections/preview",
@@ -900,7 +858,6 @@ async def test_a_first_delete_answered_404_reports_it_and_queues_nothing(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(pending_writes.Path, "home", lambda: tmp_path)
-    client_module._FAILURE_WINDOWS.clear()
     client = _client_with_transport(
         httpx.MockTransport(
             lambda _request: httpx.Response(
@@ -925,7 +882,6 @@ async def test_a_replayed_delete_answered_404_is_done_not_parked(
 ) -> None:
     """A queued delete that already landed replays to a 404; the resource is gone."""
     monkeypatch.setattr(pending_writes.Path, "home", lambda: tmp_path)
-    client_module._FAILURE_WINDOWS.clear()
     answers = [
         httpx.Response(503, json={"error": "service_unavailable", "message": "down"}),
         httpx.Response(404, json={"error": "not_found", "message": "Entity not found: note_gone"}),
@@ -972,7 +928,6 @@ async def test_a_first_write_that_meets_a_revision_conflict_is_not_queued(
     would draw a fresh plan, and the rerun queued a second pinned write.
     """
     monkeypatch.setattr(pending_writes.Path, "home", lambda: tmp_path)
-    client_module._FAILURE_WINDOWS.clear()
     client = _client_with_transport(
         httpx.MockTransport(lambda _request: httpx.Response(409, json=_REVISION_CONFLICT))
     )
@@ -993,7 +948,6 @@ async def test_a_replayed_write_that_meets_a_revision_conflict_parks_with_the_re
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(pending_writes.Path, "home", lambda: tmp_path)
-    client_module._FAILURE_WINDOWS.clear()
     answers = [
         httpx.Response(503, json={"error": "service_unavailable", "message": "down"}),
         httpx.Response(409, json=_REVISION_CONFLICT),
@@ -1035,7 +989,6 @@ async def test_an_unbuffered_delete_answered_404_still_raises(
 ) -> None:
     """Only a queued delete treats 404 as done; an unbuffered caller needs the answer."""
     monkeypatch.setattr(pending_writes.Path, "home", lambda: tmp_path)
-    client_module._FAILURE_WINDOWS.clear()
     client = _client_with_transport(
         httpx.MockTransport(
             lambda _request: httpx.Response(404, json={"error": "not_found", "message": "gone"})
@@ -1056,7 +1009,6 @@ async def test_a_supersede_waits_for_an_earlier_queued_write_to_its_replacement(
 ) -> None:
     """A supersede of A by B reads B, so it cannot overtake a queued delete of B."""
     monkeypatch.setattr(pending_writes.Path, "home", lambda: tmp_path)
-    client_module._FAILURE_WINDOWS.clear()
     sent: list[str] = []
 
     def respond(request: httpx.Request) -> httpx.Response:

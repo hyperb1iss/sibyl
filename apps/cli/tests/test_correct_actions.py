@@ -358,7 +358,6 @@ def test_a_change_between_preview_and_apply_is_refused_and_leaves_the_rerun_free
     from sibyl_cli.client import SibylClient
 
     monkeypatch.setattr(pending_writes.Path, "home", lambda: tmp_path)
-    client_transport_module._FAILURE_WINDOWS.clear()
     revision = {"current": 3}
     applied: list[int | None] = []
 

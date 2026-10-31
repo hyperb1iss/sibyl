@@ -1,10 +1,6 @@
 """Shared HTTP transport, error handling, and pending-write behavior."""
 
 import os
-import random
-import sys
-import time
-from collections import deque
 from contextlib import suppress
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -47,9 +43,6 @@ from sibyl_cli.pending_writes import (
 
 # Default server port (matches sibyl-server default)
 DEFAULT_SERVER_PORT = 3334
-FAILURE_WINDOW_SECONDS = 10.0
-FAILURE_THRESHOLD = 3
-_FAILURE_WINDOWS: dict[tuple[str, str], deque[float]] = {}
 BUFFERED_WRITE_METHODS = {"POST", "PATCH", "DELETE"}
 AUTO_REPLAY_LIMIT = 8
 AUTO_REPLAY_GRACE_SECONDS = 30.0
@@ -242,15 +235,6 @@ def _format_error_detail(detail: object) -> str:
     return str(detail)
 
 
-def _subcommand_key() -> str:
-    parts = [arg for arg in sys.argv[1:3] if arg and not arg.startswith("-")]
-    return " ".join(parts) or "sibyl"
-
-
-def _failure_key(base_url: str) -> tuple[str, str]:
-    return (_subcommand_key(), base_url)
-
-
 def _auth_replay_scope(
     stored_replay_scope: str | None,
     auth_token: str | None,
@@ -279,32 +263,6 @@ def _load_default_replay_scope(
     if stored_token != auth_token:
         stored_scope = ""
     return _auth_replay_scope(stored_scope, auth_token)
-
-
-def _prune_failures(window: deque[float], now: float) -> None:
-    while window and now - window[0] > FAILURE_WINDOW_SECONDS:
-        window.popleft()
-
-
-async def _maybe_wait_for_circuit_breaker(key: tuple[str, str]) -> None:
-    window = _FAILURE_WINDOWS.get(key)
-    if not window:
-        return
-    now = time.monotonic()
-    _prune_failures(window, now)
-    if len(window) >= FAILURE_THRESHOLD:
-        await anyio_sleep(1.0 + random.random())
-
-
-def _record_failure(key: tuple[str, str]) -> None:
-    now = time.monotonic()
-    window = _FAILURE_WINDOWS.setdefault(key, deque())
-    _prune_failures(window, now)
-    window.append(now)
-
-
-def _record_success(key: tuple[str, str]) -> None:
-    _FAILURE_WINDOWS.pop(key, None)
 
 
 def _is_refresh_revoked(message: str | None) -> bool:
@@ -415,12 +373,6 @@ def _refresh_failure_remediation(*, pending_write_id: str | None) -> str:
     return (
         "Retry once Sibyl is healthy, or run 'sibyl auth login' if the refresh token was revoked."
     )
-
-
-async def anyio_sleep(delay: float) -> None:
-    import asyncio
-
-    await asyncio.sleep(delay)
 
 
 class ClientTransportMixin:
@@ -818,8 +770,6 @@ class ClientTransportMixin:
                 raise exc
 
         client = await self._get_client()
-        breaker_key = _failure_key(self.base_url)
-        await _maybe_wait_for_circuit_breaker(breaker_key)
 
         try:
             headers = {"Idempotency-Key": idempotency_key} if idempotency_key else {}
@@ -873,8 +823,6 @@ class ClientTransportMixin:
                     if not payload.remediation:
                         payload.remediation = "Access denied. Check org and project permissions."
 
-                if not (path == "/auth/replay-identity" and response.status_code == 404):
-                    _record_failure(breaker_key)
                 exc = SibylClientError(
                     f"API error: {payload.error or detail}: {detail}",
                     status_code=response.status_code,
@@ -921,7 +869,6 @@ class ClientTransportMixin:
             # Return empty dict for 204 No Content
             if response.status_code == 204:
                 _resolve_pending_write(pending_write_id, applied_outcome)
-                _record_success(breaker_key)
                 if _replay_pending and (pending_write_id is None or pending_write_created):
                     await self._maybe_replay_pending_writes()
                 return {}
@@ -937,13 +884,11 @@ class ClientTransportMixin:
                 self._record_pending_failure(pending_write_id, exc)
                 raise exc from cause
             _resolve_pending_write(pending_write_id, applied_outcome)
-            _record_success(breaker_key)
             if _replay_pending and (pending_write_id is None or pending_write_created):
                 await self._maybe_replay_pending_writes()
             return data
 
         except httpx.ConnectError as e:
-            _record_failure(breaker_key)
             exc = SibylClientError(
                 f"Cannot connect to Sibyl API at {self.base_url}. Is the server running?",
                 detail=str(e),
@@ -951,7 +896,6 @@ class ClientTransportMixin:
             self._record_pending_failure(pending_write_id, exc)
             raise exc from e
         except httpx.TimeoutException as e:
-            _record_failure(breaker_key)
             exc = SibylClientError(
                 f"Request timed out after {self.timeout}s",
                 detail=str(e),
@@ -959,7 +903,6 @@ class ClientTransportMixin:
             self._record_pending_failure(pending_write_id, exc)
             raise exc from e
         except httpx.RequestError as e:
-            _record_failure(breaker_key)
             exc = SibylClientError(
                 "Connection interrupted; the write outcome is unconfirmed.",
                 error_code="response_unconfirmed",

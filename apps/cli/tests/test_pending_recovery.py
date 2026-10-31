@@ -17,7 +17,6 @@ BASE_URL = "https://testserver/api"
 @pytest.fixture(autouse=True)
 def isolated_store(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(Path, "home", lambda: tmp_path)
-    client_transport._FAILURE_WINDOWS.clear()
 
 
 @pytest.fixture
