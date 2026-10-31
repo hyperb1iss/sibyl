@@ -118,6 +118,21 @@ sibyl remember "Review ritual" "Verifier passes are mandatory." --kind rule \
   --propose-scope-key 0f8b6c52-4d2e-4a7a-9c1d-6e5b2a9f3d10
 ```
 
+Automatic review never publishes to a team. Auto-review and `sibyl memory review drain` report team
+candidates as exceptions for a person to decide. A member of the team publishes the nomination by
+promoting it explicitly. `--scope-key` can be left out, in which case promotion uses the team the
+capture nominated:
+
+```bash
+sibyl memory promote <capture-id> --scope team --preview
+sibyl memory promote <capture-id> --scope team --apply
+```
+
+Promotion reads your team memberships from Sibyl's team records each time. Naming a team you do not
+belong to, whether on the command line or in the nomination, is refused with
+`unverified_membership`. Organization owners and admins can promote to any team in their
+organization.
+
 Sibyl records policy and audit metadata around memory operations so recall can stay useful without
 leaking private project or user content.
 

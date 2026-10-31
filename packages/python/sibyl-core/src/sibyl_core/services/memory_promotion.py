@@ -178,6 +178,15 @@ def _resolve_promotion_scope_key(
         return promote_to_scope_key
     if target_scope is MemoryScope.PROJECT:
         return project or _metadata_str(candidate_memory.metadata, "suggested_scope_key")
+    if target_scope is MemoryScope.TEAM:
+        # The capture's nominated team is a hint, honored only when it nominated
+        # a team. Membership is checked against the auth store after this, so a
+        # key naming a team the principal is not in is still denied.
+        suggested_scope = _coerce_promotion_scope(
+            _metadata_str(candidate_memory.metadata, "suggested_memory_scope")
+        )
+        if suggested_scope is MemoryScope.TEAM:
+            return _metadata_str(candidate_memory.metadata, "suggested_scope_key")
     return None
 
 

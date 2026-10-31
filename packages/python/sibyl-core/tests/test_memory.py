@@ -1989,3 +1989,193 @@ async def test_memory_correction_preview_returns_the_revision_it_was_drawn_again
     assert result.allowed
     assert result.metadata is not None
     assert result.metadata["observed_revision"] == 7
+
+
+def _team_nominated_candidate(team_key: str | None) -> RawMemory:
+    return _raw_review_candidate(
+        metadata={
+            **_raw_review_candidate().metadata,
+            "suggested_memory_scope": "team",
+            "suggested_scope_key": team_key,
+        }
+    )
+
+
+@pytest.mark.parametrize(
+    ("accessible_teams", "allowed", "reason"),
+    [
+        ({"team-a"}, True, "promotion_preview_allowed"),
+        ({"team-b"}, False, "unverified_membership"),
+        (None, False, "unverified_membership"),
+    ],
+)
+async def test_preview_team_promotion_checks_resolved_membership(
+    monkeypatch: pytest.MonkeyPatch,
+    accessible_teams: set[str] | None,
+    allowed: bool,
+    reason: str,
+) -> None:
+    candidate = _raw_review_candidate()
+    source = _raw_review_candidate(id="source-1")
+    monkeypatch.setattr(
+        reflection_module, "get_raw_memory", AsyncMock(side_effect=[candidate, source])
+    )
+
+    result = await preview_reflection_candidate_promotion(
+        candidate_id="candidate-1",
+        organization_id="org-1",
+        principal_id="user-1",
+        promote_to_scope="team",
+        promote_to_scope_key="team-a",
+        accessible_teams=accessible_teams,
+    )
+
+    assert result.allowed is allowed
+    assert result.reason == reason
+    assert result.memory_scope is MemoryScope.TEAM
+    assert result.scope_key == "team-a"
+
+
+@pytest.mark.parametrize(
+    ("suggested_key", "allowed", "reason"),
+    [
+        ("team-a", True, "promotion_preview_allowed"),
+        # A nomination naming a team the reviewer is not in stays a hint the
+        # membership check refuses.
+        ("team-forged", False, "unverified_membership"),
+    ],
+)
+async def test_team_promotion_falls_back_to_the_nominated_team(
+    monkeypatch: pytest.MonkeyPatch,
+    suggested_key: str,
+    allowed: bool,
+    reason: str,
+) -> None:
+    candidate = _team_nominated_candidate(suggested_key)
+    source = _raw_review_candidate(id="source-1")
+    monkeypatch.setattr(
+        reflection_module, "get_raw_memory", AsyncMock(side_effect=[candidate, source])
+    )
+
+    result = await preview_reflection_candidate_promotion(
+        candidate_id="candidate-1",
+        organization_id="org-1",
+        principal_id="user-1",
+        promote_to_scope="team",
+        accessible_teams={"team-a"},
+    )
+
+    assert result.allowed is allowed
+    assert result.reason == reason
+    assert result.memory_scope is MemoryScope.TEAM
+    assert result.scope_key == suggested_key
+
+
+async def test_team_promotion_ignores_a_project_nomination_key(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    candidate = _raw_review_candidate(
+        metadata={
+            **_raw_review_candidate().metadata,
+            "suggested_memory_scope": "project",
+            "suggested_scope_key": "team-a",
+        }
+    )
+    source = _raw_review_candidate(id="source-1")
+    monkeypatch.setattr(
+        reflection_module, "get_raw_memory", AsyncMock(side_effect=[candidate, source])
+    )
+
+    result = await preview_reflection_candidate_promotion(
+        candidate_id="candidate-1",
+        organization_id="org-1",
+        principal_id="user-1",
+        promote_to_scope="team",
+        accessible_teams={"team-a"},
+    )
+
+    assert not result.allowed
+    assert result.reason == "missing_scope_key"
+    assert result.scope_key is None
+
+
+async def test_preview_raw_team_nomination_promotes_for_a_member(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    memory = _raw_import_memory(
+        metadata={
+            **_raw_import_memory().metadata,
+            "suggested_memory_scope": "team",
+            "suggested_scope_key": "team-a",
+        }
+    )
+    monkeypatch.setattr(reflection_module, "get_raw_memory", AsyncMock(return_value=memory))
+
+    member = await preview_raw_memory_promotion(
+        raw_memory_id="raw-1",
+        organization_id="org-1",
+        principal_id="user-1",
+        promote_to_scope="team",
+        accessible_teams={"team-a"},
+    )
+    outsider = await preview_raw_memory_promotion(
+        raw_memory_id="raw-1",
+        organization_id="org-1",
+        principal_id="user-1",
+        promote_to_scope="team",
+        accessible_teams=set(),
+    )
+
+    assert member.allowed
+    assert member.scope_key == "team-a"
+    assert not outsider.allowed
+    assert outsider.reason == "unverified_membership"
+
+
+async def test_promote_review_candidate_to_member_team_persists_team_scope(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    candidate = _team_nominated_candidate("team-a")
+    source = _raw_review_candidate(id="source-1")
+    memories = {candidate.id: candidate, source.id: source}
+    persisted: list[dict[str, object]] = []
+
+    async def fake_persist(**kwargs):
+        persisted.append(kwargs)
+        return ReflectionWriteResult(
+            response=AddResponse(
+                success=True, id="rule_team", message="promoted", timestamp=datetime.now(UTC)
+            ),
+            metadata={"policy_allowed": True, "native_write_path": "reflection_promotion"},
+        )
+
+    async def fake_save(memory: RawMemory, **kwargs) -> RawMemory:
+        memories[memory.id] = memory
+        return memory
+
+    monkeypatch.setattr(
+        reflection_module,
+        "get_raw_memory",
+        AsyncMock(side_effect=lambda **kwargs: memories.get(kwargs["memory_id"])),
+    )
+    monkeypatch.setattr(reflection_module, "persist_reflection_candidate", fake_persist)
+    monkeypatch.setattr(reflection_module, "save_raw_memory", fake_save)
+    monkeypatch.setattr(
+        reflection_module, "get_surreal_graph_runtime", AsyncMock(return_value=SimpleNamespace())
+    )
+
+    result = await promote_reflection_candidate_review(
+        candidate_id="candidate-1",
+        organization_id="org-1",
+        principal_id="user-1",
+        promote_to_scope="team",
+        accessible_teams={"team-a"},
+    )
+
+    assert result.success
+    assert result.promoted_id == "rule_team"
+    assert result.memory_scope is MemoryScope.TEAM
+    assert result.scope_key == "team-a"
+    assert persisted[0]["memory_scope"] is MemoryScope.TEAM
+    assert persisted[0]["scope_key"] == "team-a"
+    assert persisted[0]["accessible_teams"] == {"team-a"}

@@ -2685,6 +2685,7 @@ async def test_preview_reflection_promotion_verifies_project_target() -> None:
         domain="sibyl",
         project="project_123",
         accessible_projects={"project_123", "read_only_source"},
+        accessible_teams=set(),
         writable_projects={"project_123"},
     )
     audit.assert_awaited_once_with(
@@ -2788,6 +2789,7 @@ async def test_preview_memory_promotion_routes_imported_raw_memory() -> None:
         domain=None,
         project="project_123",
         accessible_projects={"project_123", "read_only_source"},
+        accessible_teams=set(),
         writable_projects={"project_123"},
     )
     audit.assert_awaited_once()
@@ -3003,6 +3005,7 @@ async def test_auto_review_reflection_candidate_promotes_safe_candidate() -> Non
         domain="sibyl",
         project="project_123",
         accessible_projects={"project_123", "read_only_source"},
+        accessible_teams=set(),
         writable_projects={"project_123"},
     )
     promote.assert_awaited_once_with(
@@ -3016,6 +3019,7 @@ async def test_auto_review_reflection_candidate_promotes_safe_candidate() -> Non
         project="project_123",
         related_to=["task_123"],
         accessible_projects={"project_123", "read_only_source"},
+        accessible_teams=set(),
         writable_projects={"project_123"},
     )
     audit.assert_awaited_once_with(
@@ -3435,6 +3439,7 @@ async def test_promote_reflection_candidate_verifies_project_target() -> None:
         project="project_123",
         related_to=["task_123"],
         accessible_projects={"project_123", "read_only_source"},
+        accessible_teams=set(),
         writable_projects={"project_123"},
     )
     audit.assert_awaited_once_with(
@@ -3535,6 +3540,7 @@ async def test_promote_memory_routes_imported_raw_memory() -> None:
         project="project_123",
         related_to=[],
         accessible_projects={"project_123", "read_only_source"},
+        accessible_teams=set(),
         writable_projects={"project_123"},
     )
     audit.assert_awaited_once()
