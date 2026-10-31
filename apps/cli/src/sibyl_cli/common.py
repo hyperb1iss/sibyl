@@ -94,6 +94,29 @@ def print_mutation_receipt(response: Mapping[str, object]) -> None:
     console.print(f"  [dim]Revision: {revision} · Operation: {operation_id} ({state})[/dim]")
 
 
+def _link_owner(link: Path) -> int:
+    return link.lstat().st_uid
+
+
+def _filesystem_root(link: Path) -> Path:
+    return Path(link.anchor)
+
+
+def _is_system_link(link: Path) -> bool:
+    """Whether a directory link was laid down by the OS, like macOS /tmp or /var.
+
+    The OS's own links sit directly under the filesystem root and belong to
+    root, and only root can create either. A cloned repo or an unpacked archive
+    cannot forge one, and a root-owned link deeper down (a checkout made with
+    sudo) still counts as planted. Running as root erases the ownership signal,
+    and without POSIX ownership no link qualifies.
+    """
+    geteuid = getattr(os, "geteuid", None)
+    if geteuid is None or geteuid() == 0:
+        return False
+    return link.parent == _filesystem_root(link) and _link_owner(link) == 0
+
+
 def read_content_file(
     path: str,
     *,
@@ -105,9 +128,11 @@ def read_content_file(
         file_path = Path.cwd() / file_path
 
     if not follow_symlinks:
-        for component in (file_path, *file_path.parents):
-            if component.exists() and component.is_symlink():
-                raise ValueError("Refusing to read symlink without --follow-symlinks.")
+        if file_path.exists() and file_path.is_symlink():
+            raise ValueError(f"Refusing to read symlink without --follow-symlinks: {file_path}")
+        for parent in file_path.parents:
+            if parent.is_symlink() and not _is_system_link(parent):
+                raise ValueError(f"Refusing to read symlink without --follow-symlinks: {parent}")
 
     if not file_path.exists():
         raise ValueError(f"Content file not found: {file_path}")

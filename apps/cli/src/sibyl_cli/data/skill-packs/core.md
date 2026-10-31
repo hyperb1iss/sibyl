@@ -62,12 +62,13 @@ These rules exist because real agent sessions consistently fail without them.
    execute as shell commands; this has re-run real build commands as a side effect of saving a
    memory. Run sibyl writes as standalone commands, never chained with `&&` after builds or tests.
    TITLE stays positional and required even when the body arrives via stdin. Never point
-   `--content-file` at `/dev/stdin` or a `$TMPDIR` path: both are symlinks on macOS and hit the
-   symlink guard (`Refusing to read symlink`), so pipe stdin or use a real file path instead. Never
-   feed a command substitution from its own pipe (`cat file | sibyl task create -d "$(cat)"`
-   deadlocks because `$(cat)` expands before the pipe exists). When separating chained commands,
-   quote the separator (`echo "==="`, not `echo ===`): zsh equals-expansion turns bare `===` into a
-   phantom exit-1 that makes a successful sibyl call look failed.
+   `--content-file` at `/dev/stdin`: it is a symlink on macOS and hits the symlink guard
+   (`Refusing to read symlink`), so pipe stdin instead. `/tmp` and `$TMPDIR` paths are fine unless
+   the CLI runs as root. Never feed a command substitution from its own pipe
+   (`cat file | sibyl task create -d "$(cat)"` deadlocks because `$(cat)` expands before the pipe
+   exists). When separating chained commands, quote the separator (`echo "==="`, not `echo ===`):
+   zsh equals-expansion turns bare `===` into a phantom exit-1 that makes a successful sibyl call
+   look failed.
 
 8. **A failed write needs a receipt.** A non-zero exit from `remember` does not confirm a server
    save. If the CLI says the write was buffered, do not rerun it with a new idempotency key. Wait
