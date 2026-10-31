@@ -139,9 +139,10 @@ memory has no read or write policy yet. Use `project` or `team` instead.
 ### Post a Time-Boxed Team Notice
 
 `--expires` retires the memory after a duration between one minute and 30 days. It is meant for live
-state the whole team needs now, like an active incident, never for durable knowledge. The memory is
-stored verbatim like `--raw`, packs show it with an `expires=` marker, and when the deadline passes
-a scheduled sweep marks it stale with the reason `expired`. Resolve it early with
+state the team needs while it is true, like an active incident, never for durable knowledge. The
+memory is stored verbatim like `--raw`, surfaces in team members' packs when it is relevant to their
+goal, with an `expires=` marker, and when the deadline passes a scheduled sweep marks it stale with
+the reason `expired`. Resolve it early with
 `sibyl correct <raw-memory-id> --action stale --reason resolved`. See
 [time-boxed team notices](../users/sharing-memory.md#time-boxed-team-notices).
 

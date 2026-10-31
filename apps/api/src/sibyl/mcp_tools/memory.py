@@ -753,8 +753,8 @@ def register_memory_tools(mcp: MCPServer) -> None:
             still have the context, rather than discovering months later that
             nothing could reach it.
         expires: retire this memory after a duration such as "30m", "2h" or
-            "1d" (at most 30 days). Use it for live state everyone needs right
-            now and nobody needs later, like an active incident or a deploy
+            "1d" (at most 30 days). Use it for live state that matters while it
+            is true and nobody needs later, like an active incident or a deploy
             freeze, never for durable knowledge. When the time passes the
             memory is marked stale and leaves every pack and search; resolve
             it early with a stale correction.

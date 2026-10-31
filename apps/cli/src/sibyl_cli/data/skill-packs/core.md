@@ -407,11 +407,11 @@ that is intentional.
 
 ### Time-boxed team notices
 
-Live state the whole team needs right now, and nobody needs once it is over, gets an expiry instead
+Live state the team needs while it is true, and nobody needs once it is over, gets an expiry instead
 of a cleanup chore: an active incident, a deploy freeze, a migration window.
 
 ```bash
-# Every teammate's context pack carries it, marked `expires=...`, until the deadline
+# Surfaces in teammates' packs when relevant, marked `expires=...`, until the deadline
 sibyl remember "Checkout outage" "Checkout returns 502s; hold all deploys." \
   --scope team --scope-key <team-uuid> --expires 2h
 
@@ -421,8 +421,10 @@ sibyl correct <raw-memory-id> --action stale --reason resolved
 
 `--expires` takes `30m`, `2h`, `1d` or `1h30m`, from one minute up to 30 days, and stores the notice
 verbatim like `--raw`. When the deadline passes, a scheduled sweep marks it stale with the reason
-`expired`, so it leaves every pack, search and recall lane. `--action restore` keeps a notice alive
-past its deadline. Never time-box durable knowledge: once the incident is over, capture the lesson
+`expired`, so it leaves every pack, search and recall lane. A notice reaches a pack through recall,
+so it shows up when it ranks for the goal; title it the way an agent would search. Once the sweep
+has expired a notice, `--action restore` keeps it alive for good; restoring an early-resolved notice
+before its deadline leaves the expiry in place. Never time-box durable knowledge: once the incident is over, capture the lesson
 as a normal `remember`.
 
 ---

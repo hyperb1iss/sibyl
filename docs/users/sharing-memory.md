@@ -101,8 +101,8 @@ decisions, gotchas, runbooks, domain language, interfaces, and tested failure mo
 ## Time-Boxed Team Notices
 
 Some team memory is state, not knowledge: an active incident, a deploy freeze, a migration window.
-Everyone on the team needs it in their context pack right now, and nobody needs it once it is over.
-Give that kind of capture an expiry:
+The team needs it while it is true, and nobody needs it once it is over. Give that kind of capture
+an expiry:
 
 ```bash
 sibyl remember "Checkout outage" \
@@ -113,10 +113,12 @@ sibyl remember "Checkout outage" \
 ```
 
 `--expires` takes a duration such as `30m`, `2h`, `1d` or `1h30m`, between one minute and 30 days. A
-time-boxed capture is stored verbatim, like `--raw`. Until it expires, every team member's context
-pack carries it with an `expires=` marker, so an agent can tell a live notice from history. A
-scheduled sweep retires it within a minute of the deadline by applying the same `stale` correction
-an operator would, with the reason `expired`, so it drops out of every pack, search and recall lane.
+time-boxed capture is stored verbatim, like `--raw`. Until it expires, it surfaces in team members'
+context packs when it is relevant to their goal, whatever repo they work in, and it carries an
+`expires=` marker so an agent can tell a live notice from history. A notice reaches a pack through
+recall, so write its title and body in the words an agent would search by. A scheduled sweep retires
+it within a minute of the deadline by applying the same `stale` correction an operator would, with
+the reason `expired`, so it drops out of every pack, search and recall lane.
 
 Resolve a notice early with a correction. The sweep sees it is already retired and leaves it alone:
 
@@ -124,9 +126,10 @@ Resolve a notice early with a correction. The sweep sees it is already retired a
 sibyl correct <raw-memory-id> --action stale --reason resolved
 ```
 
-To keep a notice past its deadline, restore it with
-`sibyl correct <raw-memory-id> --action restore`; a restored notice no longer expires. Never use an
-expiry for durable knowledge. Write the lesson as a normal memory once the incident is over.
+Once the sweep has expired a notice, `sibyl correct <raw-memory-id> --action restore` brings it back
+for good: the sweep has already handled it, so it does not expire again. Restoring a notice that was
+resolved early, before its deadline, leaves its expiry in place. Never use an expiry for durable
+knowledge. Write the lesson as a normal memory once the incident is over.
 
 ## Promotion
 

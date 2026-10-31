@@ -45,9 +45,9 @@ interface RememberInput {
 }
 ```
 
-`expires` is for live state that should leave every pack once it is over, such as an active
-incident. When the deadline passes, a scheduled sweep marks the memory stale with the reason
-`expired`. Leave it unset for durable knowledge.
+`expires` is for live state that should surface in relevant packs while it is true and leave them
+once it is over, such as an active incident. When the deadline passes, a scheduled sweep marks the
+memory stale with the reason `expired`. Leave it unset for durable knowledge.
 
 ### Memory Kinds
 
