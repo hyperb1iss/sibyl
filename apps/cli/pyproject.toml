@@ -40,7 +40,7 @@ dependencies = [
     "pyyaml>=6.0",
     "tomli-w>=1.2.0",
     # WebSocket (logs --follow)
-    "websockets>=16.1.1",
+    "websockets>=17.4",
     # Shared library
     "sibyl-core==1.4.11",
 ]
@@ -55,7 +55,7 @@ dev = [
     "pytest-asyncio",
     "pytest-cov>=7.0.0",
     "ruff",
-    "ty>=0.0.86",
+    "ty>=0.0.91",
 ]
 
 [project.scripts]
