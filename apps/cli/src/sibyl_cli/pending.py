@@ -323,10 +323,7 @@ def discard_writes(
         raise typer.Exit(code=1)
 
 
-# `adopt` is the word the notices use, because it says what the verb does to a
-# write whose original owner is gone. `claim` stays for existing muscle memory.
 @app.command("adopt")
-@app.command("claim")
 def claim_writes(
     write_ids: Annotated[
         list[str] | None,

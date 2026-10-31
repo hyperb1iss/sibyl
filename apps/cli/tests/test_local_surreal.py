@@ -210,6 +210,6 @@ def test_container_probe_executes_dependency_readiness_check(
     probe = local.COMPOSE_CONFIG["services"]["api"]["healthcheck"]["test"][-1]
     if status == 503:
         with pytest.raises(httpx.HTTPStatusError):
-            exec(probe)  # noqa: S102
+            exec(probe)
     else:
-        exec(probe)  # noqa: S102
+        exec(probe)

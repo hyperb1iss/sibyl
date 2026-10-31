@@ -7,7 +7,7 @@ from typing import Any
 import httpx
 import pytest
 
-from sibyl_cli import auth_store, client_transport, pending_writes
+from sibyl_cli import auth_store, pending_writes
 from sibyl_cli.client import SibylClient, SibylClientError
 from sibyl_cli.pending_identity import normalize_replay_identity
 

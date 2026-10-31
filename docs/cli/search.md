@@ -19,8 +19,8 @@ sibyl search "implement authentication" --intent build
 ```
 
 The old graph-search grammar is not accepted by `search`. Flags such as `--type`, `--graph-only`,
-and `--docs-only` belonged to the pre-convergence command. Existing operator automation can use the
-hidden `sibyl graph-search` escape while migrating, but agent prompts should use `context`.
+and `--docs-only` belonged to the pre-convergence command, which is gone; agent prompts should use
+`context`.
 
 Use `sibyl show <id>` when a returned context preview is not enough. Record material usage with
 `sibyl cite <id...>` or `sibyl cite <id...> --misled`.

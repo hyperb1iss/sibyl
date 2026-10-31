@@ -77,7 +77,6 @@ from sibyl_cli.skill import app as skill_app
 from sibyl_cli.state import set_context_override
 from sibyl_cli.synthesis import app as synthesis_app
 from sibyl_cli.task import app as task_app
-from sibyl_cli.task import list_tasks
 from sibyl_cli.team import app as team_app
 from sibyl_cli.update import app as update_app
 
@@ -161,7 +160,6 @@ app.add_typer(auth_app, name="auth")
 app.add_typer(org_app, name="org")
 config_app.add_typer(context_app, name="context")
 app.add_typer(config_app, name="config")
-app.add_typer(context_app, name="contexts", hidden=True)
 app.add_typer(docker_app, name="docker")
 app.add_typer(service_app, name="service")
 app.add_typer(local_app, name="local")
@@ -175,7 +173,6 @@ app.add_typer(admin_app, name="admin")
 memory_admin.register_root_commands(app)
 app.add_typer(synthesis_app, name="synthesis")
 app.add_typer(team_app, name="team")
-app.command("tasks", hidden=True)(list_tasks)
 app.command("setup")(setup_cmd)
 app.command("doctor")(doctor_cmd)
 app.command("login")(login_cmd)
@@ -229,7 +226,6 @@ _CONTEXT_REPAIR_COMMANDS = frozenset(
         ("setup",),
         *[("config", leaf) for leaf in _LOCAL_CONFIG_LEAVES],
         *[("config", "context", leaf) for leaf in _LOCAL_CONTEXT_LEAVES],
-        *[("contexts", leaf) for leaf in _LOCAL_CONTEXT_LEAVES],
     ]
 )
 

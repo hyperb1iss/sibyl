@@ -679,7 +679,7 @@ def test_an_option_before_a_repair_leaf_fails_closed(
     _contexts(tmp_path, monkeypatch)
     monkeypatch.setattr(state, "_ignore_selection", False)
 
-    result = CliRunner().invoke(main_app, ["-C", "stagingg", "contexts", "--json", "list"])
+    result = CliRunner().invoke(main_app, ["-C", "stagingg", "config", "context", "--json", "list"])
 
     assert result.exit_code == 1
     assert "Unknown context 'stagingg'" in result.stdout

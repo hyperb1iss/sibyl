@@ -7,8 +7,6 @@ from sibyl_cli import capture, memory, recall
 
 def register_commands(root: typer.Typer) -> None:
     """Register root commands in their established public order."""
-    root.command("graph-search", hidden=True)(recall.search)
-    root.command("graph-add", hidden=True)(capture.add_knowledge)
     root.command("capture")(capture.capture_memory)
     root.command("note")(capture.note_alias)
     root.command("brief")(recall.brief_context)

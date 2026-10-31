@@ -50,13 +50,6 @@ def remember_memory(
         help=capture_support.ENTITY_TYPE_HELP,
         show_default="episode",
     ),
-    legacy_kind: str | None = typer.Option(
-        None,
-        "--type",
-        "-t",
-        callback=capture_support.normalize_legacy_memory_kind,
-        hidden=True,
-    ),
     domain: str | None = typer.Option(None, "--domain", "-d", help="Domain/category"),
     project: str | None = typer.Option(None, "--project", "-p", help="Project ID"),
     all_projects: bool = typer.Option(
@@ -165,13 +158,10 @@ def remember_memory(
 ) -> None:
     """Remember a decision, plan, idea, claim, artifact, session, or learning."""
 
-    if kind and legacy_kind and kind != legacy_kind:
-        error("--kind and the legacy --type alias must match")
-        raise typer.Exit(code=1)
     if scope_key and not memory_scope:
         error("--scope-key needs --scope; without one the project default picks the key.")
         raise typer.Exit(code=1)
-    kind = kind or legacy_kind or "episode"
+    kind = kind or "episode"
 
     try:
         resolved_content = (

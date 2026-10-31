@@ -276,7 +276,7 @@ def test_pending_writes_claim_binds_and_retries_legacy_entries(
         lambda: "local",
     )
 
-    result = CliRunner().invoke(pending.app, ["claim", "--yes"])
+    result = CliRunner().invoke(pending.app, ["adopt", "--yes"])
 
     assert result.exit_code == 0
     assert "bliss@example.test" in result.stdout
@@ -329,7 +329,7 @@ def test_pending_writes_claim_fails_when_replay_lock_is_busy(
     monkeypatch.setattr(pending, "pending_replay_lock", lambda: nullcontext(False))
     monkeypatch.setattr("sibyl_cli.config_store.resolve_context_name", lambda: "local")
 
-    result = CliRunner().invoke(pending.app, ["claim", "--yes"])
+    result = CliRunner().invoke(pending.app, ["adopt", "--yes"])
 
     assert result.exit_code == 1
     assert "claim did not run" in result.stdout
@@ -390,7 +390,7 @@ def test_pending_writes_claim_reports_a_concurrent_queue_change(
     monkeypatch.setattr(pending, "claim_pending_write_replay_scope", fail_claim)
     monkeypatch.setattr("sibyl_cli.config_store.resolve_context_name", lambda: "local")
 
-    result = CliRunner().invoke(pending.app, ["claim", "--yes"])
+    result = CliRunner().invoke(pending.app, ["adopt", "--yes"])
 
     assert result.exit_code == 1
     assert "Could not claim" in result.stdout
@@ -746,7 +746,7 @@ def test_unverified_adoption_requires_explicit_ids(
 ) -> None:
     monkeypatch.setattr(Path, "home", lambda: tmp_path)
     item = _create_pending()
-    result = CliRunner().invoke(pending.app, ["claim", "--unverified", "--yes"])
+    result = CliRunner().invoke(pending.app, ["adopt", "--unverified", "--yes"])
     assert result.exit_code == 1
     assert "explicit write IDs" in result.stdout
     assert pending_writes.read_pending_write(item["id"])["replay_scope"] == TEST_REPLAY_SCOPE
@@ -761,7 +761,7 @@ def test_explicit_unverified_adoption_preserves_key_and_replays_only_selected(
     untouched = _create_pending()
     calls: list[httpx.Request] = []
     _mock_authenticated_client(monkeypatch, calls)
-    result = CliRunner().invoke(pending.app, ["claim", selected["id"], "--unverified", "--yes"])
+    result = CliRunner().invoke(pending.app, ["adopt", selected["id"], "--unverified", "--yes"])
     assert result.exit_code == 0, result.stdout
     assert "Original ownership cannot be verified" in result.stdout
     mutations = [request for request in calls if request.method == "POST"]
@@ -785,7 +785,7 @@ def test_unverified_adoption_never_reassigns_verified_owner(
     )
     calls: list[httpx.Request] = []
     _mock_authenticated_client(monkeypatch, calls)
-    CliRunner().invoke(pending.app, ["claim", item["id"], "--unverified", "--yes"])
+    CliRunner().invoke(pending.app, ["adopt", item["id"], "--unverified", "--yes"])
     assert not calls
     assert pending_writes.read_pending_write(item["id"])["replay_identity"] == foreign
 
@@ -865,7 +865,7 @@ def test_unverified_adoption_requires_server_identity(
 
     monkeypatch.setattr(pending, "SibylClient", factory)
     monkeypatch.setattr("sibyl_cli.config_store.resolve_context_name", lambda: None)
-    result = CliRunner().invoke(pending.app, ["claim", item["id"], "--unverified", "--yes"])
+    result = CliRunner().invoke(pending.app, ["adopt", item["id"], "--unverified", "--yes"])
     assert result.exit_code == 1
     assert "Upgrade the server" in result.stdout
     assert pending_writes.resolve_pending_write_path(item["id"]).read_bytes() == original

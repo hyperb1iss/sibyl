@@ -1,7 +1,7 @@
 """Tests for crawl/document CLI commands."""
 
-from importlib import import_module
 import re
+from importlib import import_module
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from typer.testing import CliRunner

@@ -1029,7 +1029,6 @@ it first.
 | `sibyl context ... \|\| true`       | `sibyl context ...` (let errors surface)          |
 | `sibyl config`                      | `sibyl config show`                               |
 | `sibyl auth token`                  | Not a real command: use `sibyl auth status`       |
-| Using `--kind gotcha` or `learning` | Deprecated aliases: use `error_pattern`/`note`    |
 | `--kind insight` / `discovery`      | Not kinds: use `episode` (or `note`)              |
 | `remember --title` / `--body`       | Title and body are positional arguments           |
 | `--intent explore` / `verify`       | Use `research` / `review`                         |

@@ -1,4 +1,4 @@
-"""Root commands for graph search and context recall."""
+"""Root commands for context recall."""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ import typer
 
 from sibyl_cli import capture_support, command_support, memory_views
 from sibyl_cli.client import SibylClientError, get_client
-from sibyl_cli.common import CORAL, NEON_CYAN, console, error, info, print_json, run_async
+from sibyl_cli.common import console, error, print_json, run_async
 from sibyl_cli.config_store import resolve_effective_context, resolve_project_from_cwd
 from sibyl_cli.project_scope import resolve_recall_project
 from sibyl_core.models.context import ContextIntent
@@ -26,140 +26,6 @@ def normalize_context_intent(value: str) -> str:
         return normalized
     choices = ", ".join(CONTEXT_INTENT_VALUES)
     raise typer.BadParameter(f"{value!r} is not one of: {choices}")
-
-
-def search(
-    query: str = typer.Argument(..., help="Search query"),
-    entity_type: str | None = typer.Option(None, "--type", "-t", help="Filter by entity type"),
-    limit: int = typer.Option(10, "--limit", "-l", help="Maximum results"),
-    all_projects: bool = typer.Option(False, "--all", "-a", help="Search all projects"),
-    graph_only: bool = typer.Option(False, "--graph-only", help="Search graph memory only"),
-    docs_only: bool = typer.Option(False, "--docs-only", help="Search crawled docs only"),
-    as_of: str | None = typer.Option(None, "--as-of", help="Filter graph memory as of a timestamp"),
-    json_output: bool = typer.Option(False, "--json", "-j", help="Output as JSON"),
-) -> None:
-    """Search the knowledge graph."""
-    if graph_only and docs_only:
-        error("--graph-only and --docs-only cannot be combined")
-        raise typer.Exit(1)
-
-    normalized_type = entity_type.lower() if entity_type else None
-    if graph_only and normalized_type == "document":
-        error("--graph-only cannot be combined with --type document")
-        raise typer.Exit(1)
-    if docs_only and normalized_type and normalized_type != "document":
-        error("--docs-only can only be combined with --type document")
-        raise typer.Exit(1)
-
-    # Scope to one project unless --all asked for every project on purpose
-    effective_project = resolve_recall_project(
-        None,
-        all_projects,
-        resolve_linked=resolve_project_from_cwd,
-        resolve_context=resolve_effective_context,
-    )
-    include_documents = not graph_only
-    include_graph = not docs_only
-
-    @run_async
-    async def run_search() -> None:
-        try:
-            async with get_client() as client:
-                types = [entity_type] if entity_type else None
-                search_kwargs: dict[str, Any] = {}
-                if as_of:
-                    search_kwargs["as_of"] = as_of
-                data = await client.search(
-                    query,
-                    types=types,
-                    limit=limit,
-                    project=effective_project,
-                    include_documents=include_documents,
-                    include_graph=include_graph,
-                    **search_kwargs,
-                )
-
-                if json_output:
-                    print_json(data)
-                    return
-
-                results = data.get("results", [])
-                if not results:
-                    info("No results found")
-                    return
-
-                console.print(f"\n[bold]Found {len(results)} results:[/bold]\n")
-                for r in results:
-                    entity_id = r.get("id", "")
-                    name = r.get("name", "Unknown")
-                    source = r.get("source")
-                    content = r.get("content", "")
-                    metadata = r.get("metadata", {})
-                    heading_path = metadata.get("heading_path", [])
-                    origin = str(
-                        r.get("result_origin")
-                        or ("document" if metadata.get("document_id") else "graph")
-                    ).lower()
-                    origin_label = {
-                        "document": "docs",
-                        "raw_memory": "memory",
-                    }.get(origin, "graph")
-
-                    # Header: Document name (source)
-                    # Skip file paths - they're not useful. Show source name only.
-                    display_source = source if source and not source.startswith("/") else None
-                    source_info = f" ({display_source})" if display_source else ""
-                    console.print(
-                        f"  [dim]{origin_label}[/dim] "
-                        f"[{NEON_CYAN}]{name}[/{NEON_CYAN}][dim]{source_info}[/dim]"
-                    )
-
-                    # Section path
-                    if heading_path:
-                        path_str = " > ".join(heading_path)
-                        console.print(f"    [dim]{path_str}[/dim]")
-
-                    # Content preview
-                    if content:
-                        metadata_snippet = metadata.get("snippet")
-                        snippet = (
-                            metadata_snippet
-                            if isinstance(metadata_snippet, str)
-                            else content
-                            if "<mark>" in content
-                            else None
-                        )
-                        console.print(
-                            f"    {memory_views.format_highlight_preview(snippet, content)}",
-                            soft_wrap=True,
-                        )
-
-                    # Show IDs for fetching
-                    document_id = metadata.get("document_id")
-                    if document_id:
-                        # Crawled doc: show document_id for full doc retrieval
-                        console.print(f"    [dim]doc:[/dim] [{CORAL}]{document_id}[/{CORAL}]")
-                    else:
-                        # Graph entity: show entity ID
-                        console.print(f"    [{CORAL}]{entity_id}[/{CORAL}]")
-                    console.print()
-
-                # Hint for retrieval - check if any results are from crawled docs
-                has_docs = any(r.get("metadata", {}).get("document_id") for r in results)
-                has_entities = any(not r.get("metadata", {}).get("document_id") for r in results)
-
-                hints = []
-                if has_entities:
-                    hints.append(f"[{NEON_CYAN}]sibyl show <id>[/{NEON_CYAN}]")
-                if has_docs:
-                    hints.append(f"[{NEON_CYAN}]sibyl crawl documents show <doc>[/{NEON_CYAN}]")
-
-                if hints:
-                    console.print(f"[dim]Full content:[/dim] {' [dim]or[/dim] '.join(hints)}")
-        except SibylClientError as e:
-            command_support.handle_client_error(e)
-
-    run_search()
 
 
 def brief_context(

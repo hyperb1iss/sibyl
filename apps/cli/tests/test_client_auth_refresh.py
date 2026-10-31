@@ -378,7 +378,7 @@ async def test_refresh_rotates_and_writes_tokens_under_lock(
         def __init__(self, *_args: object, **_kwargs: object) -> None:
             pass
 
-        async def __aenter__(self) -> "FakeAsyncClient":
+        async def __aenter__(self) -> FakeAsyncClient:
             return self
 
         async def __aexit__(self, *_args: object) -> None:
