@@ -1,19 +1,18 @@
+"""End-to-end smoke of the default memory loop and the shipped entrypoints.
+
+Lives with the API tests because it imports the API, so every environment that
+collects it has FastAPI installed and a broken import fails instead of skipping.
+"""
+
 from __future__ import annotations
 
-import importlib.util
 import os
 import subprocess
 import sys
 import textwrap
 from pathlib import Path
 
-import pytest
-
-_REPO_ROOT = Path(__file__).resolve().parents[4]
-pytestmark = pytest.mark.skipif(
-    importlib.util.find_spec("fastapi") is None,
-    reason="no-Graphiti default-loop smoke imports API entrypoints",
-)
+_REPO_ROOT = Path(__file__).resolve().parents[3]
 
 
 def _subprocess_env() -> dict[str, str]:
@@ -84,9 +83,9 @@ async def main():
     import sibyl.jobs.consolidation as consolidation_module
     import sibyl.persistence.graph_runtime as graph_runtime_module
 
-    group_id = "no-graphiti-default-loop"
-    principal_id = "principal-no-graphiti"
-    project_title = "No Graphiti Project"
+    group_id = "default-loop-smoke"
+    principal_id = "principal-default-loop"
+    project_title = "Default Loop Project"
     client = SurrealGraphClient(group_id=group_id, url="memory://")
     await client.connect()
     await prepare_graph_schema(client)
@@ -124,7 +123,7 @@ async def main():
                 name="Native Ingestion Source",
                 description="Default loop ingestion source.",
                 confidence=0.91,
-                source_episode_id="episode-no-graphiti",
+                source_episode_id="episode-default-loop",
                 context="Native ingestion source context.",
             ),
             ExtractedEntity(
@@ -132,7 +131,7 @@ async def main():
                 name="Native Ingestion Target",
                 description="Default loop ingestion target.",
                 confidence=0.92,
-                source_episode_id="episode-no-graphiti",
+                source_episode_id="episode-default-loop",
                 context="Native ingestion target context.",
             ),
         ]
@@ -153,7 +152,7 @@ async def main():
                         target_name="Native Ingestion Target",
                         relation_type=RelationType.RELATED_TO,
                         confidence=0.88,
-                        source_episode_id="episode-no-graphiti",
+                        source_episode_id="episode-default-loop",
                         evidence="Native ingestion source references target.",
                     )
                 ],
@@ -177,7 +176,7 @@ async def main():
         project_id = str(project.id)
 
         remembered = await add_module.add(
-            title="No Graphiti Default Loop Decision",
+            title="Default Loop Decision",
             content="Native Surreal recall should find this default loop decision.",
             entity_type="decision",
             metadata={"organization_id": group_id, "project_id": project_id},
@@ -187,20 +186,20 @@ async def main():
         assert remembered.success, remembered.message
         await runtime.relationship_manager.create(
             Relationship(
-                id="rel_no_graphiti_temporal",
+                id="rel_default_loop_temporal",
                 relationship_type=RelationshipType.RELATED_TO,
                 source_id=str(remembered.id),
                 target_id=project_id,
                 metadata={
-                    "fact": "No Graphiti temporal reads use native Surreal edges.",
+                    "fact": "Default loop temporal reads use native Surreal edges.",
                     "valid_at": "2026-05-12T00:00:00+00:00",
                 },
             )
         )
         task_a = Entity(
-            id="task_no_graphiti_manage_a",
+            id="task_default_loop_manage_a",
             entity_type=EntityType.TASK,
-            name="No Graphiti Manage Task A",
+            name="Default Loop Manage Task A",
             description="Manage tool native task A.",
             organization_id=group_id,
             metadata={
@@ -211,9 +210,9 @@ async def main():
             },
         )
         task_b = Entity(
-            id="task_no_graphiti_manage_b",
+            id="task_default_loop_manage_b",
             entity_type=EntityType.TASK,
-            name="No Graphiti Manage Task B",
+            name="Default Loop Manage Task B",
             description="Manage tool native task B.",
             organization_id=group_id,
             metadata={
@@ -227,7 +226,7 @@ async def main():
         await runtime.entity_manager.create_direct(task_b)
         await runtime.relationship_manager.create(
             Relationship(
-                id="rel_no_graphiti_manage_dep_a_b",
+                id="rel_default_loop_manage_dep_a_b",
                 relationship_type=RelationshipType.DEPENDS_ON,
                 source_id=task_a.id,
                 target_id=task_b.id,
@@ -235,7 +234,7 @@ async def main():
         )
         await runtime.relationship_manager.create(
             Relationship(
-                id="rel_no_graphiti_manage_dep_b_a",
+                id="rel_default_loop_manage_dep_b_a",
                 relationship_type=RelationshipType.DEPENDS_ON,
                 source_id=task_b.id,
                 target_id=task_a.id,
@@ -270,9 +269,9 @@ async def main():
             accessible_projects={project_id},
         )
         temporal_edge = next(
-            edge for edge in temporal.edges if edge.id == "rel_no_graphiti_temporal"
+            edge for edge in temporal.edges if edge.id == "rel_default_loop_temporal"
         )
-        assert temporal_edge.source_name == "No Graphiti Default Loop Decision"
+        assert temporal_edge.source_name == "Default Loop Decision"
         assert temporal_edge.target_name == project_title
 
         updated = await manage_module.manage(
@@ -328,8 +327,8 @@ async def main():
         ).create_doc_relationships(
             uuid.UUID("00000000-0000-0000-0000-000000000123"),
             [str(remembered.id)],
-            document_title="No Graphiti Docs",
-            document_url="https://docs.example.test/no-graphiti",
+            document_title="Default Loop Docs",
+            document_url="https://docs.example.test/default-loop",
         )
         assert doc_links == 1
 
@@ -389,11 +388,11 @@ async def main():
         )
         assert pack.total_items >= 1
         markdown = context_module.context_pack_to_markdown(pack)
-        assert "No Graphiti Default Loop Decision" in markdown
+        assert "Default Loop Decision" in markdown
 
         reflection = await reflect_module.reflect_memory(
             "Decision: native reflection writes stay on direct Surreal records.",
-            source_title="No Graphiti Reflection",
+            source_title="Default Loop Reflection",
             intent="build",
             project=project_id,
             organization_id=group_id,
@@ -417,14 +416,14 @@ async def main():
             raw_memory_recall_fn=empty_raw_recall,
         )
         recall_markdown = context_module.context_pack_to_markdown(recall)
-        assert "No Graphiti Reflection" in recall_markdown
+        assert "Default Loop Reflection" in recall_markdown
     finally:
         await client.close()
 
 
 asyncio.run(main())
 """
-    result = subprocess.run(
+    result = subprocess.run(  # noqa: S603 - fixed smoke script, current interpreter
         [sys.executable, "-c", textwrap.dedent(script)],
         check=False,
         cwd=os.getcwd(),
@@ -489,7 +488,7 @@ assert ("", "mcp") in combined_routes
 root = Path(os.environ["SIBYL_REPO_ROOT"])
 runpy.run_path(str(root / "apps/cli/src/sibyl_cli/data/hooks/session-start.py"))
 """
-    result = subprocess.run(
+    result = subprocess.run(  # noqa: S603 - fixed smoke script, current interpreter
         [sys.executable, "-c", textwrap.dedent(script)],
         check=False,
         cwd=os.getcwd(),
