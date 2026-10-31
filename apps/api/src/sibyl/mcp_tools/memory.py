@@ -31,6 +31,7 @@ from sibyl_core.memory_pipeline.source_lifecycle import (
     SOURCE_BINDINGS_KEY,
     source_revision_bindings,
 )
+from sibyl_core.services.memory_expiry import capture_expiry_metadata, resolve_capture_expiry
 
 log = structlog.get_logger()
 
@@ -72,6 +73,15 @@ async def _claim_remember_idempotency(
     return None, replayed
 
 
+def _normalized_idempotency_key(idempotency_key: str | None) -> str | None:
+    if idempotency_key is None:
+        return None
+    key = idempotency_key.strip()
+    if not key or len(key) > 255:
+        raise ValueError("idempotency_key must be a non-empty string up to 255 characters")
+    return key
+
+
 @mcp_idempotency.serialize_request("mcp/remember")
 async def _remember_mcp_memory(
     *,
@@ -90,6 +100,7 @@ async def _remember_mcp_memory(
     spans: list[dict[str, Any]] | None = None,
     atomic: bool = False,
     probes: list[str] | None = None,
+    expires: str | None = None,
 ) -> dict[str, Any]:
     from sibyl_core.memory_pipeline.structure import build_memory_structure
     from sibyl_core.services.surreal_content import remember_raw_memory
@@ -104,21 +115,20 @@ async def _remember_mcp_memory(
     if not ctx.user_id:
         raise ValueError("User context required to remember raw source material.")
     principal_id = ctx.user_id
-    if idempotency_key is not None:
-        idempotency_key = idempotency_key.strip()
-        if not idempotency_key or len(idempotency_key) > 255:
-            raise ValueError("idempotency_key must be a non-empty string up to 255 characters")
+    idempotency_key = _normalized_idempotency_key(idempotency_key)
+    expires_at = resolve_capture_expiry(expires_in=expires)
 
     # Ahead of the idempotency claim: a refused plan must not consume the key,
     # or the caller's corrected retry would replay the rejection.
     build_memory_structure(content.strip(), spans=spans, atomic=atomic, probes=probes)
 
-    memory_scope = "project" if project else "private"
+    resolved_scope = await mcp_policy.resolve_capture_default_scope(ctx, project=project)
+    memory_scope = resolved_scope.memory_scope.value
     write_decision = await mcp_policy.authorize_memory_request(
         ctx=ctx,
         write=True,
         memory_scope=memory_scope,
-        scope_key=project,
+        scope_key=resolved_scope.scope_key,
         surface="mcp_remember",
     )
     resolved_links = await mcp_policy.resolve_capture_links(
@@ -164,6 +174,7 @@ async def _remember_mcp_memory(
         "spans": spans,
         "atomic": atomic,
         "probes": probes,
+        "expires": expires,
     }
     idempotency_claim, replayed = await _claim_remember_idempotency(
         ctx=ctx,
@@ -194,7 +205,7 @@ async def _remember_mcp_memory(
         provenance={"remember_kind": kind, "related_to": resolved_links or []},
         source_id=f"mcp:remember:{kind}",
         memory_scope=memory_scope,
-        scope_key=project,
+        scope_key=resolved_scope.scope_key,
         principal_id=ctx.user_id,
         capture_surface="mcp",
         spans=spans,
@@ -215,13 +226,14 @@ async def _remember_mcp_memory(
             source_id=request.source_id,
             raw_content=request.content,
             title=request.title,
-            memory_scope=request.memory_scope,
+            memory_scope=memory_scope,
             scope_key=request.scope_key,
             tags=list(request.tags) if request.tags is not None else None,
             metadata=dict(request.metadata),
             provenance=dict(request.provenance),
             capture_surface=request.capture_surface,
             **source_context,
+            **({} if expires_at is None else {"expires_at": expires_at}),
         )
         raw_revision = getattr(raw_memory, "revision", 1)
         return {
@@ -249,7 +261,10 @@ async def _remember_mcp_memory(
             # strip; without it the row reaches the graph naming no capture,
             # and both the correction write-through and the projection
             # boundary lose the only link back.
-            capture_provenance=server_provenance_metadata(graph_metadata),
+            capture_provenance={
+                **server_provenance_metadata(graph_metadata),
+                **capture_expiry_metadata(expires_at),
+            },
             project=project,
             memory_scope=request.memory_scope,
             scope_key=request.scope_key,
@@ -292,6 +307,8 @@ async def _remember_mcp_memory(
     if capture_result.raw_policy_reason is None:
         payload.pop("raw_policy_reason", None)
     payload["policy_reason"] = write_decision.reason
+    payload["memory_scope"] = memory_scope
+    payload["scope_resolution"] = resolved_scope.reason
     affected_records = (
         [f"raw_captures:{capture_result.raw_memory_id}"] if capture_result.raw_memory_id else []
     )
@@ -349,8 +366,9 @@ async def _reflect_mcp_memory(
         active_task=active_task and persist,
         accessible_projects=accessible_projects,
     )
-    memory_scope = "project" if project else "private"
-    scope_key = project
+    resolved_scope = await mcp_policy.resolve_capture_default_scope(ctx, project=project)
+    memory_scope = resolved_scope.memory_scope.value
+    scope_key = resolved_scope.scope_key
     if persist:
         await mcp_policy.authorize_memory_request(
             ctx=ctx,
@@ -464,8 +482,15 @@ async def _add_mcp_entity(
         project,
         require_project_when_restricted=True,
     )
-    memory_scope = "project" if project else "private"
-    scope_key = project
+    if normalized_entity_type in _UNSCOPED_ENTITY_TYPES:
+        # Work items carry no scope; the project is their audience, so the
+        # write is authorized as a project write whatever the default says.
+        memory_scope = "project" if project else "private"
+        scope_key = project
+    else:
+        resolved_scope = await mcp_policy.resolve_capture_default_scope(ctx, project=project)
+        memory_scope = resolved_scope.memory_scope.value
+        scope_key = resolved_scope.scope_key
     write_decision = await mcp_policy.authorize_memory_request(
         ctx=ctx,
         write=True,
@@ -672,6 +697,7 @@ def register_memory_tools(mcp: MCPServer) -> None:
         spans: list[dict[str, Any]] | None = None,
         atomic: bool = False,
         probes: list[str] | None = None,
+        expires: str | None = None,
     ) -> dict[str, Any]:
         """Remember durable context from planning, ideation, building, or any domain.
 
@@ -726,6 +752,12 @@ def register_memory_tools(mcp: MCPServer) -> None:
             an absent probe is telling you to rewrite the memory now, while you
             still have the context, rather than discovering months later that
             nothing could reach it.
+        expires: retire this memory after a duration such as "30m", "2h" or
+            "1d" (at most 30 days). Use it for live state that matters while it
+            is true and nobody needs later, like an active incident or a deploy
+            freeze, never for durable knowledge. When the time passes the
+            memory is marked stale and leaves every pack and search; resolve
+            it early with a stale correction.
         """
 
         return await _remember_mcp_memory(
@@ -744,6 +776,7 @@ def register_memory_tools(mcp: MCPServer) -> None:
             spans=spans,
             atomic=atomic,
             probes=probes,
+            expires=expires,
         )
 
     # =========================================================================

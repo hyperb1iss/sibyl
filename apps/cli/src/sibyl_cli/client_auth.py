@@ -361,3 +361,20 @@ class ClientAuthMixin:
             "DELETE",
             f"/teams/{quote(team_id, safe='')}/projects/{quote(project_id, safe='')}",
         )
+
+    async def get_project_settings(self, project_id: str) -> dict[str, Any]:
+        """Read a project's settings, including its default write scope."""
+        return await self._request("GET", f"/projects/{quote(project_id, safe='')}/settings")
+
+    async def update_project_settings(
+        self,
+        project_id: str,
+        *,
+        default_memory_scope: str,
+    ) -> dict[str, Any]:
+        """Change where unscoped captures in a project land."""
+        return await self._request(
+            "PATCH",
+            f"/projects/{quote(project_id, safe='')}/settings",
+            json={"default_memory_scope": default_memory_scope},
+        )

@@ -14,16 +14,14 @@ def anthropic(model: str, **kwargs) -> LLMConfig:
     return LLMConfig(provider="anthropic", model=model, api_key=SecretStr("fixture"), **kwargs)
 
 
-def test_haiku_5_5_profile_corrects_what_pydantic_ai_does_not_know() -> None:
-    upstream = AnthropicProvider.model_profile("claude-haiku-5-5") or {}
-    corrected = providers.resolved_model_profile(anthropic("claude-haiku-5-5"))
-    # pydantic-ai matches no rule for Haiku 5.5 and would send temperature.
-    assert upstream.get("anthropic_disallows_sampling_settings") is False
-    assert corrected["anthropic_disallows_sampling_settings"] is True
-    assert corrected["anthropic_supports_effort"] is True
-    assert corrected["anthropic_supports_adaptive_thinking"] is True
-    assert corrected["supports_json_schema_output"] is True
-    assert corrected.get("supports_forced_tool_choice", True) is True
+def test_haiku_5_5_profile_drops_temperature_and_takes_effort_and_native_output() -> None:
+    # Temperature is a 400 on this model; pydantic-ai profiles it from 2.60.
+    resolved = providers.resolved_model_profile(anthropic("claude-haiku-5-5"))
+    assert resolved["anthropic_disallows_sampling_settings"] is True
+    assert resolved["anthropic_supports_effort"] is True
+    assert resolved["anthropic_supports_adaptive_thinking"] is True
+    assert resolved["supports_json_schema_output"] is True
+    assert resolved.get("supports_forced_tool_choice", True) is True
 
 
 async def test_haiku_5_5_settings_and_model_carry_the_corrected_profile() -> None:

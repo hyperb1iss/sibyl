@@ -154,7 +154,7 @@ _DEFAULT_ENTRIES = [
         max_output_tokens=128_000,
         default_temperature=None,
         # Prompts up to 100,000 tokens. Longer prompts pay five times as much on
-        # every token, which sibyl_core.ai.prices charges exactly.
+        # every token, which genai-prices charges exactly.
         input_cost_per_mtok_usd=0.1,
         output_cost_per_mtok_usd=0.5,
         cost_source_url="https://platform.claude.com/docs/en/models/haiku-5-5/overview",

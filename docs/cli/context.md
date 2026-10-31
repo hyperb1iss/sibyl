@@ -114,18 +114,18 @@ on purpose; the pack then carries `scope: all_projects` in JSON and a
 
 These flags switch recall to verbatim raw memory and narrow which raw imports qualify:
 
-| Option              | Default   | Description                                          |
-| ------------------- | --------- | ---------------------------------------------------- |
-| `--raw`             | false     | Recall verbatim raw memories                         |
-| `--diary`           | false     | Recall a private agent diary                         |
-| `--scope`           | `private` | Memory scope: `private`, `project`, `team`, or `org` |
-| `--scope-key`       | (none)    | Project/team/shared scope key                        |
-| `--participant`     | (none)    | Filter raw imports by participant                    |
-| `--label`           | (none)    | Filter raw imports by adapter label                  |
-| `--thread`          | (none)    | Filter raw imports by thread                         |
-| `--occurred-after`  | (none)    | Filter raw imports after an ISO timestamp            |
-| `--occurred-before` | (none)    | Filter raw imports before an ISO timestamp           |
-| `--as-of`           | (none)    | Filter raw memory by validity timestamp              |
+| Option              | Default   | Description                                   |
+| ------------------- | --------- | --------------------------------------------- |
+| `--raw`             | false     | Recall verbatim raw memories                  |
+| `--diary`           | false     | Recall a private agent diary                  |
+| `--scope`           | `private` | Memory scope: `private`, `project`, or `team` |
+| `--scope-key`       | (none)    | Project/team/shared scope key                 |
+| `--participant`     | (none)    | Filter raw imports by participant             |
+| `--label`           | (none)    | Filter raw imports by adapter label           |
+| `--thread`          | (none)    | Filter raw imports by thread                  |
+| `--occurred-after`  | (none)    | Filter raw imports after an ISO timestamp     |
+| `--occurred-before` | (none)    | Filter raw imports before an ISO timestamp    |
+| `--as-of`           | (none)    | Filter raw memory by validity timestamp       |
 
 ### Examples
 

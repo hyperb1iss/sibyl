@@ -468,7 +468,9 @@ async def remember_raw_memory(
     accessible_teams: Iterable[str] | None = None,
     accessible_delegations: Iterable[str] | None = None,
     allowed_memory_scope_keys: Iterable[str] | None = None,
+    expires_at: datetime | None = None,
 ) -> RawMemory:
+    from sibyl_core.services.memory_expiry import capture_expiry_metadata
     from sibyl_core.services.memory_source_validation import (
         SOURCE_VALIDATION_CONTEXT_KEY,
         SourceReadAuthority,
@@ -497,6 +499,8 @@ async def remember_raw_memory(
         ),
         captured_at=models.utcnow(),
     )
+    # Stamped after the write strip, so only a validated request sets it.
+    memory.metadata.update(capture_expiry_metadata(expires_at))
     if operational_write is not None:
         if (
             dream_write is not None

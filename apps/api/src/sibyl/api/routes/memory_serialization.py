@@ -88,6 +88,7 @@ def raw_memory_response(
     *,
     policy_reason: str | None = None,
     receipt: MutationReceipt | None = None,
+    scope_resolution: str | None = None,
 ) -> RawMemoryResponse:
     return RawMemoryResponse(
         id=memory.id,
@@ -107,6 +108,7 @@ def raw_memory_response(
         score=memory.score,
         snippet=memory.snippet,
         policy_reason=policy_reason,
+        scope_resolution=scope_resolution,
         revision=memory.revision,
         mutation_receipt=receipt,
     )
