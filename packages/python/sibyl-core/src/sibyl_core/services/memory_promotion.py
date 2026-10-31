@@ -8,7 +8,11 @@ from collections.abc import Iterable, Mapping, Sequence
 from datetime import UTC, datetime
 from typing import Any
 
-from sibyl_core.auth.memory_policy import authorize_memory_read, stamp_memory_scope_metadata
+from sibyl_core.auth.memory_policy import (
+    authorize_memory_read,
+    memory_scope_policy_key,
+    stamp_memory_scope_metadata,
+)
 from sibyl_core.errors import EntityNotFoundError
 from sibyl_core.memory_pipeline.quality import normalize_memory_quality_metadata
 from sibyl_core.models.entities import Entity, EntityType, Relationship, RelationshipType
@@ -178,7 +182,49 @@ def _resolve_promotion_scope_key(
         return promote_to_scope_key
     if target_scope is MemoryScope.PROJECT:
         return project or _metadata_str(candidate_memory.metadata, "suggested_scope_key")
+    if target_scope is MemoryScope.TEAM:
+        # The capture's nominated team is a hint, honored only when it nominated
+        # a team. Membership is checked against the auth store after this, so a
+        # key naming a team the principal is not in is still denied.
+        suggested_scope = _coerce_promotion_scope(
+            _metadata_str(candidate_memory.metadata, "suggested_memory_scope")
+        )
+        if suggested_scope is MemoryScope.TEAM:
+            return _metadata_str(candidate_memory.metadata, "suggested_scope_key")
     return None
+
+
+def _api_key_target_denial(
+    *,
+    allowed_memory_scope_keys: Iterable[str] | None,
+    candidate_memory: RawMemory,
+    principal_id: str | None,
+    target_scope: MemoryScope,
+    target_scope_key: str | None,
+    raw_source_ids: list[str],
+) -> ReflectionPromotionResult | None:
+    """Refuse a target outside the memory spaces an API key was granted.
+
+    Checked on the resolved target, after any fallback to the nominated key,
+    so a restricted key cannot publish into a space it never named.
+    """
+    if allowed_memory_scope_keys is None:
+        return None
+    scope_key = target_scope_key
+    if target_scope is MemoryScope.PRIVATE and not scope_key:
+        scope_key = principal_id
+    if memory_scope_policy_key(target_scope.value, scope_key) in frozenset(
+        allowed_memory_scope_keys
+    ):
+        return None
+    return _promotion_denied(
+        candidate_id=candidate_memory.id,
+        reason="api_key_memory_space_denied",
+        review_state=candidate_memory.review_state,
+        memory_scope=target_scope,
+        scope_key=target_scope_key,
+        raw_source_ids=raw_source_ids,
+    )
 
 
 def _candidate_from_review_memory(

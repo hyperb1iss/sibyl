@@ -80,6 +80,7 @@ from sibyl_core.services.memory_policy import (
     raw_memory_source_signature as _promotion_source_signature,
 )
 from sibyl_core.services.memory_promotion import (
+    _api_key_target_denial,
     _broadest_scope,
     _candidate_from_raw_memory,
     _candidate_from_review_memory,
@@ -823,6 +824,7 @@ async def preview_reflection_candidate_promotion(
     writable_projects: Iterable[str] | None = None,
     accessible_teams: Iterable[str] | None = None,
     accessible_delegations: Iterable[str] | None = None,
+    allowed_memory_scope_keys: Iterable[str] | None = None,
 ) -> ReflectionPromotionPreview:
     accessible_projects = (
         frozenset(accessible_projects) if accessible_projects is not None else None
@@ -839,6 +841,7 @@ async def preview_reflection_candidate_promotion(
         accessible_projects=accessible_projects,
         accessible_teams=accessible_teams,
         accessible_delegations=accessible_delegations,
+        allowed_memory_scope_keys=allowed_memory_scope_keys,
     )
     if isinstance(plan, ReflectionPromotionResult):
         return _promotion_preview_from_denial(plan)
@@ -887,6 +890,7 @@ async def preview_raw_memory_promotion(
     writable_projects: Iterable[str] | None = None,
     accessible_teams: Iterable[str] | None = None,
     accessible_delegations: Iterable[str] | None = None,
+    allowed_memory_scope_keys: Iterable[str] | None = None,
 ) -> ReflectionPromotionPreview:
     accessible_projects = (
         frozenset(accessible_projects) if accessible_projects is not None else None
@@ -903,6 +907,7 @@ async def preview_raw_memory_promotion(
         accessible_projects=accessible_projects,
         accessible_teams=accessible_teams,
         accessible_delegations=accessible_delegations,
+        allowed_memory_scope_keys=allowed_memory_scope_keys,
     )
     if isinstance(plan, ReflectionPromotionResult):
         return _promotion_preview_from_denial(plan)
@@ -1462,6 +1467,16 @@ async def _resolve_reflection_promotion_plan(
         project=project,
         candidate_memory=candidate_memory,
     )
+    api_key_denial = _api_key_target_denial(
+        allowed_memory_scope_keys=allowed_memory_scope_keys,
+        candidate_memory=candidate_memory,
+        principal_id=principal_id,
+        target_scope=target_scope,
+        target_scope_key=target_scope_key,
+        raw_source_ids=raw_source_ids,
+    )
+    if api_key_denial is not None:
+        return api_key_denial
     broadest_scope = _broadest_scope(input_memories)
     if _has_mixed_scope_inputs(input_memories) and target_scope is not broadest_scope:
         return _promotion_denied(
@@ -1606,6 +1621,16 @@ async def _resolve_raw_memory_promotion_plan(
         project=project,
         candidate_memory=memory,
     )
+    api_key_denial = _api_key_target_denial(
+        allowed_memory_scope_keys=allowed_memory_scope_keys,
+        candidate_memory=memory,
+        principal_id=principal_id,
+        target_scope=target_scope,
+        target_scope_key=target_scope_key,
+        raw_source_ids=raw_source_ids,
+    )
+    if api_key_denial is not None:
+        return api_key_denial
     promotion_candidate = _candidate_from_raw_memory(
         memory,
         target_scope=target_scope,

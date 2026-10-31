@@ -70,7 +70,9 @@ async def preview_reflection_promotion(
         request=request,
         http_request=http_request,
     )
+    accessible_teams = await memory_auth.accessible_teams_for_share(ctx=ctx)
     result = await preview_reflection_candidate_promotion(
+        allowed_memory_scope_keys=ctx.api_key_memory_scope_keys,
         candidate_id=request.candidate_id,
         organization_id=str(org.id),
         principal_id=principal_id,
@@ -79,6 +81,7 @@ async def preview_reflection_promotion(
         domain=request.domain,
         project=request.project,
         accessible_projects=accessible_projects,
+        accessible_teams=accessible_teams,
         writable_projects=await memory_auth.writable_projects_for_memory(ctx=ctx),
     )
     await memory_auth.log_memory_audit(
@@ -131,7 +134,9 @@ async def preview_memory_promotion(
         request=request,
         http_request=http_request,
     )
+    accessible_teams = await memory_auth.accessible_teams_for_share(ctx=ctx)
     result = await preview_reflection_candidate_promotion(
+        allowed_memory_scope_keys=ctx.api_key_memory_scope_keys,
         candidate_id=request.candidate_id,
         organization_id=str(org.id),
         principal_id=principal_id,
@@ -140,6 +145,7 @@ async def preview_memory_promotion(
         domain=request.domain,
         project=request.project,
         accessible_projects=accessible_projects,
+        accessible_teams=accessible_teams,
         writable_projects=await memory_auth.writable_projects_for_memory(ctx=ctx),
     )
     if result.reason == "not_reflection_candidate":
@@ -152,6 +158,7 @@ async def preview_memory_promotion(
             surface="memory_promote_preview",
         )
         result = await preview_raw_memory_promotion(
+            allowed_memory_scope_keys=ctx.api_key_memory_scope_keys,
             raw_memory_id=request.candidate_id,
             organization_id=str(org.id),
             principal_id=principal_id,
@@ -160,6 +167,7 @@ async def preview_memory_promotion(
             domain=request.domain,
             project=request.project,
             accessible_projects=accessible_projects,
+            accessible_teams=accessible_teams,
             writable_projects=await memory_auth.writable_projects_for_memory(ctx=ctx),
         )
     await memory_auth.log_memory_audit(
@@ -212,6 +220,7 @@ async def promote_reflection_candidate(
             request=request,
             http_request=http_request,
         )
+        accessible_teams = await memory_auth.accessible_teams_for_share(ctx=ctx)
         result = await promote_reflection_candidate_review(
             allowed_memory_scope_keys=ctx.api_key_memory_scope_keys,
             candidate_id=request.candidate_id,
@@ -223,6 +232,7 @@ async def promote_reflection_candidate(
             project=request.project,
             related_to=request.related_to,
             accessible_projects=accessible_projects,
+            accessible_teams=accessible_teams,
             writable_projects=await memory_auth.writable_projects_for_memory(ctx=ctx),
         )
         await memory_auth.log_memory_audit(
@@ -290,6 +300,7 @@ async def promote_memory(
             request=request,
             http_request=http_request,
         )
+        accessible_teams = await memory_auth.accessible_teams_for_share(ctx=ctx)
         result = await promote_reflection_candidate_review(
             allowed_memory_scope_keys=ctx.api_key_memory_scope_keys,
             candidate_id=request.candidate_id,
@@ -301,6 +312,7 @@ async def promote_memory(
             project=request.project,
             related_to=request.related_to,
             accessible_projects=accessible_projects,
+            accessible_teams=accessible_teams,
             writable_projects=await memory_auth.writable_projects_for_memory(ctx=ctx),
         )
         if result.reason == "not_reflection_candidate":
@@ -323,6 +335,7 @@ async def promote_memory(
                 project=request.project,
                 related_to=request.related_to,
                 accessible_projects=accessible_projects,
+                accessible_teams=accessible_teams,
                 writable_projects=await memory_auth.writable_projects_for_memory(ctx=ctx),
             )
         await memory_auth.log_memory_audit(

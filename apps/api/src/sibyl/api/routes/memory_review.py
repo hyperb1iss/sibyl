@@ -172,6 +172,7 @@ async def _auto_review_reflection_candidate(
     org: AuthOrganization,
     ctx: AuthContext,
     accessible_projects: set[str] | None = None,
+    accessible_teams: set[str] | None = None,
 ) -> ReflectionAutonomyResponse:
     principal_id = ctx.user_id
     if not principal_id:
@@ -183,7 +184,10 @@ async def _auto_review_reflection_candidate(
             request=request,
             http_request=http_request,
         )
+    if accessible_teams is None:
+        accessible_teams = await memory_auth.accessible_teams_for_share(ctx=ctx)
     preview = await preview_reflection_candidate_promotion(
+        allowed_memory_scope_keys=ctx.api_key_memory_scope_keys,
         candidate_id=request.candidate_id,
         organization_id=str(org.id),
         principal_id=principal_id,
@@ -192,6 +196,7 @@ async def _auto_review_reflection_candidate(
         domain=request.domain,
         project=request.project,
         accessible_projects=accessible_projects,
+        accessible_teams=accessible_teams,
         writable_projects=await memory_auth.writable_projects_for_memory(ctx=ctx),
     )
     confidence_threshold = (
@@ -217,6 +222,7 @@ async def _auto_review_reflection_candidate(
             project=request.project,
             related_to=request.related_to,
             accessible_projects=accessible_projects,
+            accessible_teams=accessible_teams,
             writable_projects=await memory_auth.writable_projects_for_memory(ctx=ctx),
         )
 
@@ -305,6 +311,7 @@ async def drain_reflection_review(
         )
         source_accessible_projects = await memory_auth.list_accessible_project_graph_ids(ctx)
         readable_projects = {str(project_id) for project_id in source_accessible_projects or set()}
+        accessible_teams = await memory_auth.accessible_teams_for_share(ctx=ctx)
         results: list[ReflectionReviewDrainItem] = []
         for candidate in candidates:
             policy_context = MemoryPolicyContext(
@@ -315,6 +322,7 @@ async def drain_reflection_review(
                 scope_key=candidate.scope_key,
                 project_id=serialization.memory_project_id(candidate),
                 accessible_projects=readable_projects,
+                accessible_teams=accessible_teams,
                 agent_id=candidate.agent_id,
                 source_surface="reflection_review_drain",
             )
@@ -350,6 +358,7 @@ async def drain_reflection_review(
                     org=org,
                     ctx=ctx,
                     accessible_projects=accessible_projects,
+                    accessible_teams=accessible_teams,
                 )
                 archived = False
                 review_state = response.review_state
