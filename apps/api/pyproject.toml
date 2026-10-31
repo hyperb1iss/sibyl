@@ -98,7 +98,7 @@ dev = [
     "pytest-asyncio",
     "pytest-cov",
     "ruff",
-    "ty>=0.0.91",
+    "ty>=0.0.93",
     # Cross-adapter fixtures invoke the installed workspace CLI over HTTP.
     "sibyl-dev",
 ]
