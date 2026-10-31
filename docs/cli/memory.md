@@ -112,9 +112,9 @@ Raw memories and artifacts carry a scope that controls who can recall them:
 | `private` | The capturing principal only (default) |
 | `project` | Members working in a project           |
 | `team`    | A named team                           |
-| `org`     | Organization-wide memory               |
 
-`--scope-key` pins a scope to a specific project, team, or organization bucket.
+`--scope-key` pins a scope to a specific project or team. Organization-wide memory is not enabled
+yet, so the CLI refuses `--scope org` until its policy ships.
 
 ---
 

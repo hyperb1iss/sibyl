@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterator
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
@@ -266,6 +266,8 @@ async def test_remember_raw_uses_current_org_and_principal() -> None:
                 "proposed_scope": None,
             },
             "diary": False,
+            # No scope named and no project: private, and the audit says why.
+            "scope_resolution": "default_scope_no_project",
             "tag_count": 1,
         },
     )
@@ -3863,3 +3865,181 @@ async def test_correction_preview_honors_an_explicit_expected_revision(correctio
         "expected": "3",
         "actual": "4",
     }
+
+
+@pytest.mark.asyncio
+async def test_remember_raw_without_a_scope_lands_in_a_shared_project() -> None:
+    from sibyl_core.auth.memory_policy import DefaultWriteScope
+
+    org = _org()
+    resolved = DefaultWriteScope(MemoryScope.PROJECT, "project_oncall", "default_scope_project")
+    with (
+        patch(
+            "sibyl.api.routes.memory_auth.resolve_capture_default_scope",
+            AsyncMock(return_value=resolved),
+        ) as resolve,
+        patch("sibyl.api.routes.memory_auth.authorize_project_scope_write", AsyncMock()),
+        patch(
+            "sibyl.api.routes.memory_auth.list_accessible_project_graph_ids",
+            AsyncMock(return_value={"project_oncall"}),
+        ),
+        patch(
+            "sibyl.api.routes.memory_raw.remember_raw_memory",
+            AsyncMock(
+                return_value=_memory(
+                    organization_id=str(org.id),
+                    memory_scope=MemoryScope.PROJECT,
+                    scope_key="project_oncall",
+                )
+            ),
+        ) as remember,
+        patch("sibyl.api.routes.memory_auth.log_memory_audit_event", AsyncMock()) as audit,
+        patch("sibyl.api.routes.memory_raw.publish_raw_capture_changed", AsyncMock()),
+    ):
+        response = await remember_raw(
+            RawMemoryRememberRequest(
+                raw_content="Checkout 500s trace to the payments pool.",
+                metadata={"project_id": "project_oncall"},
+            ),
+            http_request=_http_request(),
+            org=org,
+            ctx=_ctx(),
+        )
+
+    assert resolve.await_args.kwargs["project_id"] == "project_oncall"
+    assert remember.await_args.kwargs["memory_scope"] == "project"
+    assert remember.await_args.kwargs["scope_key"] == "project_oncall"
+    assert response.memory_scope == "project"
+    assert response.scope_resolution == "default_scope_project"
+    assert audit.await_args.kwargs["details"]["scope_resolution"] == "default_scope_project"
+
+
+@pytest.mark.asyncio
+async def test_remember_raw_with_an_explicit_scope_ignores_the_project_default() -> None:
+    org = _org()
+    with (
+        patch("sibyl.api.routes.memory_auth.resolve_capture_default_scope", AsyncMock()) as resolve,
+        patch(
+            "sibyl.api.routes.memory_raw.remember_raw_memory",
+            AsyncMock(return_value=_memory(organization_id=str(org.id))),
+        ) as remember,
+        patch("sibyl.api.routes.memory_auth.log_memory_audit_event", AsyncMock()),
+        patch("sibyl.api.routes.memory_raw.publish_raw_capture_changed", AsyncMock()),
+    ):
+        response = await remember_raw(
+            RawMemoryRememberRequest(
+                raw_content="My own shell alias, not the team's business.",
+                memory_scope="private",
+                metadata={"project_id": "project_oncall"},
+            ),
+            http_request=_http_request(),
+            org=org,
+            ctx=_ctx(),
+        )
+
+    resolve.assert_not_awaited()
+    assert remember.await_args.kwargs["memory_scope"] == "private"
+    assert response.scope_resolution is None
+
+
+@pytest.mark.asyncio
+async def test_remember_raw_diary_never_consults_the_project_default() -> None:
+    org = _org()
+    with (
+        patch(
+            "sibyl.api.routes.memory_auth.get_project_default_memory_scope", AsyncMock()
+        ) as lookup,
+        patch("sibyl.api.routes.memory_auth.authorize_project_filter", AsyncMock()),
+        patch(
+            "sibyl.api.routes.memory_raw.remember_raw_memory",
+            AsyncMock(return_value=_memory(organization_id=str(org.id))),
+        ) as remember,
+        patch("sibyl.api.routes.memory_auth.log_memory_audit_event", AsyncMock()),
+        patch("sibyl.api.routes.memory_raw.publish_raw_capture_changed", AsyncMock()),
+    ):
+        await remember_raw(
+            RawMemoryRememberRequest(
+                raw_content="Diary: the deploy felt shaky.",
+                diary=True,
+                agent_id="oncall-agent",
+                project_id="project_oncall",
+            ),
+            http_request=_http_request(),
+            org=org,
+            ctx=_ctx(),
+        )
+
+    lookup.assert_not_awaited()
+    assert remember.await_args.kwargs["memory_scope"] == "private"
+
+
+@pytest.mark.asyncio
+async def test_remember_raw_refuses_a_scope_key_without_a_scope() -> None:
+    with (
+        patch("sibyl.api.routes.memory_raw.remember_raw_memory", AsyncMock()) as remember,
+        pytest.raises(HTTPException) as exc_info,
+    ):
+        await remember_raw(
+            RawMemoryRememberRequest(raw_content="note", scope_key="team-uuid"),
+            http_request=_http_request(),
+            org=_org(),
+            ctx=_ctx(),
+        )
+
+    assert exc_info.value.status_code == 422
+    remember.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_remember_raw_stamps_a_validated_expiry() -> None:
+    org = _org()
+    before = datetime.now(UTC)
+    with (
+        patch(
+            "sibyl.api.routes.memory_raw.remember_raw_memory",
+            AsyncMock(return_value=_memory(organization_id=str(org.id), source_id="incident")),
+        ) as remember,
+        patch("sibyl.api.routes.memory_auth.log_memory_audit_event", AsyncMock()),
+        patch("sibyl.api.routes.memory_raw.publish_raw_capture_changed", AsyncMock()),
+    ):
+        await remember_raw(
+            RawMemoryRememberRequest(
+                title="Checkout outage",
+                raw_content="Checkout is down; hold every deploy.",
+                source_id="incident",
+                expires_in="2h",
+                metadata={"expires_at": "2099-01-01T00:00:00Z"},
+            ),
+            http_request=_http_request(),
+            org=org,
+            ctx=_ctx(),
+        )
+
+    kwargs = remember.await_args.kwargs
+    expires_at = kwargs["expires_at"]
+    assert timedelta(hours=2) - timedelta(seconds=5) <= expires_at - before
+    assert expires_at - before <= timedelta(hours=2, seconds=5)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("expires_in", ["45d", "soon", "10s"])
+async def test_remember_raw_rejects_an_expiry_outside_the_cap(expires_in: str) -> None:
+    org = _org()
+    remember = AsyncMock()
+    with (
+        patch("sibyl.api.routes.memory_raw.remember_raw_memory", remember),
+        pytest.raises(HTTPException) as raised,
+    ):
+        await remember_raw(
+            RawMemoryRememberRequest(
+                title="Outage",
+                raw_content="Body",
+                expires_in=expires_in,
+            ),
+            http_request=_http_request(),
+            org=org,
+            ctx=_ctx(),
+        )
+
+    assert raised.value.status_code == 400
+    remember.assert_not_awaited()

@@ -446,6 +446,11 @@ async def test_remember_mcp_memory_scopes_project_metadata(monkeypatch) -> None:
     link_raw = AsyncMock(return_value=True)
 
     with (
+        # A project that opted into project scope: an unscoped remember lands there.
+        patch(
+            "sibyl.mcp_tools.policy.get_project_default_memory_scope",
+            AsyncMock(return_value=MemoryScope.PROJECT),
+        ),
         patch("sibyl.mcp_tools.context.require_context", AsyncMock(return_value=ctx)),
         patch(
             "sibyl.mcp_tools.context.get_accessible_projects", AsyncMock(return_value={"project-a"})
@@ -480,6 +485,8 @@ async def test_remember_mcp_memory_scopes_project_metadata(monkeypatch) -> None:
         "raw_memory_id": "raw_123",
         "raw_source_id": "mcp:remember:decision",
         "policy_reason": "same_scope_write_allowed",
+        "memory_scope": "project",
+        "scope_resolution": "default_scope_project",
     }
     operation_id = receipt.pop("operation_id")
     UUID(operation_id)
@@ -1614,6 +1621,10 @@ async def test_reflect_mcp_memory_links_single_active_task_when_persisting(monke
     explore = AsyncMock(return_value=SimpleNamespace(entities=[SimpleNamespace(id="task_active")]))
 
     with (
+        patch(
+            "sibyl.mcp_tools.policy.get_project_default_memory_scope",
+            AsyncMock(return_value=MemoryScope.PROJECT),
+        ),
         patch("sibyl.mcp_tools.context.require_context", AsyncMock(return_value=ctx)),
         patch(
             "sibyl.mcp_tools.context.get_accessible_projects", AsyncMock(return_value={"project-a"})

@@ -88,6 +88,13 @@ Stores verbatim memory before extraction or graph reflection.
 | `metadata`        | object   | No       | `{}`      | Auxiliary metadata                   |
 | `provenance`      | object   | No       | `{}`      | Source provenance                    |
 | `capture_surface` | string   | No       | `api`     | Capture surface label                |
+| `expires_in`      | string   | No       | -         | Retire after a duration like `2h`    |
+| `expires_at`      | datetime | No       | -         | Retire at this instant (with offset) |
+
+Set at most one of `expires_in` and `expires_at`, between one minute and 30 days out. The server
+stamps the deadline into `metadata.expires_at` (a caller cannot set it through `metadata`), and a
+scheduled sweep marks the capture stale with the reason `expired` once it passes. See
+[time-boxed team notices](../users/sharing-memory.md#time-boxed-team-notices).
 
 **Response:**
 

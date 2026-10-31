@@ -615,6 +615,12 @@ _SCOPE_READERS_THAT_DO_NOT_AUTHORIZE = {
     "services/content_raw_persistence.py::save_raw_memory": "Reject creation or reclassification into the retired shared scope.",
     "services/memory_identity.py::reflection_identity": "binds evidence identity to its authorized scope",
     "audit/filters.py::audit_event_matches_resource": "filters an audit log by a recorded value",
+    "memory_pipeline/capture.py::MemoryCaptureService.capture": (
+        "write stamp: copies the scope the authorized raw write landed in onto its graph row"
+    ),
+    "memory_pipeline/capture.py::MemoryCaptureResult.to_payload": (
+        "receipt: reports the scope a completed write landed in"
+    ),
     "migrate/personal_archive_candidates.py::_audience": (
         "classifies untrusted source scopes into mapped or quarantine candidates; "
         "does not authorize destination visibility"
@@ -864,3 +870,76 @@ def test_caller_cannot_supply_reconciliation_pending_owners(pending):
     )
     assert "lifecycle_reconciliation_pending" not in stamped
     assert stamped["note"] == "keep"
+
+
+# --- default write scope -----------------------------------------------------
+
+
+def _default(**overrides):
+    from sibyl_core.auth.memory_policy import resolve_default_write_scope
+
+    values = {
+        "project_id": "project_a",
+        "project_default": MemoryScope.PROJECT,
+        "writable_projects": {"project_a"},
+        "project_scope_granted": True,
+        "private_scope_granted": True,
+    }
+    values.update(overrides)
+    return resolve_default_write_scope(**values)
+
+
+def test_default_write_scope_lands_in_a_shared_project_for_contributors() -> None:
+    resolved = _default()
+    assert (resolved.memory_scope, resolved.scope_key, resolved.reason) == (
+        MemoryScope.PROJECT,
+        "project_a",
+        "default_scope_project",
+    )
+
+
+def test_default_write_scope_is_private_without_a_project() -> None:
+    resolved = _default(project_id=None)
+    assert (resolved.memory_scope, resolved.scope_key) == (MemoryScope.PRIVATE, None)
+    assert resolved.reason == "default_scope_no_project"
+
+
+def test_default_write_scope_is_private_in_an_unshared_project() -> None:
+    resolved = _default(project_default=MemoryScope.PRIVATE)
+    assert resolved.memory_scope is MemoryScope.PRIVATE
+    assert resolved.reason == "default_scope_project_private"
+
+
+def test_default_write_scope_never_widens_on_a_missing_default() -> None:
+    assert _default(project_default=None).memory_scope is MemoryScope.PRIVATE
+
+
+def test_default_write_scope_falls_back_to_private_for_readers() -> None:
+    for writable in (set(), None, {"project_b"}):
+        resolved = _default(writable_projects=writable)
+        assert resolved.memory_scope is MemoryScope.PRIVATE
+        assert resolved.reason == "default_scope_requires_contributor"
+
+
+def test_default_write_scope_respects_api_key_memory_grants() -> None:
+    resolved = _default(project_scope_granted=False)
+    assert resolved.memory_scope is MemoryScope.PRIVATE
+    assert resolved.reason == "default_scope_api_key_denied"
+
+
+def test_project_only_credential_lands_in_its_project_even_when_unshared() -> None:
+    resolved = _default(project_default=MemoryScope.PRIVATE, private_scope_granted=False)
+    assert (resolved.memory_scope, resolved.scope_key, resolved.reason) == (
+        MemoryScope.PROJECT,
+        "project_a",
+        "default_scope_credential",
+    )
+
+
+def test_project_only_credential_without_project_write_stays_private() -> None:
+    resolved = _default(
+        project_default=MemoryScope.PRIVATE,
+        private_scope_granted=False,
+        writable_projects=set(),
+    )
+    assert resolved.memory_scope is MemoryScope.PRIVATE

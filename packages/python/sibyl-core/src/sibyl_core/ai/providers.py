@@ -104,21 +104,6 @@ ANTHROPIC_MODELS_WITHOUT_FORCED_TOOLS = frozenset(
     {"claude-opus-5-5", "claude-sonnet-5-5", "claude-fable-5-1", "claude-mythos-5-1"}
 )
 
-#: Profile corrections for Claude models newer than the installed pydantic-ai.
-#: pydantic-ai 2.54 matches no profile rule for Claude Haiku 5.5, so it would
-#: send ``temperature`` (a 400 on this model), skip effort and adaptive
-#: thinking, and refuse native structured output, all of which the model takes.
-ANTHROPIC_PROFILE_PATCHES: dict[str, AnthropicModelProfile] = {
-    "claude-haiku-5-5": AnthropicModelProfile(
-        supports_json_schema_output=True,
-        anthropic_supports_adaptive_thinking=True,
-        anthropic_supports_effort=True,
-        anthropic_supports_xhigh_effort=True,
-        anthropic_disallows_sampling_settings=True,
-        anthropic_disallows_budget_thinking=True,
-    ),
-}
-
 #: Claude models whose Bedrock InvokeModel route accepts native structured
 #: output (``output_config.format``). AWS documents Sonnet 4.5, Haiku 4.5,
 #: Opus 4.5 and Opus 4.6; Sonnet 4.6 also answers it live, and Haiku 5.5 and
@@ -210,12 +195,10 @@ _ANTHROPIC_OUTPUT_MODE_PROFILE = ModelProfile(forced_tool_choice_disables_thinki
 
 
 def anthropic_profile(model_id: str) -> ModelProfile:
-    """pydantic-ai's profile for a Claude model ID, with Sibyl's corrections applied."""
-    profile = merge_profile(
+    """pydantic-ai's profile for a Claude model ID, with Sibyl's output mode applied."""
+    return merge_profile(
         AnthropicProvider.model_profile(model_id) or {}, _ANTHROPIC_OUTPUT_MODE_PROFILE
     )
-    patch = ANTHROPIC_PROFILE_PATCHES.get(canonical_model_alias(model_id))
-    return merge_profile(profile, patch) if patch else profile
 
 
 def _bedrock_profile(

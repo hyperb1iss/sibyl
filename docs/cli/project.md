@@ -7,6 +7,7 @@ Project management commands. Projects are the top-level container for tasks and 
 - `sibyl project list` - List all projects
 - `sibyl project show` - Show project details
 - `sibyl project create` - Create a project
+- `sibyl project update` - Change project settings, like where new memories land
 - `sibyl project progress` - Show project progress
 - `sibyl project link` - Link directory to project
 - `sibyl project relink` - Repair the link for the current directory
@@ -96,6 +97,8 @@ Project proj_abc1
   Progress: ████████████░░░░░░░░ 71%
 
   Tech Stack: typescript, express, postgresql
+
+  Default write scope: private (each writer's captures stay their own)
 ```
 
 ### JSON Output
@@ -167,6 +170,38 @@ Output:
 ```
 Project created: proj_abc123def456
 ```
+
+---
+
+## project update
+
+Change project settings. Requires the project owner or a maintainer, or an organization admin.
+
+### Synopsis
+
+```bash
+sibyl project update <project> --default-scope <private|project> [options]
+```
+
+### Options
+
+| Option            | Short | Description                                                    |
+| ----------------- | ----- | -------------------------------------------------------------- |
+| `--default-scope` |       | Where captures that name no scope land: `private` or `project` |
+| `--json`          | `-j`  | JSON output                                                    |
+
+`private` is the default for every project: each writer's memories stay their own. `project` shares
+unscoped captures with everyone who can read the project, which is the whole organization for a
+project with organization visibility. Writers need contributor access for a capture to land in the
+project; anyone else's capture still lands private. An explicit `--scope` on `remember` always wins.
+
+### Example
+
+```bash
+sibyl project update proj_oncall --default-scope project
+```
+
+`sibyl project show` prints the current default.
 
 ---
 

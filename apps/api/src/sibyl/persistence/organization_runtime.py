@@ -12,6 +12,7 @@ from sibyl.persistence.surreal.organization_runtime import (
     delete_org,
     delete_org_invitation,
     get_org,
+    get_project_memory_settings,
     list_org_ids,
     list_org_invitations,
     list_org_members,
@@ -23,6 +24,7 @@ from sibyl.persistence.surreal.organization_runtime import (
     update_org,
     update_org_member_role,
     update_project_member_role,
+    update_project_memory_settings,
     validate_org_invitation_for_signup,
 )
 
@@ -36,6 +38,7 @@ __all__ = [
     "delete_org",
     "delete_org_invitation",
     "get_org",
+    "get_project_memory_settings",
     "list_org_ids",
     "list_org_invitations",
     "list_org_members",
@@ -47,5 +50,6 @@ __all__ = [
     "update_org",
     "update_org_member_role",
     "update_project_member_role",
+    "update_project_memory_settings",
     "validate_org_invitation_for_signup",
 ]

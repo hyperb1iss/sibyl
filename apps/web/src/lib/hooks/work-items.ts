@@ -6,6 +6,7 @@ import type {
   CreateNoteRequest,
   EpicStatus,
   OrgMetricsResponse,
+  ProjectDefaultMemoryScope,
   ProjectMetricsResponse,
   ProjectRole,
   ProjectSummariesResponse,
@@ -218,6 +219,33 @@ export function useUpdateProjectMemberRole() {
     }) => projectsApi.members.updateRole(projectId, userId, role),
     onSuccess: (_data, variables) => {
       queryClient.invalidateQueries({ queryKey: queryKeys.projects.members(variables.projectId) });
+    },
+  });
+}
+
+export function useProjectSettings(projectId: string) {
+  return useQuery({
+    queryKey: queryKeys.projects.settings(projectId),
+    queryFn: () => projectsApi.settings.get(projectId),
+    enabled: !!projectId,
+    retry: false,
+    staleTime: TIMING.STALE_TIME,
+  });
+}
+
+export function useUpdateProjectSettings() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({
+      projectId,
+      defaultMemoryScope,
+    }: {
+      projectId: string;
+      defaultMemoryScope: ProjectDefaultMemoryScope;
+    }) => projectsApi.settings.update(projectId, defaultMemoryScope),
+    onSuccess: (data, variables) => {
+      queryClient.setQueryData(queryKeys.projects.settings(variables.projectId), data);
     },
   });
 }

@@ -14,6 +14,7 @@ from sibyl.api.context_audit import (
     log_denied_render_audit,
     log_reflection_audit,
 )
+from sibyl.api.routes import memory_auth
 from sibyl.api.schemas import (
     ContextPackRequest,
     ContextPackResponse,
@@ -689,6 +690,11 @@ async def reflect_context(
             accessible_projects=accessible_projects,
         )
 
+        # Same resolution as remember: a reflection persisted in an unshared
+        # project stays the writer's own, whichever surface sent it.
+        resolved_scope = await memory_auth.resolve_capture_default_scope(
+            ctx=ctx, project_id=request.project
+        )
         pack = await reflect_memory(
             allowed_memory_scope_keys=ctx.api_key_memory_scope_keys,
             content=request.content,
@@ -705,8 +711,8 @@ async def reflect_context(
                 if request.persist
                 else set()
             ),
-            memory_scope="project" if request.project else "private",
-            scope_key=request.project,
+            memory_scope=resolved_scope.memory_scope.value,
+            scope_key=resolved_scope.scope_key,
             persist=request.persist,
             persist_source=request.persist_source,
             persist_review=request.persist_review,

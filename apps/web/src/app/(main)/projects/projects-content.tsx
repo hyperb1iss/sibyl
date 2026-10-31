@@ -41,6 +41,7 @@ import {
 import { Spinner } from '@/components/ui/spinner';
 import { Tooltip } from '@/components/ui/tooltip';
 import type {
+  ProjectDefaultMemoryScope,
   ProjectRole,
   ProjectSummariesResponse,
   ProjectSummary,
@@ -55,12 +56,14 @@ import {
   useMe,
   useProjectMembers,
   useProjectMetrics,
+  useProjectSettings,
   useProjectSummaries,
   useProjects,
   useRemoveProjectMember,
   useTasks,
   useUpdateEntity,
   useUpdateProjectMemberRole,
+  useUpdateProjectSettings,
 } from '@/lib/hooks';
 import { useClientPrefs } from '@/lib/storage';
 
@@ -1039,6 +1042,7 @@ function ProjectDetail({ project, stats, tasks, onDeleted }: ProjectDetailProps)
           Team
         </h2>
         <ProjectMembersList projectId={project.id} />
+        <ProjectMemorySharing projectId={project.id} />
       </div>
 
       {/* Empty state for no tasks */}
@@ -1125,6 +1129,76 @@ function ProjectDetailSkeleton() {
           <div className="h-12 w-full bg-sc-bg-elevated rounded" />
         </div>
       </div>
+    </div>
+  );
+}
+
+// =============================================================================
+// ProjectMemorySharing Component
+// =============================================================================
+
+const MEMORY_SHARING_OPTIONS: Record<
+  ProjectDefaultMemoryScope,
+  { label: string; description: string }
+> = {
+  private: {
+    label: 'Private',
+    description: "Each person's memories stay their own unless they choose to share one.",
+  },
+  project: {
+    label: 'Shared with project',
+    description: 'Memories from contributors are visible to everyone who can see this project.',
+  },
+};
+
+function ProjectMemorySharing({ projectId }: { projectId: string }) {
+  const { data, isLoading, isError } = useProjectSettings(projectId);
+  const updateSettings = useUpdateProjectSettings();
+
+  if (isLoading || isError || !data) return null;
+
+  const current = MEMORY_SHARING_OPTIONS[data.default_memory_scope];
+
+  const handleChange = async (value: ProjectDefaultMemoryScope) => {
+    try {
+      await updateSettings.mutateAsync({ projectId, defaultMemoryScope: value });
+      toast.success(`Memory sharing: ${MEMORY_SHARING_OPTIONS[value].label}`);
+    } catch {
+      toast.error('Failed to update memory sharing');
+    }
+  };
+
+  return (
+    <div className="mt-4 pt-4 border-t border-sc-fg-subtle/10 flex items-start gap-3">
+      <div className="flex-1 min-w-0">
+        <p className="text-sm font-medium text-sc-fg-primary">Memory sharing</p>
+        <p className="text-xs text-sc-fg-muted">{current.description}</p>
+      </div>
+      {data.can_manage ? (
+        <Select
+          value={data.default_memory_scope}
+          onValueChange={value => handleChange(value as ProjectDefaultMemoryScope)}
+          disabled={updateSettings.isPending}
+        >
+          <SelectTrigger
+            aria-label="Memory sharing"
+            className="min-w-[170px] w-[170px] py-1 text-xs"
+          >
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {(Object.keys(MEMORY_SHARING_OPTIONS) as ProjectDefaultMemoryScope[]).map(scope => (
+              <SelectItem key={scope} value={scope}>
+                {MEMORY_SHARING_OPTIONS[scope].label}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      ) : (
+        <span className="text-xs text-sc-fg-muted px-2 py-1 bg-sc-bg-highlight rounded-full">
+          {current.label}
+        </span>
+      )}
     </div>
   );
 }
