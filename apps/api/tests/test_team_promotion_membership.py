@@ -205,6 +205,22 @@ async def test_rest_preview_authorizes_team_against_membership(
         assert "unverified_membership" in response.policy_reasons
 
 
+@pytest.mark.parametrize("route", _PREVIEW_ROUTES)
+async def test_rest_preview_matches_apply_for_a_restricted_api_key(store, route) -> None:
+    store["candidate-1"] = _candidate()
+    with ExitStack() as stack:
+        _rest_auth(stack, teams={TEAM})
+        response = await route(
+            ReflectionPromotionRequest(candidate_id="candidate-1", promote_to_scope="team"),
+            http_request=_http_request(),
+            org=SimpleNamespace(id=ORG_ID),
+            ctx=_ctx(api_key_memory_scope_keys={f"private\x1f{USER_ID}"}),
+        )
+
+    assert response.allowed is False
+    assert response.reason == "api_key_memory_space_denied"
+
+
 @pytest.mark.parametrize("route", [promote_reflection_candidate, promote_memory])
 async def test_rest_promote_keeps_a_restricted_api_key_out_of_teams(store, route) -> None:
     """A key granted only private memory cannot publish its owner's candidate to a team."""

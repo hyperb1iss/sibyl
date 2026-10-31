@@ -2677,6 +2677,7 @@ async def test_preview_reflection_promotion_verifies_project_target() -> None:
         require_existing_project=True,
     )
     preview.assert_awaited_once_with(
+        allowed_memory_scope_keys=None,
         candidate_id="candidate-1",
         organization_id=str(org.id),
         principal_id="user-123",
@@ -2781,6 +2782,7 @@ async def test_preview_memory_promotion_routes_imported_raw_memory() -> None:
 
     reflection_preview.assert_awaited_once()
     raw_preview.assert_awaited_once_with(
+        allowed_memory_scope_keys=None,
         raw_memory_id="raw-1",
         organization_id=str(org.id),
         principal_id="user-123",
@@ -2997,6 +2999,7 @@ async def test_auto_review_reflection_candidate_promotes_safe_candidate() -> Non
         require_existing_project=True,
     )
     preview_call.assert_awaited_once_with(
+        allowed_memory_scope_keys=None,
         candidate_id="candidate-1",
         organization_id=str(org.id),
         principal_id="user-123",

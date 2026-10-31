@@ -824,6 +824,7 @@ async def preview_reflection_candidate_promotion(
     writable_projects: Iterable[str] | None = None,
     accessible_teams: Iterable[str] | None = None,
     accessible_delegations: Iterable[str] | None = None,
+    allowed_memory_scope_keys: Iterable[str] | None = None,
 ) -> ReflectionPromotionPreview:
     accessible_projects = (
         frozenset(accessible_projects) if accessible_projects is not None else None
@@ -840,6 +841,7 @@ async def preview_reflection_candidate_promotion(
         accessible_projects=accessible_projects,
         accessible_teams=accessible_teams,
         accessible_delegations=accessible_delegations,
+        allowed_memory_scope_keys=allowed_memory_scope_keys,
     )
     if isinstance(plan, ReflectionPromotionResult):
         return _promotion_preview_from_denial(plan)
@@ -888,6 +890,7 @@ async def preview_raw_memory_promotion(
     writable_projects: Iterable[str] | None = None,
     accessible_teams: Iterable[str] | None = None,
     accessible_delegations: Iterable[str] | None = None,
+    allowed_memory_scope_keys: Iterable[str] | None = None,
 ) -> ReflectionPromotionPreview:
     accessible_projects = (
         frozenset(accessible_projects) if accessible_projects is not None else None
@@ -904,6 +907,7 @@ async def preview_raw_memory_promotion(
         accessible_projects=accessible_projects,
         accessible_teams=accessible_teams,
         accessible_delegations=accessible_delegations,
+        allowed_memory_scope_keys=allowed_memory_scope_keys,
     )
     if isinstance(plan, ReflectionPromotionResult):
         return _promotion_preview_from_denial(plan)

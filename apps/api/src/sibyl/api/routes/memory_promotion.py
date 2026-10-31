@@ -72,6 +72,7 @@ async def preview_reflection_promotion(
     )
     accessible_teams = await memory_auth.accessible_teams_for_share(ctx=ctx)
     result = await preview_reflection_candidate_promotion(
+        allowed_memory_scope_keys=ctx.api_key_memory_scope_keys,
         candidate_id=request.candidate_id,
         organization_id=str(org.id),
         principal_id=principal_id,
@@ -135,6 +136,7 @@ async def preview_memory_promotion(
     )
     accessible_teams = await memory_auth.accessible_teams_for_share(ctx=ctx)
     result = await preview_reflection_candidate_promotion(
+        allowed_memory_scope_keys=ctx.api_key_memory_scope_keys,
         candidate_id=request.candidate_id,
         organization_id=str(org.id),
         principal_id=principal_id,
@@ -156,6 +158,7 @@ async def preview_memory_promotion(
             surface="memory_promote_preview",
         )
         result = await preview_raw_memory_promotion(
+            allowed_memory_scope_keys=ctx.api_key_memory_scope_keys,
             raw_memory_id=request.candidate_id,
             organization_id=str(org.id),
             principal_id=principal_id,
