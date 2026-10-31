@@ -52,6 +52,13 @@ def test_ttl_rejects_anything_else(text: str) -> None:
         parse_capture_ttl(text)
 
 
+def test_absurd_duration_is_a_value_error_not_an_overflow() -> None:
+    with pytest.raises(ValueError, match="at most 30 days"):
+        parse_capture_ttl("99999999999999d")
+    with pytest.raises(ValueError, match="at most 30 days"):
+        resolve_capture_expiry(expires_in="99999999999999d", now=NOW)
+
+
 def test_expiry_resolves_from_duration_or_instant() -> None:
     assert resolve_capture_expiry(now=NOW) is None
     assert resolve_capture_expiry(expires_in="2h", now=NOW) == NOW + timedelta(hours=2)

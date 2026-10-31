@@ -66,7 +66,10 @@ def parse_capture_ttl(text: str) -> timedelta:
         msg = f"expiry {text!r} is not a duration; use forms like 30m, 2h, 1d or 1h30m"
         raise ValueError(msg)
     seconds = sum(int(amount) * _TTL_UNITS[unit] for amount, unit in _TTL_PART.findall(compact))
-    return timedelta(seconds=seconds)
+    try:
+        return timedelta(seconds=seconds)
+    except OverflowError as exc:
+        raise ValueError("expiry can be at most 30 days out") from exc
 
 
 def resolve_capture_expiry(

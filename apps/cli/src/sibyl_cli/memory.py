@@ -212,6 +212,14 @@ def remember_memory(
             "--spans-json, --atomic, and --probe need a graph memory; drop --raw/--diary/--expires."
         )
         raise typer.Exit(code=1)
+    if expires and (parsed_keys or related_ids or task_ids or wait_searchable):
+        # A time-boxed notice is stored verbatim with no graph row, so there is
+        # nothing to key, link, or wait on; refusing beats dropping them silently.
+        error(
+            "--key, --related-to, --task, and --wait-searchable need a graph memory; "
+            "drop them or --expires."
+        )
+        raise typer.Exit(code=1)
     metadata = {
         "capture_mode": "remember",
         "capture_surface": surface,
@@ -250,12 +258,15 @@ def remember_memory(
                     )
                     if resolved_project:
                         metadata["project_id"] = resolved_project
+                    raw_scope_key = scope_key
+                    if memory_scope == "project" and raw_scope_key is None:
+                        raw_scope_key = resolved_project
                     data = await client.remember_raw_memory(
                         title=title,
                         raw_content=resolved_content,
                         source_id=source_id,
                         memory_scope=memory_scope,
-                        scope_key=scope_key,
+                        scope_key=raw_scope_key,
                         diary=diary,
                         agent_id=agent,
                         project_id=resolved_project if diary else None,
@@ -271,10 +282,17 @@ def remember_memory(
                         print_json(data)
                         return
 
-                    label = f"diary entry for {agent}" if diary else "raw memory"
+                    if diary:
+                        label = f"diary entry for {agent}"
+                    elif expires:
+                        label = "team notice" if memory_scope == "team" else "time-boxed notice"
+                    else:
+                        label = "raw memory"
                     success(f"Remembered {label}: {title}")
                     print_mutation_receipt(data)
                     console.print(f"  [dim]ID: {memory_id}[/dim]")
+                    if deadline := (data.get("metadata") or {}).get("expires_at"):
+                        console.print(f"  [dim]Expires: {deadline}[/dim]")
                     if policy_reason := data.get("policy_reason"):
                         console.print(f"  [dim]Policy: {policy_reason}[/dim]")
                     memory_views.print_memory_scope(data)

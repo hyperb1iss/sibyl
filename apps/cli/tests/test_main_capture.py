@@ -1271,10 +1271,14 @@ def test_remember_command_rejects_a_bad_proposed_team(
 def test_org_scope_is_refused_before_any_request(
     mock_get_client: MagicMock, command: str, scope: str
 ) -> None:
-    args = ["remember", "Org note", "Everyone should know."] if command == "remember" else [
-        "context",
-        "org wide",
-    ]
+    args = (
+        ["remember", "Org note", "Everyone should know."]
+        if command == "remember"
+        else [
+            "context",
+            "org wide",
+        ]
+    )
 
     result = CliRunner().invoke(app, [*args, "--scope", scope])
 
@@ -3334,13 +3338,75 @@ def test_remember_expires_stores_a_time_boxed_raw_capture(
     assert payload["memory_scope"] == "team"
     assert payload["scope_key"] == "team-uuid"
     mock_client.create_entity.assert_not_called()
+    assert "Remembered team notice: Checkout outage" in _strip_ansi(result.stdout)
 
 
-def test_remember_expires_refuses_graph_only_options() -> None:
-    result = CliRunner().invoke(app, ["remember", "Outage", "Body", "--expires", "1h", "--atomic"])
+@pytest.mark.parametrize(
+    "extra",
+    [
+        ["--atomic"],
+        ["--key", "ERR_CHECKOUT"],
+        ["--related-to", "decision_1"],
+        ["--task", "task_1"],
+        ["--wait-searchable"],
+    ],
+)
+def test_remember_expires_refuses_graph_only_options(extra: list[str]) -> None:
+    result = CliRunner().invoke(app, ["remember", "Outage", "Body", "--expires", "1h", *extra])
 
     assert result.exit_code == 1
     assert "--expires" in _strip_ansi(result.stdout + (result.stderr or ""))
+
+
+@patch("sibyl_cli.memory.resolve_project_reference", AsyncMock(return_value="project_123"))
+@patch("sibyl_cli.memory.resolve_project_from_cwd", return_value="project_123")
+@patch("sibyl_cli.memory.get_client")
+def test_remember_expires_in_project_scope_fills_the_linked_project_key(
+    mock_get_client: MagicMock,
+    _mock_resolve_project_from_cwd: MagicMock,
+) -> None:
+    mock_client = _mock_capture_client()
+    mock_client.remember_raw_memory = AsyncMock(
+        return_value={
+            "id": "raw_123",
+            "source_id": "cli:manual",
+            "memory_scope": "project",
+            "scope_key": "project_123",
+            "metadata": {"expires_at": "2026-10-30T14:00:00Z"},
+        }
+    )
+    mock_get_client.return_value = _FakeClientContext(mock_client)
+
+    result = CliRunner().invoke(
+        app,
+        ["remember", "Deploy freeze", "Hold deploys.", "--scope", "project", "--expires", "2h"],
+    )
+
+    assert result.exit_code == 0, result.stdout
+    payload = mock_client.remember_raw_memory.await_args.kwargs
+    assert (payload["memory_scope"], payload["scope_key"]) == ("project", "project_123")
+    output = _strip_ansi(result.stdout)
+    assert "Remembered time-boxed notice: Deploy freeze" in output
+    assert "Expires: 2026-10-30T14:00:00Z" in output
+
+
+@patch("sibyl_cli.memory.resolve_project_reference", AsyncMock(return_value="project_123"))
+@patch("sibyl_cli.memory.resolve_project_from_cwd", return_value="project_123")
+@patch("sibyl_cli.memory.get_client")
+def test_raw_remember_in_project_scope_fills_the_linked_project_key(
+    mock_get_client: MagicMock,
+    _mock_resolve_project_from_cwd: MagicMock,
+) -> None:
+    mock_client = _mock_capture_client()
+    mock_get_client.return_value = _FakeClientContext(mock_client)
+
+    result = CliRunner().invoke(
+        app, ["remember", "Runbook", "Fail over.", "--raw", "--scope", "project"]
+    )
+
+    assert result.exit_code == 0, result.stdout
+    payload = mock_client.remember_raw_memory.await_args.kwargs
+    assert (payload["memory_scope"], payload["scope_key"]) == ("project", "project_123")
 
 
 async def test_raw_remember_client_sends_expiry_only_when_given() -> None:
