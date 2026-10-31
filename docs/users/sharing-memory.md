@@ -98,6 +98,39 @@ project.
 Do not use project memory as a dumping ground for everything. The best shared memory is durable:
 decisions, gotchas, runbooks, domain language, interfaces, and tested failure modes.
 
+## Time-Boxed Team Notices
+
+Some team memory is state, not knowledge: an active incident, a deploy freeze, a migration window.
+The team needs it while it is true, and nobody needs it once it is over. Give that kind of capture
+an expiry:
+
+```bash
+sibyl remember "Checkout outage" \
+  "Checkout is returning 502s; hold all deploys until the on-call agent clears it" \
+  --scope team \
+  --scope-key 0f8b6c52-4d2e-4a7a-9c1d-6e5b2a9f3d10 \
+  --expires 2h
+```
+
+`--expires` takes a duration such as `30m`, `2h`, `1d` or `1h30m`, between one minute and 30 days. A
+time-boxed capture is stored verbatim, like `--raw`. Until it expires, it surfaces in team members'
+context packs when it is relevant to their goal, whatever repo they work in, and it carries an
+`expires=` marker so an agent can tell a live notice from history. A notice reaches a pack through
+recall, so write its title and body in the words an agent would search by. A scheduled sweep retires
+it within a minute of the deadline by applying the same `stale` correction an operator would, with
+the reason `expired`, so it drops out of every pack, search and recall lane.
+
+Resolve a notice early with a correction. The sweep sees it is already retired and leaves it alone:
+
+```bash
+sibyl correct <raw-memory-id> --action stale --reason resolved
+```
+
+Once the sweep has expired a notice, `sibyl correct <raw-memory-id> --action restore` brings it back
+for good: the sweep has already handled it, so it does not expire again. Restoring a notice that was
+resolved early, before its deadline, leaves its expiry in place. Never use an expiry for durable
+knowledge. Write the lesson as a normal memory once the incident is over.
+
 ## Promotion
 
 When a private note becomes useful to the team, rewrite it as a clean project memory instead of

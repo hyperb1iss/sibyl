@@ -50,6 +50,8 @@ Useful write flags:
 - `--basis <value>` records how the claim was learned.
 - `--propose-scope team --propose-scope-key <team-uuid>` nominates a capture for audited promotion
   to that team; it does not share immediately.
+- `--expires 2h` time-boxes live state (an active incident) so it retires itself; never use it for
+  durable knowledge.
 - `sibyl cite <id...> --misled` records negative feedback only when memory materially led the answer
   astray. Irrelevant or unused context is not misleading.
 

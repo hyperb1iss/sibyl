@@ -423,3 +423,31 @@ async def test_get_mcp_context_marks_api_keys_and_not_user_sessions() -> None:
 
     assert user_ctx is not None
     assert user_ctx.is_api_key is False
+
+
+@pytest.mark.asyncio
+async def test_remember_refuses_an_expiry_past_the_cap_without_writing() -> None:
+    ctx = _api_key_ctx(["mcp", "api:write"])
+    add = AsyncMock()
+    remember_raw = AsyncMock()
+
+    with (
+        patch("sibyl.mcp_tools.context.get_context", AsyncMock(return_value=ctx)),
+        patch("sibyl.mcp_tools.context.resolve_project_scope", AsyncMock(return_value=None)),
+        patch("sibyl_core.tools.core.add", add),
+        patch("sibyl_core.services.surreal_content.remember_raw_memory", remember_raw),
+        pytest.raises(ValueError, match="at most 30 days"),
+    ):
+        await _remember_mcp_memory(
+            title="Incident",
+            content="Checkout is down.",
+            kind="note",
+            domain=None,
+            project=None,
+            tags=None,
+            related_to=None,
+            expires="45d",
+        )
+
+    add.assert_not_awaited()
+    remember_raw.assert_not_awaited()

@@ -37,6 +37,7 @@ from sibyl.jobs.entities import (
     update_entity,
     update_task,
 )
+from sibyl.jobs.expiry import expire_time_boxed_captures
 from sibyl.jobs.lifecycle_repair import repair_lifecycle_all_orgs
 from sibyl.jobs.memory_extraction import extract_memory_entities
 from sibyl.jobs.operational_distillation import distill_operational_experience_notes
@@ -282,6 +283,13 @@ def get_schedule_specs() -> list[ScheduleSpec]:
     )
     schedule_specs.append(
         ScheduleSpec(
+            name="expire_time_boxed_captures",
+            function=expire_time_boxed_captures,
+            schedule_label="* * * * *",
+        )
+    )
+    schedule_specs.append(
+        ScheduleSpec(
             name="consolidate_all_orgs",
             function=consolidate_all_orgs,
             schedule_label="0 3 * * *",
@@ -374,6 +382,7 @@ class WorkerSettings:
         consolidate_all_orgs,
         priority_decay,
         purge_due_deleted_personal_memories,
+        expire_time_boxed_captures,
         run_reflection_dream_cycle,
         run_reflection_dream_cycle_all_orgs,
         # Probe replay

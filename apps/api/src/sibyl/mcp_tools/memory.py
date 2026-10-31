@@ -31,6 +31,7 @@ from sibyl_core.memory_pipeline.source_lifecycle import (
     SOURCE_BINDINGS_KEY,
     source_revision_bindings,
 )
+from sibyl_core.services.memory_expiry import capture_expiry_metadata, resolve_capture_expiry
 
 log = structlog.get_logger()
 
@@ -72,6 +73,15 @@ async def _claim_remember_idempotency(
     return None, replayed
 
 
+def _normalized_idempotency_key(idempotency_key: str | None) -> str | None:
+    if idempotency_key is None:
+        return None
+    key = idempotency_key.strip()
+    if not key or len(key) > 255:
+        raise ValueError("idempotency_key must be a non-empty string up to 255 characters")
+    return key
+
+
 @mcp_idempotency.serialize_request("mcp/remember")
 async def _remember_mcp_memory(
     *,
@@ -90,6 +100,7 @@ async def _remember_mcp_memory(
     spans: list[dict[str, Any]] | None = None,
     atomic: bool = False,
     probes: list[str] | None = None,
+    expires: str | None = None,
 ) -> dict[str, Any]:
     from sibyl_core.memory_pipeline.structure import build_memory_structure
     from sibyl_core.services.surreal_content import remember_raw_memory
@@ -104,10 +115,8 @@ async def _remember_mcp_memory(
     if not ctx.user_id:
         raise ValueError("User context required to remember raw source material.")
     principal_id = ctx.user_id
-    if idempotency_key is not None:
-        idempotency_key = idempotency_key.strip()
-        if not idempotency_key or len(idempotency_key) > 255:
-            raise ValueError("idempotency_key must be a non-empty string up to 255 characters")
+    idempotency_key = _normalized_idempotency_key(idempotency_key)
+    expires_at = resolve_capture_expiry(expires_in=expires)
 
     # Ahead of the idempotency claim: a refused plan must not consume the key,
     # or the caller's corrected retry would replay the rejection.
@@ -165,6 +174,7 @@ async def _remember_mcp_memory(
         "spans": spans,
         "atomic": atomic,
         "probes": probes,
+        "expires": expires,
     }
     idempotency_claim, replayed = await _claim_remember_idempotency(
         ctx=ctx,
@@ -223,6 +233,7 @@ async def _remember_mcp_memory(
             provenance=dict(request.provenance),
             capture_surface=request.capture_surface,
             **source_context,
+            **({} if expires_at is None else {"expires_at": expires_at}),
         )
         raw_revision = getattr(raw_memory, "revision", 1)
         return {
@@ -250,7 +261,10 @@ async def _remember_mcp_memory(
             # strip; without it the row reaches the graph naming no capture,
             # and both the correction write-through and the projection
             # boundary lose the only link back.
-            capture_provenance=server_provenance_metadata(graph_metadata),
+            capture_provenance={
+                **server_provenance_metadata(graph_metadata),
+                **capture_expiry_metadata(expires_at),
+            },
             project=project,
             memory_scope=request.memory_scope,
             scope_key=request.scope_key,
@@ -683,6 +697,7 @@ def register_memory_tools(mcp: MCPServer) -> None:
         spans: list[dict[str, Any]] | None = None,
         atomic: bool = False,
         probes: list[str] | None = None,
+        expires: str | None = None,
     ) -> dict[str, Any]:
         """Remember durable context from planning, ideation, building, or any domain.
 
@@ -737,6 +752,12 @@ def register_memory_tools(mcp: MCPServer) -> None:
             an absent probe is telling you to rewrite the memory now, while you
             still have the context, rather than discovering months later that
             nothing could reach it.
+        expires: retire this memory after a duration such as "30m", "2h" or
+            "1d" (at most 30 days). Use it for live state that matters while it
+            is true and nobody needs later, like an active incident or a deploy
+            freeze, never for durable knowledge. When the time passes the
+            memory is marked stale and leaves every pack and search; resolve
+            it early with a stale correction.
         """
 
         return await _remember_mcp_memory(
@@ -755,6 +776,7 @@ def register_memory_tools(mcp: MCPServer) -> None:
             spans=spans,
             atomic=atomic,
             probes=probes,
+            expires=expires,
         )
 
     # =========================================================================

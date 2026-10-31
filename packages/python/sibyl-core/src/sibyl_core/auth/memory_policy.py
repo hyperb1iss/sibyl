@@ -36,11 +36,16 @@ MEMORY_OWNER_METADATA_KEYS = frozenset(
 # (`memory_pipeline/capture.py`), so no legitimate writer supplies them.
 EVAL_ADMISSION_METADATA_KEY = "eval_admission"
 EVAL_CONSOLIDATION_METADATA_KEY = "eval_consolidation"
+# When a time-boxed capture retires itself. The server stamps it from the
+# validated request field (`services/memory_expiry.py`), because a payload
+# that could write it directly could keep a notice live past the cap.
+CAPTURE_EXPIRES_AT_METADATA_KEY = "expires_at"
 
 MEMORY_PROVENANCE_METADATA_KEYS = frozenset(
     {
         EVAL_ADMISSION_METADATA_KEY,
         EVAL_CONSOLIDATION_METADATA_KEY,
+        CAPTURE_EXPIRES_AT_METADATA_KEY,
         "raw_memory_id",
         "raw_source_id",
         "correction_blockers",
@@ -849,6 +854,7 @@ def stamp_memory_scope_metadata(
 
 
 __all__ = [
+    "CAPTURE_EXPIRES_AT_METADATA_KEY",
     "MEMORY_OWNER_METADATA_KEYS",
     "MEMORY_PROVENANCE_METADATA_KEYS",
     "SERVER_OWNED_METADATA_KEYS",
