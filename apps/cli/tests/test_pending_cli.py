@@ -850,6 +850,7 @@ def test_selected_flush_cannot_bypass_earlier_related_attention(
         params=None,
         replay_identity=TEST_IDENTITY,
     )
+    pending_writes.increment_attempts(earlier["id"])
     pending_writes.record_pending_failure(earlier["id"], category="rejected", status_code=404)
     calls: list[httpx.Request] = []
     _mock_authenticated_client(monkeypatch, calls)
@@ -928,6 +929,7 @@ def test_pending_writes_list_shows_the_class_and_the_servers_refusal(
 ) -> None:
     _signed_in()
     rejected = _queued(identity=TEST_IDENTITY, path="/entities")
+    pending_writes.increment_attempts(str(rejected["id"]))
     pending_writes.record_pending_failure(
         str(rejected["id"]),
         category="rejected",
@@ -977,6 +979,7 @@ def test_pending_writes_discard_rejected_removes_only_client_refusals(
 ) -> None:
     _signed_in()
     rejected = _queued(identity=TEST_IDENTITY, path="/tasks")
+    pending_writes.increment_attempts(str(rejected["id"]))
     pending_writes.record_pending_failure(
         str(rejected["id"]),
         category="rejected",
@@ -1151,6 +1154,7 @@ def test_discard_rejected_reaches_a_refusal_whose_owner_rotated_away(
     _signed_in()
     stranger = {**TEST_IDENTITY, "user_id": "44444444-4444-4444-4444-444444444444"}
     orphaned = _queued(identity=stranger, path="/tasks")
+    pending_writes.increment_attempts(str(orphaned["id"]))
     pending_writes.record_pending_failure(
         str(orphaned["id"]),
         category="rejected",
@@ -1171,6 +1175,7 @@ def test_discard_rejected_leaves_another_servers_refusal_alone(
 ) -> None:
     _signed_in()
     elsewhere = _queued(base_url=OTHER_LOCAL_BASE_URL, path="/tasks")
+    pending_writes.increment_attempts(str(elsewhere["id"]))
     pending_writes.record_pending_failure(
         str(elsewhere["id"]),
         category="rejected",

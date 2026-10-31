@@ -65,6 +65,8 @@ def _buffer(
             replay_identity=identity,
         )
         if status == "attention":
+            # A refusal parks only on replay, which counts its attempt first.
+            pending_writes.increment_attempts(str(item["id"]))
             item = pending_writes.record_pending_failure(
                 str(item["id"]),
                 category="rejected",

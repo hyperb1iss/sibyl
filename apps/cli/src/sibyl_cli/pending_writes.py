@@ -393,11 +393,37 @@ def read_pending_write(write_id: str) -> dict[str, Any]:
     return _read_pending_path(path)
 
 
+def _refused_on_first_attempt(item: dict[str, Any]) -> bool:
+    # Every replay counts its attempt before it sends, so a refusal on a write
+    # with none counted came back to the command that created it. Conflicts are
+    # not refusals: a 409 can mean the write may have landed without a receipt.
+    failure = item.get("last_failure")
+    return (
+        item.get("status") == "attention"
+        and item.get("attempts") == 0
+        and isinstance(failure, dict)
+        and failure.get("category") == "rejected"
+    )
+
+
 def list_pending_writes() -> list[dict[str, Any]]:
+    """Read the queue, dropping writes the server refused on their first attempt.
+
+    The command that made such a write already reported the refusal, and the
+    same payload would draw it again, so nothing can resolve it. Older CLIs
+    kept them anyway, parked for a decision; reading the queue clears them.
+    """
     root = pending_writes_dir()
     if not root.exists():
         return []
-    return [_read_pending_path(path) for path in sorted(root.glob("*.json"))]
+    writes = []
+    for path in sorted(root.glob("*.json")):
+        item = _read_pending_path(path)
+        if _refused_on_first_attempt(item) and delete_pending_write(str(item["id"])):
+            record_pending_metric("dropped")
+            continue
+        writes.append(item)
+    return writes
 
 
 def pending_write_count() -> int:
