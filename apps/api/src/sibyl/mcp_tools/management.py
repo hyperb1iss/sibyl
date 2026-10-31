@@ -476,6 +476,7 @@ async def _manage_memory_correction(
             else None
         ),
         writable_projects=await mcp_context.get_writable_projects(ctx),
+        maintained_projects=await mcp_context.get_maintained_projects(ctx),
         replacement_source_id=(
             str(data["replacement_source_id"]) if data.get("replacement_source_id") else None
         ),

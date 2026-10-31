@@ -75,6 +75,11 @@ between is refused rather than corrected against a different plan.
 | `redact`                       | Flags the body redacted everywhere; irreversible |
 | `delete`                       | Deletes the memory; irreversible                 |
 
+You can correct the memories you captured (a project memory also needs contributor access to its
+project). Correcting someone else's project memory takes project maintainer access on that project,
+which org owners and admins have everywhere; a contributor's attempt is refused with
+`project_maintainer_required` and changes nothing.
+
 Raw memories change only through `correct`. `sibyl entity delete raw_memory:<id>` refuses and prints
 the `correct --action delete` command instead, because a graph delete can never remove a raw memory
 and a failed write would otherwise wait in the pending-write queue.

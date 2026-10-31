@@ -17,9 +17,11 @@ from sibyl.persistence.auth_runtime import (
     InvalidAuthClaimsError,
     UserNotFoundError,
     authenticate_api_key,
+    list_accessible_project_graph_ids,
     resolve_auth_context,
     resolve_project_graph_grants,
 )
+from sibyl_core.auth import ProjectRole
 from sibyl_core.auth.context import AuthContext, MemoryPolicyContext
 
 log = structlog.get_logger()
@@ -321,3 +323,20 @@ async def get_writable_projects(ctx: McpContext) -> set[str]:
         return set()
     _, writable = await ctx.project_grants
     return set(writable)
+
+
+async def get_maintained_projects(ctx: McpContext) -> set[str]:
+    """Resolve project maintainer grants within the credential project restriction."""
+    if not ctx.user_id:
+        return set()
+    authority = ctx.authority or await _resolve_principal_authority(
+        user_id=ctx.user_id, org_id=ctx.org_id, scopes=ctx.scopes
+    )
+    if authority is None:
+        return set()
+    maintained = await list_accessible_project_graph_ids(
+        authority, required_role=ProjectRole.MAINTAINER
+    )
+    if ctx.api_key_project_ids is not None:
+        maintained &= set(ctx.api_key_project_ids)
+    return maintained

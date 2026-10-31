@@ -250,10 +250,16 @@ async def preview_memory_correction_route(
         memory_scope=memory.memory_scope.value,
         scope_key=memory.scope_key,
     )
-    accessible_projects, accessible_teams, writable_projects = await asyncio.gather(
+    (
+        accessible_projects,
+        accessible_teams,
+        writable_projects,
+        maintained_projects,
+    ) = await asyncio.gather(
         memory_auth.list_accessible_project_graph_ids(ctx),
         memory_auth.list_accessible_team_scope_keys(ctx),
         memory_auth.list_accessible_project_graph_ids(ctx, required_role=ProjectRole.CONTRIBUTOR),
+        memory_auth.list_accessible_project_graph_ids(ctx, required_role=ProjectRole.MAINTAINER),
     )
     try:
         preview = await preview_memory_correction(
@@ -264,6 +270,7 @@ async def preview_memory_correction_route(
             reason=request.reason,
             accessible_projects=accessible_projects,
             writable_projects=writable_projects,
+            maintained_projects=maintained_projects,
             accessible_teams=accessible_teams,
             replacement_source_id=request.replacement_source_id,
             duplicate_of_source_id=request.duplicate_of_source_id,
@@ -342,10 +349,16 @@ async def apply_memory_correction_route(
         memory_scope=memory.memory_scope.value,
         scope_key=memory.scope_key,
     )
-    accessible_projects, accessible_teams, writable_projects = await asyncio.gather(
+    (
+        accessible_projects,
+        accessible_teams,
+        writable_projects,
+        maintained_projects,
+    ) = await asyncio.gather(
         memory_auth.list_accessible_project_graph_ids(ctx),
         memory_auth.list_accessible_team_scope_keys(ctx),
         memory_auth.list_accessible_project_graph_ids(ctx, required_role=ProjectRole.CONTRIBUTOR),
+        memory_auth.list_accessible_project_graph_ids(ctx, required_role=ProjectRole.MAINTAINER),
     )
     idempotency_path = f"/memory/inspect/{source_id}/corrections"
     idempotency_payload = {"body": request.model_dump(mode="json")}
@@ -378,6 +391,7 @@ async def apply_memory_correction_route(
         "reason": request.reason,
         "accessible_projects": accessible_projects,
         "writable_projects": writable_projects,
+        "maintained_projects": maintained_projects,
         "accessible_teams": accessible_teams,
         "replacement_source_id": request.replacement_source_id,
         "duplicate_of_source_id": request.duplicate_of_source_id,
