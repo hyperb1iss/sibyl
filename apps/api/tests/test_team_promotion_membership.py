@@ -58,12 +58,12 @@ def _org() -> MagicMock:
     return org
 
 
-def _ctx() -> MagicMock:
+def _ctx(api_key_memory_scope_keys: set[str] | None = None) -> MagicMock:
     ctx = MagicMock()
     ctx.user_id = USER_ID
     ctx.organization_id = ORG_ID
     ctx.org_role = OrganizationRole.MEMBER
-    ctx.api_key_memory_scope_keys = None
+    ctx.api_key_memory_scope_keys = api_key_memory_scope_keys
     return ctx
 
 
@@ -203,6 +203,28 @@ async def test_rest_preview_authorizes_team_against_membership(
     assert response.promote_to_scope_key == resolved
     if not allowed:
         assert "unverified_membership" in response.policy_reasons
+
+
+@pytest.mark.parametrize("route", [promote_reflection_candidate, promote_memory])
+async def test_rest_promote_keeps_a_restricted_api_key_out_of_teams(store, route) -> None:
+    """A key granted only private memory cannot publish its owner's candidate to a team."""
+    store["candidate-1"] = _candidate()
+    with ExitStack() as stack:
+        _rest_auth(stack, teams={TEAM})
+        persist = stack.enter_context(
+            patch.object(memory_reflection, "persist_reflection_candidate", AsyncMock())
+        )
+        response = await route(
+            ReflectionPromotionRequest(candidate_id="candidate-1", promote_to_scope="team"),
+            http_request=_http_request(),
+            org=SimpleNamespace(id=ORG_ID),
+            ctx=_ctx(api_key_memory_scope_keys={f"private\x1f{USER_ID}"}),
+        )
+
+    persist.assert_not_awaited()
+    assert response.success is False
+    assert response.reason == "api_key_memory_space_denied"
+    assert response.scope_key == TEAM
 
 
 @pytest.mark.parametrize("route", [promote_reflection_candidate, promote_memory])

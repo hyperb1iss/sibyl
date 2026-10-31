@@ -2170,6 +2170,7 @@ async def test_promote_review_candidate_to_member_team_persists_team_scope(
         principal_id="user-1",
         promote_to_scope="team",
         accessible_teams={"team-a"},
+        allowed_memory_scope_keys={"private\x1fuser-1", "team\x1fteam-a"},
     )
 
     assert result.success
@@ -2179,3 +2180,39 @@ async def test_promote_review_candidate_to_member_team_persists_team_scope(
     assert persisted[0]["memory_scope"] is MemoryScope.TEAM
     assert persisted[0]["scope_key"] == "team-a"
     assert persisted[0]["accessible_teams"] == {"team-a"}
+
+
+@pytest.mark.parametrize(
+    ("granted", "reason"),
+    [
+        ({"private\x1fuser-1"}, "api_key_memory_space_denied"),
+        ({"team\x1fteam-b"}, "api_key_memory_space_denied"),
+    ],
+)
+async def test_team_promotion_respects_api_key_memory_spaces(
+    monkeypatch: pytest.MonkeyPatch, granted: set[str], reason: str
+) -> None:
+    candidate = _team_nominated_candidate("team-a")
+    source = _raw_review_candidate(id="source-1")
+    memories = {candidate.id: candidate, source.id: source}
+    persist = AsyncMock()
+    monkeypatch.setattr(
+        reflection_module,
+        "get_raw_memory",
+        AsyncMock(side_effect=lambda **kwargs: memories.get(kwargs["memory_id"])),
+    )
+    monkeypatch.setattr(reflection_module, "persist_reflection_candidate", persist)
+
+    result = await promote_reflection_candidate_review(
+        candidate_id="candidate-1",
+        organization_id="org-1",
+        principal_id="user-1",
+        promote_to_scope="team",
+        accessible_teams={"team-a"},
+        allowed_memory_scope_keys=granted | {"private\x1fuser-1"},
+    )
+
+    assert not result.success
+    assert result.reason == reason
+    assert result.scope_key == "team-a"
+    persist.assert_not_awaited()
