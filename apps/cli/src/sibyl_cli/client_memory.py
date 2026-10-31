@@ -13,7 +13,7 @@ class ClientMemoryMixin:
         title: str,
         raw_content: str,
         source_id: str | None = None,
-        memory_scope: str = "private",
+        memory_scope: str | None = None,
         scope_key: str | None = None,
         diary: bool = False,
         agent_id: str | None = None,
@@ -22,19 +22,25 @@ class ClientMemoryMixin:
         metadata: dict[str, Any] | None = None,
         provenance: dict[str, Any] | None = None,
         capture_surface: str = "cli",
+        expires_in: str | None = None,
         _idempotency_key: str | None = None,
     ) -> dict[str, Any]:
-        """Store verbatim raw memory."""
+        """Store verbatim raw memory.
+
+        Without a scope the server resolves one from the project's default
+        write scope, which is private unless the project opted in.
+        """
         data: dict[str, Any] = {
             "title": title,
             "raw_content": raw_content,
-            "memory_scope": memory_scope,
             "diary": diary,
             "tags": tags or [],
             "metadata": metadata or {},
             "provenance": provenance or {},
             "capture_surface": capture_surface,
         }
+        if memory_scope:
+            data["memory_scope"] = memory_scope
         if source_id:
             data["source_id"] = source_id
         if scope_key:
@@ -43,6 +49,8 @@ class ClientMemoryMixin:
             data["agent_id"] = agent_id
         if project_id:
             data["project_id"] = project_id
+        if expires_in:
+            data["expires_in"] = expires_in
         if _idempotency_key is not None:
             # The migration owns durable retry identity across process restarts.
             return await self._request(

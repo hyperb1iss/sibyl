@@ -36,8 +36,10 @@ from sibyl_core.backends.surreal.records import (
     coerce_uuid as _coerce_uuid,
     normalize_record as _normalize_record,
     normalize_records as _normalize_records,
+    query_error as _query_error,
     utcnow as _utcnow,
 )
+from sibyl_core.models.memory_scope import PROJECT_DEFAULT_MEMORY_SCOPES, MemoryScope
 
 
 async def _generate_unique_project_slug(
@@ -337,6 +339,7 @@ async def create_project_record(
             "graph_project_id": graph_project_id,
             "visibility": ProjectVisibility.ORG.value,
             "default_role": ProjectRole.VIEWER.value,
+            "default_memory_scope": MemoryScope.PRIVATE.value,
             "settings": {},
             "created_at": now,
             "updated_at": now,
@@ -346,6 +349,33 @@ async def create_project_record(
             uuid=_coerce_uuid(record["uuid"], field_name="projects.uuid"),
             record=record,
         )
+
+
+async def get_project_default_memory_scope(
+    *,
+    organization_id: UUID | str,
+    graph_project_id: str,
+) -> MemoryScope:
+    """Where a capture in this project lands when the writer names no scope.
+
+    Anything but a recognized project default reads as private, including a
+    project with no auth record, so a lookup miss never widens a write.
+    """
+    async with _auth_client_scope() as client:
+        repo = _SurrealRepository(client)
+        record = await repo.select_one(
+            "SELECT default_memory_scope FROM projects "
+            "WHERE organization_id = $organization_id AND graph_project_id = $graph_project_id "
+            "LIMIT 1;",
+            organization_id=str(organization_id),
+            graph_project_id=graph_project_id,
+        )
+    raw = record.get("default_memory_scope") if record else None
+    try:
+        scope = MemoryScope(str(raw)) if raw else MemoryScope.PRIVATE
+    except ValueError:
+        return MemoryScope.PRIVATE
+    return scope if scope in PROJECT_DEFAULT_MEMORY_SCOPES else MemoryScope.PRIVATE
 
 
 async def update_project_record(
@@ -367,20 +397,32 @@ async def update_project_record(
         if existing is None:
             return False
 
-        updated = dict(existing)
         project_uuid = _coerce_uuid(existing.get("uuid"), field_name="projects.uuid")
+        # Only the fields this call owns are written. Replacing the whole row
+        # from the read above would put back any setting another request
+        # changed in between, such as the default write scope.
+        changes: dict[str, object] = {"updated_at": _utcnow()}
         if name is not None and name != existing.get("name"):
-            updated["name"] = name
-            updated["slug"] = await _generate_unique_project_slug(
+            changes["name"] = name
+            changes["slug"] = await _generate_unique_project_slug(
                 repo,
                 organization_id=organization_id,
                 name=name,
                 exclude_uuid=project_uuid,
             )
         if description is not None:
-            updated["description"] = description[:2000] if description else None
-        updated["updated_at"] = _utcnow()
-        await repo.replace_record("projects", uuid=project_uuid, record=updated)
+            changes["description"] = description[:2000] if description else None
+        assignments = ", ".join(f"{field} = ${field}" for field in changes)
+        # Field names come from the fixed keys above; values are bound.
+        result = await client.execute_query(
+            f"UPDATE projects SET {assignments} "  # noqa: S608
+            "WHERE organization_id = $organization_id AND uuid = $uuid;",
+            organization_id=str(organization_id),
+            uuid=str(project_uuid),
+            **changes,
+        )
+        if (error := _query_error(result)) is not None:
+            raise RuntimeError(error)
         return True
 
 

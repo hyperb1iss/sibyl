@@ -151,6 +151,14 @@ export interface ProjectMembersResponse {
   can_manage: boolean;
 }
 
+export type ProjectDefaultMemoryScope = 'private' | 'project';
+
+export interface ProjectSettings {
+  project_id: string;
+  default_memory_scope: ProjectDefaultMemoryScope;
+  can_manage: boolean;
+}
+
 export interface Task {
   id: string;
   title: string;
@@ -371,6 +379,15 @@ export const projectsApi = {
     remove: (projectId: string, userId: string) =>
       fetchApi<{ success: boolean }>(`/projects/${projectId}/members/${userId}`, {
         method: 'DELETE',
+      }),
+  },
+
+  settings: {
+    get: (projectId: string) => fetchApi<ProjectSettings>(`/projects/${projectId}/settings`),
+    update: (projectId: string, defaultMemoryScope: ProjectDefaultMemoryScope) =>
+      fetchApi<ProjectSettings>(`/projects/${projectId}/settings`, {
+        method: 'PATCH',
+        body: JSON.stringify({ default_memory_scope: defaultMemoryScope }),
       }),
   },
 };

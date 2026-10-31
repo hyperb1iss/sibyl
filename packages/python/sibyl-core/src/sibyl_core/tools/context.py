@@ -708,6 +708,9 @@ _ITEM_METADATA_KEYS = (
     "completed_at",
     "occurred_at",
     "valid_at",
+    # A time-boxed capture's retirement instant, so an agent can tell a live
+    # notice from history.
+    "expires_at",
     "learnings",
     "description",
     # Policy and correction gates downstream (synthesis render filters) read

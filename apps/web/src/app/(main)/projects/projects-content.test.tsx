@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { Breadcrumb } from '@/components/layout/breadcrumb';
 import { BreadcrumbProvider } from '@/components/layout/breadcrumb-context';
 import type { ProjectSummariesResponse, TaskListResponse } from '@/lib/api';
-import { projectFilterTarget, render, screen } from '@/test/utils';
+import { projectFilterTarget, render, screen, userEvent, within } from '@/test/utils';
 
 const hooks = vi.hoisted(() => ({
   useDeleteEntity: vi.fn(),
@@ -10,12 +10,14 @@ const hooks = vi.hoisted(() => ({
   useMe: vi.fn(),
   useProjectMembers: vi.fn(),
   useProjectMetrics: vi.fn(),
+  useProjectSettings: vi.fn(),
   useProjectSummaries: vi.fn(),
   useProjects: vi.fn(),
   useRemoveProjectMember: vi.fn(),
   useTasks: vi.fn(),
   useUpdateEntity: vi.fn(),
   useUpdateProjectMemberRole: vi.fn(),
+  useUpdateProjectSettings: vi.fn(),
 }));
 
 const navigation = vi.hoisted(() => ({
@@ -112,6 +114,12 @@ describe('ProjectsContent', () => {
     hooks.useTasks.mockReturnValue({ data: { entities: [] }, isLoading: false });
     hooks.useUpdateEntity.mockReturnValue({ mutateAsync: vi.fn() });
     hooks.useUpdateProjectMemberRole.mockReturnValue({ mutateAsync: vi.fn() });
+    hooks.useProjectSettings.mockReturnValue({
+      data: { project_id: 'proj-a', default_memory_scope: 'private', can_manage: false },
+      isLoading: false,
+      isError: false,
+    });
+    hooks.useUpdateProjectSettings.mockReturnValue({ mutateAsync: vi.fn(), isPending: false });
   });
 
   it('uses lean project summaries to render sidebar stats', () => {
@@ -194,6 +202,56 @@ describe('ProjectsContent', () => {
     expect(projectFilterTarget(link.getAttribute('href'))).toEqual({
       pathname: '/tasks',
       projects: ['proj-a'],
+    });
+  });
+
+  it('shows memory sharing read-only to people who cannot manage the project', () => {
+    navigation.searchParams = 'id=proj-a';
+
+    render(
+      <ProjectsContent
+        initialProjects={initialProjects}
+        initialProjectSummaries={initialProjectSummaries}
+      />
+    );
+
+    expect(screen.getByText('Memory sharing')).toBeInTheDocument();
+    expect(screen.getByText('Private')).toBeInTheDocument();
+    expect(screen.queryByRole('combobox', { name: 'Memory sharing' })).not.toBeInTheDocument();
+  });
+
+  it('lets a project manager share new memories with the project', async () => {
+    navigation.searchParams = 'id=proj-a';
+    const mutateAsync = vi.fn().mockResolvedValue({
+      project_id: 'proj-a',
+      default_memory_scope: 'project',
+      can_manage: true,
+    });
+    hooks.useProjectSettings.mockReturnValue({
+      data: { project_id: 'proj-a', default_memory_scope: 'private', can_manage: true },
+      isLoading: false,
+      isError: false,
+    });
+    hooks.useUpdateProjectSettings.mockReturnValue({ mutateAsync, isPending: false });
+    const user = userEvent.setup();
+
+    render(
+      <ProjectsContent
+        initialProjects={initialProjects}
+        initialProjectSummaries={initialProjectSummaries}
+      />
+    );
+
+    await user.click(screen.getByRole('combobox', { name: 'Memory sharing' }));
+    await user.click(
+      within(await screen.findByRole('listbox')).getByRole('option', {
+        name: 'Shared with project',
+      })
+    );
+
+    expect(mutateAsync).toHaveBeenCalledWith({
+      projectId: 'proj-a',
+      defaultMemoryScope: 'project',
     });
   });
 });
