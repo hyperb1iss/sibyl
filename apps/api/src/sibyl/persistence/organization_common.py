@@ -7,6 +7,7 @@ from datetime import datetime
 from uuid import UUID
 
 from sibyl_core.auth import OrganizationRole, ProjectRole
+from sibyl_core.models.memory_scope import MemoryScope
 
 
 @dataclass
@@ -71,6 +72,13 @@ class ProjectMembersResult:
 
 
 @dataclass
+class ProjectMemorySettings:
+    graph_project_id: str
+    default_memory_scope: MemoryScope
+    can_manage: bool
+
+
+@dataclass
 class ProjectMemberChange:
     org_id: UUID
     project_db_id: UUID
@@ -87,8 +95,26 @@ __all__ = [
     "OrgSummary",
     "ProjectMemberChange",
     "ProjectMembersResult",
+    "ProjectMemorySettings",
     "can_manage_project_members",
+    "can_manage_project_settings",
 ]
+
+
+def can_manage_project_settings(
+    role: ProjectRole | None,
+    project: object,
+    user: object,
+    org_role: OrganizationRole | None,
+) -> bool:
+    """Return whether the actor can change project-wide settings.
+
+    The member-management authority, plus org owners and admins, who already
+    hold owner rights on every project for reads and writes.
+    """
+    if org_role in {OrganizationRole.OWNER, OrganizationRole.ADMIN}:
+        return True
+    return can_manage_project_members(role, project, user)
 
 
 def can_manage_project_members(

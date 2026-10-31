@@ -114,6 +114,7 @@ export {
   useOrgMetrics,
   useProjectMembers,
   useProjectMetrics,
+  useProjectSettings,
   useProjectSummaries,
   useProjects,
   useRemoveProjectMember,
@@ -122,4 +123,5 @@ export {
   useTasks,
   useTaskUpdateStatus,
   useUpdateProjectMemberRole,
+  useUpdateProjectSettings,
 } from './hooks/work-items';

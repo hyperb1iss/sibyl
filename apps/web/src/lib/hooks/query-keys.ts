@@ -107,6 +107,7 @@ export const queryKeys = {
     list: () => ['projects', 'list'] as const,
     detail: (id: string) => ['projects', 'detail', id] as const,
     members: (id: string) => ['projects', 'members', id] as const,
+    settings: (id: string) => ['projects', 'settings', id] as const,
   },
   epics: {
     all: ['epics'] as const,

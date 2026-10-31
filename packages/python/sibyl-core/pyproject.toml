@@ -76,11 +76,10 @@ graphrag = [
 ]
 llm = [
     "anthropic>=1.0.0,<2",
-    # Held below 2.52, which sends Claude structured output as native
-    # json_schema while Sibyl reports and budgets tool mode, and deprecates
-    # the Bedrock profile's forced-tool-choice key. Lift the cap together
-    # with the move to the new output modes.
-    "pydantic-ai-slim[anthropic,google,openai]>=2.54.0,<2.55",
+    # Pinned to one minor. Each release can reshape the requests Sibyl
+    # records in receipts and extractor revisions (output modes, strict
+    # schema transforms, model profiles), so a bump lands with its tests.
+    "pydantic-ai-slim[anthropic,google,openai]>=2.60.0,<2.61",
 ]
 reranking = [
     "sentence-transformers>=5.6.1",
@@ -104,8 +103,8 @@ dev = [
     # so CI stays fast; its tests mock the cross-encoder instead.
     "surrealdb>=2.0.0,<3.0",
     "numpy>=2.5.1",
-    "pydantic-ai-slim[anthropic,google,openai]>=2.54.0,<2.55",
-    "ty>=0.0.86",
+    "pydantic-ai-slim[anthropic,google,openai]>=2.60.0,<2.61",
+    "ty>=0.0.91",
     "cbor2>=6.1.5,<7",
     "boto3>=1.35.2,<2",
     "networkx>=3.0",

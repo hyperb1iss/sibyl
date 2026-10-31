@@ -13,3 +13,9 @@ class MemoryScope(StrEnum):
     ORGANIZATION = "organization"
     SHARED = "shared"
     PUBLIC = "public"
+
+
+# Scopes a project may name as the landing place for captures that declare
+# none. Team needs a team key and reaches the graph through reviewed promotion,
+# so it is never a default.
+PROJECT_DEFAULT_MEMORY_SCOPES = (MemoryScope.PRIVATE, MemoryScope.PROJECT)

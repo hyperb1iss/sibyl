@@ -41,6 +41,7 @@ from sibyl_core.auth.memory_policy import (
     MemoryPolicyAction,
 )
 from sibyl_core.observability import elapsed_ms, telemetry_registry
+from sibyl_core.services.memory_expiry import resolve_capture_expiry
 from sibyl_core.services.memory_source_validation import SourceReadAuthority
 from sibyl_core.services.surreal_content import (
     AGENT_DIARY_CAPTURE_SURFACE,
@@ -74,6 +75,14 @@ _ARCHIVEABLE_REFLECTION_EXCEPTION_REASONS = frozenset(
 router = APIRouter(prefix="/memory", tags=["memory"])
 
 
+def _capture_expiry(request: RawMemoryRememberRequest) -> dict[str, Any]:
+    expires_at = resolve_capture_expiry(
+        expires_in=request.expires_in,
+        expires_at=request.expires_at,
+    )
+    return {} if expires_at is None else {"expires_at": expires_at}
+
+
 @router.post(
     "/raw",
     response_model=RawMemoryResponse,
@@ -98,6 +107,26 @@ async def remember_raw(
     try:
         capture_surface = AGENT_DIARY_CAPTURE_SURFACE if request.diary else request.capture_surface
         source_id = request.source_id or f"{capture_surface}:manual"
+        # Replay matches on the body the caller sent, so a retry after the
+        # project's default changed still finds its first response.
+        request_body = request.model_dump(mode="json")
+        scope_resolution: str | None = None
+        if request.memory_scope is None and request.scope_key:
+            # The default decides the key along with the scope, so a key on
+            # its own would be silently replaced; refuse it instead.
+            raise HTTPException(status_code=422, detail="scope_key requires memory_scope")
+        if request.memory_scope is None:
+            resolved = await memory_auth.resolve_capture_default_scope(
+                ctx=ctx,
+                project_id=None if request.diary else memory_auth.capture_project_hint(request),
+            )
+            scope_resolution = resolved.reason
+            request = request.model_copy(
+                update={
+                    "memory_scope": resolved.memory_scope.value,
+                    "scope_key": resolved.scope_key,
+                }
+            )
         memory_auth.validate_diary_request(
             diary=request.diary,
             agent_id=request.agent_id,
@@ -127,7 +156,7 @@ async def remember_raw(
             request=http_request,
             project_id=request.project_id,
         )
-        idempotency_payload = {"body": request.model_dump(mode="json")}
+        idempotency_payload = {"body": request_body}
         if replay_interrupted is False:
             idempotency_payload["query"] = {"replay_interrupted": False}
         replayed = await replay_idempotent_response(
@@ -179,6 +208,7 @@ async def remember_raw(
             provenance=request.provenance,
             capture_surface=capture_surface,
             **source_context,
+            **_capture_expiry(request),
         )
         await memory_auth.log_memory_audit(
             action="memory.remember",
@@ -200,6 +230,7 @@ async def remember_raw(
                     "proposed_scope": metadata.get("suggested_memory_scope"),
                 },
                 "diary": request.diary,
+                "scope_resolution": scope_resolution,
                 "tag_count": len(request.tags),
             },
         )
@@ -210,6 +241,7 @@ async def remember_raw(
         response = serialization.raw_memory_response(
             memory,
             policy_reason=write_decision.reason,
+            scope_resolution=scope_resolution,
             receipt=mutation_receipt(
                 http_request,
                 applied=True,
