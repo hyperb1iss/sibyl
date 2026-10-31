@@ -9,6 +9,8 @@ export interface RawCaptureSummary {
   metadata: Record<string, unknown>;
   capture_surface: string | null;
   review_state: 'pending' | 'deferred' | 'archived';
+  memory_scope?: string | null;
+  project_id?: string | null;
   created_by_user_id: string | null;
   created_at: string;
 }

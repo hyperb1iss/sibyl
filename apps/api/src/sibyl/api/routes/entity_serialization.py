@@ -84,6 +84,13 @@ def _raw_capture_review_state(capture: RawCaptureRecord) -> str:
     return normalized_raw_capture_review_state(capture.review_state)
 
 
+def _raw_capture_project_id(capture: RawCaptureRecord) -> str | None:
+    if capture.project_id:
+        return capture.project_id
+    value = capture.metadata.get("project_id")
+    return str(value) if value else None
+
+
 def serialize_raw_capture_summary(capture: RawCaptureRecord) -> RawCaptureSummary:
     return RawCaptureSummary(
         id=str(capture.id),
@@ -94,6 +101,8 @@ def serialize_raw_capture_summary(capture: RawCaptureRecord) -> RawCaptureSummar
         metadata=public_memory_metadata(capture.metadata),
         capture_surface=capture.capture_surface,
         review_state=_raw_capture_review_state(capture),
+        memory_scope=capture.memory_scope,
+        project_id=_raw_capture_project_id(capture),
         created_by_user_id=str(capture.created_by_user_id) if capture.created_by_user_id else None,
         created_at=capture.created_at,
     )

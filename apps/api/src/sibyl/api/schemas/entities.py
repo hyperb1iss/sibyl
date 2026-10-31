@@ -303,6 +303,8 @@ class RawCaptureSummary(BaseModel):
         default="pending",
         description="Review queue state",
     )
+    memory_scope: str | None = Field(default=None, description="Memory scope the capture reads as")
+    project_id: str | None = Field(default=None, description="Project the capture belongs to")
     created_by_user_id: str | None = Field(
         default=None, description="User who initiated the capture"
     )

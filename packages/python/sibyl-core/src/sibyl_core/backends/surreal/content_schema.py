@@ -20,6 +20,9 @@ from sibyl_core.backends.surreal.schema_archive_phases import (
     ARCHIVE_PHASE_STATEMENTS,
     ARCHIVE_PHASE_TABLES,
 )
+from sibyl_core.backends.surreal.schema_capture_project import (
+    file_capture_sidecars_under_project,
+)
 from sibyl_core.backends.surreal.schema_derivations import DERIVATION_DEFINITIONS
 from sibyl_core.backends.surreal.schema_embedding_states import (
     EMBEDDING_DEPLOYMENT_DEFINITIONS,
@@ -154,7 +157,7 @@ CONTENT_TABLES = (
     *RAW_LEXICAL_TABLES,
     RAW_LEXICAL_STATE_TABLE,
 )
-CONTENT_SCHEMA_CURRENT_VERSION = 57
+CONTENT_SCHEMA_CURRENT_VERSION = 58
 CONTENT_SCHEMA_NAME = "content"
 _SCHEMA_CHECK_BATCH_SIZE = 128
 _CONTENT_MEMORY_SCOPE_VALUES = tuple(scope.value for scope in MemoryScope)
@@ -1296,6 +1299,11 @@ def _content_schema_migrations(*, url: str) -> tuple[SchemaMigration, ...]:
                 "DEFINE INDEX IF NOT EXISTS idx_raw_captures_expires_at "
                 "ON raw_captures FIELDS metadata.expires_at",
             ),
+        ),
+        SchemaMigration(
+            version=58,
+            name="content_capture_sidecar_project",
+            action=file_capture_sidecars_under_project,
         ),
     )
 

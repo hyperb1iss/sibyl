@@ -100,6 +100,8 @@ async def test_list_raw_captures_returns_paginated_summaries() -> None:
     assert [capture.title for capture in response.captures] == ["Newest", "Older"]
     assert response.captures[0].metadata["capture_surface"] == "dashboard"
     assert response.captures[0].review_state == "pending"
+    assert response.captures[0].memory_scope == "private"
+    assert response.captures[0].project_id is None
     list_captures.assert_awaited_once_with(
         session,
         organization_id=org.id,
@@ -108,6 +110,7 @@ async def test_list_raw_captures_returns_paginated_summaries() -> None:
         review_state=None,
         limit=2,
         offset=0,
+        private_owner=str(reader_id),
     )
 
 
@@ -321,6 +324,7 @@ async def test_archive_raw_capture_stamps_the_raw_memory_it_projects() -> None:
             entity_type="error_pattern",
             tags=[],
             metadata={"capture_mode": "remember"},
+            project_id=None,
             source_capture_id="raw-1",
         )
 
@@ -358,6 +362,7 @@ async def test_archive_raw_capture_leaves_unprojected_quick_captures_alone() -> 
             entity_type="note",
             tags=[],
             metadata={"capture_mode": "quick"},
+            project_id=None,
         )
 
     mark.assert_not_awaited()
@@ -463,3 +468,22 @@ async def test_capture_selection_cannot_exceed_owner_api_key_project_grants(sele
     assert denied.value.detail == "project_scope_denied"
     verify.assert_not_awaited()
     storage.assert_not_awaited()
+
+
+def test_capture_summary_reports_scope_and_project() -> None:
+    from sibyl.api.routes.entity_serialization import serialize_raw_capture_summary
+
+    org_id = uuid4()
+    sidecar = replace(
+        _capture(org_id=org_id, title="Sidecar", surface="cli"),
+        memory_scope="project",
+        scope_key="project_1",
+        project_id="project_1",
+    )
+    raw = _capture(org_id=org_id, title="Raw", surface="cli")
+    raw = replace(raw, metadata={**raw.metadata, "project_id": "project_2"})
+
+    assert serialize_raw_capture_summary(sidecar).memory_scope == "project"
+    assert serialize_raw_capture_summary(sidecar).project_id == "project_1"
+    # Raw memories written by the CLI carry their project in metadata only.
+    assert serialize_raw_capture_summary(raw).project_id == "project_2"

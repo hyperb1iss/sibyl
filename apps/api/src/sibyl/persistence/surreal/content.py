@@ -1854,12 +1854,22 @@ def _raw_capture_filter_clause(
     capture_surface: str | None,
     review_state: str | None,
     project_ids: list[str] | None = None,
+    private_owner: str | None = None,
 ) -> tuple[str, dict[str, object]]:
     clauses = ["organization_id = $organization_id"]
     params: dict[str, object] = {"organization_id": str(organization_id)}
     if project_ids is not None:
         clauses.append("(project_id ?? metadata.project_id) IN $project_ids")
         params["project_ids"] = project_ids
+    if private_owner:
+        # The reader policy drops other principals' private rows after the
+        # page is cut, so a page of them would come back empty with has_more
+        # set. Rows without a stamped principal stay for the policy to judge.
+        clauses.append(
+            "NOT (memory_scope = 'private' AND (principal_id ?? '') != '' "
+            "AND principal_id != $private_owner)"
+        )
+        params["private_owner"] = private_owner
     if entity_type:
         clauses.append("entity_type = $entity_type")
         params["entity_type"] = entity_type
@@ -1883,6 +1893,7 @@ async def list_raw_captures(
     capture_surface: str | None,
     review_state: str | None,
     project_ids: list[str] | None = None,
+    private_owner: str | None = None,
     limit: int,
     offset: int,
 ) -> tuple[list[RawCaptureRecord], bool]:
@@ -1892,6 +1903,7 @@ async def list_raw_captures(
         capture_surface=capture_surface,
         review_state=review_state,
         project_ids=project_ids,
+        private_owner=private_owner,
     )
     async with surreal_content_client() as client:
         rows = await _select_many(
