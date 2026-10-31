@@ -20,7 +20,7 @@ from sibyl_core.backends.surreal.schema_version import (
     ensure_schema_version_table,
     get_schema_version,
 )
-from sibyl_core.models.memory_scope import MemoryScope
+from sibyl_core.models.memory_scope import PROJECT_DEFAULT_MEMORY_SCOPES, MemoryScope
 
 if TYPE_CHECKING:
     from sibyl_core.backends.surreal.auth_client import SurrealAuthClient
@@ -52,12 +52,15 @@ EXTENDED_AUTH_TABLES = (
     "oauth_authorization_requests",
 )
 AUTH_TABLES = (*CORE_AUTH_TABLES, *EXTENDED_AUTH_TABLES)
-AUTH_SCHEMA_CURRENT_VERSION = 10
+AUTH_SCHEMA_CURRENT_VERSION = 11
 AUTH_SCHEMA_NAME = "auth"
 _AUTH_ORGANIZATION_ROLE_VALUES = tuple(role.value for role in OrganizationRole)
 _AUTH_PROJECT_ROLE_VALUES = tuple(role.value for role in ProjectRole)
 _AUTH_PROJECT_VISIBILITY_VALUES = tuple(visibility.value for visibility in ProjectVisibility)
 _AUTH_MEMORY_SCOPE_VALUES = tuple(scope.value for scope in MemoryScope)
+_AUTH_PROJECT_DEFAULT_MEMORY_SCOPE_VALUES = tuple(
+    scope.value for scope in PROJECT_DEFAULT_MEMORY_SCOPES
+)
 _AUTH_MEMORY_SPACE_STATE_VALUES = ("active", "disabled")
 _AUTH_DEVICE_AUTHORIZATION_STATUS_VALUES = ("pending", "approved", "denied", "consumed")
 _AUTH_OAUTH_AUTHORIZATION_STATUS_VALUES = ("pending", "authenticated", "code_issued")
@@ -729,6 +732,15 @@ AUTH_SESSION_REVOCATION_ANNOUNCED_DEFINITIONS = """
 DEFINE FIELD IF NOT EXISTS revocation_announced_at ON user_sessions TYPE option<datetime>;
 """
 
+# The scope a capture in this project lands in when the writer names none.
+# Private keeps a project's members from broadcasting by accident; an owner
+# opts the project into project scope once instead of every agent passing it.
+AUTH_PROJECT_DEFAULT_MEMORY_SCOPE_DEFINITIONS = f"""
+DEFINE FIELD IF NOT EXISTS default_memory_scope ON projects TYPE string DEFAULT 'private'
+    ASSERT $value IN {_surql_string_array(_AUTH_PROJECT_DEFAULT_MEMORY_SCOPE_VALUES)};
+UPDATE projects SET default_memory_scope = 'private' WHERE default_memory_scope = NONE;
+"""
+
 AUTH_SCHEMA_MIGRATIONS = (
     SchemaMigration(
         version=1,
@@ -783,6 +795,11 @@ AUTH_SCHEMA_MIGRATIONS = (
         version=10,
         name="auth_session_revocation_announced_at",
         statements=tuple(split_statements(AUTH_SESSION_REVOCATION_ANNOUNCED_DEFINITIONS)),
+    ),
+    SchemaMigration(
+        version=11,
+        name="auth_project_default_memory_scope",
+        statements=tuple(split_statements(AUTH_PROJECT_DEFAULT_MEMORY_SCOPE_DEFINITIONS)),
     ),
 )
 

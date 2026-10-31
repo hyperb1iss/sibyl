@@ -37,6 +37,9 @@ task command you came for. Sessions that load the contract and skip the verb def
 - "have we hit this before" / "do we know X" -> `sibyl context "<topic>"`
 - "remember this" / "write this up" / "save this insight" -> `sibyl remember "<title>" "<body>"`
 - "that memory is wrong/stale/superseded" -> `sibyl correct <id>` then add `--action ...`
+- "tell the team prod is on fire" (live state, never durable knowledge) ->
+  `sibyl remember "<title>" "<body>" --scope team --scope-key <team-uuid> --expires 2h`; resolve
+  early with `sibyl correct <id> --action stale --reason resolved`
 
 Live status: `sibyl health` shows server reachability.
 

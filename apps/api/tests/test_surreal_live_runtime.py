@@ -3424,3 +3424,127 @@ async def test_live_a_refused_provisional_row_keeps_the_adoption_provisional(
     assert row["stamp"] == large_stamp
     assert PROVISIONAL_ADOPTION_KEY not in row["stamp"]
     assert row["vector"] != _OLD_GRAPH_VECTOR
+
+
+async def test_live_expired_capture_retires_through_correction(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from datetime import timedelta
+
+    from sibyl_core.services import content_client
+    from sibyl_core.services.graph_read_availability import available_graph_entities
+    from sibyl_core.services.graph_relationships import RelationshipManager
+    from sibyl_core.services.graph_runtime import GraphRuntime
+    from sibyl_core.services.memory_expiry import (
+        CAPTURE_EXPIRED_AT_METADATA_KEY,
+        CAPTURE_EXPIRES_AT_METADATA_KEY,
+        DUE_CAPTURES_STATEMENT,
+        EXPIRY_INDEX,
+        capture_expiry_stamp,
+        due_capture_ids,
+        expire_due_captures,
+    )
+    from sibyl_core.services.surreal_content import get_raw_memory, remember_raw_memory
+
+    namespace = f"capture_expiry_live_{uuid4().hex}"
+    content = _live_content_client(namespace)
+    group_id = str(uuid4())
+    graph = _live_graph_client(group_id)
+    runtime = GraphRuntime(
+        client=graph,
+        entity_manager=EntityManager(graph, group_id=group_id),
+        relationship_manager=RelationshipManager(graph, group_id=group_id),
+    )
+
+    @asynccontextmanager
+    async def session():
+        yield content
+
+    monkeypatch.setattr(content_client, "surreal_content_client", session)
+    monkeypatch.setattr(
+        "sibyl_core.services.memory_lifecycle.get_surreal_graph_runtime",
+        _async_return(runtime),
+    )
+    now = datetime.now(UTC)
+    try:
+        await bootstrap_content_schema(content, reset=True)
+        await prepare_graph_schema(graph)
+        notice = await remember_raw_memory(
+            organization_id=group_id,
+            principal_id="oncall-agent",
+            source_id="incident:live",
+            raw_content="Checkout is down; hold every deploy.",
+            memory_scope="team",
+            scope_key="team-oncall",
+            embedding_provider=None,
+            expires_at=now + timedelta(minutes=5),
+        )
+        later = await remember_raw_memory(
+            organization_id=group_id,
+            principal_id="oncall-agent",
+            source_id="incident:later",
+            raw_content="Search reindex runs tonight.",
+            memory_scope="team",
+            scope_key="team-oncall",
+            embedding_provider=None,
+            expires_at=now + timedelta(hours=5),
+        )
+        plain = await remember_raw_memory(
+            organization_id=group_id,
+            principal_id="oncall-agent",
+            source_id="plain",
+            raw_content="Durable knowledge with no expiry.",
+            embedding_provider=None,
+        )
+        note = Entity(
+            id=f"note-{notice.id}",
+            name="Active incident",
+            content=notice.raw_content,
+            entity_type=EntityType.NOTE,
+            metadata={
+                "raw_memory_id": notice.id,
+                "memory_scope": "team",
+                "scope_key": "team-oncall",
+                "principal_id": "oncall-agent",
+            },
+        )
+        await runtime.entity_manager.create_direct(note, generate_embedding=False)
+        assert note.id in await available_graph_entities(group_id, [note.id], runtime=runtime)
+
+        sweep_at = now + timedelta(minutes=10)
+        plan = await content.execute_query(
+            f"{DUE_CAPTURES_STATEMENT.removesuffix(';')} EXPLAIN;",
+            now=capture_expiry_stamp(sweep_at),
+            limit=10,
+        )
+        assert EXPIRY_INDEX in json.dumps(plan, default=str), plan
+        assert await due_capture_ids(now=sweep_at, limit=10) == [(group_id, notice.id)]
+
+        result = await expire_due_captures(now=sweep_at)
+
+        assert [(item.memory.id, item.corrected) for item in result.expired] == [(notice.id, True)]
+        assert note.id not in await available_graph_entities(group_id, [note.id], runtime=runtime)
+        stored = await get_raw_memory(organization_id=group_id, memory_id=notice.id)
+        assert stored is not None
+        assert stored.metadata.get(CAPTURE_EXPIRES_AT_METADATA_KEY) is None
+        assert stored.metadata[CAPTURE_EXPIRED_AT_METADATA_KEY] == capture_expiry_stamp(
+            now + timedelta(minutes=5)
+        )
+        assert await due_capture_ids(now=sweep_at, limit=10) == []
+        for untouched in (later, plain):
+            row = await get_raw_memory(organization_id=group_id, memory_id=untouched.id)
+            assert row is not None
+            assert "correction_history" not in row.metadata
+    finally:
+        await content.close()
+        await graph.close()
+        await _drop_surreal_namespace(namespace)
+        with suppress(Exception):
+            await _drop_surreal_namespace(graph.namespace)
+
+
+def _async_return(value: Any) -> Callable[..., Awaitable[Any]]:
+    async def resolve(*_args: Any, **_kwargs: Any) -> Any:
+        return value
+
+    return resolve

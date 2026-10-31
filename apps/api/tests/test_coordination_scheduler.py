@@ -30,6 +30,14 @@ def test_privacy_purge_job_is_scheduled_and_registered() -> None:
     )
 
 
+def test_capture_expiry_sweep_runs_every_minute_and_is_registered() -> None:
+    specs = {spec.name: spec for spec in worker_module.get_schedule_specs()}
+
+    spec = specs["expire_time_boxed_captures"]
+    assert (spec.minute, spec.hour, spec.schedule_label) == (None, None, "* * * * *")
+    assert worker_module.expire_time_boxed_captures in worker_module.WorkerSettings.functions
+
+
 def test_raw_capture_changefeed_poll_is_scheduled_and_registered() -> None:
     spec_names = {spec.name for spec in worker_module.get_schedule_specs()}
 

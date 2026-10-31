@@ -45,9 +45,9 @@ These rules exist because real agent sessions consistently fail without them.
    produces the same message and login cannot fix it. Sibyl retries buffered writes automatically
    after the next successful API request. Use `sibyl pending-writes list` to inspect anything still
    queued. Older read-like entries are not replayed, because reads should be rerun instead. Remove
-   those with `sibyl pending-writes discard --read-like`. In a sandboxed environment, `sibyl config
-   context --quick` succeeding from local state while context retrieval or health cannot connect
-   means blocked network egress, not a server outage.
+   those with `sibyl pending-writes discard --read-like`. In a sandboxed environment,
+   `sibyl config context --quick` succeeding from local state while context retrieval or health
+   cannot connect means blocked network egress, not a server outage.
 
 6. **Never invent subcommands, flags, or enum values.** If you're unsure whether a command exists,
    run `sibyl <group> --help`. Do not guess, and do not pass any flag you have not seen in this
@@ -71,15 +71,15 @@ These rules exist because real agent sessions consistently fail without them.
    look failed.
 
 8. **A failed write needs a receipt.** A non-zero exit from `remember` does not confirm a server
-   save. If the CLI says the write was buffered, do not rerun it with a new idempotency key. Wait for
-   automatic replay or inspect it with `sibyl pending-writes list`. Retry exactly once after applying
-   the printed remediation only when the failure was not buffered. If that retry still fails,
-   include the unsaved learning verbatim in your final message so the user can capture it. Never
-   claim a memory was stored unless you can quote the returned entity ID (e.g.
+   save. If the CLI says the write was buffered, do not rerun it with a new idempotency key. Wait
+   for automatic replay or inspect it with `sibyl pending-writes list`. Retry exactly once after
+   applying the printed remediation only when the failure was not buffered. If that retry still
+   fails, include the unsaved learning verbatim in your final message so the user can capture it.
+   Never claim a memory was stored unless you can quote the returned entity ID (e.g.
    `error_pattern_5f40ca...`) as the receipt. On an unbuffered `internal_error`, retry once at most,
-   then walk the fallback ladder instead of spiraling: for a completion, `task complete` → `task
-   update <id> -s done` plus a separate `remember` for the learnings. Never silently drop a capture
-   because the server is sick. Write the body to a scratch file and say so.
+   then walk the fallback ladder instead of spiraling: for a completion, `task complete` →
+   `task update <id> -s done` plus a separate `remember` for the learnings. Never silently drop a
+   capture because the server is sick. Write the body to a scratch file and say so.
 
 9. **Fetch IDs fresh.** Re-run the list command immediately before `show`/`update`/`complete`; never
    reuse an entity or task UUID remembered from earlier in a long session, and never run the list
@@ -110,7 +110,8 @@ Sibyl is the agent's durable brain. Use it as a loop, not a lookup box:
    or unused context as misleading.
 3. **Remember while learning.** Run `sibyl remember "Title" "What matters" --kind <type>` whenever
    future agents should not rediscover a decision, plan, idea, claim, artifact, session, procedure,
-   or error pattern. In a linked repo, `remember` automatically scopes the memory to that project.
+   or error pattern. In a linked repo, `remember` files the memory under that project; who can
+   read it is a separate question, answered under "Who sees a memory" below.
 4. **Reflect at clean breakpoints.** Run `sibyl reflect "<raw notes>" --title "<session>"` to
    extract reviewable candidates. Add `--persist` to write candidates and preserve the raw session
    source as provenance. On task completion, still use `sibyl task complete --learnings "..."`.
@@ -126,6 +127,26 @@ Prefer these verbs:
 - `show`: retrieve full source memory from a graph entity or raw memory ID.
 - `cite`: mark only the memory that materially informed an answer, task completion, or reflection.
 - `correct`: mark raw memory wrong, stale, duplicate, or superseded, or revise its canonical body.
+
+### Who sees a memory
+
+Filing a memory under a project and sharing it are different things. Scope decides the audience:
+
+- **No `--scope`** lands in the project's default write scope. That is `private` (only you) unless
+  a project owner shared the project with `sibyl project update <project> --default-scope project`.
+  `sibyl project show <project>` prints the current default. The write receipt reports where the
+  memory landed (`memory_scope`) and why (`scope_resolution`); read it instead of assuming.
+- **`--scope private`** keeps a personal note yours even inside a shared project.
+- **`--scope project`** shares with everyone who can read the project. In a linked repo the key
+  fills in from the link. Writing it needs contributor access; a viewer's unscoped capture in a
+  shared project lands private, and the receipt says so.
+- **`--scope team --scope-key <team-uuid>`** reaches a team across all its projects and rides in
+  every team member's context pack, so keep it to curated, cross-project knowledge.
+  `sibyl team list` shows team keys.
+
+Reading mirrors this. In a linked repo, `context` and `search` return your private memories, that
+project's shared memories, and your teams' memories. Another project's memories stay out until you
+ask with `--project <id>` or `--all`.
 
 ### Correction loop
 
@@ -354,7 +375,8 @@ sibyl remember "CSS diagnostic" --content-file ./snippet.css --kind artifact
 sibyl remember "Moon gates" "Use moon for monorepo checks." --kind rule --pin --basis observed
 
 # Nominate a private memory for audited team promotion; this does not share it immediately
-sibyl remember "Review ritual" "Verifier passes are mandatory." --kind rule --propose-scope team
+sibyl remember "Review ritual" "Verifier passes are mandatory." --kind rule \
+  --propose-scope team --propose-scope-key <team-uuid>
 ```
 
 `remember` has **no** `--title`, `--type`, or `--summary` flags. Title and body are positional
@@ -372,15 +394,39 @@ wider legacy enum is accepted but not preferred. The natural words agents reach 
 Map them: `insight`/`discovery` → `episode`, `gotcha` → `error_pattern`, `learning` → `note`. If
 `--kind` is rejected, pick from the advertised list; never invent one. Use `--pin` only when
 ordinary decay would be harmful. `--basis` records whether the memory was observed, inferred, told,
-or assumed. `--propose-scope team` nominates the capture for the audited promotion pipeline; it
-never bypasses scope policy. These optional fields are usage-gated: if any remains null on more than
-95 percent of writes after one release, rework or demote that surface. Remember whenever future
-agents should not have to rediscover a detail. Project scoping stores both `metadata.project_id` and
-a project edge, and `remember` links to the single active `doing` task when exactly one exists.
-Future context can find the memory from graph retrieval, traversal, or task context. Use
-`--no-active-task` when the memory belongs to the project but not the current task. `--content-file`
-rejects symlinks, non-UTF-8 content, and files larger than 1 MiB by default; use `--max-size` or
-`--follow-symlinks` only when that is intentional.
+or assumed. `--propose-scope team` nominates the capture for the audited promotion pipeline, and
+`--propose-scope-key <team-uuid>` (from `sibyl team list`) names the team; neither bypasses scope
+policy. `--scope org` is not enabled yet and the CLI refuses it; use `project` or `team`. These
+optional fields are usage-gated: if any remains null on more than 95 percent of writes after one
+release, rework or demote that surface. Remember whenever future agents should not have to
+rediscover a detail. Project scoping stores both `metadata.project_id` and a project edge, and
+`remember` links to the single active `doing` task when exactly one exists. Future context can find
+the memory from graph retrieval, traversal, or task context. Use `--no-active-task` when the memory
+belongs to the project but not the current task. `--content-file` rejects symlinks, non-UTF-8
+content, and files larger than 1 MiB by default; use `--max-size` or `--follow-symlinks` only when
+that is intentional.
+
+### Time-boxed team notices
+
+Live state the team needs while it is true, and nobody needs once it is over, gets an expiry instead
+of a cleanup chore: an active incident, a deploy freeze, a migration window.
+
+```bash
+# Surfaces in teammates' packs when relevant, marked `expires=...`, until the deadline
+sibyl remember "Checkout outage" "Checkout returns 502s; hold all deploys." \
+  --scope team --scope-key <team-uuid> --expires 2h
+
+# Over early? Retire it now; the sweep leaves an already-retired notice alone
+sibyl correct <raw-memory-id> --action stale --reason resolved
+```
+
+`--expires` takes `30m`, `2h`, `1d` or `1h30m`, from one minute up to 30 days, and stores the notice
+verbatim like `--raw`. When the deadline passes, a scheduled sweep marks it stale with the reason
+`expired`, so it leaves every pack, search and recall lane. A notice reaches a pack through recall,
+so it shows up when it ranks for the goal; title it the way an agent would search. Once the sweep
+has expired a notice, `--action restore` keeps it alive for good; restoring an early-resolved notice
+before its deadline leaves the expiry in place. Never time-box durable knowledge: once the incident is over, capture the lesson
+as a normal `remember`.
 
 ---
 
