@@ -23,23 +23,20 @@ export function createTestQueryClient() {
   });
 }
 
-interface WrapperProps {
+interface TestProvidersProps {
+  client: QueryClient;
   children: ReactNode;
 }
 
 /**
- * Test wrapper with all required providers.
+ * Every provider a rendered component expects.
  */
-function createWrapper(queryClient?: QueryClient) {
-  const client = queryClient ?? createTestQueryClient();
-
-  return function Wrapper({ children }: WrapperProps) {
-    return (
-      <QueryClientProvider client={client}>
-        <ThemeProvider>{children}</ThemeProvider>
-      </QueryClientProvider>
-    );
-  };
+function TestProviders({ client, children }: TestProvidersProps) {
+  return (
+    <QueryClientProvider client={client}>
+      <ThemeProvider>{children}</ThemeProvider>
+    </QueryClientProvider>
+  );
 }
 
 /**
@@ -50,12 +47,13 @@ export function renderWithProviders(
   options?: Omit<RenderOptions, 'wrapper'> & { queryClient?: QueryClient }
 ) {
   const { queryClient, ...renderOptions } = options ?? {};
+  const client = queryClient ?? createTestQueryClient();
 
   return {
     user: userEvent.setup(),
-    queryClient: queryClient ?? createTestQueryClient(),
+    queryClient: client,
     ...render(ui, {
-      wrapper: createWrapper(queryClient),
+      wrapper: ({ children }) => <TestProviders client={client}>{children}</TestProviders>,
       ...renderOptions,
     }),
   };

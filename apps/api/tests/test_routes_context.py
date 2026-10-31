@@ -1125,6 +1125,69 @@ def _reflection_pack(
 
 
 class TestReflectRoute:
+    @pytest.fixture(autouse=True)
+    def _shared_project_default(self) -> Iterator[None]:
+        """These tests reflect into a project that opted into project scope.
+
+        The resolver itself is covered in test_project_default_scope; here it
+        stands in as "shared project, contributor writer" so the assertions
+        stay about the route.
+        """
+        from sibyl_core.auth.memory_policy import DefaultWriteScope
+        from sibyl_core.models.memory_scope import MemoryScope
+
+        async def shared(*, ctx, project_id):
+            if project_id:
+                return DefaultWriteScope(MemoryScope.PROJECT, project_id, "default_scope_project")
+            return DefaultWriteScope(MemoryScope.PRIVATE, None, "default_scope_no_project")
+
+        with patch("sibyl.api.routes.memory_auth.resolve_capture_default_scope", shared):
+            yield
+
+    @pytest.mark.asyncio
+    async def test_reflect_in_an_unshared_project_keeps_the_notes_private(self) -> None:
+        from sibyl.api.routes.context import reflect_context
+        from sibyl_core.auth.memory_policy import DefaultWriteScope
+        from sibyl_core.models.memory_scope import MemoryScope
+
+        org = SimpleNamespace(id=UUID("00000000-0000-0000-0000-000000000111"))
+        private = DefaultWriteScope(MemoryScope.PRIVATE, None, "default_scope_project_private")
+        with (
+            patch(
+                "sibyl.api.routes.memory_auth.resolve_capture_default_scope",
+                AsyncMock(return_value=private),
+            ) as resolve,
+            patch(
+                "sibyl.api.routes.context.list_accessible_project_graph_ids",
+                AsyncMock(return_value=["proj_1"]),
+            ),
+            patch("sibyl.api.routes.context.verify_entity_project_access", AsyncMock()),
+            patch(
+                "sibyl_core.tools.core.reflect_memory",
+                AsyncMock(return_value=_reflection_pack()),
+            ) as reflect_memory,
+            patch(
+                "sibyl_core.tools.core.explore",
+                AsyncMock(return_value=SimpleNamespace(entities=[])),
+            ),
+        ):
+            await reflect_context(
+                request=ReflectionRequest(
+                    content="Raw session notes with my half-formed theories.",
+                    source_title="Planning",
+                    intent=ContextIntent.BUILD,
+                    project="proj_1",
+                    persist=True,
+                ),
+                org=org,
+                ctx=_ctx(),
+            )
+
+        assert resolve.await_args.kwargs["project_id"] == "proj_1"
+        assert reflect_memory.await_args.kwargs["memory_scope"] == "private"
+        assert reflect_memory.await_args.kwargs["scope_key"] is None
+        assert reflect_memory.await_args.kwargs["project"] == "proj_1"
+
     @pytest.mark.asyncio
     async def test_reflect_scopes_to_accessible_project(self) -> None:
         from sibyl.api.routes.context import reflect_context

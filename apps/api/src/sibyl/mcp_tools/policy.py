@@ -5,11 +5,14 @@ import structlog
 import sibyl.mcp_tools.context as mcp_context
 from sibyl.auth.api_key_common import api_key_memory_scope_key
 from sibyl.auth.memory_targets import RelationshipReaderScope, validate_relationship_targets
+from sibyl.persistence.auth_runtime import get_project_default_memory_scope
 from sibyl_core.auth.memory_policy import (
+    DefaultWriteScope,
     MemoryPolicyAction,
     MemoryPolicyDecision,
     authorize_memory_read,
     authorize_memory_write,
+    resolve_default_write_scope,
 )
 from sibyl_core.services.surreal_content import MemoryScope
 
@@ -97,6 +100,40 @@ def deny_api_key_memory_scope(
     )
     log_policy_decision(ctx=ctx, decision=decision, surface=surface)
     raise ValueError(decision.reason)
+
+
+async def resolve_capture_default_scope(
+    ctx: mcp_context.McpContext, *, project: str | None
+) -> DefaultWriteScope:
+    """The scope an MCP capture lands in; MCP tools take no scope argument."""
+    if not project:
+        return resolve_default_write_scope(
+            project_id=None,
+            project_default=None,
+            writable_projects=None,
+            project_scope_granted=False,
+        )
+    project_default = await get_project_default_memory_scope(
+        organization_id=ctx.org_id,
+        graph_project_id=project,
+    )
+    private_granted = memory_scope_allowed(
+        ctx, memory_scope=MemoryScope.PRIVATE.value, scope_key=None
+    )
+    writable = (
+        await mcp_context.get_writable_projects(ctx)
+        if project_default is MemoryScope.PROJECT or not private_granted
+        else None
+    )
+    return resolve_default_write_scope(
+        project_id=project,
+        project_default=project_default,
+        writable_projects=writable,
+        project_scope_granted=memory_scope_allowed(
+            ctx, memory_scope=MemoryScope.PROJECT.value, scope_key=project
+        ),
+        private_scope_granted=private_granted,
+    )
 
 
 async def authorize_memory_request(
