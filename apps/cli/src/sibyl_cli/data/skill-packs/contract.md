@@ -30,8 +30,7 @@ sibyl task complete <id> --learnings "<durable result>"
 sibyl health
 ```
 
-`search`, `recall`, `add`, and `blame` are compatibility aliases. Use the five verbs above in new
-agent instructions. Human and operator surfaces live outside this compact contract.
+Human and operator surfaces live outside this compact contract.
 
 ## Small enums
 
@@ -61,8 +60,8 @@ Useful write flags:
    need to inspect or correct a specific memory.
 2. Load `sibyl skill get core` before the first write intent. The full pack carries current flags,
    receipts, task transitions, correction actions, and conflict handling.
-3. Raw memory is law. New knowledge goes through `sibyl remember`, even when the hidden `add` alias
-   would work. This preserves verbatim provenance before graph projection.
+3. Raw memory is law. New knowledge goes through `sibyl remember`, which preserves verbatim
+   provenance before graph projection.
 4. Feedback must be material. Positive citation means the memory shaped the result. `--misled` means
    it shaped the result incorrectly. Mere exposure earns neither signal.
 5. Trust receipts, not narration. A write is complete only when its mutation receipt says it was

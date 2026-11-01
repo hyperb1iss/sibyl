@@ -85,9 +85,9 @@ Projects default to organization visibility, so every organization member can re
 project-scoped memory. Shared project memory therefore reaches the whole organization unless the
 project is private and granted to specific people or teams.
 
-Reads follow the working project. In a linked repo, `sibyl context` and `sibyl search` return your
-private memories, that project's shared memories, and your teams' memories. Another project's
-memories appear only when you ask for them with `--project <id>` or `--all`.
+Reads follow the working project. In a linked repo, `sibyl context` returns your private memories,
+that project's shared memories, and your teams' memories. Another project's memories appear only
+when you ask for them with `--project <id>` or `--all`.
 
 ## Choosing A Scope
 

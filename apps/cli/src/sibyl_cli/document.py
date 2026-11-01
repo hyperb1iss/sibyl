@@ -374,7 +374,7 @@ def show_document(
     Use the document_id from search result metadata to fetch the complete document.
 
     Example:
-        sibyl search "proto config"
+        sibyl context "proto config"
         # Note the document_id in metadata
         sibyl crawl documents show 22d4cf79-8561-4be0-8067-da8673e3439d
     """

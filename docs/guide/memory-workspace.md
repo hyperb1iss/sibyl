@@ -30,7 +30,7 @@ team's memory been doing".
 
 ## Captures
 
-Captures are raw, low-friction memories created with `sibyl capture` or the `remember` flow. The
+Captures are raw, low-friction memories created with `sibyl remember` or the web capture dialog. The
 captures surface lists them so you can:
 
 - Read the original content and inspect linked memories

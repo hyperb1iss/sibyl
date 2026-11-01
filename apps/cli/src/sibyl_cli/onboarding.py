@@ -117,13 +117,13 @@ def show_success() -> None:
     console.print("  [dim]Try these commands:[/dim]")
     console.print()
     console.print(
-        f'    [{NEON_CYAN}]›[/{NEON_CYAN}] [bold {NEON_CYAN}]sibyl search[/bold {NEON_CYAN}] [white]"patterns"[/white]   [dim]Search knowledge[/dim]'
+        f'    [{NEON_CYAN}]›[/{NEON_CYAN}] [bold {NEON_CYAN}]sibyl context[/bold {NEON_CYAN}] [white]"patterns"[/white]  [dim]Recall knowledge[/dim]'
     )
     console.print(
         f"    [{NEON_CYAN}]›[/{NEON_CYAN}] [bold {NEON_CYAN}]sibyl task list[/bold {NEON_CYAN}]          [dim]View tasks[/dim]"
     )
     console.print(
-        f'    [{NEON_CYAN}]›[/{NEON_CYAN}] [bold {NEON_CYAN}]sibyl add[/bold {NEON_CYAN}] [white]"Title" "..."[/white]   [dim]Capture knowledge[/dim]'
+        f'    [{NEON_CYAN}]›[/{NEON_CYAN}] [bold {NEON_CYAN}]sibyl remember[/bold {NEON_CYAN}] [white]"Title" "..."[/white] [dim]Capture knowledge[/dim]'
     )
     console.print()
 

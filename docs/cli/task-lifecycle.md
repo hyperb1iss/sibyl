@@ -469,9 +469,6 @@ sibyl task note task_abc123 "Implementing the fix now" --assistant --author clau
 git log -1 --format=%B | sibyl task note task_abc123 -
 ```
 
-The top-level [`sibyl note`](./remember.md) command wraps this: pass a task ID and it adds a task
-note, pass free text and it captures a note memory.
-
 ---
 
 ## task notes

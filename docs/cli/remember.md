@@ -169,5 +169,4 @@ git log -5 --oneline | sibyl remember "Recent auth commits" --kind episode
 
 - [`sibyl context`](./context.md) - Load memory back into an agent context
 - [`sibyl reflect`](./reflect.md) - Turn raw notes into reviewable candidates
-- [`sibyl capture`](./capture.md) - Quick capture without a separate title
 - [Memory governance](./memory.md) - Inspect, audit, and promote raw memory

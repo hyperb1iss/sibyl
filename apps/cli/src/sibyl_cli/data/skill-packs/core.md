@@ -143,7 +143,7 @@ Filing a memory under a project and sharing it are different things. Scope decid
   every team member's context pack, so keep it to curated, cross-project knowledge.
   `sibyl team list` shows team keys.
 
-Reading mirrors this. In a linked repo, `context` and `search` return your private memories, that
+Reading mirrors this. In a linked repo, `context` returns your private memories, that
 project's shared memories, and your teams' memories. Another project's memories stay out until you
 ask with `--project <id>` or `--all`.
 

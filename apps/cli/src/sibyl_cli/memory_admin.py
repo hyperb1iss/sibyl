@@ -169,27 +169,6 @@ def memory_inspect(
     run_memory_inspect()
 
 
-def blame_memory(
-    source_id: str = typer.Argument(..., help="Raw memory source ID"),
-    json_output: bool = typer.Option(False, "--json", "-j", help="Output as JSON"),
-) -> None:
-    """Show a memory's revisions, corrections, audits, and lineage."""
-
-    @run_async
-    async def run_blame_memory() -> None:
-        try:
-            async with get_client() as client:
-                data = await _load_memory_blame(client, source_id)
-            if json_output:
-                print_json(data)
-                return
-            print_memory_source_blame(cast("dict[str, object]", data))
-        except SibylClientError as e:
-            command_support.handle_client_error(e)
-
-    run_blame_memory()
-
-
 async def _load_memory_blame(client: Any, source_id: str) -> dict[str, Any]:
     resolved_source_id = await resolve_raw_memory_id_prefix(
         client,
@@ -747,5 +726,4 @@ app.add_typer(memory_review.app, name="review")
 def register_root_commands(root: typer.Typer) -> None:
     """Register the memory verbs agents run at the root."""
     root.command("cite")(cite_memories)
-    root.command("blame", hidden=True)(blame_memory)
     root.command("correct")(correct_memory)

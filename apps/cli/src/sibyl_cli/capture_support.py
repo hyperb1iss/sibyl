@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import re
 from collections.abc import Mapping
 from typing import Any, cast
 from uuid import UUID
@@ -17,7 +16,6 @@ from sibyl_core.memory_pipeline.capture import MemoryCaptureRequest, MemoryCaptu
 from sibyl_core.models.entities import EntityType
 from sibyl_core.models.memory_scope import MemoryScope
 
-CAPTURE_TITLE_CHARS = 72
 ENTITY_TYPE_VALUES = [entity_type.value for entity_type in EntityType]
 ADVERTISED_ENTITY_TYPE_VALUES = (
     "episode",
@@ -47,10 +45,6 @@ def normalize_entity_type(value: str) -> str:
         return normalized
     choices = ", ".join(ENTITY_TYPE_VALUES)
     raise typer.BadParameter(f"{value!r} is not one of: {choices}")
-
-
-def normalize_add_type(value: str) -> str:
-    return normalize_entity_type(value)
 
 
 def normalize_memory_kind(value: str | None) -> str | None:
@@ -102,27 +96,6 @@ def normalize_memory_scope(value: str | None) -> str | None:
     except ValueError as exc:
         choices = ", ".join(ADVERTISED_MEMORY_SCOPE_VALUES)
         raise typer.BadParameter(f"{value!r} is not one of: {choices}") from exc
-
-
-def looks_like_task_id(value: str) -> bool:
-    candidate = value.strip()
-    if candidate.startswith("task_"):
-        return True
-    try:
-        UUID(candidate)
-    except ValueError:
-        return False
-    return True
-
-
-def derive_capture_title(content: str) -> str:
-    """Create a compact default title for quick captures."""
-    compact = re.sub(r"\s+", " ", content).strip()
-    if not compact:
-        return "Untitled capture"
-    if len(compact) <= CAPTURE_TITLE_CHARS:
-        return compact
-    return compact[: CAPTURE_TITLE_CHARS - 1].rstrip(" ,;:-") + "…"
 
 
 async def resolve_capture_links(

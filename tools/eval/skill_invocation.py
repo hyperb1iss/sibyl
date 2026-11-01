@@ -124,7 +124,7 @@ class PromptResult:
 def extract_sibyl_verb(command: str) -> str | None:
     """Return the sibyl verb invoked by a bash command, or None.
 
-    Handles both single-word verbs (`sibyl search`) and the multi-word verbs
+    Handles both single-word verbs (`sibyl context`) and the multi-word verbs
     listed in MULTI_WORD_VERBS (`sibyl task list`, `sibyl entity show`).
     """
     tokens = command.lstrip().split()

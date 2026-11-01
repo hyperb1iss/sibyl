@@ -85,8 +85,7 @@ the `correct --action delete` command instead, because a graph delete can never 
 and a failed write would otherwise wait in the pending-write queue.
 
 Every applied correction returns a mutation receipt with its operation ID, affected records, and
-revision. Use `--preview` to validate a mutation without applying it. The hidden `blame` alias
-remains available during migration, but new instructions should use `correct` for inspection.
+revision. Use `--preview` to validate a mutation without applying it.
 
 ## Usage Feedback
 

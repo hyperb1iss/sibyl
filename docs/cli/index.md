@@ -58,8 +58,6 @@ Capture knowledge and recall it back into agent context.
 | [`sibyl remember`](./remember.md)      | Remember a decision, plan, idea, claim, or learning |
 | [`sibyl reflect`](./reflect.md)        | Reflect raw notes into reviewable memory candidates |
 | `sibyl cite`                           | Record citation or misleading-usage feedback        |
-| [`sibyl capture`](./capture.md)        | Quick capture with an auto-derived title            |
-| [`sibyl note`](./remember.md)          | Add a task note or capture a free note memory       |
 | [`sibyl correct`](./memory.md)         | Inspect or correct source memory                    |
 | [`sibyl show`](./show.md)              | Show a graph entity or raw memory by ID             |
 | [`sibyl entity`](./entity.md)          | Generic entity CRUD operations                      |
@@ -269,7 +267,7 @@ sibyl task list --status todo --json | jq '[.[] | {id, name, priority}]'
 sibyl context "fix the auth token refresh bug" --intent debug
 
 # Capture findings as you go
-sibyl capture "Redis WRONGTYPE on refresh was the root cause"
+sibyl remember "Refresh root cause" "Redis WRONGTYPE on refresh was the root cause" --kind error_pattern
 
 # Reflect a session into reviewable candidates
 cat session-notes.md | sibyl reflect --persist --review

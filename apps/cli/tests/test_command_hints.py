@@ -44,6 +44,9 @@ SUGGESTION = re.compile(r"(?<![\w/.~-])sibyl[ \t]+((?:[^\n\0`'\"&|;,().]|\.{3}|\
 NOT_COMMANDS = {
     ("data/hooks/session-start.py", "command and return stdout"),
     ("data/hooks/session-start.py", "commands this session"),
+    # The exact prompt older installers wrote, matched byte for byte so setup
+    # can find and remove it; it is never shown as advice.
+    ("setup.py", "add"),
 }
 
 

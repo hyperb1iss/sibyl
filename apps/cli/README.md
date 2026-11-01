@@ -31,7 +31,6 @@ No uv yet? The shell installer bootstraps it, then runs `sibyl setup`:
 sibyl context "goal"                          # Agent-ready context before work
 sibyl remember "title" "content" --kind decision  # Capture durable memory
 sibyl reflect "raw notes" --persist          # Distill notes into candidates
-sibyl capture "content"                      # Fast verbatim capture
 sibyl correct <raw_memory_id>                 # Inspect or correct source memory
 sibyl session bundle                         # Wake up with active context
 ```
@@ -56,8 +55,6 @@ sibyl task complete <id> --learnings "..."   # Complete with learnings
 | `correct`  | Inspect or correct source memory                          |
 | `reflect`  | Distill raw notes into reviewable memory candidates       |
 | `cite`     | Record citation or misleading-usage feedback for memories |
-| `capture`  | Fast verbatim capture from arguments or stdin             |
-| `note`     | Add a task note or capture a free note memory             |
 | `session`  | Package wake-up context for a session or agent            |
 
 ### Work tracking
@@ -141,7 +138,7 @@ compatibility.
 
 ```bash
 sibyl context "ship the SurrealDB-native memory path" --intent build
-sibyl capture "Redis TTL mismatch caused the stale auth token bug"
+sibyl remember "Stale auth token" "Redis TTL mismatch caused the stale auth token bug" --kind error_pattern
 sibyl remember "Token TTL decision" \
   "Keep refresh token TTL longer than access token TTL." --kind decision --domain auth
 sibyl remember "Worker routing decision" \

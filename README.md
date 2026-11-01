@@ -188,7 +188,6 @@ workflows.
 sibyl context "<goal>"                 # Compile working context
 sibyl remember "Title" "Body"         # Store durable memory
 sibyl reflect "<notes>" --persist     # Distill notes into candidates
-sibyl capture "<quick note>"          # Fast verbatim capture
 sibyl correct <raw_memory_id>          # Inspect or correct source memory
 
 # Knowledge & graph

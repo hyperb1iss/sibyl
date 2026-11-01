@@ -244,7 +244,7 @@ vs main.py remember --help. Audit: contexts/sibyl-analysis-2026-05-14/SYNTHESIS.
 ```
 
 Keep these scoped to the project being audited; future sessions on that project should find them via
-`sibyl recall`.
+`sibyl context`.
 
 ---
 
@@ -294,7 +294,7 @@ A bad audit:
   profane.
 - **"OUTPUT (ERROR)" over-inclusion**: the episode extractor flags errors heuristically. Filter
   again on `Process exited with code 1` or `✗` markers before counting real failures.
-- **Don't fix surfaces the team is already redesigning.** Check `sibyl recall <topic>` before
+- **Don't fix surfaces the team is already redesigning.** Check `sibyl context <topic>` before
   writing up a recommendation — the work might already be in flight.
 
 ---

@@ -133,18 +133,6 @@ def test_task_start_exits_nonzero_on_server_error_envelopes(
     assert result.exit_code == 1
 
 
-def test_note_alias_exits_nonzero_when_the_write_is_refused() -> None:
-    client = _client(create_note={})
-
-    with (
-        patch("sibyl_cli.capture.get_client", return_value=client),
-        patch("sibyl_cli.capture.resolve_id_prefix", AsyncMock(side_effect=lambda _c, i, **_k: i)),
-    ):
-        result = CliRunner().invoke(main_app, ["note", TASK_ID, "body"])
-
-    assert result.exit_code == 1
-
-
 def test_local_stop_exits_nonzero_when_compose_fails(tmp_path: Path) -> None:
     from sibyl_cli import local
 

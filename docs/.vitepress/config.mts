@@ -158,12 +158,8 @@ export default defineConfig({
                 {
                     text: 'Memory Loop',
                     items: [
-                        { text: 'recall', link: '/cli/recall' },
                         { text: 'remember', link: '/cli/remember' },
                         { text: 'reflect', link: '/cli/reflect' },
-                        { text: 'capture', link: '/cli/capture' },
-                        { text: 'search', link: '/cli/search' },
-                        { text: 'add', link: '/cli/add' },
                         { text: 'show', link: '/cli/show' },
                         { text: 'brief', link: '/cli/brief' },
                         { text: 'session', link: '/cli/session' },

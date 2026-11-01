@@ -238,10 +238,10 @@ A free-form note. Notes attach to tasks or stand alone as raw memory.
 
 ```bash
 # Task note
-sibyl note task_xyz "Found the root cause of the bug"
+sibyl task note task_xyz "Found the root cause of the bug"
 
 # Standalone free note
-sibyl note "Surreal RPC path is /rpc, easy to forget"
+sibyl remember "Surreal RPC path" "Surreal RPC path is /rpc, easy to forget" --kind note
 ```
 
 **Properties (task notes):**
