@@ -45,6 +45,7 @@ from sibyl_core.retrieval.search import build_context_retrieval_plan, context_se
 from sibyl_core.services.eval_publication_guards import (
     unavailable_publication_ids,
 )
+from sibyl_core.services.graph_entity_store import _CONTENT_MIRRORS_DESCRIPTION_TYPES
 from sibyl_core.services.graph_read_availability import GraphReadMemo
 from sibyl_core.services.graph_runtime import get_surreal_graph_runtime
 from sibyl_core.services.surreal_content import (
@@ -712,7 +713,6 @@ _ITEM_METADATA_KEYS = (
     # notice from history.
     "expires_at",
     "learnings",
-    "description",
     # Policy and correction gates downstream (synthesis render filters) read
     # these; dropping them silently disables defense-in-depth checks.
     "memory_scope",
@@ -727,6 +727,16 @@ _ITEM_METADATA_KEYS = (
     "supported",
     "claim",
 )
+
+# Description is index text on memory-shaped rows: a blurb derived from the
+# content, or on passages the trajectory framing every span of an observation
+# shares. It is BM25-indexed and embedded so retrieval matches on it, and the
+# projection writes it there on the premise that the reader never pays for it,
+# so it stays out of the lean item. Work items are the exception: description
+# is their authored body and content its mirror, and rows edited before updates
+# began mirroring still hold a create-time content, so a description that has
+# moved on from its content is served until those rows are backfilled.
+_LIVE_DESCRIPTION_TYPES = frozenset(_CONTENT_MIRRORS_DESCRIPTION_TYPES)
 
 
 def _lean_item_metadata(metadata: dict[str, Any]) -> dict[str, Any]:
@@ -749,9 +759,9 @@ def _lean_item_metadata(metadata: dict[str, Any]) -> dict[str, Any]:
 def _description_adds_nothing(description: str, content: str | None) -> bool:
     """Report whether a description is wholly contained in the content already served.
 
-    Writers store description as a hard prefix of content, so equality only holds
-    while the reader is served that same prefix; once the full body is served the
-    description is still redundant, just no longer identical.
+    A work item whose content still mirrors its description, and a row with no
+    content that is served its description as content, would both receive a
+    second copy that adds nothing.
     """
     trimmed = description.strip()
     body = (content or "").strip()
@@ -776,10 +786,10 @@ def _item_from_result(
         learnings = metadata.get("learnings")
         if isinstance(learnings, str) and learnings.strip():
             content = learnings.strip()
-    if not audit:
-        description = metadata.get("description")
-        if isinstance(description, str) and _description_adds_nothing(description, content):
-            metadata.pop("description", None)
+    if not audit and (result.type or "").lower() in _LIVE_DESCRIPTION_TYPES:
+        description = full_metadata.get("description")
+        if isinstance(description, str) and not _description_adds_nothing(description, content):
+            metadata["description"] = description
     kwargs: dict[str, Any] = {
         "id": result.id,
         "source_revision": result.source_revision,

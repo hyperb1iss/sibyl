@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from datetime import UTC, datetime
 from types import SimpleNamespace
 from typing import Any, Literal
@@ -28,6 +29,7 @@ from sibyl_core.tools.context import (
     context_item_source_id,
     context_pack_to_dict,
     context_pack_to_markdown,
+    render_context_pack,
 )
 from sibyl_core.tools.responses import SearchResponse, SearchResult
 from sibyl_core.tools.usage_exposure import drain_pending_exposure_stamps
@@ -2154,50 +2156,29 @@ def test_markdown_without_a_budget_keeps_the_count_defaults() -> None:
     assert "Decision 3" not in rendered
 
 
-@pytest.mark.asyncio
-async def test_lean_metadata_drops_description_equal_to_content(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    responses = {
-        ContextFacet.DECISIONS: [
-            _result(
-                "decision-1",
-                "decision",
-                "Decision",
-                metadata={"description": "Decision content"},
-            ),
-            _result(
-                "decision-2",
-                "decision",
-                "Other",
-                metadata={"description": "A longer different summary"},
-            ),
-        ],
-    }
-    monkeypatch.setattr(context_module, "context_search", _facet_native_search(responses))
-
-    pack = await compile_context("ship", intent="decide", organization_id="org-123")
-
-    by_id = {item.id: item for item in pack.items}
-    assert "description" not in by_id["decision-1"].metadata
-    assert by_id["decision-2"].metadata["description"] == "A longer different summary"
+GOAL_CARRY = "Goal: rotate the zephyrine credentials before the quarterly audit"
+SPAN_BODY = "button: Rotate keys [enabled]\nbutton: Restart gateway [enabled]"
 
 
-@pytest.mark.asyncio
-async def test_lean_metadata_drops_description_that_only_prefixes_content(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Serving the full body must not resurrect the truncated copy of it.
-
-    Writers store description as content[:500]. Once retrieval serves the whole
-    body the two stop being equal, so an equality-only check would ship the
-    prefix again as redundant metadata on every item.
-    """
+def _description_leak_responses() -> dict[ContextFacet, list[SearchResult]]:
     full_content = "Full decision body. " * 100
-    responses = {
+    return {
         ContextFacet.DECISIONS: [
             SearchResult(
-                id="decision-1",
+                id="passage-1",
+                type="passage",
+                name="Observation 3.1 passage 1/2",
+                content=SPAN_BODY,
+                score=0.9,
+                metadata={
+                    "entity_type": "passage",
+                    "projection_kind": "passage",
+                    "source_entity_type": "decision",
+                    "description": GOAL_CARRY,
+                },
+            ),
+            SearchResult(
+                id="decision-prefix",
                 type="decision",
                 name="Decision",
                 content=full_content,
@@ -2205,7 +2186,7 @@ async def test_lean_metadata_drops_description_that_only_prefixes_content(
                 metadata={"entity_type": "decision", "description": full_content[:500]},
             ),
             SearchResult(
-                id="decision-2",
+                id="decision-summary",
                 type="decision",
                 name="Other",
                 content=full_content,
@@ -2214,14 +2195,106 @@ async def test_lean_metadata_drops_description_that_only_prefixes_content(
             ),
         ],
     }
-    monkeypatch.setattr(context_module, "context_search", _facet_native_search(responses))
+
+
+@pytest.mark.asyncio
+async def test_pack_items_never_serve_a_memory_description(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Description on a memory-shaped row is index text, not reader payload.
+
+    Passage projection writes the trajectory's goal framing into description so
+    BM25 and the embedding match on it, on the premise that the reader never
+    pays for it. The JSON pack ships item metadata verbatim, so any description
+    left there costs reader tokens on every pack that admits the row.
+    """
+    monkeypatch.setattr(
+        context_module, "context_search", _facet_native_search(_description_leak_responses())
+    )
 
     pack = await compile_context("ship", intent="decide", organization_id="org-123")
 
     by_id = {item.id: item for item in pack.items}
-    assert by_id["decision-1"].content == full_content
-    assert "description" not in by_id["decision-1"].metadata
-    assert by_id["decision-2"].metadata["description"] == "An unrelated summary"
+    assert set(by_id) >= {"passage-1", "decision-prefix", "decision-summary"}
+    assert by_id["passage-1"].content == SPAN_BODY
+    assert by_id["decision-prefix"].content == "Full decision body. " * 100
+    assert all("description" not in item.metadata for item in pack.items)
+    payload = json.dumps(context_pack_to_dict(pack))
+    markdown = render_context_pack(pack).markdown
+    for leaked in ("zephyrine", "An unrelated summary"):
+        assert leaked not in payload
+        assert leaked not in markdown
+    assert "Rotate keys" in markdown
+
+
+@pytest.mark.asyncio
+async def test_audit_packs_still_carry_the_description(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Audit is the view for debugging what retrieval matched on."""
+    monkeypatch.setattr(
+        context_module, "context_search", _facet_native_search(_description_leak_responses())
+    )
+
+    pack = await compile_context("ship", intent="decide", organization_id="org-123", audit=True)
+
+    by_id = {item.id: item for item in pack.items}
+    assert by_id["passage-1"].metadata["description"] == GOAL_CARRY
+
+
+@pytest.mark.asyncio
+async def test_an_edited_work_item_still_serves_its_live_description(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Work items keep description as the authored body.
+
+    Rows edited before updates began mirroring description into content still
+    hold the create-time text in content, so a retrieved task whose description
+    moved on would otherwise serve only the stale copy. One whose content still
+    mirrors its description would gain nothing from a second copy.
+    """
+    responses = {
+        ContextFacet.ACTIVE_WORK: [
+            SearchResult(
+                id="task-edited",
+                type="task",
+                name="Fix the sanitizer",
+                content="Original premise, frozen at create time.",
+                score=0.8,
+                metadata={
+                    "entity_type": "task",
+                    "status": "todo",
+                    "description": "CORRECTED: the real cause is the error sanitizer.",
+                },
+            ),
+            SearchResult(
+                id="task-unedited",
+                type="task",
+                name="Ship the fix",
+                content="Ship the fix behind the flag.",
+                score=0.7,
+                metadata={
+                    "entity_type": "task",
+                    "status": "todo",
+                    "description": "Ship the fix behind the flag.",
+                },
+            ),
+        ],
+    }
+    monkeypatch.setattr(context_module, "context_search", _facet_native_search(responses))
+
+    pack = await compile_context(
+        "ship",
+        intent="build",
+        organization_id="org-123",
+        active_work_fn=AsyncMock(return_value=[]),
+    )
+
+    by_id = {item.id: item for item in pack.items}
+    assert by_id["task-edited"].metadata["description"] == (
+        "CORRECTED: the real cause is the error sanitizer."
+    )
+    assert "description" not in by_id["task-unedited"].metadata
 
 
 def test_active_work_item_serves_live_description_over_stale_content() -> None:
