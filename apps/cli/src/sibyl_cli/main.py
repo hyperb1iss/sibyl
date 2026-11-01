@@ -44,7 +44,6 @@ from sibyl_cli.connect import setup_cmd
 from sibyl_cli.context import app as context_app
 from sibyl_cli.crawl import app as crawl_app
 from sibyl_cli.debug import app as debug_app
-from sibyl_cli.dev import app as dev_app
 from sibyl_cli.docker import app as docker_app
 from sibyl_cli.doctor import doctor as doctor_cmd
 from sibyl_cli.document import docs_app
@@ -156,7 +155,6 @@ app.add_typer(export_app, name="export")
 app.add_typer(crawl_app, name="crawl")
 app.add_typer(docs_app, name="docs")
 app.add_typer(debug_app, name="debug")
-app.add_typer(dev_app, name="dev")
 app.add_typer(auth_app, name="auth")
 app.add_typer(org_app, name="org")
 config_app.add_typer(context_app, name="context")
