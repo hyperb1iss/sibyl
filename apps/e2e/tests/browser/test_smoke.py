@@ -62,7 +62,7 @@ class TestFrontendBrowserContracts:
         project_id = project.get("id") if isinstance(project, dict) else None
         assert project_id, f"Project seed did not return an id: {project!r}"
         assert_cli_success(
-            cli.task_create(test_task_title, project_id, sync=True),
+            cli.task_create(test_task_title, project_id),
             "task seed",
         )
 

@@ -39,7 +39,6 @@ class TestTaskWorkflow:
 
     def test_task_start(self, cli, project_id, test_task_title) -> None:
         """Create and start a task."""
-        # Create (sync=True by default ensures task exists before start)
         create_result = cli.task_create(test_task_title, project_id)
         assert create_result.success, f"Task create failed: {create_result.stderr}"
         task_id = create_result.json().get("id")
@@ -54,7 +53,6 @@ class TestTaskWorkflow:
 
     def test_task_complete(self, cli, project_id, test_task_title) -> None:
         """Create, start, and complete a task."""
-        # Create (sync=True by default ensures task exists)
         create_result = cli.task_create(test_task_title, project_id)
         assert create_result.success, f"Task create failed: {create_result.stderr}"
         task_id = create_result.json().get("id")
@@ -75,7 +73,6 @@ class TestTaskWorkflow:
         """Full task lifecycle: create -> start -> complete."""
         task_title = f"Lifecycle Test {unique_id}"
 
-        # Create (sync=True by default ensures immediate availability)
         create_result = cli.task_create(
             task_title, project_id, priority="medium", feature="testing"
         )
