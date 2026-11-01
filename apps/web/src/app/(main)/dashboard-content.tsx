@@ -802,8 +802,8 @@ export function DashboardContent({ initialStats }: DashboardContentProps) {
           </div>
         </div>
 
-        {/* Right Column - Sidebar */}
-        <div className="lg:w-80 shrink-0 space-y-4 sm:space-y-6">
+        {/* Right Column - Sidebar: long unbroken tokens (snake_case task names) wrap inside it */}
+        <div className="lg:w-80 shrink-0 min-w-0 break-words space-y-4 sm:space-y-6">
           <div className="bg-sc-bg-elevated border border-sc-fg-subtle/30 rounded-xl p-4 sm:p-6 shadow-card">
             <div className="flex items-center gap-2 sm:gap-3 mb-4">
               <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-lg sm:rounded-xl bg-sc-cyan/10 border border-sc-cyan/20 flex items-center justify-center">
@@ -831,7 +831,9 @@ export function DashboardContent({ initialStats }: DashboardContentProps) {
                     <div className="text-[10px] uppercase tracking-[0.18em] text-sc-fg-subtle">
                       Focus
                     </div>
-                    <div className="mt-1 text-sm text-sc-purple">{sessionBundle.query}</div>
+                    <div className="mt-1 text-sm text-sc-purple line-clamp-3">
+                      {sessionBundle.query}
+                    </div>
                   </div>
                 )}
 
