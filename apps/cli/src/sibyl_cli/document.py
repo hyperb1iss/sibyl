@@ -5,8 +5,6 @@ Commands for viewing crawled documents and their chunks.
 
 from __future__ import annotations
 
-import asyncio
-import time
 from pathlib import Path
 from typing import Annotated, Any
 from urllib.parse import urlparse
@@ -21,15 +19,13 @@ from sibyl_cli.common import (
     error,
     handle_client_error,
     info,
-    print_json,
     resolve_content_input,
     run_async,
-    success,
     truncate,
 )
 from sibyl_cli.config_store import resolve_project_from_cwd
-from sibyl_cli.memory_views import print_source_import_status
 from sibyl_cli.project_refs import PROJECT_RELINK_HINT, resolve_project_reference
+from sibyl_cli.source_imports import finish_import
 from sibyl_cli.view_shared import maybe_print_json, render_detail_panel, render_table_or_empty
 
 app = typer.Typer(
@@ -42,8 +38,6 @@ docs_app = typer.Typer(
     help="Import and list document collections",
     no_args_is_help=True,
 )
-
-_TERMINAL_STATUSES = {"completed", "failed", "canceled"}
 
 
 def _resolve_document_path(source: Path) -> Path:
@@ -96,63 +90,6 @@ async def _resolve_target_project(client: Any, project: str | None) -> str:
     raise typer.Exit(1)
 
 
-async def _wait_for_import(
-    client: Any,
-    import_id: str,
-    *,
-    poll_interval: float,
-    timeout: float | None,
-) -> dict[str, object]:
-    started_at = time.monotonic()
-    while True:
-        data = await client.source_import_status(import_id)
-        if str(data.get("status") or "") in _TERMINAL_STATUSES:
-            return data
-        if timeout is not None and time.monotonic() - started_at >= timeout:
-            return data
-        await asyncio.sleep(poll_interval)
-
-
-async def _finish_document_import(
-    client: Any,
-    data: dict[str, object],
-    *,
-    drain: bool,
-    poll_interval: float,
-    timeout: float | None,
-    json_out: bool,
-) -> None:
-    if drain:
-        import_id = str(data.get("import_id") or "")
-        if import_id:
-            if not json_out:
-                info(f"Waiting for document import drain {import_id}")
-            data = await _wait_for_import(
-                client,
-                import_id,
-                poll_interval=poll_interval,
-                timeout=timeout,
-            )
-    status = str(data.get("status") or "")
-    if json_out:
-        print_json(data)
-        if status in {"failed", "canceled"}:
-            raise typer.Exit(1)
-        return
-
-    if status == "completed":
-        success("Document import completed")
-    elif status in {"failed", "canceled"}:
-        print_source_import_status(data, title="Document Import", default_scope="project")
-        error(f"Document import {status}")
-        raise typer.Exit(1)
-    elif drain and status not in _TERMINAL_STATUSES:
-        info("Document import drain is still running")
-    else:
-        success("Document import queued")
-    print_source_import_status(data, title="Document Import", default_scope="project")
-
-
 @docs_app.command("add")
 def add_document_source(
     source: Annotated[str, typer.Argument(help="Document file, directory, or URL")],
@@ -200,9 +137,12 @@ def add_document_source(
                     promotion_preview_approved=False,
                     allow_private_network=allow_private_network,
                 )
-                await _finish_document_import(
+                await finish_import(
                     client,
                     data,
+                    noun="Document import",
+                    title="Document Import",
+                    default_scope="project",
                     drain=drain,
                     poll_interval=poll_interval,
                     timeout=timeout,
@@ -265,9 +205,12 @@ def paste_document(
                     batch_size=batch_size,
                     promotion_preview_approved=False,
                 )
-                await _finish_document_import(
+                await finish_import(
                     client,
                     data,
+                    noun="Document import",
+                    title="Document Import",
+                    default_scope="project",
                     drain=drain,
                     poll_interval=poll_interval,
                     timeout=timeout,
