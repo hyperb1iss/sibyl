@@ -42,7 +42,7 @@ Every significant task follows this cycle:
 **1. RESEARCH** (before coding)
 
 ```
-/sibyl search "topic"
+/sibyl context "topic"
 /sibyl explore patterns
 ```
 
@@ -56,7 +56,7 @@ Every significant task follows this cycle:
 
 ```
 /sibyl task complete <id> --learnings "What I learned"
-/sibyl add "Pattern Title" "What, why, how, caveats"
+/sibyl remember "Pattern Title" "What, why, how, caveats"
 ```
 
 ---

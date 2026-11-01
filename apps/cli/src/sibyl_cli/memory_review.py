@@ -9,7 +9,7 @@ import typer
 
 from sibyl_cli import command_support
 from sibyl_cli.client import SibylClientError, get_client
-from sibyl_cli.common import print_json, run_async
+from sibyl_cli.common import handle_client_error, print_json, run_async
 from sibyl_cli.config_store import resolve_project_from_cwd
 from sibyl_cli.memory_views import (
     print_memory_review_drain,
@@ -97,7 +97,7 @@ def memory_review_drain(
                 return
             print_memory_review_drain(cast("dict[str, object]", data))
         except SibylClientError as e:
-            command_support.handle_client_error(e)
+            handle_client_error(e)
 
     run_memory_review_drain()
 
@@ -136,7 +136,7 @@ def memory_review_dream(
                 return
             print_reflection_dream_enqueue(cast("dict[str, object]", data), dry_run=dry_run)
         except SibylClientError as e:
-            command_support.handle_client_error(e)
+            handle_client_error(e)
 
     run_memory_review_dream()
 
@@ -184,6 +184,6 @@ def memory_review_status(
                 return
             print_reflection_dream_status(payload)
         except SibylClientError as e:
-            command_support.handle_client_error(e)
+            handle_client_error(e)
 
     run_memory_review_status()

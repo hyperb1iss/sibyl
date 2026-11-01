@@ -11,6 +11,7 @@ from sibyl_cli import command_support, memory_review, memory_space
 from sibyl_cli.client import SibylClientError, get_client
 from sibyl_cli.common import (
     error,
+    handle_client_error,
     info,
     print_json,
     print_mutation_receipt,
@@ -86,7 +87,7 @@ def memory_audit(
             events = data.get("events", [])
             print_memory_audit_events(events if isinstance(events, list) else [])
         except SibylClientError as e:
-            command_support.handle_client_error(e)
+            handle_client_error(e)
 
     run_memory_audit()
 
@@ -142,7 +143,7 @@ def cite_memories(
             if excluded_count:
                 info(f"{excluded_count} citation(s) were accounted as exclusions")
         except SibylClientError as e:
-            command_support.handle_client_error(e)
+            handle_client_error(e)
 
     run_cite_memories()
 
@@ -164,30 +165,9 @@ def memory_inspect(
                 return
             print_memory_source_inspect(data)
         except SibylClientError as e:
-            command_support.handle_client_error(e)
+            handle_client_error(e)
 
     run_memory_inspect()
-
-
-def blame_memory(
-    source_id: str = typer.Argument(..., help="Raw memory source ID"),
-    json_output: bool = typer.Option(False, "--json", "-j", help="Output as JSON"),
-) -> None:
-    """Show a memory's revisions, corrections, audits, and lineage."""
-
-    @run_async
-    async def run_blame_memory() -> None:
-        try:
-            async with get_client() as client:
-                data = await _load_memory_blame(client, source_id)
-            if json_output:
-                print_json(data)
-                return
-            print_memory_source_blame(cast("dict[str, object]", data))
-        except SibylClientError as e:
-            command_support.handle_client_error(e)
-
-    run_blame_memory()
 
 
 async def _load_memory_blame(client: Any, source_id: str) -> dict[str, Any]:
@@ -343,7 +323,7 @@ def correct_memory(
                     return
                 print_memory_source_blame(cast("dict[str, object]", data))
             except SibylClientError as e:
-                command_support.handle_client_error(e)
+                handle_client_error(e)
 
         run_inspect_memory()
         return
@@ -524,7 +504,7 @@ def correct_memory(
                         "rerun without --expected-revision to preview the current state."
                     )
                 raise typer.Exit(code=1) from e
-            command_support.handle_client_error(e)
+            handle_client_error(e)
 
     run_correct_memory()
 
@@ -546,7 +526,7 @@ def memory_import_status(
                 return
             print_source_import_status(cast("dict[str, object]", data))
         except SibylClientError as e:
-            command_support.handle_client_error(e)
+            handle_client_error(e)
 
     run_memory_import_status()
 
@@ -654,7 +634,7 @@ def memory_promote(
             else:
                 print_promotion_preview(payload)
         except SibylClientError as e:
-            command_support.handle_client_error(e)
+            handle_client_error(e)
 
     run_memory_promote()
 
@@ -735,7 +715,7 @@ def memory_share(
             else:
                 print_share_result(cast("dict[str, object]", data))
         except SibylClientError as e:
-            command_support.handle_client_error(e)
+            handle_client_error(e)
 
     run_memory_share()
 
@@ -747,5 +727,4 @@ app.add_typer(memory_review.app, name="review")
 def register_root_commands(root: typer.Typer) -> None:
     """Register the memory verbs agents run at the root."""
     root.command("cite")(cite_memories)
-    root.command("blame", hidden=True)(blame_memory)
     root.command("correct")(correct_memory)

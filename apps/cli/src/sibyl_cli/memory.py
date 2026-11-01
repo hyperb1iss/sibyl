@@ -12,6 +12,7 @@ from sibyl_cli.client import SibylClientError, get_client
 from sibyl_cli.common import (
     console,
     error,
+    handle_client_error,
     info,
     print_json,
     print_mutation_receipt,
@@ -323,7 +324,7 @@ def remember_memory(
                     wait_searchable=wait_searchable,
                 )
         except SibylClientError as e:
-            command_support.handle_client_error(e)
+            handle_client_error(e)
         except ValueError as e:
             error(str(e))
             raise typer.Exit(code=1) from e
@@ -444,6 +445,6 @@ def reflect_memory(
                     f"{citation_usage.get('cited_count', len(cited_ids))}"
                 )
         except SibylClientError as e:
-            command_support.handle_client_error(e)
+            handle_client_error(e)
 
     run_reflect()

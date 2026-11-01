@@ -4,7 +4,6 @@ Commands for crawling documentation sites and managing the ingestion pipeline.
 All commands communicate with the REST API.
 """
 
-from functools import partial
 from typing import Annotated
 
 import typer
@@ -41,8 +40,6 @@ app = typer.Typer(
     no_args_is_help=True,
 )
 app.add_typer(document_app, name="documents")
-
-_handle_client_error = partial(handle_client_error, conflict_label="Conflict")
 
 
 @app.command("list")
@@ -98,7 +95,7 @@ def list_sources(
             console.print(f"\n[dim]Showing {len(sources)} source(s)[/dim]")
 
         except SibylClientError as e:
-            _handle_client_error(e)
+            handle_client_error(e)
 
     _list()
 
@@ -132,7 +129,6 @@ def add_source(
         depth=depth,
         include_patterns=pattern,
         json_out=json_out,
-        handle_client_error=_handle_client_error,
         next_step_command="sibyl crawl ingest",
     )
 
@@ -162,7 +158,6 @@ def ingest(
         max_depth=max_depth,
         generate_embeddings=not no_embed,
         json_out=json_out,
-        handle_client_error=_handle_client_error,
         status_command="sibyl crawl status <source_id>",
     )
 
@@ -178,7 +173,6 @@ def crawl_status(
     show_source_status(
         source_id,
         json_out=json_out,
-        handle_client_error=_handle_client_error,
     )
 
 
@@ -193,7 +187,6 @@ def show_source(
     show_crawl_source(
         source_id,
         json_out=json_out,
-        handle_client_error=_handle_client_error,
     )
 
 
@@ -232,7 +225,7 @@ def stats(
                     console.print(f"    {status_name}: {count}")
 
         except SibylClientError as e:
-            _handle_client_error(e)
+            handle_client_error(e)
 
     _stats()
 
@@ -270,7 +263,7 @@ def health(
                 raise typer.Exit(1)
 
         except SibylClientError as e:
-            _handle_client_error(e)
+            handle_client_error(e)
 
     _health()
 
@@ -304,7 +297,7 @@ def delete_source(
                 raise typer.Exit(1)
 
         except SibylClientError as e:
-            _handle_client_error(e)
+            handle_client_error(e)
 
     _delete()
 
@@ -324,7 +317,7 @@ def link_status(
         try:
             response = await client.link_graph_status()
         except SibylClientError as e:
-            _handle_client_error(e)
+            handle_client_error(e)
             return
 
         if json_out:
@@ -386,7 +379,7 @@ def link_graph(
                 create_new_entities=create_new_entities,
             )
         except SibylClientError as e:
-            _handle_client_error(e)
+            handle_client_error(e)
             return
 
         status = response.get("status", "unknown")

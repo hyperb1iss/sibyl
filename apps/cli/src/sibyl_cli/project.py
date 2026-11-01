@@ -54,8 +54,6 @@ app = typer.Typer(
     no_args_is_help=True,
 )
 
-_handle_client_error = handle_client_error
-
 
 def _print_pinned_context(context_name: str | None) -> None:
     """Show the context (and server) a directory link now routes to."""
@@ -129,7 +127,7 @@ def list_projects(
             console.print(f"\n[dim]Showing {len(entities)} project(s)[/dim]")
 
         except SibylClientError as e:
-            _handle_client_error(e)
+            handle_client_error(e)
 
     _list()
 
@@ -256,7 +254,7 @@ def show_project(
             console.print(panel)
 
         except SibylClientError as e:
-            _handle_client_error(e)
+            handle_client_error(e)
 
     _show()
 
@@ -303,7 +301,7 @@ def create_project(
                 raise typer.Exit(1)
 
         except SibylClientError as e:
-            _handle_client_error(e)
+            handle_client_error(e)
 
     _create()
 
@@ -340,7 +338,7 @@ def update_project(
                 resolved, default_memory_scope=normalized
             )
         except SibylClientError as e:
-            _handle_client_error(e)
+            handle_client_error(e)
             return
         if json_out:
             print_json(settings)
@@ -422,7 +420,7 @@ def project_progress(
                     console.print(f"  {status:10} [{NEON_CYAN}]{status_bar}[/{NEON_CYAN}] {count}")
 
         except SibylClientError as e:
-            _handle_client_error(e)
+            handle_client_error(e)
 
     _progress()
 

@@ -22,21 +22,17 @@ sibyl context "debug the error you hit" --intent debug
 
 ### Capture What You Learn
 
-If it took time to figure out, save it. There are three ways, in rising order of ceremony:
+If it took time to figure out, save it with `sibyl remember`, a title, the body, and a kind:
 
 ```bash
-# Quickest: derive a title from the content
-sibyl capture "Surreal embedded mode is single-writer, fine for local dev"
+# A quick thought: the default kind is episode
+sibyl remember "Embedded Surreal is single-writer" "Fine for local dev, not for shared servers"
 
 # Typed durable memory with an explicit kind
 sibyl remember "Chose SurrealDB" "One engine replaces three backends" --kind decision
-
-# Full control over type and metadata
-sibyl remember "Descriptive title" "What, why, how, caveats" --kind procedure
 ```
 
-`capture` and `remember` are the memory-loop verbs. `add` is the lower-level command with the widest
-set of flags.
+`remember` is the memory-loop verb for every kind; `--kind` picks the shape.
 
 Knowledge does not always arrive one entry at a time. Transcript ingestion
 (`sibyl ingest claude-code`/`codex`) replays past agent sessions into memory, and document

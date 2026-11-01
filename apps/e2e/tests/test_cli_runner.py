@@ -39,15 +39,6 @@ class TestCLIRunner:
             timeout=WAIT_SEARCHABLE_COMMAND_TIMEOUT,
         )
 
-    def test_capture_wait_searchable_uses_extended_timeout(self) -> None:
-        """Wait-searchable captures should use the same extended timeout budget."""
-        runner = CLIRunner()
-
-        with patch.object(runner, "run") as mock_run:
-            runner.capture("Content", wait_searchable=True)
-
-        assert mock_run.call_args.kwargs["timeout"] == WAIT_SEARCHABLE_COMMAND_TIMEOUT
-
     def test_remember_can_ignore_host_project_mapping(self) -> None:
         """Browser seeds can write without inheriting the checkout's project mapping."""
         runner = CLIRunner()

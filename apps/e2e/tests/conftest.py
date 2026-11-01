@@ -210,26 +210,6 @@ class CLIRunner:
         timeout = WAIT_SEARCHABLE_COMMAND_TIMEOUT if wait_searchable else 30
         return self.run(*args, timeout=timeout)
 
-    def capture(
-        self,
-        content: str,
-        *,
-        title: str | None = None,
-        entity_type: str = "episode",
-        tags: str | None = None,
-        wait_searchable: bool = False,
-    ) -> CLIResult:
-        """Capture a quick memory."""
-        args = ["capture", content, "--type", entity_type, "--json"]
-        if title:
-            args.extend(["--title", title])
-        if tags:
-            args.extend(["--tags", tags])
-        if wait_searchable:
-            args.append("--wait-searchable")
-        timeout = WAIT_SEARCHABLE_COMMAND_TIMEOUT if wait_searchable else 30
-        return self.run(*args, timeout=timeout)
-
     def context(
         self,
         goal: str,

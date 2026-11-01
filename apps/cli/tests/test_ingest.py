@@ -70,20 +70,6 @@ async def test_start_source_import_client_posts_ingestion_payload() -> None:
     )
 
 
-@pytest.mark.asyncio
-async def test_ingestion_source_import_status_url_encodes_import_id() -> None:
-    client = SibylClient(base_url="http://example.test/api", auth_token="token")
-    client._request = AsyncMock(return_value={"import_id": "import-1"})  # type: ignore[method-assign]
-
-    data = await client.ingestion_source_import_status("import/run:1")
-
-    assert data == {"import_id": "import-1"}
-    client._request.assert_awaited_once_with(  # type: ignore[attr-defined]
-        "GET",
-        "/ingestion/imports/import%2Frun%3A1",
-    )
-
-
 @patch("sibyl_cli.ingest.get_client")
 def test_ingest_claude_code_starts_private_import(
     mock_get_client: MagicMock,
@@ -109,7 +95,7 @@ def test_ingest_claude_code_starts_private_import(
         batch_size=100,
         promotion_preview_approved=False,
     )
-    mock_client.ingestion_source_import_status.assert_not_called()
+    mock_client.source_import_status.assert_not_called()
 
 
 @patch("sibyl_cli.ingest.get_client")
@@ -127,7 +113,7 @@ def test_ingest_codex_drain_polls_until_completed(
             "adapter_name": "codex_jsonl",
         }
     )
-    mock_client.ingestion_source_import_status = AsyncMock(
+    mock_client.source_import_status = AsyncMock(
         side_effect=[
             {**_import_status(status="running"), "adapter_name": "codex_jsonl"},
             {**_import_status(status="completed", imported_count=2), "adapter_name": "codex_jsonl"},
@@ -164,7 +150,7 @@ def test_ingest_codex_drain_polls_until_completed(
         batch_size=100,
         promotion_preview_approved=False,
     )
-    assert mock_client.ingestion_source_import_status.await_count == 2
+    assert mock_client.source_import_status.await_count == 2
 
 
 @patch("sibyl_cli.ingest.get_client")
@@ -176,9 +162,7 @@ def test_ingest_drain_fails_when_import_fails(
     transcript.write_text("{}\n", encoding="utf-8")
     mock_client = MagicMock()
     mock_client.start_source_import = AsyncMock(return_value=_import_status(status="running"))
-    mock_client.ingestion_source_import_status = AsyncMock(
-        return_value=_import_status(status="failed")
-    )
+    mock_client.source_import_status = AsyncMock(return_value=_import_status(status="failed"))
     mock_get_client.return_value = _FakeClientContext(mock_client)
 
     result = CliRunner().invoke(
@@ -209,9 +193,7 @@ def test_ingest_json_drain_failure_returns_nonzero_with_json(
     transcript.write_text("{}\n", encoding="utf-8")
     mock_client = MagicMock()
     mock_client.start_source_import = AsyncMock(return_value=_import_status(status="running"))
-    mock_client.ingestion_source_import_status = AsyncMock(
-        return_value=_import_status(status="failed")
-    )
+    mock_client.source_import_status = AsyncMock(return_value=_import_status(status="failed"))
     mock_get_client.return_value = _FakeClientContext(mock_client)
 
     result = CliRunner().invoke(

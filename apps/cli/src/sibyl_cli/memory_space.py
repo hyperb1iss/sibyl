@@ -8,7 +8,7 @@ import typer
 
 from sibyl_cli import command_support
 from sibyl_cli.client import SibylClientError, get_client
-from sibyl_cli.common import print_json, run_async
+from sibyl_cli.common import handle_client_error, print_json, run_async
 from sibyl_cli.memory_views import print_access_preview
 
 app = typer.Typer(help="Memory-space inspection and preview commands")
@@ -45,6 +45,6 @@ def memory_space_preview_agent(
                 return
             print_access_preview(cast("dict[str, object]", data))
         except SibylClientError as e:
-            command_support.handle_client_error(e)
+            handle_client_error(e)
 
     run_memory_space_preview_agent()

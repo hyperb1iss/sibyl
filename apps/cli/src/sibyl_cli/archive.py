@@ -9,11 +9,11 @@ from sibyl_cli.common import (
     CORAL,
     ELECTRIC_PURPLE,
     NEON_CYAN,
+    handle_client_error,
     run_async,
     success,
     truncate,
 )
-from sibyl_cli.common import handle_client_error as _handle_client_error
 from sibyl_cli.view_shared import maybe_print_json, render_detail_panel, render_table_or_empty
 
 app = typer.Typer(
@@ -76,7 +76,7 @@ def list_archive(
                     ),
                 )
         except SibylClientError as e:
-            _handle_client_error(e)
+            handle_client_error(e)
 
     _list()
 
@@ -138,6 +138,6 @@ def show_archive_capture(
 
                 render_detail_panel(title="Raw Capture", lines=lines)
         except SibylClientError as e:
-            _handle_client_error(e)
+            handle_client_error(e)
 
     _show()

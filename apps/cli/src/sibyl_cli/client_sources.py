@@ -66,11 +66,6 @@ class ClientSourcesMixin:
         """List accessible document import collections."""
         return await self._request("GET", "/ingestion/collections")
 
-    async def ingestion_source_import_status(self, import_id: str) -> dict[str, Any]:
-        """Inspect a source import receipt from the ingestion surface."""
-        encoded_import_id = quote(import_id, safe="")
-        return await self._request("GET", f"/ingestion/imports/{encoded_import_id}")
-
     async def resume_source_import(
         self,
         import_id: str,

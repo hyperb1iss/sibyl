@@ -55,8 +55,6 @@ def _runner() -> CliRunner:
 # (argv, client method that must never run when nothing names a project)
 UNLINKED_ENTRY_POINTS = [
     (["context", "goal"], "context_pack"),
-    (["recall", "goal"], "context_pack"),
-    (["search", "goal"], "context_pack"),
     (["brief", "goal"], "context_pack"),
 ]
 

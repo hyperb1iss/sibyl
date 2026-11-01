@@ -31,8 +31,6 @@ app = typer.Typer(
     no_args_is_help=True,
 )
 
-_handle_client_error = handle_client_error
-
 
 @app.command("related")
 def explore_related(
@@ -88,7 +86,7 @@ def explore_related(
             console.print(table)
 
         except SibylClientError as e:
-            _handle_client_error(e)
+            handle_client_error(e)
 
     _related()
 
@@ -157,7 +155,7 @@ def explore_traverse(
             )
 
         except SibylClientError as e:
-            _handle_client_error(e)
+            handle_client_error(e)
 
     _traverse()
 
@@ -235,7 +233,7 @@ def explore_dependencies(
             console.print(f"\n[dim]Total: {len(entities)} task(s) in dependency order[/dim]")
 
         except SibylClientError as e:
-            _handle_client_error(e)
+            handle_client_error(e)
 
     _deps()
 
@@ -300,6 +298,6 @@ def explore_path(
             console.print(f"  [{NEON_CYAN}]{to_id}[/{NEON_CYAN}]")
 
         except SibylClientError as e:
-            _handle_client_error(e)
+            handle_client_error(e)
 
     _path()

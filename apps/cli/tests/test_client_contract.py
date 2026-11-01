@@ -100,7 +100,6 @@ PUBLIC_METHOD_OWNERS = {
         "start_source_import",
         "start_document_import",
         "list_document_collections",
-        "ingestion_source_import_status",
         "resume_source_import",
         "cancel_source_import",
         "create_crawl_source",
@@ -130,7 +129,7 @@ def test_public_methods_resolve_directly_to_one_canonical_owner() -> None:
         if not name.startswith("_")
     }
 
-    assert len(expected) == 90
+    assert len(expected) == 89
     assert actual == expected
     assert {
         name

@@ -485,10 +485,10 @@ def handle_client_error(
     invalid_request_label: str = "Invalid request",
     conflict_label: str = "Conflict",
 ) -> None:
-    """Handle client errors with helpful messages and exit with code 1.
+    """Render a client error for a terminal reader, then exit with code 1.
 
-    This is the centralized error handler for all CLI commands.
-    Import and use: `from sibyl_cli.common import handle_client_error`
+    A structured server envelope (error code, request id, remediation) wins;
+    bare errors fall back to a status-specific label.
     """
     if e.error_code or e.request_id or e.remediation:
         label = e.error_code or "api_error"
@@ -499,12 +499,21 @@ def handle_client_error(
             console.print(f"  [{NEON_CYAN}]→[/{NEON_CYAN}] {e.remediation}")
     elif "Cannot connect" in str(e):
         error(str(e))
+    elif e.status_code == 401:
+        error("Authentication required")
+        console.print(f"  [{NEON_CYAN}]→[/{NEON_CYAN}] sibyl auth login         [dim]Log in[/dim]")
+        console.print(
+            f"  [{NEON_CYAN}]→[/{NEON_CYAN}] sibyl auth local-signup  "
+            "[dim]Create a local account[/dim]"
+        )
+    elif e.status_code == 403:
+        error(f"Access denied: {e.detail or str(e)}")
     elif e.status_code == 404:
-        error(f"{not_found_label}: {e.detail}")
+        error(f"{not_found_label}: {e.detail or str(e)}")
     elif e.status_code == 400:
-        error(f"{invalid_request_label}: {e.detail}")
+        error(f"{invalid_request_label}: {e.detail or str(e)}")
     elif e.status_code == 409:
-        error(f"{conflict_label}: {e.detail}")
+        error(f"{conflict_label}: {e.detail or str(e)}")
     else:
         error(str(e))
     raise typer.Exit(1)

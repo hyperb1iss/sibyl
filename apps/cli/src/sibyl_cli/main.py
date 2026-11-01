@@ -14,7 +14,7 @@ from typing import Annotated, Any, cast
 import typer
 from typer.core import TyperGroup
 
-from sibyl_cli import command_support, config_store, memory_admin, root_commands, state
+from sibyl_cli import config_store, memory_admin, root_commands, state
 from sibyl_cli.archive import app as archive_app
 from sibyl_cli.auth import app as auth_app
 from sibyl_cli.auth import clear_token_cmd as logout_cmd
@@ -27,6 +27,7 @@ from sibyl_cli.common import (
     create_table,
     current_pending_write_triage,
     error,
+    handle_client_error,
     info,
     mark_pending_writes_reported,
     notify_pending_writes,
@@ -356,7 +357,7 @@ def show_reference(
             else:
                 print_entity_details(data)
         except SibylClientError as e:
-            command_support.handle_client_error(e)
+            handle_client_error(e)
 
     _show()
 
@@ -452,7 +453,7 @@ def health(
                     },
                     succeeded=False,
                 )
-            command_support.handle_client_error(e)
+            handle_client_error(e)
 
     check_health()
 
@@ -580,7 +581,7 @@ def stats(
                     console.print(table)
                 console.print()
         except SibylClientError as e:
-            command_support.handle_client_error(e)
+            handle_client_error(e)
 
     get_stats()
 

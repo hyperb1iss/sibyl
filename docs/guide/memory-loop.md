@@ -84,14 +84,11 @@ sibyl remember "Q3 reflection rollout" "Phased per-org enablement" --kind plan
 Useful kinds for the loop are `decision`, `plan`, `idea`, `claim`, `episode`, and `session`. See
 [Entity Types](./entity-types.md) for the full set.
 
-For a fast capture without separate title and content, use `sibyl capture`:
+For a quick thought mid-task, a short title and the default `episode` kind are enough:
 
 ```bash
-sibyl capture "Surreal embedded mode is single-writer, fine for local dev"
+sibyl remember "Embedded Surreal is single-writer" "Fine for local dev, not for shared servers"
 ```
-
-`capture` derives a title from the content and stores the entry as raw memory. It is the
-lowest-friction way to get a thought into the graph mid-task.
 
 ## Reflect
 
