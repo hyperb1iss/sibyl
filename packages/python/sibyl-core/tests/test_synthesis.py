@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from importlib import import_module
 from types import SimpleNamespace
 from typing import Any, Literal
@@ -25,6 +26,7 @@ from sibyl_core.models.synthesis import (
     SynthesisVerificationStatus,
 )
 from sibyl_core.services.synthesis import (
+    _sources_from_explore,
     default_context_pack,
     default_search,
     draft_synthesis_artifact,
@@ -33,7 +35,12 @@ from sibyl_core.services.synthesis import (
     remember_synthesis_artifact,
     remembered_artifact_source_id,
 )
-from sibyl_core.tools.responses import SearchResponse, SearchResult
+from sibyl_core.tools.responses import (
+    EntitySummary,
+    ExploreResponse,
+    SearchResponse,
+    SearchResult,
+)
 from tests.test_reflection_identity import runtime as _synthesis_runtime
 
 synthesis_runtime = _synthesis_runtime
@@ -1134,6 +1141,93 @@ async def test_draft_synthesis_artifact_renders_citable_markdown_and_json() -> N
     assert "Hidden context omitted: 1" in artifact.markdown
     assert artifact.json_payload["sections"][0]["source_ids"] == ["source:allowed"]
     assert artifact.json_payload["sections"][0]["hidden_count"] == 1
+
+
+@pytest.mark.asyncio
+async def test_synthesis_never_renders_an_index_only_description(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Section sources inherit whatever metadata the context pack hands them.
+
+    Driven through the real pack compiler, because the pack is what decides
+    whether a description reaches a source: a hand-built pack would only prove
+    what the fixture put in it. The JSON artifact carries source metadata
+    verbatim, so the markdown alone is not the whole surface.
+    """
+    span = SearchResult(
+        id="passage-1",
+        type="passage",
+        name="Observation 3.1 passage 1/2",
+        content="button: Rotate keys [enabled]",
+        score=0.9,
+        source="source:passage-1",
+        metadata={
+            "entity_type": "passage",
+            "projection_kind": "passage",
+            "source_entity_type": "decision",
+            "description": "Goal: rotate the zephyrine credentials before the quarterly audit",
+            "project_id": "proj-allowed",
+            "memory_scope": "project",
+            "scope_key": "proj-allowed",
+        },
+    )
+
+    async def fake_native_search(**kwargs: Any) -> SearchResponse:
+        return SearchResponse(results=[span], total=1, query=kwargs["plan"].query, filters={})
+
+    context_module = import_module("sibyl_core.tools.context")
+    monkeypatch.setattr(context_module, "context_search", fake_native_search)
+
+    async def fake_search(**kwargs: Any) -> SearchResponse:
+        return SearchResponse(results=[], total=0, query=kwargs["query"], filters={})
+
+    run = await plan_synthesis(
+        SynthesisRequest(
+            goal="Write citable report",
+            required_sections=[SynthesisSectionRequest(title="Evidence")],
+        ),
+        organization_id="org-123",
+        search_fn=fake_search,
+        related_fn=_empty_related,
+    )
+
+    async def pack_without_graph_walk(**kwargs: Any) -> ContextPack:
+        return await default_context_pack(**{**kwargs, "include_related": False})
+
+    materialized = await materialize_synthesis_section_packs(
+        run,
+        organization_id="org-123",
+        principal_id="user-123",
+        accessible_projects={"proj-allowed"},
+        context_fn=pack_without_graph_walk,
+        allowed_memory_scope_keys=None,
+    )
+    artifact = draft_synthesis_artifact(materialized)
+
+    assert "button: Rotate keys [enabled]" in artifact.markdown
+    assert "zephyrine" not in artifact.markdown
+    assert "zephyrine" not in json.dumps(artifact.json_payload)
+
+
+def test_explored_neighbours_never_preview_their_description() -> None:
+    """A neighbour's description is index text, whatever shape explore returns."""
+    response = ExploreResponse(
+        mode="related",
+        entities=[
+            EntitySummary(
+                id="decision-1",
+                type="decision",
+                name="Rotate keys",
+                description="Goal: rotate the zephyrine credentials",
+            )
+        ],
+        total=1,
+        filters={},
+    )
+
+    (source,) = _sources_from_explore(response)
+
+    assert source.content_preview == ""
 
 
 @pytest.mark.asyncio

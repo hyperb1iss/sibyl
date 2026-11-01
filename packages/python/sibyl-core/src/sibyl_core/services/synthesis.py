@@ -204,7 +204,10 @@ def _sources_from_explore(response: ExploreResponse) -> list[SynthesisSourceRefe
                 id=str(entity.id),
                 type=str(entity.type),
                 name=str(entity.name),
-                content_preview=str(getattr(entity, "description", "") or ""),
+                # A neighbour arrives without its body, and its description is
+                # index text, so there is nothing here to preview. Materialization
+                # replaces these sources with context-pack items that carry content.
+                content_preview="",
                 score=0.5,
                 origin="neighborhood",
                 relation=str(relation) if relation else None,
