@@ -10,10 +10,11 @@ from typing import Any
 from sibyl_core.auth.context import MemoryPolicyContext
 from sibyl_core.models.memory_scope import MemoryScope
 
-# A graph row has no scope column: retrieval reads its audience out of these
-# three metadata fields alone. A private row's owner resolves as principal_id
-# or scope_key, and a project row is served to every member named by scope_key,
-# so all three are authorization inputs and none may come from a request body.
+# The read rule takes a row's audience from these three metadata fields (a
+# graph row's scope column folds in through `memory_row_scope_metadata`). A
+# private row's owner resolves as principal_id or scope_key, and a project row
+# is served to every member named by scope_key, so all three are authorization
+# inputs and none may come from a request body.
 MEMORY_OWNER_METADATA_KEYS = frozenset(
     {
         "memory_scope",
@@ -737,6 +738,27 @@ def memory_row_project_id(
     return _optional_str(fields.get("project_id"))
 
 
+def memory_row_scope_metadata(
+    metadata: Mapping[str, Any] | None,
+    row: Mapping[str, Any],
+) -> dict[str, Any]:
+    """A stored graph row's metadata, with its scope column filling a lost stamp.
+
+    A graph row carries its scope twice: stamped into the attribute bag, and
+    promoted to the indexed ``memory_scope`` column. Writers set both from one
+    value, but a bag that lost its stamp reads as unscoped, and the read rule
+    admits an unscoped row to every reader of its project, or to the whole
+    organization when it has none. Every surface that parses a stored row
+    folds the column in here, so search and a direct read cannot disagree
+    about who may see it. A stamp the bag carries always wins.
+    """
+    fields = dict(metadata) if isinstance(metadata, Mapping) else {}
+    column = row.get("memory_scope")
+    if fields.get("memory_scope") is None and column is not None:
+        fields["memory_scope"] = column
+    return fields
+
+
 def private_scope_granted_for(
     allowed_memory_scope_keys: Iterable[str] | None,
     *,
@@ -921,6 +943,7 @@ __all__ = [
     "authorize_memory_write",
     "memory_metadata_read_allowed",
     "memory_row_project_id",
+    "memory_row_scope_metadata",
     "memory_scope_policy_key",
     "private_scope_granted_for",
     "resolve_default_write_scope",

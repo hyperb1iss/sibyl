@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING, Any, cast
 import structlog
 from pydantic import ValidationError
 
+from sibyl_core.auth.memory_policy import memory_row_scope_metadata
 from sibyl_core.backends.surreal.url_schemes import is_embedded_surreal_url
 from sibyl_core.memory_pipeline.audit import decode_audit_metadata, encode_audit_metadata
 from sibyl_core.memory_pipeline.quality import (
@@ -81,6 +82,7 @@ _RELATED_ENTITY_PROJECTION_FIELDS = (
     ("description", "description"),
     ("labels", "labels"),
     ("attributes", "attributes"),
+    ("memory_scope", "memory_scope"),
     ("group_id", "group_id"),
     ("created_at", "created_at"),
     ("updated_at", "updated_at"),
@@ -155,12 +157,9 @@ def entity_from_surreal_row(row: Mapping[str, object]) -> Entity:
     if metadata.get("category") is None:
         metadata.pop("category", None)
 
+    metadata = memory_row_scope_metadata(metadata, normalized_row)
     for key in (
         "project_id",
-        # The scope column is authoritative when attributes lost the stamp: a
-        # row whose scope lives only in the column would otherwise parse as
-        # unscoped and hand the read path its fail-open.
-        "memory_scope",
         "epic_id",
         "parent_task_id",
         "task_id",
