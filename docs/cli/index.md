@@ -314,8 +314,7 @@ The CLI uses the SilkCircuit palette for terminal output:
 ### Cannot connect to server
 
 ```
-Cannot connect to Sibyl server
-  > Check that the Sibyl server is running
+✗ Cannot connect to Sibyl API at http://localhost:3334/api. Is the server running?
 ```
 
 Ensure the server is running:
@@ -330,8 +329,9 @@ Writes attempted while offline are buffered locally. Inspect and replay them wit
 ### Authentication required
 
 ```
-Authentication required
-  > sibyl auth login    Log in
+✗ Authentication required
+  → sibyl auth login         Log in
+  → sibyl auth local-signup  Create a local account
 ```
 
 Run [`sibyl auth login`](./auth.md) to authenticate.
