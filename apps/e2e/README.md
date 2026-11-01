@@ -43,6 +43,17 @@ Moon runs the CLI E2E suite against the repo checkout by setting
 `SIBYL_E2E_CLI_COMMAND="uv run --project ../cli sibyl"`, so local test runs do
 not depend on a separately installed global `sibyl`.
 
+## Sign-In Budget
+
+The login route allows five attempts a minute per client address, and a CI run signs in from one
+runner. Each pytest process signs in once through the API with `SIBYL_E2E_EMAIL` and
+`SIBYL_E2E_PASSWORD`, or not at all when `SIBYL_E2E_ACCESS_TOKEN` hands it a session for that
+account; CI hands over the one the baseline seed opened. The browser run also signs in once through
+the real login page either way. With `SIBYL_E2E_API_LOG` pointing at the API server's log, the
+browser run fails when any client address signed in five or more times over the whole job. The auth
+lifecycle replay signs in from its own forwarded address, as a separate user on another machine
+would.
+
 ## Performance Suite
 
 `moon run e2e:test-perf` runs an opt-in live load suite against the configured API. It does not

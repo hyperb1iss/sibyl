@@ -341,14 +341,40 @@ class CLIRunner:
 # =============================================================================
 
 
+def _handed_session_token(client: httpx.Client, token: str) -> str:
+    """Accept a session the caller already signed in, once it proves to be the E2E user's.
+
+    The browser suite signs in through the login page as ``E2E_TEST_EMAIL``,
+    so a token for anyone else would seed data that account never sees.
+    """
+    response = client.get("/auth/me", headers={"Authorization": f"Bearer {token}"})
+    if response.status_code != 200:
+        raise RuntimeError(
+            f"SIBYL_E2E_ACCESS_TOKEN was rejected by /auth/me: "
+            f"{response.status_code} {response.text}"
+        )
+    email = response.json()["user"]["email"]
+    if email.lower() != E2E_TEST_EMAIL.lower():
+        raise RuntimeError(
+            f"SIBYL_E2E_ACCESS_TOKEN belongs to {email}, not the E2E user {E2E_TEST_EMAIL}"
+        )
+    return token
+
+
 @pytest.fixture(scope="session")
 def e2e_auth_token() -> str:
-    """Create or login test user and return auth token.
+    """Return an access token for the E2E user, signing in at most once per run.
 
-    This is session-scoped so we only authenticate once per test run.
-    Uses the local auth endpoints (not OAuth).
+    The login route allows five attempts a minute per client address, and in
+    CI every step signs in from the same runner. CI therefore hands the suites
+    the session the baseline seed already opened (SIBYL_E2E_ACCESS_TOKEN), and
+    the suites sign in themselves only when run on their own.
     """
     with httpx.Client(base_url=API_BASE_URL, timeout=30.0) as client:
+        handed_token = os.getenv("SIBYL_E2E_ACCESS_TOKEN", "").strip()
+        if handed_token:
+            return _handed_session_token(client, handed_token)
+
         # Try to login first (user may already exist)
         login_response = client.post(
             "/auth/local/login",
