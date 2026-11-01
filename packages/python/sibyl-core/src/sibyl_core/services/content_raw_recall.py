@@ -179,6 +179,14 @@ def _memory_scope_where(
     if memory_scope is MemoryScope.PRIVATE:
         clauses.append("principal_id = $principal_id")
         params["principal_id"] = principal_id
+        # Drop capture sidecars: the private rows the entity route archives
+        # beside a remembered memory, holding the graph row's id and type.
+        # A sidecar has no lifecycle, so a correction to the memory never
+        # reaches it, and the raw row already serves the memory. Every other
+        # private row keeps entity_id NONE (raw promotion stamps it only in
+        # organization and public scope), so reflection sources and synthesis
+        # artifacts, which carry a graph type, stay recallable.
+        clauses.append(_raw_memory_disjunction("entity_type = 'raw_memory'", "entity_id = NONE"))
     elif scope_key is not None:
         clauses.append("scope_key = $scope_key")
         params["scope_key"] = scope_key
