@@ -914,7 +914,13 @@ jobs:
           SIBYL_E2E_CLI_COMMAND: uv run --project ../cli sibyl
           SIBYL_E2E_EMAIL: baseline-corpus@sibyl.dev
           SIBYL_E2E_PASSWORD: baseline-corpus-password-secure-123!
+          # The browser run's guard counts every sign-in the job sent here.
+          SIBYL_E2E_API_LOG: /tmp/sibyld.log
         run: |
+          # Every step signs in from this runner, which gets five logins a
+          # minute, so the suites reuse the session the baseline seed opened.
+          SIBYL_E2E_ACCESS_TOKEN="$(jq -er '.auth.access_token' .moon/cache/baseline-runtime-manifest.json)"
+          export SIBYL_E2E_ACCESS_TOKEN
           moon run e2e:test -- --ignore=tests/browser
           moon run e2e:test-browser
 
