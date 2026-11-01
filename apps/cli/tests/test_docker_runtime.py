@@ -12,7 +12,6 @@ import yaml
 from typer.testing import CliRunner
 
 from sibyl_cli import config_store
-from sibyl_cli import dev as dev_module
 from sibyl_cli import docker as docker_module
 from sibyl_cli import local as local_module
 from sibyl_cli.docker_storage import SURREAL_IMAGE_REFERENCE
@@ -148,43 +147,6 @@ def test_quickstart_test_compose_replaces_base_ports() -> None:
     assert config["services"]["api"]["container_name"] == "sibyl-test-api"
     assert config["services"]["secrets-init"]["container_name"] == "sibyl-test-secrets-init"
     assert config["services"]["surrealdb"]["container_name"] == "sibyl-test-surrealdb"
-
-
-def test_dev_compose_disables_default_env_file(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    compose = tmp_path / ".devcontainer" / "docker-compose.yml"
-    compose.parent.mkdir()
-    compose.write_text("services: {}\n")
-    calls: list[list[str]] = []
-
-    def fake_run(
-        cmd: list[str],
-        **_: object,
-    ) -> subprocess.CompletedProcess[str]:
-        calls.append(cmd)
-        return subprocess.CompletedProcess(cmd, 0, stdout="[]")
-
-    monkeypatch.setattr(dev_module.subprocess, "run", fake_run)
-
-    result = dev_module._run_compose(["ps", "--format", "json"], compose, capture=True)
-
-    assert result is not None
-    assert result.returncode == 0
-    assert calls == [
-        [
-            "docker",
-            "compose",
-            "--env-file",
-            "/dev/null",
-            "-f",
-            str(compose),
-            "ps",
-            "--format",
-            "json",
-        ]
-    ]
 
 
 def test_docker_init_writes_runtime_files_and_context(

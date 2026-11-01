@@ -133,7 +133,6 @@ Auth, organizations, configuration, and operations.
 | [`sibyl service`](./service.md) | Install local daemon service files                   |
 | [`sibyl docker`](./docker.md)   | Manage a self-hosted Docker deployment               |
 | [`sibyl local`](./local.md)     | Manage a local Docker-based instance                 |
-| `sibyl dev`                     | Devcontainer shell and lifecycle commands            |
 | [`sibyl update`](./update.md)   | Self-update the CLI/containers/skills                |
 | [`sibyl skill`](./skill.md)     | Install/list/print version-matched skill packs       |
 
