@@ -82,6 +82,7 @@ _RELATED_ENTITY_PROJECTION_FIELDS = (
     ("description", "description"),
     ("labels", "labels"),
     ("attributes", "attributes"),
+    ("memory_scope", "memory_scope"),
     ("group_id", "group_id"),
     ("created_at", "created_at"),
     ("updated_at", "updated_at"),

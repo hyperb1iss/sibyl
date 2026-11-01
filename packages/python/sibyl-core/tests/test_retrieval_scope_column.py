@@ -16,7 +16,7 @@ from datetime import UTC, datetime
 import pytest
 
 from sibyl_core.models.context import ContextFacet
-from sibyl_core.models.entities import Entity, EntityType
+from sibyl_core.models.entities import Entity, EntityType, Relationship, RelationshipType
 from sibyl_core.retrieval import _search_candidates as candidate_module
 from sibyl_core.retrieval import _search_sources as source_module
 from sibyl_core.retrieval._search_plan import (
@@ -28,6 +28,7 @@ from sibyl_core.retrieval._search_plan import (
 from sibyl_core.services.graph import SurrealGraphClient, normalize_records, prepare_graph_schema
 from sibyl_core.services.graph_entities import EntityManager
 from sibyl_core.services.graph_records import entity_from_surreal_row
+from sibyl_core.services.graph_relationships import RelationshipManager
 
 _ORG = "org-scope-column"
 
@@ -164,3 +165,54 @@ async def test_a_stored_row_that_lost_its_attribute_stamp_stays_private(
         assert _admitted(full_row, _plan("alice", project, org))
     finally:
         await client.close()
+
+
+@pytest.mark.asyncio
+async def test_entity_search_and_related_lookups_carry_the_scope_column() -> None:
+    """Both read through the shared projection, which has to select the column.
+
+    Without it a column-only private row came back scopeless from entity search
+    and related-entity lookups, while a direct read of the same row said private.
+    """
+    org = f"{_ORG}-projection"
+    client = SurrealGraphClient(group_id=org, url="memory://")
+    try:
+        await prepare_graph_schema(client)
+        entities = EntityManager(client, group_id=org)
+        relationships = RelationshipManager(client, group_id=org)
+        for entity_id, scope in (("note-private", "private"), ("note-anchor", None)):
+            await entities.create_direct(
+                Entity(
+                    id=entity_id,
+                    entity_type=EntityType.NOTE,
+                    name=f"Salary notes {entity_id}",
+                    content="salary numbers I keep to myself",
+                    organization_id=org,
+                    created_at=datetime(2026, 1, 1, tzinfo=UTC),
+                    metadata={"memory_scope": scope, "principal_id": "alice"} if scope else {},
+                )
+            )
+        await relationships.create_bulk(
+            [
+                Relationship(
+                    id="rel-anchor-private",
+                    source_id="note-anchor",
+                    target_id="note-private",
+                    relationship_type=RelationshipType.RELATED_TO,
+                )
+            ]
+        )
+        await client.execute_query(
+            "UPDATE entity SET attributes.memory_scope = NONE WHERE uuid = 'note-private';"
+        )
+
+        found = {entity.id: entity for entity, _score in await entities.search(query="salary")}
+        related = {
+            entity.id: entity
+            for entity, _rel in await relationships.get_related_entities("note-anchor")
+        }
+    finally:
+        await client.close()
+
+    assert found["note-private"].metadata.get("memory_scope") == "private"
+    assert related["note-private"].metadata.get("memory_scope") == "private"
