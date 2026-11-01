@@ -6,7 +6,7 @@ from collections.abc import Mapping
 from datetime import datetime
 from typing import Any
 
-from sibyl_core.auth.memory_policy import memory_metadata_read_allowed
+from sibyl_core.auth.memory_policy import memory_metadata_read_allowed, memory_row_scope_metadata
 from sibyl_core.embeddings.providers import EmbeddingMetadata
 from sibyl_core.models.context import ContextFacet
 from sibyl_core.retrieval._search_plan import (
@@ -47,13 +47,16 @@ def _candidate_from_node_record(
         or attributes.get("source_file")
         or row.get("uuid")
     )
-    metadata = {
-        **attributes,
-        **_selected_record_metadata(row),
-        "entity_type": entity_type,
-        "source_id": source,
-        "retrieval_signals": [signal.value],
-    }
+    metadata = memory_row_scope_metadata(
+        {
+            **attributes,
+            **_selected_record_metadata(row),
+            "entity_type": entity_type,
+            "source_id": source,
+            "retrieval_signals": [signal.value],
+        },
+        row,
+    )
     if embedding_metadata is not None:
         metadata["embedding_metadata"] = embedding_metadata.to_dict()
     visibility = "project" if project_id else "organization"

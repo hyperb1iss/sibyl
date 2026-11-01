@@ -65,6 +65,8 @@ NODE_CANDIDATE_FIELDS = (
     "attributes",
     "group_id",
     "project_id",
+    # The scope gate reads this when the attribute bag lost its stamp.
+    "memory_scope",
     "created_at",
     "revision",
     "summary",

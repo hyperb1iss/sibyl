@@ -155,25 +155,6 @@ def _compact(value: str, max_chars: int) -> tuple[str, bool]:
     return text[:cutoff].rstrip() + "...", True
 
 
-def _row_scope_entity(row: Mapping[str, object]) -> Entity:
-    """Parse a Surreal entity row, keeping the scope the column carries.
-
-    ``entity_from_surreal_row`` promotes denormalized columns into metadata but
-    not ``memory_scope``, and the read check treats an absent scope as
-    unscoped. The two representations are written in lockstep and agree on every
-    row in the live store today, so this overlay is a guard against a future
-    write that sets only the column rather than a repair of a known divergence:
-    it can only add a scope where metadata had none, never relax one.
-    """
-    from sibyl_core.services.graph_records import entity_from_surreal_row
-
-    entity = entity_from_surreal_row(row)
-    column_scope = row.get("memory_scope")
-    if not entity.metadata.get("memory_scope") and column_scope:
-        entity.metadata["memory_scope"] = str(column_scope)
-    return entity
-
-
 async def expand_neighbors(
     entity_ids: Sequence[str],
     *,
@@ -226,6 +207,8 @@ async def expand_neighbors(
         ExpandNeighborsResponse with hop-tagged neighbors, highest path score
         first, plus the seeds that resolved and the ones that did not.
     """
+    from sibyl_core.services.graph_records import entity_from_surreal_row
+
     if not organization_id:
         raise ValueError("organization_id is required - cannot traverse without org context")
 
@@ -310,7 +293,7 @@ async def expand_neighbors(
     parsed: dict[int, Entity] = {}
 
     async def available_rows(rows: list[dict[str, object]]) -> list[dict[str, object]]:
-        entities = {str(row["uuid"]): _row_scope_entity(row) for row in rows}
+        entities = {str(row["uuid"]): entity_from_surreal_row(row) for row in rows}
         current = await available_graph_entity_rows(
             organization_id,
             entities,
@@ -330,7 +313,7 @@ async def expand_neighbors(
         return set(await available_graph_relationships(organization_id, ids, runtime=runtime))
 
     def row_allowed(row: Mapping[str, object]) -> bool:
-        entity = parsed.get(id(row)) or _row_scope_entity(row)
+        entity = parsed.get(id(row)) or entity_from_surreal_row(row)
         if not scope_guard(entity):
             return False
         parsed[id(row)] = entity
