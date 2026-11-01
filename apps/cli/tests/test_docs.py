@@ -8,6 +8,7 @@ from typer.testing import CliRunner
 
 from sibyl_cli.client import SibylClient
 from sibyl_cli.main import app
+from sibyl_cli.memory_views import print_source_import_status
 
 
 class _FakeClientContext:
@@ -228,7 +229,7 @@ def test_docs_add_drain_polls_until_completed(
 ) -> None:
     mock_client = MagicMock()
     mock_client.start_document_import = AsyncMock(return_value=_import_status(status="running"))
-    mock_client.ingestion_source_import_status = AsyncMock(
+    mock_client.source_import_status = AsyncMock(
         return_value=_import_status(status="completed", imported_count=2)
     )
     mock_get_client.return_value = _FakeClientContext(mock_client)
@@ -251,7 +252,20 @@ def test_docs_add_drain_polls_until_completed(
     assert "Document import completed" in result.stdout
     assert "raw-1" in result.stdout
     mock_resolve_project.assert_called_once()
-    mock_client.ingestion_source_import_status.assert_awaited_once_with("import/run:1")
+    mock_client.source_import_status.assert_awaited_once_with("import/run:1")
+
+
+def test_a_receipt_without_a_recorded_scope_keeps_each_callers_default(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Document imports always target project scope; other imports default private."""
+    receipt = {**_import_status(), "target_memory_scope": None}
+
+    print_source_import_status(receipt)
+    assert "private:project_123" in capsys.readouterr().out
+
+    print_source_import_status(receipt, title="Document Import", default_scope="project")
+    assert "project:project_123" in capsys.readouterr().out
 
 
 @pytest.mark.parametrize("terminal_status", ["failed", "canceled"])
@@ -264,7 +278,7 @@ def test_docs_add_drain_failure_statuses_return_nonzero(
 ) -> None:
     mock_client = MagicMock()
     mock_client.start_document_import = AsyncMock(return_value=_import_status(status="running"))
-    mock_client.ingestion_source_import_status = AsyncMock(
+    mock_client.source_import_status = AsyncMock(
         return_value=_import_status(status=terminal_status)
     )
     mock_get_client.return_value = _FakeClientContext(mock_client)
@@ -298,7 +312,7 @@ def test_docs_add_json_drain_failure_statuses_return_nonzero(
 ) -> None:
     mock_client = MagicMock()
     mock_client.start_document_import = AsyncMock(return_value=_import_status(status="running"))
-    mock_client.ingestion_source_import_status = AsyncMock(
+    mock_client.source_import_status = AsyncMock(
         return_value=_import_status(status=terminal_status)
     )
     mock_get_client.return_value = _FakeClientContext(mock_client)

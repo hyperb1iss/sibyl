@@ -6,14 +6,13 @@ import asyncio
 import sys
 import time
 from pathlib import Path
-from typing import Annotated, Any, cast
+from typing import Annotated, Any
 
 import typer
 
 from sibyl_cli import agent_memories
 from sibyl_cli.client import SibylClientError, get_client, resolve_client_context_name
 from sibyl_cli.common import (
-    CORAL,
     console,
     create_table,
     error,
@@ -24,6 +23,7 @@ from sibyl_cli.common import (
     success,
     warn,
 )
+from sibyl_cli.memory_views import print_source_import_status
 
 app = typer.Typer(
     name="ingest",
@@ -48,39 +48,6 @@ def _resolve_source_path(source: Path) -> str:
     return str(path)
 
 
-def _scope_label(data: dict[str, object]) -> str:
-    scope = str(data.get("target_memory_scope") or "private")
-    if scope_key := data.get("target_scope_key"):
-        return f"{scope}:{scope_key}"
-    return scope
-
-
-def _progress(data: dict[str, object]) -> dict[str, object]:
-    progress = data.get("progress")
-    return cast("dict[str, object]", progress) if isinstance(progress, dict) else {}
-
-
-def _print_import_status(data: dict[str, object]) -> None:
-    progress = _progress(data)
-    table = create_table("Source Import", "Field", "Value", expand=False)
-    table.add_row("Import Id", str(data.get("import_id") or ""))
-    table.add_row("Status", str(data.get("status") or ""))
-    table.add_row("Adapter", str(data.get("adapter_name") or ""))
-    table.add_row("Source", str(data.get("source_identity") or ""))
-    table.add_row("Target scope", _scope_label(data))
-    table.add_row("Imported", str(progress.get("imported_count") or 0))
-    table.add_row("Deduped", str(progress.get("dedupe_count") or 0))
-    table.add_row("Skipped", str(progress.get("skipped_count") or 0))
-    table.add_row("Errors", str(progress.get("error_count") or 0))
-    console.print(table)
-
-    raw_memory_ids = data.get("raw_memory_ids")
-    if isinstance(raw_memory_ids, list) and raw_memory_ids:
-        console.print("\n[bold]Raw memory receipts[/bold]")
-        for raw_memory_id in raw_memory_ids[:18]:
-            console.print(f"  [{CORAL}]{raw_memory_id}[/{CORAL}]")
-
-
 async def _wait_for_import(
     client: Any,
     import_id: str,
@@ -90,7 +57,7 @@ async def _wait_for_import(
 ) -> dict[str, object]:
     started_at = time.monotonic()
     while True:
-        data = await client.ingestion_source_import_status(import_id)
+        data = await client.source_import_status(import_id)
         if str(data.get("status") or "") in _TERMINAL_STATUSES:
             return data
         if timeout is not None and time.monotonic() - started_at >= timeout:
@@ -148,14 +115,14 @@ async def _start_transcript_import(
             if status == "completed":
                 success("Import completed")
             elif status in {"failed", "canceled"}:
-                _print_import_status(data)
+                print_source_import_status(data, title="Source Import")
                 error(f"Import {status}")
                 raise typer.Exit(1)
             elif drain and status not in _TERMINAL_STATUSES:
                 info("Import drain is still running")
             else:
                 success("Import queued")
-            _print_import_status(data)
+            print_source_import_status(data, title="Source Import")
     except SibylClientError as exc:
         handle_client_error(exc, invalid_request_label="Import rejected")
 

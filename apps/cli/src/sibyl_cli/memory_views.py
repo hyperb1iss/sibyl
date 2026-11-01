@@ -347,8 +347,8 @@ def print_synthesis_remember(data: dict[str, object]) -> None:
     error("Synthesis artifact was drafted but not remembered.")
 
 
-def _source_import_scope(data: dict[str, object]) -> str:
-    scope = str(data.get("target_memory_scope") or "private")
+def _source_import_scope(data: dict[str, object], default_scope: str) -> str:
+    scope = str(data.get("target_memory_scope") or default_scope)
     if scope_key := data.get("target_scope_key"):
         return f"{scope}:{scope_key}"
     return scope
@@ -366,15 +366,26 @@ def _source_import_safe_record_summary(record: dict[str, object]) -> str:
     return "record"
 
 
-def print_source_import_status(data: dict[str, object]) -> None:
+def print_source_import_status(
+    data: dict[str, object],
+    *,
+    title: str = "Source import receipt",
+    default_scope: str = "private",
+) -> None:
+    """Render a source import receipt.
+
+    ``default_scope`` labels a receipt whose run never recorded a target
+    scope: the server's own default is private, while document imports are
+    always written to project scope.
+    """
     progress = _source_import_progress(data)
-    console.print("\n[bold]Source import receipt[/bold]\n")
+    console.print(f"\n[bold]{title}[/bold]\n")
     table = create_table(None, "Field", "Value", expand=False)
     table.add_row("Import Id", str(data.get("import_id") or ""))
     table.add_row("Status", str(data.get("status") or ""))
     table.add_row("Adapter", str(data.get("adapter_name") or ""))
     table.add_row("Source", str(data.get("source_identity") or ""))
-    table.add_row("Target scope", _source_import_scope(data))
+    table.add_row("Target scope", _source_import_scope(data, default_scope))
     table.add_row("Privacy", str(data.get("privacy_class") or "default"))
     table.add_row("Imported", str(progress.get("imported_count") or 0))
     table.add_row("Skipped", str(progress.get("skipped_count") or 0))
