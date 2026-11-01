@@ -40,6 +40,7 @@ constraint-dependencies = [
     "filelock>=4.2.1",
     "nltk>=3.10.4",
     "joserfc>=1.7.6",
+    "pyasn1>=0.6.5",
 ]
 
 [tool.uv.workspace]
