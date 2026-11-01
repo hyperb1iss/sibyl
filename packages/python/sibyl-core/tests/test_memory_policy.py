@@ -9,6 +9,7 @@ import pytest
 from sibyl_core.auth.context import MemoryPolicyContext
 from sibyl_core.auth.memory_policy import (
     MemoryPolicyAction,
+    authorize_memory_correction,
     authorize_memory_read,
     authorize_memory_reflect,
     authorize_memory_share,
@@ -278,6 +279,36 @@ def test_project_mutation_policy_requires_scope_key(authorize) -> None:
 
     assert not decision.allowed
     assert decision.reason == "missing_scope_key"
+
+
+@pytest.mark.parametrize(
+    ("author_id", "scope", "writable", "maintained", "reason"),
+    [
+        ("user-123", "private", set(), set(), "same_scope_write_allowed"),
+        ("someone", "private", set(), {"project_123"}, "principal_mismatch"),
+        ("user-123", "project", {"project_123"}, set(), "same_scope_write_allowed"),
+        ("user-123", "project", set(), set(), "unverified_membership"),
+        ("someone", "project", {"project_123"}, set(), "project_maintainer_required"),
+        ("someone", "project", {"project_123"}, {"project_456"}, "project_maintainer_required"),
+        ("someone", "project", {"project_123"}, {"project_123"}, "same_scope_write_allowed"),
+        (None, "project", {"project_123"}, set(), "project_maintainer_required"),
+    ],
+)
+def test_correction_policy_binds_other_principals_project_captures_to_maintainers(
+    author_id, scope, writable, maintained, reason
+) -> None:
+    decision = authorize_memory_correction(
+        principal_id="user-123",
+        author_id=author_id,
+        memory_scope=scope,
+        scope_key="user-123" if scope == "private" else "project_123",
+        accessible_projects=writable,
+        maintained_projects=maintained,
+    )
+
+    assert decision.action is MemoryPolicyAction.WRITE
+    assert decision.allowed is (reason == "same_scope_write_allowed")
+    assert decision.reason == reason
 
 
 @pytest.mark.parametrize(
