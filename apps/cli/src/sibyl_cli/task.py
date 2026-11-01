@@ -45,10 +45,6 @@ app = typer.Typer(
 )
 
 
-# Use centralized handler from common.py
-_handle_client_error = handle_client_error
-
-
 def _normalize_created_task_response(
     response: dict,
     *,
@@ -459,7 +455,7 @@ def list_tasks(
                 )
 
         except SibylClientError as e:
-            _handle_client_error(e)
+            handle_client_error(e)
 
     _list()
 
@@ -539,7 +535,7 @@ def show_task(
             _display_task_panel(entity)
 
         except SibylClientError as e:
-            _handle_client_error(e)
+            handle_client_error(e)
 
     _show()
 
@@ -589,7 +585,7 @@ def start_task(
                 raise typer.Exit(1)
 
         except SibylClientError as e:
-            _handle_client_error(e)
+            handle_client_error(e)
 
     _start()
 
@@ -632,7 +628,7 @@ def block_task(
                 raise typer.Exit(1)
 
         except SibylClientError as e:
-            _handle_client_error(e)
+            handle_client_error(e)
 
     _block()
 
@@ -674,7 +670,7 @@ def unblock_task(
                 raise typer.Exit(1)
 
         except SibylClientError as e:
-            _handle_client_error(e)
+            handle_client_error(e)
 
     _unblock()
 
@@ -729,7 +725,7 @@ def submit_review(
                 raise typer.Exit(1)
 
         except SibylClientError as e:
-            _handle_client_error(e)
+            handle_client_error(e)
 
     _review()
 
@@ -819,7 +815,7 @@ def complete_task(
                 raise typer.Exit(1)
 
         except SibylClientError as e:
-            _handle_client_error(e)
+            handle_client_error(e)
         except ValueError as e:
             error(str(e))
             raise typer.Exit(code=1) from e
@@ -1046,7 +1042,7 @@ def create_task(
                 raise typer.Exit(1)
 
         except SibylClientError as e:
-            _handle_client_error(e)
+            handle_client_error(e)
 
     _create()
 
@@ -1169,7 +1165,7 @@ def update_task(
                 raise typer.Exit(1)
 
         except SibylClientError as e:
-            _handle_client_error(e)
+            handle_client_error(e)
 
     _update()
 
@@ -1259,7 +1255,7 @@ def add_note(
                 raise typer.Exit(1)
 
         except SibylClientError as e:
-            _handle_client_error(e)
+            handle_client_error(e)
         except ValueError as e:
             error(str(e))
             raise typer.Exit(code=1) from e
@@ -1318,6 +1314,6 @@ def list_notes(
             console.print(f"[dim]{len(notes)} note(s)[/dim]")
 
         except SibylClientError as e:
-            _handle_client_error(e)
+            handle_client_error(e)
 
     _notes()

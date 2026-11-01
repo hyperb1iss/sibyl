@@ -1,5 +1,3 @@
-from collections.abc import Callable
-
 import typer
 
 from sibyl_cli.client import SibylClientError, get_client
@@ -8,6 +6,7 @@ from sibyl_cli.common import (
     NEON_CYAN,
     console,
     error,
+    handle_client_error,
     info,
     print_json,
     print_json_result,
@@ -24,7 +23,6 @@ def add_crawl_source(
     depth: int,
     include_patterns: list[str] | None,
     json_out: bool,
-    handle_client_error: Callable[[SibylClientError], None],
     next_step_command: str,
 ) -> None:
     @run_async
@@ -63,7 +61,6 @@ def show_crawl_source(
     source_id: str,
     *,
     json_out: bool,
-    handle_client_error: Callable[[SibylClientError], None],
 ) -> None:
     @run_async
     async def _show() -> None:
@@ -102,7 +99,6 @@ def start_crawl_source(
     max_depth: int = 3,
     generate_embeddings: bool = True,
     json_out: bool = False,
-    handle_client_error: Callable[[SibylClientError], None],
     status_command: str,
 ) -> None:
     @run_async
@@ -144,7 +140,6 @@ def show_source_status(
     source_id: str,
     *,
     json_out: bool,
-    handle_client_error: Callable[[SibylClientError], None],
 ) -> None:
     @run_async
     async def _status() -> None:

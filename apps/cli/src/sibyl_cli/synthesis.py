@@ -8,7 +8,7 @@ import typer
 
 from sibyl_cli import command_support
 from sibyl_cli.client import SibylClientError, get_client
-from sibyl_cli.common import print_json, print_json_result, run_async
+from sibyl_cli.common import handle_client_error, print_json, print_json_result, run_async
 from sibyl_cli.config_store import resolve_project_from_cwd
 from sibyl_cli.memory_views import (
     print_synthesis_artifact,
@@ -138,7 +138,7 @@ def synthesis_plan_command(
                 return
             print_synthesis_plan(cast("dict[str, object]", data))
         except SibylClientError as e:
-            command_support.handle_client_error(e)
+            handle_client_error(e)
 
     run_synthesis_plan()
 
@@ -214,7 +214,7 @@ def synthesis_draft_command(
                 output_format=output_format,
             )
         except SibylClientError as e:
-            command_support.handle_client_error(e)
+            handle_client_error(e)
 
     run_synthesis_draft()
 
@@ -288,7 +288,7 @@ def synthesis_verify_command(
             if not passed:
                 raise typer.Exit(1)
         except SibylClientError as e:
-            command_support.handle_client_error(e)
+            handle_client_error(e)
 
     run_synthesis_verify()
 
@@ -377,6 +377,6 @@ def synthesis_remember_command(
             if not remembered:
                 raise typer.Exit(1)
         except SibylClientError as e:
-            command_support.handle_client_error(e)
+            handle_client_error(e)
 
     run_synthesis_remember()

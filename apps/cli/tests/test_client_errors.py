@@ -78,6 +78,18 @@ def test_handle_client_error_renders_request_id(capsys: pytest.CaptureFixture[st
     assert "Use a different title." in output
 
 
+def test_handle_client_error_points_a_bare_401_at_login(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    with pytest.raises(typer.Exit):
+        handle_client_error(SibylClientError("Not authenticated", status_code=401))
+
+    output = capsys.readouterr().out
+    assert "Authentication required" in output
+    assert "sibyl auth login" in output
+    assert "sibyl auth local-signup" in output
+
+
 @pytest.mark.asyncio
 async def test_mutating_request_buffers_and_deletes_on_success(
     tmp_path: Path,

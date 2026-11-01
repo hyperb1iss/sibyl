@@ -7,7 +7,6 @@ from __future__ import annotations
 
 import asyncio
 import time
-from functools import partial
 from pathlib import Path
 from typing import Annotated, Any
 from urllib.parse import urlparse
@@ -45,7 +44,6 @@ docs_app = typer.Typer(
     no_args_is_help=True,
 )
 
-_handle_client_error = partial(handle_client_error, not_found_label="Document not found")
 _TERMINAL_STATUSES = {"completed", "failed", "canceled"}
 
 
@@ -442,7 +440,7 @@ def show_document(
             )
 
         except SibylClientError as e:
-            _handle_client_error(e)
+            handle_client_error(e, not_found_label="Document not found")
 
     _show()
 
@@ -489,6 +487,6 @@ def list_documents(
             )
 
         except SibylClientError as e:
-            _handle_client_error(e)
+            handle_client_error(e, not_found_label="Document not found")
 
     _list()

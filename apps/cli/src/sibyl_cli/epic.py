@@ -41,10 +41,6 @@ app = typer.Typer(
 )
 
 
-# Use centralized handler from common.py
-_handle_client_error = handle_client_error
-
-
 def format_epic_status(status: str) -> str:
     """Format epic status with colors."""
     colors = {
@@ -170,7 +166,7 @@ def list_epics(
             console.print(f"\n[dim]Showing {len(entities)} epic(s)[/dim]")
 
         except SibylClientError as e:
-            _handle_client_error(e)
+            handle_client_error(e)
 
     _list()
 
@@ -410,7 +406,7 @@ def show_epic(
             console.print()
 
         except SibylClientError as e:
-            _handle_client_error(e)
+            handle_client_error(e)
 
     _show()
 
@@ -497,7 +493,7 @@ def create_epic(
                 raise typer.Exit(1)
 
         except SibylClientError as e:
-            _handle_client_error(e)
+            handle_client_error(e)
 
     _create()
 
@@ -540,7 +536,7 @@ def start_epic(
                 raise typer.Exit(1)
 
         except SibylClientError as e:
-            _handle_client_error(e)
+            handle_client_error(e)
 
     _start()
 
@@ -587,7 +583,7 @@ def complete_epic(
                 raise typer.Exit(1)
 
         except SibylClientError as e:
-            _handle_client_error(e)
+            handle_client_error(e)
 
     _complete()
 
@@ -631,7 +627,7 @@ def archive_epic(
                 raise typer.Exit(1)
 
         except SibylClientError as e:
-            _handle_client_error(e)
+            handle_client_error(e)
 
     _archive()
 
@@ -709,7 +705,7 @@ def update_epic(
                 raise typer.Exit(1)
 
         except SibylClientError as e:
-            _handle_client_error(e)
+            handle_client_error(e)
 
     _update()
 
@@ -977,7 +973,7 @@ def roadmap(
                 console.print(content)
 
         except SibylClientError as e:
-            _handle_client_error(e)
+            handle_client_error(e)
 
     _roadmap()
 
@@ -1046,6 +1042,6 @@ def list_epic_tasks(
             console.print(f"\n[dim]Showing {len(entities)} task(s) for epic[/dim]")
 
         except SibylClientError as e:
-            _handle_client_error(e)
+            handle_client_error(e)
 
     _list_tasks()

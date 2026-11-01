@@ -7,9 +7,9 @@ from typing import Annotated, Any
 
 import typer
 
-from sibyl_cli import capture_support, command_support, memory_views
+from sibyl_cli import capture_support, memory_views
 from sibyl_cli.client import SibylClientError, get_client
-from sibyl_cli.common import console, error, print_json, run_async
+from sibyl_cli.common import console, error, handle_client_error, print_json, run_async
 from sibyl_cli.config_store import resolve_effective_context, resolve_project_from_cwd
 from sibyl_cli.project_scope import resolve_recall_project
 from sibyl_core.models.context import ContextIntent
@@ -76,7 +76,7 @@ def brief_context(
                 )
             sys.stdout.write((pack.get("markdown") or "") + "\n")
         except SibylClientError as e:
-            command_support.handle_client_error(e)
+            handle_client_error(e)
 
     run_brief()
 
@@ -219,6 +219,6 @@ def recall_context(
                 return
             console.print(pack.get("markdown") or "")
         except SibylClientError as e:
-            command_support.handle_client_error(e)
+            handle_client_error(e)
 
     run_recall()

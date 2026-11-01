@@ -6,9 +6,8 @@ from typing import cast
 
 import typer
 
-from sibyl_cli import command_support
 from sibyl_cli.client import SibylClientError, get_client
-from sibyl_cli.common import print_json, run_async, success
+from sibyl_cli.common import handle_client_error, print_json, run_async, success
 from sibyl_cli.memory_views import print_team, print_team_list
 
 app = typer.Typer(help="Team memory management commands")
@@ -30,7 +29,7 @@ def list_teams_cmd(
                 return
             print_team_list(cast("dict[str, object]", data))
         except SibylClientError as e:
-            command_support.handle_client_error(e)
+            handle_client_error(e)
 
     run_list_teams()
 
@@ -59,7 +58,7 @@ def create_team_cmd(
             print_team(cast("dict[str, object]", data))
             success(f"Created team: {data.get('slug') or data.get('id')}")
         except SibylClientError as e:
-            command_support.handle_client_error(e)
+            handle_client_error(e)
 
     run_create_team()
 
@@ -87,7 +86,7 @@ def add_team_member_cmd(
                 return
             success(f"Added {data.get('user_id')} to team {team_id} as {data.get('role')}")
         except SibylClientError as e:
-            command_support.handle_client_error(e)
+            handle_client_error(e)
 
     run_add_team_member()
 
@@ -110,7 +109,7 @@ def remove_team_member_cmd(
                 return
             success(f"Removed {user_id} from team {team_id}")
         except SibylClientError as e:
-            command_support.handle_client_error(e)
+            handle_client_error(e)
 
     run_remove_team_member()
 
@@ -146,7 +145,7 @@ def link_team_project_cmd(
                 f"{data.get('graph_project_id') or data.get('project_id')}"
             )
         except SibylClientError as e:
-            command_support.handle_client_error(e)
+            handle_client_error(e)
 
     run_link_team_project()
 
@@ -169,6 +168,6 @@ def unlink_team_project_cmd(
                 return
             success(f"Unlinked team {team_id} from project {project_id}")
         except SibylClientError as e:
-            command_support.handle_client_error(e)
+            handle_client_error(e)
 
     run_unlink_team_project()

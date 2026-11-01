@@ -11,6 +11,7 @@ from sibyl_cli import command_support, memory_review, memory_space
 from sibyl_cli.client import SibylClientError, get_client
 from sibyl_cli.common import (
     error,
+    handle_client_error,
     info,
     print_json,
     print_mutation_receipt,
@@ -86,7 +87,7 @@ def memory_audit(
             events = data.get("events", [])
             print_memory_audit_events(events if isinstance(events, list) else [])
         except SibylClientError as e:
-            command_support.handle_client_error(e)
+            handle_client_error(e)
 
     run_memory_audit()
 
@@ -142,7 +143,7 @@ def cite_memories(
             if excluded_count:
                 info(f"{excluded_count} citation(s) were accounted as exclusions")
         except SibylClientError as e:
-            command_support.handle_client_error(e)
+            handle_client_error(e)
 
     run_cite_memories()
 
@@ -164,7 +165,7 @@ def memory_inspect(
                 return
             print_memory_source_inspect(data)
         except SibylClientError as e:
-            command_support.handle_client_error(e)
+            handle_client_error(e)
 
     run_memory_inspect()
 
@@ -322,7 +323,7 @@ def correct_memory(
                     return
                 print_memory_source_blame(cast("dict[str, object]", data))
             except SibylClientError as e:
-                command_support.handle_client_error(e)
+                handle_client_error(e)
 
         run_inspect_memory()
         return
@@ -503,7 +504,7 @@ def correct_memory(
                         "rerun without --expected-revision to preview the current state."
                     )
                 raise typer.Exit(code=1) from e
-            command_support.handle_client_error(e)
+            handle_client_error(e)
 
     run_correct_memory()
 
@@ -525,7 +526,7 @@ def memory_import_status(
                 return
             print_source_import_status(cast("dict[str, object]", data))
         except SibylClientError as e:
-            command_support.handle_client_error(e)
+            handle_client_error(e)
 
     run_memory_import_status()
 
@@ -633,7 +634,7 @@ def memory_promote(
             else:
                 print_promotion_preview(payload)
         except SibylClientError as e:
-            command_support.handle_client_error(e)
+            handle_client_error(e)
 
     run_memory_promote()
 
@@ -714,7 +715,7 @@ def memory_share(
             else:
                 print_share_result(cast("dict[str, object]", data))
         except SibylClientError as e:
-            command_support.handle_client_error(e)
+            handle_client_error(e)
 
     run_memory_share()
 

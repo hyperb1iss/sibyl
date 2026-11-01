@@ -43,8 +43,6 @@ app = typer.Typer(
 # Valid entity types - derived from canonical EntityType enum
 ENTITY_TYPES = [e.value for e in EntityType]
 
-_handle_client_error = handle_client_error
-
 
 def print_entity_details(entity: dict[str, object]) -> None:
     lines = [
@@ -169,7 +167,7 @@ def list_entities(
             console.print(f"\n[dim]Showing {len(entities)} {entity_type}(s)[/dim]")
 
         except SibylClientError as e:
-            _handle_client_error(e)
+            handle_client_error(e)
 
     _list()
 
@@ -207,7 +205,7 @@ def show_entity(
             print_entity_details(entity)
 
         except SibylClientError as e:
-            _handle_client_error(e)
+            handle_client_error(e)
 
     _show()
 
@@ -267,7 +265,7 @@ def create_entity(
                 raise typer.Exit(1)
 
         except SibylClientError as e:
-            _handle_client_error(e)
+            handle_client_error(e)
 
     _create()
 
@@ -338,7 +336,7 @@ def delete_entity(
             success(f"Entity deleted: {entity_id}")
 
         except SibylClientError as e:
-            _handle_client_error(e)
+            handle_client_error(e)
 
     _delete()
 
@@ -390,7 +388,7 @@ def related_entities(
             console.print(f"\n[dim]Found {len(entities)} related entity(ies)[/dim]")
 
         except SibylClientError as e:
-            _handle_client_error(e)
+            handle_client_error(e)
 
     _related()
 
@@ -509,6 +507,6 @@ def entity_history(
                 console.print(f"[dim]Point-in-time: {as_of}[/dim]")
 
         except SibylClientError as e:
-            _handle_client_error(e)
+            handle_client_error(e)
 
     _history()
