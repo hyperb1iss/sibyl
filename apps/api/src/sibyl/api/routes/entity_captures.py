@@ -191,7 +191,11 @@ async def update_raw_capture_review_state(
     ctx: AuthContext = Depends(get_auth_context),
     session: Any = Depends(get_content_read_session_dependency),
 ) -> RawCaptureResponse:
-    """Update review-state metadata for a raw capture."""
+    """Update review-state metadata for a raw capture.
+
+    Seeing a capture is not enough to move it: someone else's project
+    capture takes project maintainer, as a correction does.
+    """
     accessible_projects = await policy.accessible_project_ids_for_read(ctx)
     existing = await content_runtime.get_raw_capture(
         session,
@@ -204,6 +208,9 @@ async def update_raw_capture_review_state(
         accessible_projects=accessible_projects,
     ):
         raise HTTPException(status_code=404, detail=f"Raw capture not found: {capture_id}")
+    decision = await policy.authorize_raw_capture_review(existing, ctx=ctx)
+    if not decision.allowed:
+        raise HTTPException(status_code=403, detail=decision.reason)
 
     capture = await content_runtime.update_raw_capture_review_state(
         session,

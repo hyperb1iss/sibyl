@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import replace
 from datetime import UTC, datetime
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import UUID, uuid4
 
@@ -16,6 +17,7 @@ from sibyl.api.routes.entity_captures import (
 )
 from sibyl.api.schemas import RawCaptureReviewUpdate
 from sibyl.persistence.content_common import RawCaptureRecord
+from sibyl_core.auth import ProjectRole
 from sibyl_core.auth.models import OrganizationRole
 from tests.harness.auth import stub_auth_context
 
@@ -294,6 +296,187 @@ async def test_update_raw_capture_review_state_hidden_for_other_user() -> None:
 
     assert exc.value.status_code == 404
     update_capture.assert_not_awaited()
+
+
+_PROJECT = "project-a"
+
+
+def _project_capture(*, org_id: UUID, author_id: UUID) -> RawCaptureRecord:
+    return RawCaptureRecord(
+        id=uuid4(),
+        organization_id=org_id,
+        entity_id="reflection_123",
+        title="Reflection candidate",
+        raw_content="raw::Reflection candidate",
+        entity_type="episode",
+        principal_id=str(author_id),
+        memory_scope="project",
+        scope_key=_PROJECT,
+        project_id=_PROJECT,
+        review_state="promoted",
+        metadata={"capture_surface": "reflection_candidate", "review_state": "promoted"},
+        capture_surface="reflection_candidate",
+        created_by_user_id=author_id,
+        created_at=datetime(2026, 4, 14, 16, 0, tzinfo=UTC),
+    )
+
+
+def _project_grants(
+    *,
+    read: set[str],
+    write: set[str] = frozenset(),
+    maintain: set[str] = frozenset(),
+):
+    grants = {
+        ProjectRole.VIEWER: read,
+        ProjectRole.CONTRIBUTOR: write,
+        ProjectRole.MAINTAINER: maintain,
+    }
+    return patch(
+        "sibyl.api.routes.entity_policy.list_accessible_project_graph_ids",
+        AsyncMock(
+            side_effect=lambda _ctx, required_role=ProjectRole.VIEWER: set(grants[required_role])
+        ),
+    )
+
+
+async def _patch_review_state(capture: RawCaptureRecord, *, reader_id: UUID, ctx=None):
+    update = AsyncMock(
+        side_effect=lambda _session, **kwargs: replace(capture, review_state=kwargs["review_state"])
+    )
+    with (
+        patch(
+            "sibyl.api.routes.entity_captures.content_runtime.get_raw_capture",
+            AsyncMock(return_value=capture),
+        ),
+        patch(
+            "sibyl.api.routes.entity_captures.content_runtime.update_raw_capture_review_state",
+            update,
+        ),
+    ):
+        try:
+            response = await update_raw_capture_review_state(
+                capture.id,
+                RawCaptureReviewUpdate(review_state="pending"),
+                org=MagicMock(id=capture.organization_id),
+                ctx=ctx or _ctx(user_id=str(reader_id)),
+                session=MagicMock(),
+            )
+        except HTTPException as exc:
+            return exc, update
+    return response, update
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("grants", "reason"),
+    [
+        pytest.param({"read": {_PROJECT}}, "unverified_membership", id="viewer"),
+        pytest.param(
+            {"read": {_PROJECT}, "write": {_PROJECT}},
+            "project_maintainer_required",
+            id="contributor",
+        ),
+        pytest.param(
+            {"read": {_PROJECT}, "write": {_PROJECT}, "maintain": {"project-b"}},
+            "project_maintainer_required",
+            id="maintainer-elsewhere",
+        ),
+    ],
+)
+async def test_review_state_of_another_principals_project_capture_needs_maintainer(
+    grants, reason
+) -> None:
+    capture = _project_capture(org_id=uuid4(), author_id=uuid4())
+
+    with _project_grants(**grants):
+        result, update = await _patch_review_state(capture, reader_id=uuid4())
+
+    assert isinstance(result, HTTPException)
+    assert result.status_code == 403
+    assert result.detail == reason
+    update.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_maintainer_can_set_review_state_on_another_principals_project_capture() -> None:
+    capture = _project_capture(org_id=uuid4(), author_id=uuid4())
+
+    with _project_grants(read={_PROJECT}, write={_PROJECT}, maintain={_PROJECT}):
+        result, update = await _patch_review_state(capture, reader_id=uuid4())
+
+    assert not isinstance(result, HTTPException), result
+    assert result.review_state == "pending"
+    update.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_author_contributor_can_set_review_state_on_their_project_capture() -> None:
+    author_id = uuid4()
+    capture = _project_capture(org_id=uuid4(), author_id=author_id)
+
+    with _project_grants(read={_PROJECT}, write={_PROJECT}):
+        result, update = await _patch_review_state(capture, reader_id=author_id)
+
+    assert not isinstance(result, HTTPException), result
+    assert result.review_state == "pending"
+    update.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_author_needs_project_write_access_to_set_review_state() -> None:
+    author_id = uuid4()
+    capture = _project_capture(org_id=uuid4(), author_id=author_id)
+
+    with _project_grants(read={_PROJECT}):
+        result, update = await _patch_review_state(capture, reader_id=author_id)
+
+    assert isinstance(result, HTTPException)
+    assert result.status_code == 403
+    assert result.detail == "unverified_membership"
+    update.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("org_role", "allowed"),
+    [(OrganizationRole.MEMBER, False), (OrganizationRole.ADMIN, True)],
+)
+async def test_org_admins_hold_maintainer_on_every_project_for_review_state(
+    org_role, allowed
+) -> None:
+    from sibyl.persistence.surreal.auth_runtime import projects
+
+    capture = _project_capture(org_id=uuid4(), author_id=uuid4())
+    reader_id = uuid4()
+    ctx = SimpleNamespace(
+        user=SimpleNamespace(id=reader_id),
+        user_id=str(reader_id),
+        organization=object(),
+        org_role=org_role,
+        api_key_project_ids=None,
+        api_key_memory_scope_keys=None,
+        accessible_teams=frozenset(),
+        accessible_delegations=frozenset(),
+    )
+    record = {
+        "uuid": "project-uuid",
+        "graph_project_id": _PROJECT,
+        "visibility": "org",
+        "default_role": ProjectRole.CONTRIBUTOR.value,
+    }
+    with patch.object(
+        projects, "_load_project_access_records", AsyncMock(return_value=([record], {}))
+    ):
+        result, update = await _patch_review_state(capture, reader_id=reader_id, ctx=ctx)
+
+    if allowed:
+        assert not isinstance(result, HTTPException), result
+        update.assert_awaited_once()
+    else:
+        assert isinstance(result, HTTPException)
+        assert result.detail == "project_maintainer_required"
+        update.assert_not_awaited()
 
 
 @pytest.mark.asyncio

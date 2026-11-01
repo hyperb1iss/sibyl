@@ -1,5 +1,6 @@
 """Canonical policy ownership for entity routes."""
 
+import asyncio
 from dataclasses import dataclass
 from datetime import datetime
 from functools import partial
@@ -22,6 +23,8 @@ from sibyl.persistence.auth_runtime import (
 from sibyl.persistence.content_common import RawCaptureRecord
 from sibyl_core.auth import MemoryPolicyContext, ProjectRole
 from sibyl_core.auth.memory_policy import (
+    MemoryPolicyDecision,
+    authorize_memory_correction,
     authorize_memory_read,
     memory_metadata_read_allowed,
     private_scope_granted_for,
@@ -59,14 +62,19 @@ def _capture_memory_scope(capture: RawCaptureRecord) -> str:
     return _capture_policy_value(capture.memory_scope or metadata.get("memory_scope")) or "private"
 
 
+def _capture_author_id(capture: RawCaptureRecord) -> str | None:
+    metadata = capture.metadata or {}
+    return _capture_policy_value(
+        capture.principal_id
+        or metadata.get("principal_id")
+        or (str(capture.created_by_user_id) if capture.created_by_user_id else "")
+    )
+
+
 def _capture_scope_key(capture: RawCaptureRecord, memory_scope: str) -> str | None:
     metadata = capture.metadata or {}
     if memory_scope == "private":
-        return _capture_policy_value(
-            capture.principal_id
-            or metadata.get("principal_id")
-            or (str(capture.created_by_user_id) if capture.created_by_user_id else "")
-        )
+        return _capture_author_id(capture)
     if memory_scope == "project":
         return _capture_policy_value(
             capture.scope_key
@@ -127,6 +135,34 @@ def raw_capture_visible_to_reader(
         source_surface="entities_raw_capture",
     )
     return authorize_memory_read(policy_context=policy_context).allowed
+
+
+async def authorize_raw_capture_review(
+    capture: RawCaptureRecord,
+    *,
+    ctx: AuthContext,
+) -> MemoryPolicyDecision:
+    """Whether the reader may move this capture through the review queue.
+
+    A review state decides what recall serves (a reflection candidate joins
+    the lexical corpus only once promoted), so it takes the correction rule
+    rather than read access.
+    """
+    writable_projects, maintained_projects = await asyncio.gather(
+        list_accessible_project_graph_ids(ctx, required_role=ProjectRole.CONTRIBUTOR),
+        list_accessible_project_graph_ids(ctx, required_role=ProjectRole.MAINTAINER),
+    )
+    memory_scope = _capture_memory_scope(capture)
+    return authorize_memory_correction(
+        principal_id=getattr(ctx, "user_id", None),
+        author_id=_capture_author_id(capture),
+        memory_scope=memory_scope,
+        scope_key=_capture_scope_key(capture, memory_scope),
+        accessible_projects=writable_projects,
+        maintained_projects=maintained_projects,
+        accessible_teams=ctx.accessible_teams,
+        accessible_delegations=ctx.accessible_delegations,
+    )
 
 
 def _entity_project_id(entity: Any) -> str | None:

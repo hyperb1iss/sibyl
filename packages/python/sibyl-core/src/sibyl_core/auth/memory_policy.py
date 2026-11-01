@@ -570,6 +570,59 @@ def authorize_memory_write(
     )
 
 
+def authorize_memory_correction(
+    *,
+    principal_id: str | None,
+    author_id: str | None,
+    memory_scope: MemoryScope | str | None,
+    scope_key: str | None,
+    accessible_projects: Iterable[str] | None,
+    maintained_projects: Iterable[str] | None = None,
+    accessible_teams: Iterable[str] | None = None,
+    accessible_delegations: Iterable[str] | None = None,
+) -> MemoryPolicyDecision:
+    """Whether the caller may correct or re-review a capture.
+
+    Every correction retires, rewrites, or restores the capture, and so does
+    a review-state change, so neither is a read-level action. A private
+    capture answers only to its author. A project capture needs write access
+    to its project (``accessible_projects`` lists the caller's contributor or
+    higher projects), and someone else's project capture also takes a
+    maintainer grant there, the same bar a graph delete clears.
+    ``maintained_projects`` lists the projects where the caller holds project
+    maintainer or higher; omitting it grants none.
+    """
+    scope = _coerce_scope(memory_scope) if memory_scope is not None else None
+    if scope is MemoryScope.PRIVATE and author_id != principal_id:
+        return _deny(
+            action=MemoryPolicyAction.WRITE,
+            reason="principal_mismatch",
+            memory_scope=scope,
+            scope_key=scope_key,
+        )
+    decision = authorize_memory_write(
+        principal_id=principal_id,
+        memory_scope=memory_scope,
+        scope_key=scope_key,
+        accessible_projects=accessible_projects,
+        accessible_teams=accessible_teams,
+        accessible_delegations=accessible_delegations,
+    )
+    if (
+        decision.allowed
+        and scope is MemoryScope.PROJECT
+        and author_id != principal_id
+        and scope_key not in set(maintained_projects or ())
+    ):
+        return _deny(
+            action=MemoryPolicyAction.WRITE,
+            reason="project_maintainer_required",
+            memory_scope=scope,
+            scope_key=scope_key,
+        )
+    return decision
+
+
 def authorize_memory_share(
     *,
     principal_id: str | None = None,

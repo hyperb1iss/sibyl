@@ -7,7 +7,7 @@ from dataclasses import replace
 from datetime import UTC, datetime
 from typing import Any
 
-from sibyl_core.auth.memory_policy import MemoryPolicyDecision
+from sibyl_core.auth.memory_policy import MemoryPolicyDecision, authorize_memory_correction
 from sibyl_core.errors import RevisionConflictError
 from sibyl_core.models.reflection import (
     MemoryLifecycle,
@@ -25,7 +25,6 @@ from sibyl_core.services.memory_contract import MemoryCorrectionPreview, MemoryC
 from sibyl_core.services.memory_lifecycle import _project_correction_to_graph
 from sibyl_core.services.memory_lineage import discover_source_correction_descendants
 from sibyl_core.services.memory_policy import (
-    _authorize_correction_source_write,
     _authorize_share_source_read,
     _correction_derived_ids,
     _metadata_dict_values,
@@ -321,9 +320,11 @@ async def _preview_loaded_memory_correction(
     if target_flag := _CORRECTION_TARGET_FLAGS.get(normalized_action):
         target_lifecycle_flags = list(dict.fromkeys([*target_lifecycle_flags, target_flag.value]))
 
-    write_decision = _authorize_correction_source_write(
-        memory=memory,
+    write_decision = authorize_memory_correction(
         principal_id=principal_id,
+        author_id=memory.principal_id,
+        memory_scope=memory.memory_scope,
+        scope_key=memory.scope_key,
         accessible_projects=(
             accessible_projects if writable_projects is None else tuple(writable_projects)
         ),
