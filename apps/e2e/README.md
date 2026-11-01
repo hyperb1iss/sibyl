@@ -46,11 +46,13 @@ not depend on a separately installed global `sibyl`.
 ## Sign-In Budget
 
 The login route allows five attempts a minute per client address, and a CI run signs in from one
-runner. The suites sign in once per run with `SIBYL_E2E_EMAIL` and `SIBYL_E2E_PASSWORD`, or not at
-all when `SIBYL_E2E_ACCESS_TOKEN` hands them a session for that account. CI hands them the one the
-baseline seed opened. With `SIBYL_E2E_API_LOG` pointing at the API server's log, the browser run
-fails when any client address signed in five or more times over the whole job. The auth lifecycle
-replay signs in from its own forwarded address, as a separate user on another machine would.
+runner. Each pytest process signs in once through the API with `SIBYL_E2E_EMAIL` and
+`SIBYL_E2E_PASSWORD`, or not at all when `SIBYL_E2E_ACCESS_TOKEN` hands it a session for that
+account; CI hands over the one the baseline seed opened. The browser run also signs in once through
+the real login page either way. With `SIBYL_E2E_API_LOG` pointing at the API server's log, the
+browser run fails when any client address signed in five or more times over the whole job. The auth
+lifecycle replay signs in from its own forwarded address, as a separate user on another machine
+would.
 
 ## Performance Suite
 
