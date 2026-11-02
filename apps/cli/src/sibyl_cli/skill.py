@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Annotated
 
 import typer
+from rich.markup import escape
 
 from sibyl_cli.common import NEON_CYAN, console, error, info, print_json, success, warn
 
@@ -156,14 +157,14 @@ def print_install_result(result: dict[str, list[str]], *, quiet: bool) -> None:
         info("Use: sibyl skill install --force")
 
     for path in [*installed, *updated]:
-        console.print(f"  [{NEON_CYAN}]{path}[/{NEON_CYAN}]")
+        console.print(f"  [{NEON_CYAN}]{escape(path)}[/{NEON_CYAN}]")
 
 
 def run_install(*, force: bool, quiet: bool) -> None:
     try:
         result = install_canonical_skill(force=force)
     except OSError as exc:
-        error(str(exc))
+        error(escape(str(exc)))
         raise typer.Exit(1) from exc
 
     print_install_result(result, quiet=quiet)
@@ -223,7 +224,7 @@ def list_skill_packs(
         print_json([{"name": pack.name, "description": pack.description} for pack in packs])
         return
     for pack in packs:
-        console.print(f"[{NEON_CYAN}]{pack.name}[/{NEON_CYAN}]  {pack.description}")
+        console.print(f"[{NEON_CYAN}]{escape(pack.name)}[/{NEON_CYAN}]  {escape(pack.description)}")
 
 
 @app.command("get")
@@ -237,5 +238,5 @@ def get_skill_pack(
     try:
         sys.stdout.write(skill_pack_markdown(name))
     except KeyError as exc:
-        error(str(exc))
+        error(escape(str(exc)))
         raise typer.Exit(1) from exc

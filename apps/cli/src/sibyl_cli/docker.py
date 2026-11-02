@@ -13,6 +13,7 @@ from typing import Annotated, Any
 
 import typer
 import yaml
+from rich.markup import escape
 
 from sibyl_cli import config_store
 from sibyl_cli.common import NEON_CYAN, console, error, info, success, warn
@@ -264,16 +265,24 @@ def _plan_surreal_image(service: dict[str, Any]) -> None:
     if image != SURREAL_IMAGE_REFERENCE:
         moved = upgraded_surreal_image(image)
         if moved is None:
-            warn(f"Leaving the SurrealDB image {image} as written; this CLI runs {SURREAL_IMAGE}.")
+            warn(
+                f"Leaving the SurrealDB image {escape(image)} as written; "
+                f"this CLI runs {SURREAL_IMAGE}."
+            )
             return
         service["image"] = moved
         match = MANAGED_SURREAL_IMAGE.fullmatch(image)
         shipped_tag = SURREAL_IMAGE.rpartition(":")[2]
-        info(f"Upgrading SurrealDB from {match['tag'] if match else image} to {shipped_tag}")
+        info(
+            f"Upgrading SurrealDB from {match['tag'] if match else escape(image)} to {shipped_tag}"
+        )
 
     override = _surreal_image_override()
     if override and override != SURREAL_IMAGE:
-        warn(f"SIBYL_SURREAL_IMAGE keeps SurrealDB on {override}; this CLI runs {SURREAL_IMAGE}.")
+        warn(
+            f"SIBYL_SURREAL_IMAGE keeps SurrealDB on {escape(override)}; "
+            f"this CLI runs {SURREAL_IMAGE}."
+        )
 
 
 def _migrate_runtime_services(services: dict[str, Any]) -> None:
@@ -398,7 +407,7 @@ def ensure_env_settings_key() -> None:
     try:
         key, has_container = _existing_api_settings_key()
     except SettingsKeyUnreadableError as exc:
-        error(f"Could not read the settings key the API container holds: {exc}")
+        error(f"Could not read the settings key the API container holds: {escape(str(exc))}")
         info(
             "Nothing was changed. Copy it into the env file yourself, as "
             f"SIBYL_SETTINGS_KEY=<contents of {API_SETTINGS_KEY_PATH} in the API "

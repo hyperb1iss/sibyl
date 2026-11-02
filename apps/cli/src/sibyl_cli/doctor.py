@@ -14,6 +14,7 @@ from urllib.parse import urlparse
 
 import httpx
 import typer
+from rich.markup import escape
 
 from sibyl_cli import config_store, state
 from sibyl_cli.client import SibylClientError, get_client
@@ -618,8 +619,8 @@ def _render_checks(checks: list[DoctorCheck]) -> None:
         table.add_row(
             check.name,
             f"[{color}]{labels.get(check.status, check.status.upper())}[/{color}]",
-            check.message,
-            check.detail or "",
+            escape(check.message),
+            escape(check.detail or ""),
         )
     console.print(table)
 
@@ -656,7 +657,7 @@ def doctor(
                     if action == "updated"
                     else "Appended managed block to"
                 )
-                console.print(f"[{color}]✓[/{color}] {verb} {append}")
+                console.print(f"[{color}]✓[/{color}] {verb} {escape(str(append))}")
                 console.print(
                     f"  Markers: {AGENT_BLOCK_BEGIN} / {AGENT_BLOCK_END}; re-run to update."
                 )

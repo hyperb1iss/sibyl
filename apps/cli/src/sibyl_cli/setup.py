@@ -14,6 +14,7 @@ from contextlib import suppress
 from datetime import datetime
 from pathlib import Path
 
+from rich.markup import escape
 from rich.panel import Panel
 
 from sibyl_cli.common import (
@@ -451,7 +452,7 @@ def setup_agent_integration(verbose: bool = True) -> bool:
 
     if use_symlinks and repo_dir is not None:
         if verbose:
-            info(f"Development mode - using symlinks from {repo_dir}")
+            info(f"Development mode - using symlinks from {escape(str(repo_dir))}")
 
         # Install skills
         installed, updated = install_skills_symlink(repo_dir)
@@ -623,7 +624,7 @@ def print_status() -> None:
     console.print(f"[{NEON_CYAN}]Claude Code Skills:[/{NEON_CYAN}]")
     if status["claude_skills"]:
         for skill in status["claude_skills"]:
-            link_info = f" → {skill['target']}" if skill["symlink"] else " (copy)"
+            link_info = f" → {escape(str(skill['target']))}" if skill["symlink"] else " (copy)"
             console.print(f"  [{SUCCESS_GREEN}]✓[/{SUCCESS_GREEN}] {skill['name']}{link_info}")
     else:
         console.print(f"  [{CORAL}]✗[/{CORAL}] Not installed")
@@ -634,7 +635,7 @@ def print_status() -> None:
     console.print(f"[{NEON_CYAN}]Codex CLI Skills:[/{NEON_CYAN}]")
     if status["codex_skills"]:
         for skill in status["codex_skills"]:
-            link_info = f" → {skill['target']}" if skill["symlink"] else " (copy)"
+            link_info = f" → {escape(str(skill['target']))}" if skill["symlink"] else " (copy)"
             console.print(f"  [{SUCCESS_GREEN}]✓[/{SUCCESS_GREEN}] {skill['name']}{link_info}")
     else:
         console.print(f"  [{CORAL}]✗[/{CORAL}] Not installed")

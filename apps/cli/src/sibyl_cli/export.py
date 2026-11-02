@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Annotated, Any
 
 import typer
+from rich.markup import escape
 
 from sibyl_cli.client import SibylClientError, get_client
 from sibyl_cli.common import (
@@ -274,20 +275,20 @@ def export_memory(
             handle_client_error(exc)
             return
         except ValueError as exc:
-            error(str(exc))
+            error(escape(str(exc)))
             raise typer.Exit(code=1) from exc
 
         bundle = build_memory_files_bundle(snapshot)
         try:
             write_memory_files_bundle(bundle, output, read_only=not writable, force=force)
         except OSError as exc:
-            error(str(exc))
+            error(escape(str(exc)))
             raise typer.Exit(code=1) from exc
 
         if validation_errors := validate_memory_files_bundle(output):
             error("Memory export validation failed")
             for validation_error in validation_errors:
-                error(f"- {validation_error}")
+                error(f"- {escape(str(validation_error))}")
             raise typer.Exit(code=1)
 
         receipt = {
@@ -306,14 +307,14 @@ def export_memory(
             console.print_json(json.dumps(receipt))
             return
 
-        success(f"Materialized memory to {output}")
+        success(f"Materialized memory to {escape(str(output))}")
         info(
             f"{len(bundle.files)} files - {len(snapshot.notes)} memories, "
             f"{len(snapshot.tasks)} open tasks"
         )
         console.print(f"[{NEON_CYAN}]digest[/] {bundle.content_digest[:16]}")
-        console.print(f"[{NEON_CYAN}]grep[/]   rg 'your term' {output}")
-        console.print(f"[{NEON_CYAN}]verify[/] cat {output / MANIFEST_PATH}")
+        console.print(f"[{NEON_CYAN}]grep[/]   rg 'your term' {escape(str(output))}")
+        console.print(f"[{NEON_CYAN}]verify[/] cat {escape(str(output / MANIFEST_PATH))}")
 
     run_export()
 

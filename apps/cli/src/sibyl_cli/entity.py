@@ -7,6 +7,7 @@ All commands communicate with the REST API to ensure proper event broadcasting.
 from typing import Annotated, cast
 
 import typer
+from rich.markup import escape
 
 from sibyl_cli.client import SibylClientError, get_client
 from sibyl_cli.common import (
@@ -46,12 +47,12 @@ ENTITY_TYPES = [e.value for e in EntityType]
 
 def print_entity_details(entity: dict[str, object]) -> None:
     lines = [
-        f"[{ELECTRIC_PURPLE}]Name:[/{ELECTRIC_PURPLE}] {entity.get('name', '')}",
+        f"[{ELECTRIC_PURPLE}]Name:[/{ELECTRIC_PURPLE}] {escape(str(entity.get('name', '')))}",
         f"[{ELECTRIC_PURPLE}]Type:[/{ELECTRIC_PURPLE}] {entity.get('entity_type', '')}",
         f"[{ELECTRIC_PURPLE}]ID:[/{ELECTRIC_PURPLE}] {entity.get('id', '')}",
         "",
         f"[{NEON_CYAN}]Description:[/{NEON_CYAN}]",
-        entity.get("description") or "[dim]No description[/dim]",
+        escape(str(entity.get("description") or "")) or "[dim]No description[/dim]",
     ]
 
     content = entity.get("content", "")
@@ -60,7 +61,7 @@ def print_entity_details(entity: dict[str, object]) -> None:
             [
                 "",
                 f"[{NEON_CYAN}]Content:[/{NEON_CYAN}]",
-                content,
+                escape(str(content)),
             ]
         )
 
@@ -68,7 +69,7 @@ def print_entity_details(entity: dict[str, object]) -> None:
     if isinstance(meta, dict) and meta:
         lines.extend(["", f"[{CORAL}]Metadata:[/{CORAL}]"])
         for k, v in list(meta.items())[:10]:
-            lines.append(f"  {k}: {truncate(str(v), 60)}")
+            lines.append(f"  {escape(str(k))}: {escape(truncate(str(v), 60))}")
 
     related_entities = entity.get("related", [])
     if isinstance(related_entities, list) and related_entities:
@@ -81,7 +82,7 @@ def print_entity_details(entity: dict[str, object]) -> None:
             lines.append(
                 f"  [{CORAL}]{rel.get('relationship', '')}[/{CORAL}] {direction} "
                 f"[{ELECTRIC_PURPLE}]{rel.get('entity_type', '')}[/{ELECTRIC_PURPLE}]: "
-                f"{rel.get('name', '')} [{CORAL}]{rel.get('id', '')}[/{CORAL}]"
+                f"{escape(str(rel.get('name', '')))} [{CORAL}]{rel.get('id', '')}[/{CORAL}]"
             )
 
     entity_type = entity.get("entity_type", "entity")
@@ -112,7 +113,7 @@ def list_entities(
     """List entities by type with optional filters. Default: table output."""
     format_ = "json" if json_out else ("csv" if csv_out else "table")
     if entity_type not in ENTITY_TYPES:
-        error(f"Invalid entity type: {entity_type}")
+        error(f"Invalid entity type: {escape(entity_type)}")
         info(f"Valid types: {', '.join(ENTITY_TYPES)}")
         raise typer.Exit(1)
 
@@ -159,8 +160,8 @@ def list_entities(
             for e in entities:
                 table.add_row(
                     e.get("id", ""),
-                    truncate(e.get("name", ""), 35),
-                    truncate(e.get("description") or "", 50),
+                    escape(truncate(e.get("name", ""), 35)),
+                    escape(truncate(e.get("description") or "", 50)),
                 )
 
             console.print(table)
@@ -229,7 +230,7 @@ def create_entity(
 ) -> None:
     """Create a new entity. Default: table output."""
     if entity_type not in ENTITY_TYPES:
-        error(f"Invalid entity type: {entity_type}")
+        error(f"Invalid entity type: {escape(entity_type)}")
         info(f"Valid types: {', '.join(ENTITY_TYPES)}")
         raise typer.Exit(1)
 
@@ -379,7 +380,7 @@ def related_entities(
                 rel_type = meta.get("relationship_type", "-") if meta else "-"
                 table.add_row(
                     e.get("id", ""),
-                    truncate(e.get("name", ""), 30),
+                    escape(truncate(e.get("name", ""), 30)),
                     e.get("type", ""),
                     rel_type,
                 )
@@ -448,7 +449,7 @@ def entity_history(
 
             if not edges:
                 if message:
-                    info(message)
+                    info(escape(str(message)))
                 else:
                     info(f"No edges found for {entity_id}")
                 return
@@ -467,9 +468,9 @@ def entity_history(
                     if isinstance(expired, str) and len(expired) > 10:
                         expired = expired[:10]  # Just date part
                     table.add_row(
-                        truncate(e.get("source_name", ""), 20),
-                        e.get("name", ""),
-                        truncate(e.get("target_name", ""), 20),
+                        escape(truncate(e.get("source_name", ""), 20)),
+                        escape(e.get("name") or ""),
+                        escape(truncate(e.get("target_name", ""), 20)),
                         str(expired),
                     )
             else:
@@ -489,9 +490,9 @@ def entity_history(
                         "[green]current[/green]" if e.get("is_current") else "[dim]expired[/dim]"
                     )
                     table.add_row(
-                        truncate(e.get("source_name", ""), 18),
-                        e.get("name", ""),
-                        truncate(e.get("target_name", ""), 18),
+                        escape(truncate(e.get("source_name", ""), 18)),
+                        escape(e.get("name") or ""),
+                        escape(truncate(e.get("target_name", ""), 18)),
                         str(created),
                         status,
                     )
@@ -499,7 +500,7 @@ def entity_history(
             console.print(table)
 
             if message:
-                console.print(f"\n[dim]{message}[/dim]")
+                console.print(f"\n[dim]{escape(str(message))}[/dim]")
             else:
                 console.print(f"\n[dim]Found {len(edges)} edge(s)[/dim]")
 

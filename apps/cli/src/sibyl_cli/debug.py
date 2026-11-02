@@ -9,6 +9,7 @@ from __future__ import annotations
 from typing import Annotated, cast
 
 import typer
+from rich.markup import escape
 from rich.table import Table
 
 from sibyl_cli.client import SibylClientError, get_client
@@ -71,7 +72,7 @@ def query(
                 )
 
                 if result.get("error"):
-                    error(f"Query failed: {result['error']}")
+                    error(f"Query failed: {escape(str(result['error']))}")
                     raise typer.Exit(1)
 
                 rows = result.get("rows", [])
@@ -100,7 +101,7 @@ def query(
                     columns = sorted(all_keys)
 
                     if columns:
-                        table = create_table(None, *columns)
+                        table = create_table(None, *(escape(str(key)) for key in columns))
                         for row in rows:
                             values = [_format_value(row.get(k, "")) for k in columns]
                             table.add_row(*values)
@@ -108,11 +109,11 @@ def query(
                     else:
                         # Fallback to raw output
                         for row in rows:
-                            console.print(f"  {row}")
+                            console.print(f"  {escape(str(row))}")
                 else:
                     # Fallback for non-dict rows
                     for row in rows:
-                        console.print(f"  {row}")
+                        console.print(f"  {escape(str(row))}")
 
                 console.print()
 
@@ -121,7 +122,7 @@ def query(
                 error("Access denied - OWNER role required for debug queries")
                 raise typer.Exit(1) from None
             if e.status_code == 400:
-                error(f"Invalid query: {e.detail}")
+                error(f"Invalid query: {escape(str(e.detail))}")
                 raise typer.Exit(1) from None
             handle_client_error(e)
 
@@ -152,8 +153,8 @@ def _print_explain_plan(rows: list[object], row_count: int) -> None:
         raw_metrics = node.get("metrics")
         metrics = cast(dict[str, object], raw_metrics) if isinstance(raw_metrics, dict) else {}
         table.add_row(
-            str(node.get("operator") or "unknown"),
-            str(node.get("context") or ""),
+            escape(str(node.get("operator") or "unknown")),
+            escape(str(node.get("context") or "")),
             _metric_value(metrics.get("output_rows")),
             _metric_value(metrics.get("output_batches")),
             _elapsed_value(metrics.get("elapsed_ns")),
@@ -211,7 +212,7 @@ def _explain_details(node: dict[str, object]) -> str:
     attributes = node.get("attributes")
     if isinstance(attributes, dict):
         for key, value in sorted(attributes.items()):
-            parts.append(f"{key}={_short_detail(value)}")
+            parts.append(f"{escape(str(key))}={escape(_short_detail(value))}")
     expressions = node.get("expressions")
     if isinstance(expressions, list):
         for expression in expressions[:2]:
@@ -219,7 +220,7 @@ def _explain_details(node: dict[str, object]) -> str:
                 role = expression.get("role") or "expr"
                 sql = expression.get("sql")
                 if sql:
-                    parts.append(f"{role}={_short_detail(sql)}")
+                    parts.append(f"{escape(str(role))}={escape(_short_detail(sql))}")
     total_rows = node.get("total_rows")
     if total_rows is not None:
         parts.append(f"total_rows={total_rows}")
@@ -244,13 +245,13 @@ def _format_value(value: object) -> str:
     if isinstance(value, str):
         # Truncate long strings
         if len(value) > 50:
-            return value[:47] + "..."
-        return value
+            return escape(value[:47] + "...")
+        return escape(value)
     if isinstance(value, list):
         return f"[{len(value)} items]"
     if isinstance(value, dict):
         return f"[{len(value)} keys]"
-    return str(value)[:50]
+    return escape(str(value)[:50])
 
 
 @app.command("schema")
@@ -283,7 +284,7 @@ def schema(
                 )
 
                 if result.get("error"):
-                    error(f"Query failed: {result['error']}")
+                    error(f"Query failed: {escape(str(result['error']))}")
                     raise typer.Exit(1)
 
                 rows = result.get("rows", [])
@@ -300,7 +301,7 @@ def schema(
                 table = create_table(None, "Type", "Count")
                 for row in rows:
                     table.add_row(
-                        f"[{NEON_CYAN}]{row.get('type', 'unknown')}[/{NEON_CYAN}]",
+                        f"[{NEON_CYAN}]{escape(str(row.get('type', 'unknown')))}[/{NEON_CYAN}]",
                         f"[{CORAL}]{row.get('count', 0)}[/{CORAL}]",
                     )
                 console.print(table)
@@ -346,7 +347,9 @@ def _embedding_sweep_lines(sweep: object) -> list[str]:
         lines.append(f"{label}{plane} {summary}")
         waiting = state.get("waiting_on_count")
         if summary.startswith("awaiting_evidence") and isinstance(waiting, int) and waiting:
-            names = ", ".join(str(item) for item in state.get("waiting_on_organizations") or [])
+            names = escape(
+                ", ".join(str(item) for item in state.get("waiting_on_organizations") or [])
+            )
             settles = state.get("settles_in_seconds")
             deadline = (
                 f"; settles on the evidence published so far in {settles:,}s"
@@ -482,7 +485,8 @@ def status(
                 coordination_error = data.get("coordination_error")
                 if coordination_error:
                     console.print(
-                        f"  Detail:       [{ERROR_RED}]{coordination_error}[/{ERROR_RED}]"
+                        f"  Detail:       [{ERROR_RED}]"
+                        f"{escape(str(coordination_error))}[/{ERROR_RED}]"
                     )
                 console.print()
 
@@ -493,7 +497,7 @@ def status(
                     for err in errors[-5:]:  # Show last 5
                         ts = err.get("timestamp", "")[:19]
                         event = err.get("event", "unknown")
-                        console.print(f"    [{ERROR_RED}]{ts}[/{ERROR_RED}] {event}")
+                        console.print(f"    [{ERROR_RED}]{ts}[/{ERROR_RED}] {escape(str(event))}")
                     console.print()
                 else:
                     console.print(f"  [{SUCCESS_GREEN}]No recent errors[/{SUCCESS_GREEN}]")

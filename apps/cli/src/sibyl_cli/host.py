@@ -16,6 +16,7 @@ from typing import Annotated
 from urllib.parse import urlparse
 
 import typer
+from rich.markup import escape
 
 from sibyl_cli import config_store
 from sibyl_cli.common import NEON_CYAN, console, error, info, success
@@ -72,7 +73,7 @@ def require_local_context() -> HostContext:
         info("Run 'sibyl init --local' before starting the local daemon.")
         raise typer.Exit(1)
     if not is_local_server(ctx.server_url):
-        error(f"Context '{ctx.name}' points to {ctx.server_url}.")
+        error(f"Context '{escape(ctx.name)}' points to {escape(ctx.server_url)}.")
         info("Switch to a local context with 'sibyl config context use local'.")
         raise typer.Exit(1)
     return ctx
@@ -179,7 +180,9 @@ def serve(
 
     cmd = daemon_command(host, port, transport)
     if not background:
-        console.print(f"[{NEON_CYAN}]Context:[/{NEON_CYAN}] {ctx.name} -> {ctx.server_url}")
+        console.print(
+            f"[{NEON_CYAN}]Context:[/{NEON_CYAN}] {escape(ctx.name)} -> {escape(ctx.server_url)}"
+        )
         raise typer.Exit(subprocess.run(cmd, check=False).returncode)
 
     existing_pid = read_pid()
@@ -201,7 +204,9 @@ def serve(
         log.close()
     SIBYLD_PID_FILE.write_text(f"{process.pid}\n")
     success(f"Started sibyld as pid {process.pid}")
-    console.print(f"  [{NEON_CYAN}]Context:[/{NEON_CYAN}] {ctx.name} -> {ctx.server_url}")
+    console.print(
+        f"  [{NEON_CYAN}]Context:[/{NEON_CYAN}] {escape(ctx.name)} -> {escape(ctx.server_url)}"
+    )
     console.print(f"  [{NEON_CYAN}]Logs:[/{NEON_CYAN}]    {SIBYLD_LOG_FILE}")
 
 
@@ -286,7 +291,7 @@ def install_service(
     SIBYL_RUN_DIR.mkdir(parents=True, exist_ok=True)
     path.write_text(content, encoding="utf-8")
 
-    success(f"Installed Sibyl service file for context '{ctx.name}'")
+    success(f"Installed Sibyl service file for context '{escape(ctx.name)}'")
     console.print(f"  [{NEON_CYAN}]File:[/{NEON_CYAN}]  {path}")
     console.print(f"  [{NEON_CYAN}]Logs:[/{NEON_CYAN}]  {service_log_file()}")
     info("The service was not started automatically.")

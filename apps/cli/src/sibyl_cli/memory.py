@@ -6,6 +6,7 @@ import sys
 from typing import Annotated, Any
 
 import typer
+from rich.markup import escape
 
 from sibyl_cli import capture_support, command_support, memory_views, recall
 from sibyl_cli.client import SibylClientError, get_client
@@ -175,7 +176,7 @@ def remember_memory(
             or ""
         ).strip()
     except ValueError as e:
-        error(str(e))
+        error(escape(str(e)))
         raise typer.Exit(code=1) from e
     if not resolved_content:
         error("Provide memory content as an argument, via stdin, or with --content-file.")
@@ -274,18 +275,18 @@ def remember_memory(
                         return
 
                     if diary:
-                        label = f"diary entry for {agent}"
+                        label = f"diary entry for {escape(str(agent))}"
                     elif expires:
                         label = "team notice" if memory_scope == "team" else "time-boxed notice"
                     else:
                         label = "raw memory"
-                    success(f"Remembered {label}: {title}")
+                    success(f"Remembered {label}: {escape(title)}")
                     print_mutation_receipt(data)
                     console.print(f"  [dim]ID: {memory_id}[/dim]")
                     if deadline := (data.get("metadata") or {}).get("expires_at"):
                         console.print(f"  [dim]Expires: {deadline}[/dim]")
                     if policy_reason := data.get("policy_reason"):
-                        console.print(f"  [dim]Policy: {policy_reason}[/dim]")
+                        console.print(f"  [dim]Policy: {escape(str(policy_reason))}[/dim]")
                     memory_views.print_memory_scope(data)
                     return
 
@@ -326,7 +327,7 @@ def remember_memory(
         except SibylClientError as e:
             handle_client_error(e)
         except ValueError as e:
-            error(str(e))
+            error(escape(str(e)))
             raise typer.Exit(code=1) from e
 
     run_remember()
@@ -431,7 +432,7 @@ def reflect_memory(
                 print_json(data)
                 return
 
-            console.print(data.get("markdown") or "")
+            console.print(data.get("markdown") or "", markup=False, soft_wrap=True)
             memory_views.print_reflection_persistence_summary(
                 data,
                 persist=persist,

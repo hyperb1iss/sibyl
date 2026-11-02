@@ -10,6 +10,7 @@ from typing import Annotated, Any
 from urllib.parse import urlparse
 
 import typer
+from rich.markup import escape
 
 from sibyl_cli.client import SibylClientError, get_client
 from sibyl_cli.common import (
@@ -46,16 +47,16 @@ def _resolve_document_path(source: Path) -> Path:
         path = Path.cwd() / path
     for component in (path, *path.parents):
         if component.exists() and component.is_symlink():
-            error(f"Document source cannot include symlinks: {component}")
+            error(f"Document source cannot include symlinks: {escape(str(component))}")
             raise typer.Exit(1)
     path = path.resolve()
     if not path.exists():
-        error(f"Document source not found: {path}")
+        error(f"Document source not found: {escape(str(path))}")
         raise typer.Exit(1)
     if path.is_dir():
         for child in path.rglob("*"):
             if child.is_symlink():
-                error(f"Document source cannot include symlinks: {child}")
+                error(f"Document source cannot include symlinks: {escape(str(child))}")
                 raise typer.Exit(1)
     return path
 
@@ -72,7 +73,7 @@ def _document_kind_and_source(source: str, *, recursive: bool) -> tuple[str, str
         return "folder", str(path)
     if path.is_file():
         return "file", str(path)
-    error(f"Document source is not a file, directory, or URL: {path}")
+    error(f"Document source is not a file, directory, or URL: {escape(str(path))}")
     raise typer.Exit(1)
 
 
@@ -81,7 +82,7 @@ async def _resolve_target_project(client: Any, project: str | None) -> str:
         try:
             return await resolve_project_reference(client, project)
         except ValueError as exc:
-            error(str(exc))
+            error(escape(str(exc)))
             raise typer.Exit(1) from exc
     linked_project = resolve_project_from_cwd()
     if linked_project:
@@ -188,7 +189,7 @@ def paste_document(
         try:
             content = resolve_content_input(text, content_file=content_file)
         except ValueError as exc:
-            error(str(exc))
+            error(escape(str(exc)))
             raise typer.Exit(1) from exc
         if not content or not content.strip():
             error("Document paste requires text, stdin, or --file")
@@ -242,7 +243,7 @@ def list_document_collections(
 
             rows = [
                 (
-                    truncate(item.get("name", ""), 36),
+                    escape(truncate(item.get("name", ""), 36)),
                     str(item.get("document_count", 0)),
                     str(item.get("updated_at") or ""),
                 )
@@ -297,7 +298,7 @@ def show_document(
             if raw:
                 # Just print raw content
                 content = doc.get("raw_content") or doc.get("content", "")
-                console.print(content)
+                console.print(content, markup=False, soft_wrap=True)
                 return
 
             # Rich formatted output
@@ -309,14 +310,16 @@ def show_document(
             chunks = doc.get("chunks", [])
 
             lines = [
-                f"[{ELECTRIC_PURPLE}]Title:[/{ELECTRIC_PURPLE}] {title}",
+                f"[{ELECTRIC_PURPLE}]Title:[/{ELECTRIC_PURPLE}] {escape(str(title))}",
                 f"[{ELECTRIC_PURPLE}]ID:[/{ELECTRIC_PURPLE}] {document_id}",
             ]
 
             if url:
-                lines.append(f"[{ELECTRIC_PURPLE}]URL:[/{ELECTRIC_PURPLE}] {url}")
+                lines.append(f"[{ELECTRIC_PURPLE}]URL:[/{ELECTRIC_PURPLE}] {escape(url)}")
             if source_name:
-                lines.append(f"[{ELECTRIC_PURPLE}]Source:[/{ELECTRIC_PURPLE}] {source_name}")
+                lines.append(
+                    f"[{ELECTRIC_PURPLE}]Source:[/{ELECTRIC_PURPLE}] {escape(source_name)}"
+                )
 
             lines.append(f"[{ELECTRIC_PURPLE}]Chunks:[/{ELECTRIC_PURPLE}] {len(chunks)}")
             lines.append("")
@@ -326,13 +329,13 @@ def show_document(
                 lines.append("")
                 # Show content with reasonable limit
                 if len(content) > 5000:
-                    lines.append(content[:5000])
+                    lines.append(escape(content[:5000]))
                     lines.append("")
                     lines.append(
                         f"[dim]... truncated ({len(content)} chars total, use --raw for full)[/dim]"
                     )
                 else:
-                    lines.append(content)
+                    lines.append(escape(content))
             else:
                 lines.append("[dim]No content available[/dim]")
 
@@ -340,7 +343,7 @@ def show_document(
                 title="Document",
                 lines=lines,
                 footer=(
-                    f"\n[dim]Open in browser:[/dim] [{NEON_CYAN}]{url}[/{NEON_CYAN}]"
+                    f"\n[dim]Open in browser:[/dim] [{NEON_CYAN}]{escape(url)}[/{NEON_CYAN}]"
                     if url
                     else None
                 ),
@@ -378,8 +381,8 @@ def list_documents(
             rows = [
                 (
                     truncate(doc.get("id", ""), 36),
-                    truncate(doc.get("title", ""), 30),
-                    truncate(doc.get("url", ""), 40),
+                    escape(truncate(doc.get("title", ""), 30)),
+                    escape(truncate(doc.get("url", ""), 40)),
                     str(len(doc.get("chunks", []))),
                 )
                 for doc in docs

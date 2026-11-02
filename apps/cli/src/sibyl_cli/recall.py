@@ -217,7 +217,7 @@ def recall_context(
             if json_output:
                 print_json(pack)
                 return
-            console.print(pack.get("markdown") or "")
+            console.print(pack.get("markdown") or "", markup=False, soft_wrap=True)
         except SibylClientError as e:
             handle_client_error(e)
 

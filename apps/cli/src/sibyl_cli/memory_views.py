@@ -81,7 +81,7 @@ def _print_probe_rehearsal(data: Mapping[str, Any]) -> None:
         if not isinstance(entry, Mapping):
             continue
         status = str(entry.get("status", "unknown"))
-        text = str(entry.get("probe", ""))
+        text = escape(str(entry.get("probe", "")))
         if status == "retrievable":
             console.print(f"    [green]✓[/green] rank {entry.get('rank')} · {text}")
         elif status == "absent":
@@ -101,15 +101,15 @@ def print_memory_capture_result(
 ) -> None:
     entity_id = data.get("id", "unknown")
     if wait_searchable:
-        success(f"Remembered {kind}: {title}")
+        success(f"Remembered {kind}: {escape(title)}")
     else:
-        info(f"Queued {kind}: {title}")
+        info(f"Queued {kind}: {escape(title)}")
     print_mutation_receipt(data)
     console.print(f"  [dim]ID: {entity_id}[/dim]")
     if raw_memory_id := data.get("raw_memory_id"):
         console.print(f"  [dim]Raw: {raw_memory_id}[/dim]")
     if raw_policy_reason := data.get("raw_policy_reason"):
-        console.print(f"  [dim]Policy: {raw_policy_reason}[/dim]")
+        console.print(f"  [dim]Policy: {escape(str(raw_policy_reason))}[/dim]")
     print_memory_scope(data)
     _print_probe_rehearsal(data)
 
@@ -176,14 +176,14 @@ def print_raw_memory_results(memories: list[object]) -> None:
         if not isinstance(item, dict):
             continue
         memory = cast("dict[str, object]", item)
-        title = str(memory.get("title") or "Untitled raw memory")
-        source_id = str(memory.get("source_id") or "")
+        title = escape(str(memory.get("title") or "Untitled raw memory"))
+        source_id = escape(str(memory.get("source_id") or ""))
         memory_id = str(memory.get("id") or "")
         content = str(memory.get("raw_content") or "")
         snippet = str(memory.get("snippet") or "")
         score = memory.get("score")
         scope = str(memory.get("memory_scope") or "private")
-        policy_reason = str(memory.get("policy_reason") or "")
+        policy_reason = escape(str(memory.get("policy_reason") or ""))
 
         source_label = f" [dim]({source_id})[/dim]" if source_id else ""
         console.print(f"  [{NEON_CYAN}]{title}[/{NEON_CYAN}]{source_label}")
@@ -237,9 +237,9 @@ def _source_pack_correction_reasons(data: dict[str, object]) -> list[str]:
 
 def _correction_reason_names(value: object) -> list[str]:
     if isinstance(value, dict):
-        return [str(reason) for reason in value]
+        return [escape(str(reason)) for reason in value]
     if isinstance(value, list):
-        return [str(reason) for reason in value]
+        return [escape(str(reason)) for reason in value]
     return []
 
 
@@ -269,7 +269,7 @@ def _print_source_pack_receipt(pack: dict[str, object]) -> None:
 
 def print_synthesis_plan(data: dict[str, object]) -> None:
     outline = cast("dict[str, object]", data.get("outline") or {})
-    title = str(outline.get("title") or "Synthesis Plan")
+    title = escape(str(outline.get("title") or "Synthesis Plan"))
     sections = outline.get("sections")
     section_items = sections if isinstance(sections, list) else []
     verification = cast("dict[str, object]", data.get("verification") or {})
@@ -285,13 +285,13 @@ def print_synthesis_plan(data: dict[str, object]) -> None:
         section = cast("dict[str, object]", item)
         source_ids = section.get("source_ids")
         source_count = len(source_ids) if isinstance(source_ids, list) else 0
-        console.print(f"  [{NEON_CYAN}]{section.get('title')}[/{NEON_CYAN}]")
+        console.print(f"  [{NEON_CYAN}]{escape(str(section.get('title')))}[/{NEON_CYAN}]")
         console.print(f"    [dim]{source_count} source(s)[/dim]")
         gaps = section.get("gaps")
         for gap in gaps if isinstance(gaps, list) else []:
             if isinstance(gap, dict):
                 gap_data = cast("dict[str, object]", gap)
-                console.print(f"    [dim]gap: {gap_data.get('reason')}[/dim]")
+                console.print(f"    [dim]gap: {escape(str(gap_data.get('reason')))}[/dim]")
         if pack := _find_source_pack(data, section.get("section_id")):
             _print_source_pack_receipt(pack)
 
@@ -309,7 +309,10 @@ def print_synthesis_verification(data: dict[str, object]) -> None:
     for gap in gaps if isinstance(gaps, list) else []:
         if isinstance(gap, dict):
             gap_data = cast("dict[str, object]", gap)
-            console.print(f"  [dim]{gap_data.get('title')}: {gap_data.get('reason')}[/dim]")
+            console.print(
+                f"  [dim]{escape(str(gap_data.get('title')))}: "
+                f"{escape(str(gap_data.get('reason')))}[/dim]"
+            )
     hidden, redacted, corrected, freshness = _source_pack_receipt_counts(data)
     if hidden or redacted or corrected or freshness:
         console.print(
@@ -326,7 +329,7 @@ def print_synthesis_artifact(data: dict[str, object], *, output_format: str) -> 
     if output_format == "json":
         print_json(cast("dict[str, object]", artifact.get("json_payload") or {}))
         return
-    console.print(str(artifact.get("markdown") or ""))
+    console.print(str(artifact.get("markdown") or ""), markup=False, soft_wrap=True)
 
 
 def print_synthesis_remember(data: dict[str, object]) -> None:
@@ -334,7 +337,7 @@ def print_synthesis_remember(data: dict[str, object]) -> None:
     remembered_memory_id = artifact.get("remembered_memory_id")
     remembered_source_id = artifact.get("remembered_source_id")
     if remembered_memory_id:
-        success(f"Remembered synthesis artifact: {artifact.get('title')}")
+        success(f"Remembered synthesis artifact: {escape(str(artifact.get('title')))}")
         console.print(f"  [dim]Artifact: {artifact.get('artifact_id', '')}[/dim]")
         console.print(f"  [dim]Memory: {remembered_memory_id}[/dim]")
         console.print(f"  [dim]Source: {remembered_source_id}[/dim]")
@@ -350,8 +353,8 @@ def print_synthesis_remember(data: dict[str, object]) -> None:
 def _source_import_scope(data: dict[str, object], default_scope: str) -> str:
     scope = str(data.get("target_memory_scope") or default_scope)
     if scope_key := data.get("target_scope_key"):
-        return f"{scope}:{scope_key}"
-    return scope
+        return escape(f"{scope}:{scope_key}")
+    return escape(scope)
 
 
 def _source_import_progress(data: dict[str, object]) -> dict[str, object]:
@@ -362,7 +365,7 @@ def _source_import_progress(data: dict[str, object]) -> dict[str, object]:
 def _source_import_safe_record_summary(record: dict[str, object]) -> str:
     for key in ("adapter_record_id", "source_uri", "code", "type"):
         if value := record.get(key):
-            return str(value)
+            return escape(str(value))
     return "record"
 
 
@@ -383,8 +386,8 @@ def print_source_import_status(
     table = create_table(None, "Field", "Value", expand=False)
     table.add_row("Import Id", str(data.get("import_id") or ""))
     table.add_row("Status", str(data.get("status") or ""))
-    table.add_row("Adapter", str(data.get("adapter_name") or ""))
-    table.add_row("Source", str(data.get("source_identity") or ""))
+    table.add_row("Adapter", escape(str(data.get("adapter_name") or "")))
+    table.add_row("Source", escape(str(data.get("source_identity") or "")))
     table.add_row("Target scope", _source_import_scope(data, default_scope))
     table.add_row("Privacy", str(data.get("privacy_class") or "default"))
     table.add_row("Imported", str(progress.get("imported_count") or 0))
@@ -405,14 +408,14 @@ def print_source_import_status(
     if skipped_records:
         console.print("\n[bold]Skipped records[/bold]")
         for record in skipped_records[:6]:
-            reason = record.get("reason") or record.get("message") or "skipped"
+            reason = escape(str(record.get("reason") or record.get("message") or "skipped"))
             console.print(f"  [dim]{_source_import_safe_record_summary(record)}: {reason}[/dim]")
 
     errors = _dict_list(data.get("errors"))
     if errors:
         console.print("\n[bold]Errors[/bold]")
         for record in errors[:6]:
-            message = record.get("message") or record.get("error") or "error"
+            message = escape(str(record.get("message") or record.get("error") or "error"))
             console.print(f"  [dim]{_source_import_safe_record_summary(record)}: {message}[/dim]")
 
 
@@ -469,7 +472,7 @@ def print_memory_audit_events(events: list[object]) -> None:
             timestamp,
             str(event.get("action") or ""),
             _format_policy_state(event.get("policy_allowed")),
-            scope,
+            escape(scope),
             _audit_id_summary(event.get("source_ids"), event.get("source_ids_truncated")),
             _audit_id_summary(event.get("derived_ids"), event.get("derived_ids_truncated")),
         )
@@ -493,13 +496,13 @@ def _preview_target(scope: object, scope_key: object) -> str:
     target = str(scope or "default")
     if scope_key:
         target = f"{target}:{scope_key}"
-    return target
+    return escape(target)
 
 
 def _preview_id_summary(value: object) -> str:
     if not isinstance(value, list) or not value:
         return "-"
-    return ", ".join(str(item) for item in value)
+    return escape(", ".join(str(item) for item in value))
 
 
 def _preview_count(value: object) -> str:
@@ -523,7 +526,7 @@ def print_promotion_preview(data: dict[str, object]) -> None:
     console.print("\n[bold]Promotion preview[/bold]\n")
     table = create_table(None, "Field", "Value", expand=False)
     table.add_row("State", _preview_state(data.get("allowed")))
-    table.add_row("Reason", str(data.get("reason") or ""))
+    table.add_row("Reason", escape(str(data.get("reason") or "")))
     table.add_row("Candidate", str(data.get("candidate_id") or ""))
     table.add_row("Review", str(data.get("review_state") or ""))
     table.add_row(
@@ -541,7 +544,7 @@ def print_promotion_result(data: dict[str, object]) -> None:
     console.print("\n[bold]Promotion result[/bold]\n")
     table = create_table(None, "Field", "Value", expand=False)
     table.add_row("State", "promoted" if data.get("success") is True else "blocked")
-    table.add_row("Reason", str(data.get("reason") or ""))
+    table.add_row("Reason", escape(str(data.get("reason") or "")))
     table.add_row("Candidate", str(data.get("candidate_id") or ""))
     table.add_row("Review", str(data.get("review_state") or ""))
     table.add_row(
@@ -563,7 +566,7 @@ def print_promotion_autonomy(data: dict[str, object]) -> None:
     table.add_row("Outcome", str(data.get("outcome") or ""))
     table.add_row("Action", str(data.get("recommended_action") or ""))
     table.add_row("Applied", "yes" if data.get("applied") is True else "no")
-    table.add_row("Reason", str(data.get("reason") or ""))
+    table.add_row("Reason", escape(str(data.get("reason") or "")))
     table.add_row("Candidate", str(data.get("candidate_id") or ""))
     table.add_row("Review", str(data.get("review_state") or ""))
     table.add_row(
@@ -619,7 +622,7 @@ def print_memory_review_drain(data: dict[str, object]) -> None:
             str(row.get("outcome") or ""),
             str(row.get("recommended_action") or ""),
             str(row.get("review_state") or ""),
-            str(row.get("reason") or row.get("error") or ""),
+            escape(str(row.get("reason") or row.get("error") or "")),
             str(row.get("promoted_id") or "-"),
             "yes" if row.get("archived") is True else "no",
         )
@@ -633,7 +636,7 @@ def print_reflection_dream_enqueue(data: dict[str, object], *, dry_run: bool) ->
     table.add_row("Job", str(data.get("job_id") or ""))
     table.add_row("Function", str(data.get("function") or ""))
     table.add_row("Status", str(data.get("status") or ""))
-    table.add_row("Message", str(data.get("message") or ""))
+    table.add_row("Message", escape(str(data.get("message") or "")))
     console.print(table)
 
 
@@ -709,7 +712,7 @@ def print_reflection_dream_status(data: dict[str, object]) -> None:
                 _event_time(event),
                 _dream_action_label(event.get("action")),
                 _format_policy_state(event.get("policy_allowed")),
-                scope,
+                escape(scope),
                 _audit_id_summary(event.get("source_ids"), event.get("source_ids_truncated")),
                 _audit_id_summary(event.get("derived_ids"), event.get("derived_ids_truncated")),
             )
@@ -720,7 +723,7 @@ def print_share_preview(data: dict[str, object]) -> None:
     console.print("\n[bold]Share preview[/bold]\n")
     table = create_table(None, "Field", "Value", expand=False)
     table.add_row("State", _preview_state(data.get("allowed")))
-    table.add_row("Reason", str(data.get("reason") or ""))
+    table.add_row("Reason", escape(str(data.get("reason") or "")))
     table.add_row("Target", _preview_target(data.get("target_scope"), data.get("target_scope_key")))
     table.add_row("Sources", _preview_id_summary(data.get("source_ids")))
     table.add_row("Visible", _preview_id_summary(data.get("visible_source_ids")))
@@ -738,7 +741,7 @@ def print_share_result(data: dict[str, object]) -> None:
     console.print("\n[bold]Share result[/bold]\n")
     table = create_table(None, "Field", "Value", expand=False)
     table.add_row("State", "applied" if data.get("applied") is True else "blocked")
-    table.add_row("Reason", str(data.get("reason") or ""))
+    table.add_row("Reason", escape(str(data.get("reason") or "")))
     table.add_row("Target", _preview_target(data.get("target_scope"), data.get("target_scope_key")))
     table.add_row("Sources", _preview_id_summary(data.get("source_ids")))
     table.add_row("Visible", _preview_id_summary(data.get("visible_source_ids")))
@@ -752,7 +755,7 @@ def print_access_preview(data: dict[str, object]) -> None:
     console.print("\n[bold]Access preview[/bold]\n")
     table = create_table(None, "Field", "Value", expand=False)
     table.add_row("State", _access_preview_state(data))
-    table.add_row("Reason", str(data.get("reason") or ""))
+    table.add_row("Reason", escape(str(data.get("reason") or "")))
     table.add_row(
         "Target",
         _preview_target(data.get("target_principal_type"), data.get("target_principal_id")),
@@ -781,9 +784,9 @@ def print_team_list(data: dict[str, object]) -> None:
             continue
         team = cast("dict[str, object]", item)
         table.add_row(
-            str(team.get("name") or ""),
-            str(team.get("slug") or ""),
-            str(team.get("memory_scope_key") or team.get("id") or ""),
+            escape(str(team.get("name") or "")),
+            escape(str(team.get("slug") or "")),
+            escape(str(team.get("memory_scope_key") or team.get("id") or "")),
             str(team.get("memory_space_id") or ""),
         )
     console.print(table)
@@ -791,11 +794,11 @@ def print_team_list(data: dict[str, object]) -> None:
 
 def print_team(data: dict[str, object]) -> None:
     table = create_table(None, "Field", "Value", expand=False)
-    table.add_row("Team", str(data.get("name") or ""))
-    table.add_row("Slug", str(data.get("slug") or ""))
+    table.add_row("Team", escape(str(data.get("name") or "")))
+    table.add_row("Slug", escape(str(data.get("slug") or "")))
     table.add_row("ID", str(data.get("id") or ""))
     table.add_row("Memory space", str(data.get("memory_space_id") or ""))
-    table.add_row("Scope key", str(data.get("memory_scope_key") or ""))
+    table.add_row("Scope key", escape(str(data.get("memory_scope_key") or "")))
     table.add_row("Members", _team_count(data.get("members")))
     table.add_row("Projects", _team_count(data.get("projects")))
     console.print(table)

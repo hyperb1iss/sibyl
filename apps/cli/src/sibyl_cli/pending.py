@@ -7,6 +7,7 @@ from contextlib import AsyncExitStack
 from typing import Annotated, Any
 
 import typer
+from rich.markup import escape
 
 from sibyl_cli.auth_store import (
     credential_scope,
@@ -202,9 +203,9 @@ def list_writes(
             table.add_row(
                 str(item["id"]),
                 "CORRUPT",
-                str(item["filename"]),
+                escape(str(item["filename"])),
                 "repair",
-                str(item["error"]),
+                escape(str(item["error"])),
                 "-",
                 "corrupt",
                 "corrupt",
@@ -213,12 +214,12 @@ def list_writes(
         table.add_row(
             str(item["id"]),
             str(item["method"]),
-            str(item["path"]),
+            escape(str(item["path"])),
             str(item["kind"]),
-            str(item["title"]),
+            escape(str(item["title"])),
             str(item["attempts"]),
             str(item["class"]),
-            _state_label(item),
+            escape(_state_label(item)),
         )
     console.print(table)
     for line in pending_writes_notice_lines(
@@ -228,7 +229,7 @@ def list_writes(
             identity=identity,
         )
     ):
-        warn(line)
+        warn(escape(line))
 
 
 @app.command("discard")
@@ -278,7 +279,7 @@ def discard_writes(
 
         if foreign:
             # Named explicitly, because this decides which payloads are deleted.
-            warn(f"Discarding writes buffered for a server other than {base_url}.")
+            warn(f"Discarding writes buffered for a server other than {escape(base_url)}.")
             selected = [
                 str(item["id"])
                 for item in list_pending_writes()
@@ -312,7 +313,7 @@ def discard_writes(
             else:
                 missed += 1
         except ValueError as exc:
-            error(str(exc))
+            error(escape(str(exc)))
             raise typer.Exit(code=1) from exc
 
     success(f"Discarded {removed} pending write{'s' if removed != 1 else ''}")
@@ -348,7 +349,7 @@ def claim_writes(
     try:
         selected = _selected_writes(write_ids or [])
     except (FileNotFoundError, ValueError) as exc:
-        error(str(exc))
+        error(escape(str(exc)))
         raise typer.Exit(code=1) from exc
     candidates = [
         item
@@ -388,7 +389,7 @@ def claim_writes(
                 replay_identity = await client._ensure_pending_identity()
                 identity = await client._request("GET", "/auth/me", _replay_pending=False)
             except SibylClientError as exc:
-                error(exc.detail or str(exc))
+                error(escape(exc.detail or str(exc)))
                 raise typer.Exit(code=1) from exc
             if replay_identity is None:
                 error("Upgrade the server to verify write ownership before claiming legacy writes.")
@@ -408,8 +409,8 @@ def claim_writes(
             )
             warn(
                 f"Will replay {len(matching)} legacy write"
-                f"{'s' if len(matching) != 1 else ''} to {client.base_url} as {user_label} "
-                f"in {org_label}: {_replay_plan(matching)}."
+                f"{'s' if len(matching) != 1 else ''} to {escape(client.base_url)} as "
+                f"{escape(user_label)} in {escape(org_label)}: {escape(_replay_plan(matching))}."
             )
             if unverified:
                 warn(
@@ -417,7 +418,10 @@ def claim_writes(
                     "to this account and organization."
                 )
             for item in matching:
-                warn(f"{item['id']} {item['method']} {item['path']} at {item['base_url']}")
+                warn(
+                    f"{item['id']} {item['method']} {escape(str(item['path']))} "
+                    f"at {escape(str(item['base_url']))}"
+                )
             if not yes and not typer.confirm("Continue?"):
                 raise typer.Abort()
 
@@ -441,7 +445,7 @@ def claim_writes(
                     else:
                         claimed += 1
             for write_id, reason in claim_failures:
-                error(f"Could not claim {write_id}: {reason}")
+                error(f"Could not claim {write_id}: {escape(reason)}")
             if claimed == 0:
                 raise typer.Exit(code=1)
             claimed_message = (
@@ -488,7 +492,7 @@ def retry_writes(
             try:
                 retry_pending_write(write_id)
             except (FileNotFoundError, ValueError) as exc:
-                error(str(exc))
+                error(escape(str(exc)))
                 raise typer.Exit(code=1) from exc
     flush_writes(write_ids)
 
@@ -505,7 +509,7 @@ def flush_writes(
     try:
         selected = _selected_writes(write_ids or [])
     except (FileNotFoundError, ValueError) as exc:
-        error(str(exc))
+        error(escape(str(exc)))
         raise typer.Exit(code=1) from exc
     if not selected:
         success("No pending writes")
@@ -513,15 +517,15 @@ def flush_writes(
     corrupt = [item for item in selected if is_corrupt_pending_write(item)]
     valid = [item for item in selected if not is_corrupt_pending_write(item)]
     for item in corrupt:
-        error(f"Cannot replay {item['filename']}: {item['error']}")
+        error(f"Cannot replay {escape(str(item['filename']))}: {escape(str(item['error']))}")
         path = pending_writes_dir() / str(item["filename"])
         if is_canonical_pending_write_id(str(item["id"])):
             warn(
-                f"Repair {path}, or discard it explicitly with: "
+                f"Repair {escape(str(path))}, or discard it explicitly with: "
                 f"sibyl pending-writes discard {item['id']}"
             )
         else:
-            warn(f"Inspect and remove this exact file manually: {path}")
+            warn(f"Inspect and remove this exact file manually: {escape(str(path))}")
 
     replayable = valid
     if not replayable:
@@ -614,7 +618,7 @@ def flush_writes(
                 except SibylClientError as exc:
                     failures += 1
                     blocked_resources.update(resources)
-                    error(f"Failed {write_id}: {exc.detail or exc}")
+                    error(f"Failed {write_id}: {escape(str(exc.detail or exc))}")
             if failures:
                 warn(
                     f"{replayed} replayed, {failures} unresolved; payloads remain local. "

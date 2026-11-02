@@ -22,6 +22,7 @@ from urllib.parse import urlsplit, urlunsplit
 
 import httpx
 import typer
+from rich.markup import escape
 
 from sibyl_cli import agent_memories, config_store, doctor, ingest, setup
 from sibyl_cli.auth import _login_auto, _settle_login_org
@@ -57,7 +58,7 @@ class Step:
 
 def _print_step(step: Step) -> None:
     mark = "[green]✓[/green]" if step.ok else "[red]✗[/red]"
-    console.print(f"  {mark} {step.label:<10} [dim]{step.detail}[/dim]")
+    console.print(f"  {mark} {step.label:<10} [dim]{escape(step.detail)}[/dim]")
 
 
 def normalize_server_url(raw: str) -> str:
@@ -140,8 +141,10 @@ def _new_context_name(server_url: str, name: str | None) -> str:
     for candidate in candidates:
         if config_store.get_context(candidate) is None:
             return candidate
-    error(f"Context '{candidates[-1]}' already points at another server.")
-    console.print(f"  Name a new one: sibyl setup {shlex.quote(server_url)} --context <name>")
+    error(f"Context '{escape(candidates[-1])}' already points at another server.")
+    console.print(
+        f"  Name a new one: sibyl setup {escape(shlex.quote(server_url))} --context <name>"
+    )
     raise typer.Exit(1)
 
 
@@ -163,8 +166,9 @@ def _warn_if_pinned_elsewhere(ctx: config_store.Context) -> None:
     selected = config_store.resolve_context_name()
     if selected and selected != ctx.name:
         warn(
-            f"This shell selects context '{selected}' (via -C, SIBYL_CONTEXT, or a directory "
-            f"pin), so other commands here still use it. Switch with: sibyl -C {ctx.name} ..."
+            f"This shell selects context '{escape(selected)}' (via -C, SIBYL_CONTEXT, or a "
+            "directory pin), so other commands here still use it. Switch with: "
+            f"sibyl -C {escape(ctx.name)} ..."
         )
 
 
@@ -402,7 +406,9 @@ def _run_setup(
 ) -> None:
 
     console.print()
-    console.print(f"[{ELECTRIC_PURPLE}]◈[/{ELECTRIC_PURPLE}] [bold]Sibyl setup[/bold] {server_url}")
+    console.print(
+        f"[{ELECTRIC_PURPLE}]◈[/{ELECTRIC_PURPLE}] [bold]Sibyl setup[/bold] {escape(server_url)}"
+    )
     console.print()
 
     # Sign-in sends a password or a token over this connection.

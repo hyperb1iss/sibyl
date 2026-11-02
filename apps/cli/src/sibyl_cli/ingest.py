@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Annotated, Any
 
 import typer
+from rich.markup import escape
 
 from sibyl_cli import agent_memories
 from sibyl_cli.client import SibylClientError, get_client, resolve_client_context_name
@@ -35,11 +36,11 @@ def _resolve_source_path(source: Path) -> str:
     if not path.is_absolute():
         path = Path.cwd() / path
     if path.is_symlink():
-        error(f"Transcript source cannot be a symlink: {path}")
+        error(f"Transcript source cannot be a symlink: {escape(str(path))}")
         raise typer.Exit(1)
     path = path.resolve()
     if not path.exists():
-        error(f"Transcript source not found: {path}")
+        error(f"Transcript source not found: {escape(str(path))}")
         raise typer.Exit(1)
     return str(path)
 
@@ -233,13 +234,13 @@ def _print_memory_summary(job: agent_memories.MemoryImport, *, title: str) -> No
         info(f"{attached} memories attach to the Sibyl project their repository is linked to")
     for context, count in sorted(summary["elsewhere"].items()):
         info(
-            f"{count} memories come from repositories pinned to context '{context}': "
-            f"sibyl -C {context} ingest memories"
+            f"{count} memories come from repositories pinned to context '{escape(context)}': "
+            f"sibyl -C {escape(context)} ingest memories"
         )
     if summary["skipped_files"]:
         info(f"{len(summary['skipped_files'])} files skipped (symlinks, empty, or too large)")
     for failure in summary["failures"][:10]:
-        warn(f"{failure['file']}: {failure['error']}")
+        warn(f"{escape(str(failure['file']))}: {escape(str(failure['error']))}")
 
 
 async def run_memory_import(
@@ -329,7 +330,7 @@ def ingest_memories(
     agents = agent or list(agent_memories.AGENTS)
     unknown = [name for name in agents if name not in agent_memories.AGENTS]
     if unknown:
-        error(f"Unknown agent: {', '.join(unknown)} (choose claude-code or codex)")
+        error(f"Unknown agent: {escape(', '.join(unknown))} (choose claude-code or codex)")
         raise typer.Exit(1)
 
     def confirm(job: agent_memories.MemoryImport) -> bool:
@@ -360,7 +361,7 @@ def ingest_memories(
             handle_client_error(exc, invalid_request_label="Import rejected")
             return
         except ValueError as exc:
-            error(str(exc))
+            error(escape(str(exc)))
             raise typer.Exit(1) from exc
         if job is None:
             if json_out:

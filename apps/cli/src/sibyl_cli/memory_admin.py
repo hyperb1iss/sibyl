@@ -6,6 +6,7 @@ import sys
 from typing import Annotated, Any, cast
 
 import typer
+from rich.markup import escape
 
 from sibyl_cli import command_support, memory_review, memory_space
 from sibyl_cli.client import SibylClientError, get_client
@@ -377,7 +378,7 @@ def correct_memory(
                 follow_symlinks=follow_symlinks,
             )
         except ValueError as e:
-            error(str(e))
+            error(escape(str(e)))
             raise typer.Exit(code=1) from e
         if revised_content is None or not revised_content.strip():
             error("--action revise requires --content, --content-file, or stdin")
@@ -424,7 +425,10 @@ def correct_memory(
                         if json_output:
                             print_json(planned)
                         else:
-                            error(f"Correction denied: {planned.get('reason') or 'unknown reason'}")
+                            error(
+                                "Correction denied: "
+                                f"{escape(str(planned.get('reason') or 'unknown reason'))}"
+                            )
                         raise typer.Exit(code=1)
                     if not json_output:
                         info(correction_preview_line(normalized_action, planned))
@@ -485,7 +489,7 @@ def correct_memory(
                 success(f"Memory corrected: {normalized_action}")
                 print_mutation_receipt(data)
                 return
-            error(f"Correction denied: {data.get('reason') or 'unknown reason'}")
+            error(f"Correction denied: {escape(str(data.get('reason') or 'unknown reason'))}")
             print_mutation_receipt(data)
             raise typer.Exit(code=1)
         except SibylClientError as e:

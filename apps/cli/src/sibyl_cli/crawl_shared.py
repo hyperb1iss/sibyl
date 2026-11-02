@@ -1,4 +1,5 @@
 import typer
+from rich.markup import escape
 
 from sibyl_cli.client import SibylClientError, get_client
 from sibyl_cli.common import (
@@ -74,9 +75,11 @@ def show_crawl_source(
                 return
 
             console.print(f"\n[{ELECTRIC_PURPLE}]Source Details[/{ELECTRIC_PURPLE}]\n")
-            console.print(f"  Name: [{NEON_CYAN}]{source.get('name', '')}[/{NEON_CYAN}]")
+            console.print(
+                f"  Name: [{NEON_CYAN}]{escape(str(source.get('name', '')))}[/{NEON_CYAN}]"
+            )
             console.print(f"  ID: {source.get('id', '')}")
-            console.print(f"  URL: {source.get('url', '-')}")
+            console.print(f"  URL: {escape(str(source.get('url', '-')))}")
             console.print(f"  Type: {source.get('source_type', 'website')}")
             console.print(f"  Status: {source.get('crawl_status', 'pending')}")
             console.print(f"  Documents: {source.get('document_count', 0)}")
@@ -84,7 +87,7 @@ def show_crawl_source(
             console.print(f"  Last Crawled: {source.get('last_crawled_at', 'never') or 'never'}")
 
             if source.get("last_error"):
-                error(f"Last Error: {source['last_error']}")
+                error(f"Last Error: {escape(str(source['last_error']))}")
 
         except SibylClientError as e:
             handle_client_error(e)
@@ -122,12 +125,12 @@ def start_crawl_source(
                 return
 
             if status in {"queued", "started"}:
-                success(response.get("message", "Crawl queued"))
+                success(escape(str(response.get("message", "Crawl queued"))))
                 info(f"Use '{status_command}' to check progress")
             elif status == "already_running":
-                info(response.get("message", "Crawl already in progress"))
+                info(escape(str(response.get("message", "Crawl already in progress"))))
             else:
-                error(f"Crawl failed: {response.get('message', 'Unknown error')}")
+                error(f"Crawl failed: {escape(str(response.get('message', 'Unknown error')))}")
                 raise typer.Exit(1)
 
         except SibylClientError as e:
@@ -169,8 +172,10 @@ def show_source_status(
                 return
 
             console.print(f"\n[{ELECTRIC_PURPLE}]Source Status[/{ELECTRIC_PURPLE}]\n")
-            console.print(f"  Name: [{NEON_CYAN}]{source.get('name', '')}[/{NEON_CYAN}]")
-            console.print(f"  URL: {source.get('url', '-')}")
+            console.print(
+                f"  Name: [{NEON_CYAN}]{escape(str(source.get('name', '')))}[/{NEON_CYAN}]"
+            )
+            console.print(f"  URL: {escape(str(source.get('url', '-')))}")
             console.print(
                 f"  Status: {status_response.get('crawl_status', source.get('crawl_status', 'pending'))}"
             )
@@ -187,7 +192,7 @@ def show_source_status(
             if status_response.get("current_job_id"):
                 console.print(f"  Job ID: {status_response['current_job_id']}")
             if status_response.get("last_error"):
-                error(f"Last Error: {status_response['last_error']}")
+                error(f"Last Error: {escape(str(status_response['last_error']))}")
 
         except SibylClientError as e:
             handle_client_error(e)
