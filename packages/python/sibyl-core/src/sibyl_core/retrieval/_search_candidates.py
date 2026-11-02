@@ -9,6 +9,7 @@ from typing import Any
 from sibyl_core.auth.memory_policy import memory_metadata_read_allowed, memory_row_scope_metadata
 from sibyl_core.embeddings.providers import EmbeddingMetadata
 from sibyl_core.models.context import ContextFacet
+from sibyl_core.models.entities import EntityType
 from sibyl_core.retrieval._search_plan import (
     RetrievalPlan,
     RetrievalSignal,
@@ -365,7 +366,8 @@ def _candidate_allowed(
         plan.project or plan.accessible_projects is not None
     ):
         return False
-    if plan.project and candidate.project_id and candidate.project_id != plan.project:
+    project_id = _candidate_project_id(candidate)
+    if plan.project and project_id and project_id != plan.project:
         return False
     if candidate.type == "claim" and plan.accessible_projects is not None:
         endpoint_project_ids = {
@@ -377,15 +379,29 @@ def _candidate_allowed(
             return False
     return not (
         plan.accessible_projects is not None
-        and candidate.project_id is not None
-        and candidate.project_id not in plan.accessible_projects
+        and project_id is not None
+        and project_id not in plan.accessible_projects
     )
+
+
+def _candidate_project_id(candidate: RetrievalCandidate) -> str | None:
+    """The project a candidate is read through.
+
+    A project row carries no project_id, so it is addressed by its own id, as
+    memory_row_project_id and the lifecycle gate already read it. Read as
+    project-less, every project's own row reached any reader the lanes did not
+    narrow by project.
+    """
+    if candidate.project_id is None and candidate.type == EntityType.PROJECT.value:
+        return candidate.id or None
+    return candidate.project_id
 
 
 def _candidate_scope_allowed(candidate: RetrievalCandidate, plan: RetrievalPlan) -> bool:
     metadata = candidate.metadata if isinstance(candidate.metadata, Mapping) else {}
     return memory_metadata_read_allowed(
         metadata,
+        row_project_id=_candidate_project_id(candidate),
         principal_id=plan.scopes[0].principal_id if plan.scopes else None,
         project_id=plan.project,
         accessible_projects=plan.accessible_projects,
