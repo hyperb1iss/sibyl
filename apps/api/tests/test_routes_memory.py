@@ -2679,6 +2679,7 @@ async def test_preview_reflection_promotion_verifies_project_target() -> None:
         require_existing_project=True,
     )
     preview.assert_awaited_once_with(
+        allowed_memory_scope_keys=None,
         candidate_id="candidate-1",
         organization_id=str(org.id),
         principal_id="user-123",
@@ -2687,6 +2688,7 @@ async def test_preview_reflection_promotion_verifies_project_target() -> None:
         domain="sibyl",
         project="project_123",
         accessible_projects={"project_123", "read_only_source"},
+        accessible_teams=set(),
         writable_projects={"project_123"},
     )
     audit.assert_awaited_once_with(
@@ -2782,6 +2784,7 @@ async def test_preview_memory_promotion_routes_imported_raw_memory() -> None:
 
     reflection_preview.assert_awaited_once()
     raw_preview.assert_awaited_once_with(
+        allowed_memory_scope_keys=None,
         raw_memory_id="raw-1",
         organization_id=str(org.id),
         principal_id="user-123",
@@ -2790,6 +2793,7 @@ async def test_preview_memory_promotion_routes_imported_raw_memory() -> None:
         domain=None,
         project="project_123",
         accessible_projects={"project_123", "read_only_source"},
+        accessible_teams=set(),
         writable_projects={"project_123"},
     )
     audit.assert_awaited_once()
@@ -2997,6 +3001,7 @@ async def test_auto_review_reflection_candidate_promotes_safe_candidate() -> Non
         require_existing_project=True,
     )
     preview_call.assert_awaited_once_with(
+        allowed_memory_scope_keys=None,
         candidate_id="candidate-1",
         organization_id=str(org.id),
         principal_id="user-123",
@@ -3005,6 +3010,7 @@ async def test_auto_review_reflection_candidate_promotes_safe_candidate() -> Non
         domain="sibyl",
         project="project_123",
         accessible_projects={"project_123", "read_only_source"},
+        accessible_teams=set(),
         writable_projects={"project_123"},
     )
     promote.assert_awaited_once_with(
@@ -3018,6 +3024,7 @@ async def test_auto_review_reflection_candidate_promotes_safe_candidate() -> Non
         project="project_123",
         related_to=["task_123"],
         accessible_projects={"project_123", "read_only_source"},
+        accessible_teams=set(),
         writable_projects={"project_123"},
     )
     audit.assert_awaited_once_with(
@@ -3437,6 +3444,7 @@ async def test_promote_reflection_candidate_verifies_project_target() -> None:
         project="project_123",
         related_to=["task_123"],
         accessible_projects={"project_123", "read_only_source"},
+        accessible_teams=set(),
         writable_projects={"project_123"},
     )
     audit.assert_awaited_once_with(
@@ -3537,6 +3545,7 @@ async def test_promote_memory_routes_imported_raw_memory() -> None:
         project="project_123",
         related_to=[],
         accessible_projects={"project_123", "read_only_source"},
+        accessible_teams=set(),
         writable_projects={"project_123"},
     )
     audit.assert_awaited_once()

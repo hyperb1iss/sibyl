@@ -15,6 +15,7 @@ from sibyl.persistence.auth_common import InvalidAuthClaimsError, UserNotFoundEr
 from sibyl.persistence.auth_runtime import (
     log_memory_audit_event,
     resolve_accessible_project_graph_ids,
+    resolve_accessible_team_scope_keys,
 )
 from sibyl_core.ai.errors import provider_error_detail
 from sibyl_core.ai.llm.budget import (
@@ -729,6 +730,10 @@ async def _drain_dream_candidate(
         group_id=group_id,
         candidate=candidate,
     )
+    accessible_teams = await _resolve_accessible_teams(
+        group_id=group_id,
+        principal_id=candidate.principal_id,
+    )
     preview = await preview_reflection_candidate_promotion(
         candidate_id=candidate.id,
         organization_id=group_id,
@@ -738,6 +743,7 @@ async def _drain_dream_candidate(
         domain=_metadata_str(candidate.metadata, "domain"),
         project=project,
         accessible_projects=accessible_projects,
+        accessible_teams=accessible_teams,
         writable_projects=await _resolve_accessible_projects(
             group_id=group_id,
             principal_id=candidate.principal_id,
@@ -808,6 +814,7 @@ async def _drain_dream_candidate(
             project=project,
             related_to=_metadata_str_list(candidate.metadata.get("related_to")),
             accessible_projects=accessible_projects,
+            accessible_teams=accessible_teams,
             writable_projects=await _resolve_accessible_projects(
                 group_id=group_id,
                 principal_id=candidate.principal_id,
@@ -993,6 +1000,32 @@ async def _resolve_accessible_projects(
         )
         return set()
     return {str(project_id) for project_id in project_ids or set()}
+
+
+async def _resolve_accessible_teams(
+    *,
+    group_id: str,
+    principal_id: str | None,
+) -> set[str]:
+    """Team memberships for the candidate's principal, read from the auth store.
+
+    A capture's suggested team key is a caller-supplied hint; membership is the
+    gate, so it never comes from capture metadata. A failed lookup resolves to
+    no teams, which the policy denies as unverified membership.
+    """
+    if not principal_id:
+        return set()
+    try:
+        team_keys = await resolve_accessible_team_scope_keys(user_id=principal_id, org_id=group_id)
+    except Exception as exc:
+        log.warning(
+            "reflection_dream_team_access_lookup_failed",
+            group_id=group_id,
+            principal_id=principal_id,
+            error=str(exc),
+        )
+        return set()
+    return {str(team_key) for team_key in team_keys or set()}
 
 
 async def _log_dream_candidate_audit(

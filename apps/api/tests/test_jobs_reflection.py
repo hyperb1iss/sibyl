@@ -39,6 +39,9 @@ def dispatch_cursor(monkeypatch):
     monkeypatch.setattr(
         "sibyl.jobs.reflection.list_reflection_dream_neighbours", AsyncMock(return_value=[])
     )
+    monkeypatch.setattr(
+        "sibyl.jobs.reflection.resolve_accessible_team_scope_keys", AsyncMock(return_value=set())
+    )
     # These orchestration tests stub the validator; the public cohort tests
     # exercise the durable binding and real publisher together.
     monkeypatch.setattr(
