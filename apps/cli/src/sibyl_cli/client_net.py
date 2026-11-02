@@ -2,6 +2,7 @@
 
 from collections.abc import Sequence
 from typing import Any
+from uuid import uuid4
 
 
 class ClientNetMixin:
@@ -35,7 +36,15 @@ class ClientNetMixin:
         # A channel message is live coordination. Replaying it from the write
         # buffer after the conversation moved on would hand its receivers a
         # stale instruction, so a failed post fails now and the caller retries.
-        return await self._request("POST", "/net/messages", json=data, _buffer_pending=False)
+        # The key makes the transport's own retry (after a token refresh) land
+        # once, and a decision remember its memory once.
+        return await self._request(
+            "POST",
+            "/net/messages",
+            json=data,
+            _buffer_pending=False,
+            _idempotency_key=str(uuid4()),
+        )
 
     async def net_feed(
         self,

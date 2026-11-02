@@ -7,10 +7,16 @@ entity routes. Channels are organization-visible like public chat channels;
 there are no private channels, presence or delivery receipts. Receivers own
 dedupe (by message id), permissions on what they act on, and loop limits.
 
-A message may name a graph project the poster can read. A ``decision`` is
-remembered first, through the same scope resolution, project check and
-memory policy as ``POST /memory/raw``, and is posted only once that write
-succeeds; a refused write refuses the post.
+Naming a graph project on a post takes contributor access to it, within
+the project grants of the API key the caller used, the same narrowing a
+remembered write gets. The first post that names a project pins its thread to
+that project; a later post naming another one is refused with 409, and a post
+naming none always goes through. A ``decision`` is remembered first, through
+the same scope resolution, project check and memory policy as
+``POST /memory/raw``, and is posted only once that write succeeds; a refused
+write refuses the post. ``Idempotency-Key`` is honored as it is on
+``POST /memory/raw``, so a retried decision neither duplicates its memory nor
+leaves one behind without its message.
 """
 
 from __future__ import annotations
@@ -23,6 +29,11 @@ from uuid import UUID
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
+from sibyl.api.idempotency import (
+    replay_idempotent_response,
+    save_idempotent_response,
+    serialize_idempotent_request,
+)
 from sibyl.api.raw_capture_events import publish_raw_capture_changed
 from sibyl.api.routes import entity_contracts as contracts, memory_auth
 from sibyl.api.routes.activity_rollup import Member, members_from_rows
@@ -51,8 +62,10 @@ from sibyl_core.services.net import (
     NetCursor,
     NetFeedPage,
     NetMessageRecord,
+    NetThreadProjectPinnedError,
     list_net_channels,
     list_net_threads,
+    net_thread_project,
     new_message_id,
     normalize_channel,
     normalize_thread,
@@ -241,12 +254,44 @@ async def _remember_decision(
     return memory.id
 
 
+async def authorize_project_naming(ctx: AuthContext, project_id: str) -> None:
+    """Refuse a post naming a project the caller cannot contribute to.
+
+    Contributor on the project, and inside the API key's project grants when
+    the caller used a restricted key: naming a project decides where the
+    thread is distilled, so it takes the same authority as writing there.
+    """
+    await verify_entity_project_access(
+        None,
+        ctx,
+        project_id,
+        required_role=ProjectRole.CONTRIBUTOR,
+        require_existing_project=True,
+    )
+    if ctx.api_key_project_ids is not None and project_id not in ctx.api_key_project_ids:
+        raise HTTPException(status_code=403, detail="api_key_project_denied")
+
+
+def _pinned_conflict(channel: str, thread: str, pinned: str | None) -> HTTPException:
+    where = f"{channel} thread {thread}" if thread else f"{channel} (no thread)"
+    message = (
+        f"{where} is pinned to project {pinned}; post without a project or name that one."
+        if pinned
+        else f"{where} is pinned to another project; post without a project."
+    )
+    return HTTPException(
+        status_code=409,
+        detail={"error": "thread_project_pinned", "message": message, "project_id": pinned},
+    )
+
+
 @router.post(
     "/messages",
     status_code=201,
     response_model=NetMessageCreateResponse,
     dependencies=[Depends(require_org_role(*contracts.WRITE_ROLES))],
 )
+@serialize_idempotent_request
 async def post_message(
     request: NetMessageCreateRequest,
     http_request: Request = memory_auth.REQUEST_AUTO_INJECT_SENTINEL,
@@ -256,14 +301,30 @@ async def post_message(
     """Post a message to a channel; a decision is remembered before it is posted."""
     principal_id = _caller_id(ctx)
     decision = request.kind == "decision"
-    if request.project_id and not decision:
-        await verify_entity_project_access(
-            None,
-            ctx,
-            request.project_id,
-            required_role=ProjectRole.VIEWER,
-            require_existing_project=True,
+    thread = request.thread or ""
+    if request.project_id:
+        await authorize_project_naming(ctx, request.project_id)
+    idempotency_payload = {"body": request.model_dump(mode="json")}
+    replayed = await replay_idempotent_response(
+        http_request,
+        organization_id=org.id,
+        principal_id=principal_id,
+        method="POST",
+        path="/net/messages",
+        payload=idempotency_payload,
+        response_model=NetMessageCreateResponse,
+        content_session=None,
+    )
+    if replayed is not None:
+        return replayed
+    if request.project_id:
+        # Checked before a decision is remembered, so a refused post leaves
+        # no memory behind; the write itself checks again atomically.
+        pinned = await net_thread_project(
+            organization_id=str(org.id), channel=request.channel, thread=thread
         )
+        if pinned is not None and pinned != request.project_id:
+            raise _pinned_conflict(request.channel, thread, pinned)
     message_id = new_message_id()
     members = await member_directory(org.slug, principal_id)
     decision_memory_id = (
@@ -278,20 +339,32 @@ async def post_message(
         if decision
         else None
     )
-    record = await post_net_message(
-        organization_id=str(org.id),
-        message_id=message_id,
-        channel=request.channel,
-        thread=request.thread or "",
-        kind=request.kind,
-        body=request.body,
-        author_user_id=principal_id,
-        project_id=request.project_id,
-        api_key_id=ctx.api_key_id,
-        author_agent=request.agent,
-        author_session=request.session,
-        decision_memory_id=decision_memory_id,
-    )
+    try:
+        record = await post_net_message(
+            organization_id=str(org.id),
+            message_id=message_id,
+            channel=request.channel,
+            thread=thread,
+            kind=request.kind,
+            body=request.body,
+            author_user_id=principal_id,
+            project_id=request.project_id,
+            api_key_id=ctx.api_key_id,
+            author_agent=request.agent,
+            author_session=request.session,
+            decision_memory_id=decision_memory_id,
+        )
+    except NetThreadProjectPinnedError as exc:
+        pinned = await net_thread_project(
+            organization_id=str(org.id), channel=request.channel, thread=thread
+        )
+        log.warning(
+            "net_message_pin_race",
+            organization_id=str(org.id),
+            channel=request.channel,
+            decision_memory_id=decision_memory_id,
+        )
+        raise _pinned_conflict(request.channel, thread, pinned) from exc
     log.info(
         "net_message_posted",
         organization_id=str(org.id),
@@ -301,9 +374,21 @@ async def post_message(
         message_id=record.id,
         decision_memory_id=decision_memory_id,
     )
-    return NetMessageCreateResponse(
+    response = NetMessageCreateResponse(
         message=net_message(record, members), decision_memory_id=decision_memory_id
     )
+    await save_idempotent_response(
+        http_request,
+        organization_id=org.id,
+        principal_id=principal_id,
+        method="POST",
+        path="/net/messages",
+        payload=idempotency_payload,
+        response=response,
+        status_code=201,
+        content_session=None,
+    )
+    return response
 
 
 def _feed_channels(values: Iterable[str] | None) -> list[str]:
@@ -448,6 +533,7 @@ async def list_threads(
                 reflected_through=state.reflected_through,
                 reflection_source_id=state.reflection_source_id,
                 reflection_error=state.reflection_error,
+                reflection_skipped=list(state.reflection_skipped),
             )
             for state in states
         ]
@@ -456,6 +542,7 @@ async def list_threads(
 
 __all__ = [
     "NET_CAPTURE_SURFACE",
+    "authorize_project_naming",
     "decision_content",
     "decision_title",
     "member_directory",

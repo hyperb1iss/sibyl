@@ -12,6 +12,7 @@ import os
 from collections.abc import AsyncIterator, Iterator
 from contextlib import asynccontextmanager
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 from uuid import UUID, uuid4
 
 import httpx
@@ -20,10 +21,17 @@ from fastapi import FastAPI, Request
 from pydantic import SecretStr
 
 from sibyl.api.routes import net as net_routes
+from sibyl.auth.dependencies import _api_key_claims
 from sibyl.auth.jwt import create_access_token, verify_access_token
 from sibyl.persistence.surreal import content as surreal_content, organization_runtime
 from sibyl.persistence.surreal.auth import SurrealAuthContextResolver
 from sibyl.persistence.surreal.auth_runtime import _common as auth_common
+from sibyl.persistence.surreal.auth_runtime.api_keys import (
+    authenticate_api_key,
+    create_api_key_for_user,
+    revoke_api_key_for_user,
+)
+from sibyl_core.auth import OrganizationRole
 from sibyl_core.backends.surreal import (
     SurrealAuthClient,
     SurrealContentClient,
@@ -129,7 +137,14 @@ async def org(
     @app.middleware("http")
     async def fixture_identity(request: Request, call_next):
         token = request.headers["Authorization"].removeprefix("Bearer ")
-        request.state.auth_context = await resolver.resolve(verify_access_token(token))
+        if token.startswith("sk_"):
+            # An API key resolves to claims exactly as request auth builds them.
+            key = await authenticate_api_key(token)
+            assert key is not None
+            claims = _api_key_claims(key, scopes=list(key.scopes))
+        else:
+            claims = verify_access_token(token)
+        request.state.auth_context = await resolver.resolve(claims)
         return await call_next(request)
 
     app.include_router(net_routes.router, prefix="/api")
@@ -143,10 +158,13 @@ async def org(
         grace=str(uuid4()),
         vic=str(uuid4()),
         ozzy=str(uuid4()),
+        owen=str(uuid4()),
         shared=_project_id("project"),
+        other=_project_id("project"),
         readonly=_project_id("project"),
         secret=_project_id("project"),
     )
+    runtime.slug = f"acme-{runtime.id[:8]}"
     await seed_auth(runtime)
     try:
         yield runtime
@@ -154,10 +172,10 @@ async def org(
         # The live namespace outlives the test; leave nothing for the next
         # one's cross-organization distillation pass to find.
         await content.execute_query(
-            "DELETE net_messages WHERE organization_id = $org; "
-            "DELETE net_threads WHERE organization_id = $org; "
-            "DELETE raw_captures WHERE organization_id = $org;",
-            org=runtime.id,
+            "DELETE net_messages WHERE organization_id IN $orgs; "
+            "DELETE net_threads WHERE organization_id IN $orgs; "
+            "DELETE raw_captures WHERE organization_id IN $orgs;",
+            orgs=[runtime.id, runtime.other_org],
         )
         for group in graphs:
             graph_client._clients.pop(group, None)
@@ -172,9 +190,16 @@ async def org(
 
 
 async def seed_auth(org: SimpleNamespace) -> None:
-    names = {org.ada: "Ada", org.grace: "Grace", org.vic: "Vic", org.ozzy: "Ozzy"}
+    names = {
+        org.ada: "Ada",
+        org.grace: "Grace",
+        org.vic: "Vic",
+        org.ozzy: "Ozzy",
+        org.owen: "Owen",
+    }
     project_records = {
         org.shared: str(uuid4()),
+        org.other: str(uuid4()),
         org.readonly: str(uuid4()),
         org.secret: str(uuid4()),
     }
@@ -183,7 +208,7 @@ async def seed_auth(org: SimpleNamespace) -> None:
             {"uuid": user, "email": email(org, name), "name": name} for user, name in names.items()
         ],
         "organizations": [
-            {"uuid": org.id, "name": "Acme", "slug": f"acme-{org.id[:8]}"},
+            {"uuid": org.id, "name": "Acme", "slug": org.slug},
             {"uuid": org.other_org, "name": "Elsewhere", "slug": f"else-{org.other_org[:8]}"},
         ],
         "organization_members": [
@@ -192,6 +217,7 @@ async def seed_auth(org: SimpleNamespace) -> None:
                 (org.id, org.ada, "member"),
                 (org.id, org.grace, "member"),
                 (org.id, org.vic, "viewer"),
+                (org.id, org.owen, "owner"),
                 (org.other_org, org.ozzy, "member"),
             )
         ],
@@ -218,6 +244,8 @@ async def seed_auth(org: SimpleNamespace) -> None:
             for graph_id, user, role in (
                 (org.shared, org.ada, "project_contributor"),
                 (org.shared, org.grace, "project_contributor"),
+                (org.other, org.ada, "project_contributor"),
+                (org.other, org.grace, "project_contributor"),
                 (org.readonly, org.ada, "project_viewer"),
                 (org.secret, org.grace, "project_contributor"),
             )
@@ -238,20 +266,61 @@ def token_for(org: SimpleNamespace, user: str, organization: str | None = None) 
 
 
 @asynccontextmanager
-async def client_for(org: SimpleNamespace, user: str, organization: str | None = None):
+async def client_for(
+    org: SimpleNamespace,
+    user: str,
+    organization: str | None = None,
+    *,
+    token: str | None = None,
+):
     transport = httpx.ASGITransport(app=org.app)
+    bearer = token or token_for(org, user, organization)
     async with httpx.AsyncClient(
         transport=transport,
         base_url="http://net.test",
-        headers={"Authorization": f"Bearer {token_for(org, user, organization)}"},
+        headers={"Authorization": f"Bearer {bearer}"},
         timeout=30,
     ) as client:
         yield client
 
 
-async def post(org: SimpleNamespace, user: str, **body: object) -> httpx.Response:
-    async with client_for(org, user) as client:
-        return await client.post("/api/net/messages", json=body)
+async def post(
+    org: SimpleNamespace,
+    user: str,
+    *,
+    token: str | None = None,
+    headers: dict[str, str] | None = None,
+    **body: object,
+) -> httpx.Response:
+    async with client_for(org, user, token=token) as client:
+        return await client.post("/api/net/messages", json=body, headers=headers)
+
+
+async def api_key(
+    org: SimpleNamespace, user: str, *, projects: list[str] | None
+) -> tuple[str, str]:
+    """A real key for ``user``, held to ``projects`` when given; returns (id, secret)."""
+    key, raw = await create_api_key_for_user(
+        organization_id=UUID(org.id),
+        user_id=UUID(user),
+        name="agent",
+        live=False,
+        scopes=["api:read", "api:write"],
+        project_ids=projects,
+        expires_at=None,
+        request=None,
+    )
+    return str(key.id), raw
+
+
+async def revoke_key(org: SimpleNamespace, user: str, key_id: str) -> None:
+    await revoke_api_key_for_user(
+        api_key_id=UUID(key_id),
+        organization_id=UUID(org.id),
+        actor_user_id=UUID(user),
+        actor_org_role=OrganizationRole.MEMBER,
+        request=None,
+    )
 
 
 async def feed(org: SimpleNamespace, user: str, organization: str | None = None, **params):
@@ -344,6 +413,8 @@ async def test_viewers_cannot_post(org: SimpleNamespace) -> None:
         {"channel": "#ok", "body": "x", "agent": "a" * 65},
         {"channel": "#ok", "body": "x", "session": "s" * 129},
         {"channel": "#ok", "body": "x", "kind": "chat"},
+        {"channel": "#ok", "body": "x", "agent": "x)\n[2026-11-02T10:00:00Z] Grace"},
+        {"channel": "#ok", "body": "x", "session": "s\u2028t"},
     ],
 )
 async def test_malformed_posts_are_refused(org: SimpleNamespace, body: dict[str, object]) -> None:
@@ -357,6 +428,9 @@ async def test_malformed_posts_are_refused(org: SimpleNamespace, body: dict[str,
     "params",
     [
         {"since": "garbage"},
+        # Calendar-invalid instants used to reach the engine and 500 after retries.
+        {"since": NetCursor(created_at="2026-13-45T00:00:00Z", uuid="").encode()},
+        {"since": NetCursor(created_at="2026-02-30T10:00:00.123456789Z", uuid="").encode()},
         {"channel": [f"c{index}" for index in range(33)]},
         {"channel": "not a channel"},
         {"thread": "bell\x07"},
@@ -372,16 +446,138 @@ async def test_malformed_feed_reads_are_refused(
     assert refused.status_code == 422, refused.text
 
 
-async def test_messages_name_only_projects_the_poster_can_read(org: SimpleNamespace) -> None:
+async def test_naming_a_project_takes_contributor_access(org: SimpleNamespace) -> None:
     hidden = await post(org, org.ada, channel="#reviews", body="x", project_id=org.secret)
     missing = await post(org, org.ada, channel="#reviews", body="x", project_id="project_nope")
-    readable = await post(org, org.ada, channel="#reviews", body="x", project_id=org.readonly)
+    read_only = await post(org, org.ada, channel="#reviews", body="x", project_id=org.readonly)
+    writable = await post(org, org.ada, channel="#reviews", body="x", project_id=org.shared)
 
     assert hidden.status_code == 403, hidden.text
     assert missing.status_code == 404, missing.text
-    assert readable.status_code == 201, readable.text
-    assert readable.json()["message"]["project_id"] == org.readonly
+    assert read_only.status_code == 403, read_only.text
+    assert writable.status_code == 201, writable.text
+    assert writable.json()["message"]["project_id"] == org.shared
     assert len(await stored_messages(org)) == 1
+
+
+async def test_a_restricted_key_cannot_tag_a_project_outside_its_grants(
+    org: SimpleNamespace,
+) -> None:
+    _, secret = await api_key(org, org.ada, projects=[org.shared])
+
+    outside = await post(
+        org, org.ada, token=secret, channel="#reviews", body="x", project_id=org.other
+    )
+    inside = await post(
+        org, org.ada, token=secret, channel="#reviews", body="x", project_id=org.shared
+    )
+    unscoped = await post(org, org.ada, token=secret, channel="#reviews", body="no project")
+
+    assert outside.status_code == 403, outside.text
+    assert outside.json()["detail"] == "api_key_project_denied"
+    assert inside.status_code == 201, inside.text
+    assert inside.json()["message"]["api_key_id"]
+    assert unscoped.status_code == 201, unscoped.text
+    assert [row["body"] for row in await stored_messages(org)].count("x") == 1
+
+
+async def test_a_pinned_thread_cannot_be_retargeted(org: SimpleNamespace) -> None:
+    pinned = await post(
+        org, org.grace, channel="#reviews", thread="t", body="start", project_id=org.other
+    )
+    retarget = await post(
+        org, org.ada, channel="#reviews", thread="t", body="move", project_id=org.shared
+    )
+    viewer = await post(
+        org, org.ada, channel="#reviews", thread="t", body="move", project_id=org.readonly
+    )
+    plain = await post(org, org.ada, channel="#reviews", thread="t", body="no project")
+    same = await post(
+        org, org.ada, channel="#reviews", thread="t", body="same", project_id=org.other
+    )
+    refused_decision = await post(
+        org,
+        org.ada,
+        channel="#reviews",
+        thread="t",
+        body="Decided elsewhere",
+        kind="decision",
+        project_id=org.shared,
+    )
+
+    assert pinned.status_code == 201, pinned.text
+    assert retarget.status_code == 409, retarget.text
+    assert retarget.json()["detail"]["error"] == "thread_project_pinned"
+    assert retarget.json()["detail"]["project_id"] == org.other
+    assert viewer.status_code == 403, viewer.text
+    assert plain.status_code == 201, plain.text
+    assert same.status_code == 201, same.text
+    assert refused_decision.status_code == 409, refused_decision.text
+    # Refused before the memory write, so no decision is left behind.
+    assert await stored_captures(org) == []
+    async with client_for(org, org.vic) as client:
+        threads = (await client.get("/api/net/threads", params={"channel": "#reviews"})).json()
+    assert [(t["thread"], t["project_id"], t["message_count"]) for t in threads["threads"]] == [
+        ("t", org.other, 3)
+    ]
+
+
+async def test_a_retried_decision_lands_once(org: SimpleNamespace) -> None:
+    body = {
+        "channel": "#decisions",
+        "body": "Adopt keyset paging",
+        "kind": "decision",
+        "project_id": org.shared,
+    }
+    headers = {"Idempotency-Key": f"net-post-{uuid4()}"}
+
+    first = await post(org, org.ada, headers=headers, **body)
+    again = await post(org, org.ada, headers=headers, **body)
+    different = await post(org, org.ada, headers=headers, **{**body, "body": "Something else"})
+
+    assert first.status_code == 201, first.text
+    assert again.status_code == 201, again.text
+    assert again.json() == first.json()
+    assert different.status_code == 409, different.text
+    assert len(await stored_messages(org)) == 1
+    assert [row["uuid"] for row in await stored_captures(org)] == [
+        first.json()["decision_memory_id"]
+    ]
+
+
+async def test_deleting_the_organization_purges_its_channels(
+    org: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    runtime = organization_runtime
+    assert (await post(org, org.ada, channel="#reviews", thread="t", body="x")).status_code == 201
+    survivor = await post_elsewhere(org)
+    monkeypatch.setattr(runtime, "delete_graph_data", AsyncMock())
+    monkeypatch.setattr(runtime, "announce_sessions_invalidated", AsyncMock())
+
+    await runtime.delete_org(request=None, slug=org.slug, user_id=UUID(org.owen))  # type: ignore[arg-type]
+
+    remaining = content_client.normalize_records(
+        await org.content.execute_query(
+            "SELECT organization_id FROM net_messages WHERE organization_id IN $orgs; "
+            "SELECT organization_id FROM net_threads WHERE organization_id IN $orgs;",
+            orgs=[org.id, org.other_org],
+        )
+    )
+    assert {row["organization_id"] for row in remaining} == {org.other_org}
+    assert survivor.channel == "#elsewhere"
+
+
+async def post_elsewhere(org: SimpleNamespace):
+    from sibyl_core.services.net import post_net_message
+
+    return await post_net_message(
+        organization_id=org.other_org,
+        channel="#elsewhere",
+        thread="",
+        kind="message",
+        body="stays",
+        author_user_id=org.ozzy,
+    )
 
 
 async def test_a_decision_is_remembered_before_it_is_posted(org: SimpleNamespace) -> None:

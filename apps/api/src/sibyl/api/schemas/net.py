@@ -10,6 +10,7 @@ from sibyl_core.services.net import (
     MAX_SESSION_CHARS,
     normalize_body,
     normalize_channel,
+    normalize_label,
     normalize_thread,
 )
 
@@ -29,7 +30,10 @@ class NetMessageCreateRequest(BaseModel):
     project_id: str | None = Field(
         default=None,
         min_length=1,
-        description="Graph project the message belongs to; the poster must be able to read it",
+        description=(
+            "Graph project the thread belongs to. The poster must be a contributor, and the "
+            "first post that names one pins the thread to it"
+        ),
     )
     agent: str | None = Field(
         default=None,
@@ -57,9 +61,19 @@ class NetMessageCreateRequest(BaseModel):
     def _thread(cls, value: str | None) -> str | None:
         return normalize_thread(value) or None
 
-    @field_validator("agent", "session", "project_id")
+    @field_validator("agent")
     @classmethod
-    def _label(cls, value: str | None) -> str | None:
+    def _agent(cls, value: str | None) -> str | None:
+        return normalize_label(value, field="agent", max_chars=MAX_AGENT_CHARS)
+
+    @field_validator("session")
+    @classmethod
+    def _session(cls, value: str | None) -> str | None:
+        return normalize_label(value, field="session", max_chars=MAX_SESSION_CHARS)
+
+    @field_validator("project_id")
+    @classmethod
+    def _project(cls, value: str | None) -> str | None:
         return (value.strip() or None) if value is not None else None
 
 
@@ -74,17 +88,21 @@ class NetAuthor(BaseModel):
 
 
 class NetMessage(BaseModel):
-    """A stored message as readers see it."""
+    """A stored message as readers see it.
+
+    Absent values default to null, so a response saved for idempotent replay
+    (the content store drops null fields) reads back as it was sent.
+    """
 
     id: str
     channel: str
-    thread: str | None
+    thread: str | None = None
     kind: NetMessageKindLabel
     body: str
-    project_id: str | None
+    project_id: str | None = None
     author: NetAuthor
-    api_key_id: str | None
-    decision_memory_id: str | None
+    api_key_id: str | None = None
+    decision_memory_id: str | None = None
     created_at: datetime
     cursor: str = Field(description="Feed cursor positioned at this message")
 
@@ -123,6 +141,10 @@ class NetThread(BaseModel):
     reflected_through: datetime | None
     reflection_source_id: str | None
     reflection_error: str | None
+    reflection_skipped: list[str] = Field(
+        default_factory=list,
+        description="Authors the last distillation could not reflect, as `<user id>: <reason>`",
+    )
 
 
 class NetThreadsResponse(BaseModel):

@@ -32,6 +32,7 @@ DEFINE FIELD IF NOT EXISTS reflected_through ON net_threads TYPE option<datetime
 DEFINE FIELD IF NOT EXISTS reflection_source_id ON net_threads TYPE option<string>;
 DEFINE FIELD IF NOT EXISTS reflection_attempts ON net_threads TYPE int DEFAULT 0;
 DEFINE FIELD IF NOT EXISTS reflection_error ON net_threads TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS reflection_skipped ON net_threads TYPE array<string> DEFAULT [];
 DEFINE FIELD IF NOT EXISTS reflection_claimed_at ON net_threads TYPE option<datetime>;
 DEFINE FIELD IF NOT EXISTS updated_at ON net_threads TYPE datetime DEFAULT time::now();
 DEFINE INDEX IF NOT EXISTS net_thread_key ON net_threads FIELDS organization_id, channel, thread UNIQUE;

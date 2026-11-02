@@ -128,6 +128,7 @@ async def test_post_net_message_sends_the_contract_body_unbuffered() -> None:
         agent="codex",
         session="thread-9",
     )
+    first_key = request.await_args.kwargs["_idempotency_key"]
     request.assert_awaited_once_with(
         "POST",
         "/net/messages",
@@ -141,16 +142,21 @@ async def test_post_net_message_sends_the_contract_body_unbuffered() -> None:
             "session": "thread-9",
         },
         _buffer_pending=False,
+        _idempotency_key=first_key,
     )
     request.reset_mock()
 
     await client.post_net_message(channel="@ada", body="ping")
+    second_key = request.await_args.kwargs["_idempotency_key"]
     request.assert_awaited_once_with(
         "POST",
         "/net/messages",
         json={"channel": "@ada", "body": "ping", "kind": "message"},
         _buffer_pending=False,
+        _idempotency_key=second_key,
     )
+    # Every post is its own operation: one key per call, never reused.
+    assert first_key and second_key and first_key != second_key
 
 
 @pytest.mark.asyncio

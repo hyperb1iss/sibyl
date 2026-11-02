@@ -29,8 +29,12 @@ Thread state. Every post upserts one ``net_threads`` row per
 ``(organization, channel, thread)``, addressed by a record id derived from
 that key, so concurrent first posts to a new thread conflict on one record and
 the client replays the loser instead of tripping the unique index. Threadless
-messages share the thread ``''`` so the key stays total. The distillation job
-claims idle rows with a conditional update before it reflects them.
+messages share the thread ``''`` so the key stays total. The first post that
+names a project pins the thread to it, and a later post naming a different one
+is refused in the same statement, so a thread's project can never be moved by
+whoever writes last. A new post also resets the distillation retry budget: new
+material deserves a fresh one. The distillation job claims idle rows with a
+conditional update before it reflects them.
 """
 
 from __future__ import annotations
@@ -76,9 +80,13 @@ CLAIM_LEASE_MINUTES = 15
 
 _CHANNEL_PATTERN = re.compile(r"[@#]?[a-z0-9][a-z0-9._-]{0,63}")
 _CURSOR_TIME_PATTERN = re.compile(
-    r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,9})?(Z|[+-]\d{2}:\d{2})"
+    r"(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})(?:\.(\d{1,9}))?(Z|[+-]\d{2}:\d{2})"
 )
+# Characters that end a line or steer a terminal. A label carrying one could
+# start a forged attribution line in a transcript.
+_LINE_BREAKING_CATEGORIES = frozenset({"Cc", "Zl", "Zp"})
 _CURSOR_SEPARATOR = "|"
+TRANSCRIPT_CONTINUATION = "    "
 
 _SETTLED = f"created_at <= time::now() - {SETTLE_SECONDS}s"
 _MESSAGE_FIELDS = (
@@ -89,7 +97,7 @@ _MESSAGE_FIELDS = (
 _THREAD_FIELDS = (
     "organization_id, channel, thread, project_id, message_count, first_message_at, "
     "last_message_at, reflected_through, reflection_source_id, reflection_attempts, "
-    "reflection_error"
+    "reflection_error, reflection_skipped"
 )
 # One record per (organization, channel, thread). Concurrent upserts of the
 # same thread then contend for a single key, which the server reports as a
@@ -100,22 +108,37 @@ _THREAD_RECORD = (
     "crypto::sha256(type::string([$organization_id, $channel, $thread]))))"
 )
 
+PROJECT_PINNED_MARKER = "net_thread_project_pinned"
+# The pin is checked before anything is written, inside the same statement as
+# the write, so two first posts naming different projects conflict on the
+# thread record and the replayed loser sees the winner's pin.
 _POST_MESSAGE = f"""
 RETURN {{
+    LET $key = {_THREAD_RECORD};
+    LET $pinned = (SELECT VALUE project_id FROM $key)[0];
+    IF $project_id != NONE AND $pinned != NONE AND $pinned != $project_id {{
+        THROW '{PROJECT_PINNED_MARKER}';
+    }};
     CREATE net_messages CONTENT $record RETURN NONE;
     LET $created = (SELECT VALUE created_at FROM net_messages WHERE uuid = $uuid)[0];
-    UPSERT {_THREAD_RECORD} SET
+    UPSERT $key SET
         organization_id = $organization_id,
         channel = $channel,
         thread = $thread,
-        project_id = $project_id ?? project_id,
+        project_id = project_id ?? $project_id,
         message_count = (message_count ?? 0) + 1,
         first_message_at = first_message_at ?? $created,
         last_message_at = time::max([last_message_at ?? $created, $created]),
-        reflection_attempts = reflection_attempts ?? 0,
+        reflection_attempts = 0,
         updated_at = time::now()
     RETURN NONE;
     RETURN (SELECT {_MESSAGE_FIELDS} FROM net_messages WHERE uuid = $uuid);
+}};
+"""
+_THREAD_PROJECT = f"""
+RETURN {{
+    LET $key = {_THREAD_RECORD};
+    RETURN {{ project_id: (SELECT VALUE project_id FROM $key)[0] }};
 }};
 """
 
@@ -168,6 +191,7 @@ RETURN {{
         reflection_source_id = $source_id ?? reflection_source_id,
         reflection_attempts = 0,
         reflection_error = NONE,
+        reflection_skipped = $skipped,
         reflection_claimed_at = NONE,
         updated_at = time::now()
     RETURN NONE;
@@ -175,8 +199,8 @@ RETURN {{
 """
 _SETTLE_THROUGH_LAST = (
     f"UPDATE {_THREAD_RECORD} SET reflected_through = last_message_at, "
-    "reflection_attempts = 0, reflection_error = NONE, reflection_claimed_at = NONE, "
-    "updated_at = time::now() RETURN NONE;"
+    "reflection_attempts = 0, reflection_error = NONE, reflection_skipped = [], "
+    "reflection_claimed_at = NONE, updated_at = time::now() RETURN NONE;"
 )
 _FAIL_THREAD = (
     f"UPDATE {_THREAD_RECORD} SET reflection_error = $reason, "
@@ -209,10 +233,32 @@ def normalize_thread(value: str | None) -> str:
     if len(thread) > MAX_THREAD_CHARS:
         msg = f"thread must be at most {MAX_THREAD_CHARS} characters"
         raise ValueError(msg)
-    if any(unicodedata.category(char) == "Cc" for char in thread):
-        msg = "thread must not contain control characters"
+    if _breaks_lines(thread):
+        msg = "thread must not contain control characters or line breaks"
         raise ValueError(msg)
     return thread
+
+
+def normalize_label(value: str | None, *, field: str, max_chars: int) -> str | None:
+    """Strip a client-asserted label (agent, session); None when empty.
+
+    Labels are printed inside transcript attribution lines, so a control
+    character or line break is refused rather than escaped.
+    """
+    if value is None:
+        return None
+    label = value.strip()
+    if len(label) > max_chars:
+        msg = f"{field} must be at most {max_chars} characters"
+        raise ValueError(msg)
+    if _breaks_lines(label):
+        msg = f"{field} must not contain control characters or line breaks"
+        raise ValueError(msg)
+    return label or None
+
+
+def _breaks_lines(text: str) -> bool:
+    return any(unicodedata.category(char) in _LINE_BREAKING_CATEGORIES for char in text)
 
 
 def normalize_body(value: str) -> str:
@@ -252,7 +298,7 @@ class NetCursor:
             msg = "since is not a cursor this server issued"
             raise ValueError(msg) from exc
         created_at, separator, message_id = raw.rpartition(_CURSOR_SEPARATOR)
-        if not separator or not _CURSOR_TIME_PATTERN.fullmatch(created_at):
+        if not separator or not _calendar_instant(created_at):
             msg = "since is not a cursor this server issued"
             raise ValueError(msg)
         if message_id:
@@ -262,6 +308,25 @@ class NetCursor:
                 msg = "since is not a cursor this server issued"
                 raise ValueError(msg) from exc
         return cls(created_at=created_at, uuid=message_id)
+
+
+def _calendar_instant(text: str) -> bool:
+    """Whether ``text`` is an ISO instant on the calendar, nanoseconds allowed.
+
+    Python holds only microseconds, so the check parses a truncated copy; the
+    cursor keeps the original text for the query.
+    """
+    match = _CURSOR_TIME_PATTERN.fullmatch(text)
+    if match is None:
+        return False
+    seconds, fraction, zone = match.groups()
+    micros = ((fraction or "") + "000000")[:6]
+    offset = "+00:00" if zone == "Z" else zone
+    try:
+        datetime.fromisoformat(f"{seconds}.{micros}{offset}")
+    except ValueError:
+        return False
+    return True
 
 
 @dataclass(frozen=True, slots=True)
@@ -316,6 +381,29 @@ class NetThreadState:
     reflection_source_id: str | None
     reflection_attempts: int
     reflection_error: str | None
+    reflection_skipped: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class NetAuthorWindow:
+    """One author's messages in a distillation window, under one credential.
+
+    Each is reflected on its own, as that author and with the authority of
+    the credential the messages were posted with, so nobody's lines enter
+    another person's reflection.
+    """
+
+    author_user_id: str
+    api_key_id: str | None
+    messages: tuple[NetMessageRecord, ...]
+
+
+class NetThreadProjectPinnedError(Exception):
+    """A post named a project other than the one its thread is pinned to."""
+
+    def __init__(self, pinned_project_id: str | None) -> None:
+        self.pinned_project_id = pinned_project_id
+        super().__init__(PROJECT_PINNED_MARKER)
 
 
 def new_message_id() -> str:
@@ -342,7 +430,8 @@ async def post_net_message(
 
     The message and the thread upsert share a single ``RETURN`` block, so a
     conflicting post to the same thread replays both together and the count
-    never drifts from the rows.
+    never drifts from the rows. Raises ``NetThreadProjectPinnedError``, with
+    nothing written, when ``project_id`` differs from the thread's pin.
     """
     uuid = message_id or new_message_id()
     record = {
@@ -364,20 +453,40 @@ async def post_net_message(
         if value is not None
     }
     async with content_client.surreal_content_client() as client:
-        rows = await content_client.select_many(
-            client,
-            _POST_MESSAGE,
-            record=record,
-            uuid=uuid,
-            organization_id=organization_id,
-            channel=channel,
-            thread=thread,
-            project_id=project_id,
-        )
+        try:
+            rows = await content_client.select_many(
+                client,
+                _POST_MESSAGE,
+                record=record,
+                uuid=uuid,
+                organization_id=organization_id,
+                channel=channel,
+                thread=thread,
+                project_id=project_id,
+            )
+        except Exception as failure:
+            # The live engine raises its own error type and the client its
+            # parsed one, so the thrown marker is the reliable signal.
+            if PROJECT_PINNED_MARKER not in str(failure):
+                raise
+            raise NetThreadProjectPinnedError(None) from failure
     if not rows:
         msg = f"net message {uuid} was not stored"
         raise RuntimeError(msg)
     return _message_from_row(rows[0])
+
+
+async def net_thread_project(*, organization_id: str, channel: str, thread: str) -> str | None:
+    """The project a thread is pinned to, or None when no post has named one."""
+    async with content_client.surreal_content_client() as client:
+        rows = await content_client.select_many(
+            client,
+            _THREAD_PROJECT,
+            organization_id=organization_id,
+            channel=channel,
+            thread=thread,
+        )
+    return _optional_str(rows[0].get("project_id")) if rows else None
 
 
 async def read_net_feed(
@@ -511,13 +620,15 @@ async def settle_net_thread(
     *,
     through_message_id: str | None,
     source_id: str | None = None,
+    skipped: Sequence[str] = (),
 ) -> None:
     """Record a finished distillation and release the claim.
 
     ``reflected_through`` moves to the named message's own stored timestamp,
     never backwards; with no message (an empty window) it moves to the
     thread's last message so the row stops qualifying. The retry budget
-    resets and any earlier error clears.
+    resets, any earlier error clears, and ``skipped`` records the authors
+    whose lines this pass could not reflect, and why.
     """
     async with content_client.surreal_content_client() as client:
         if through_message_id is None:
@@ -528,6 +639,7 @@ async def settle_net_thread(
             _SETTLE_THROUGH_MESSAGE,
             through_uuid=through_message_id,
             source_id=source_id,
+            skipped=list(skipped),
             **_thread_key(thread),
         )
 
@@ -548,28 +660,41 @@ def net_source_title(channel: str, thread: str) -> str:
     return f"sibylnet {channel} {thread}".rstrip()
 
 
+def author_windows(messages: Sequence[NetMessageRecord]) -> list[NetAuthorWindow]:
+    """Split a window by author and credential, in order of each one's first message."""
+    grouped: dict[tuple[str, str | None], list[NetMessageRecord]] = {}
+    for message in messages:
+        grouped.setdefault((message.author_user_id, message.api_key_id), []).append(message)
+    return [
+        NetAuthorWindow(author_user_id=author, api_key_id=api_key_id, messages=tuple(rows))
+        for (author, api_key_id), rows in grouped.items()
+    ]
+
+
 def render_net_transcript(
     thread: NetThreadState,
-    messages: Sequence[NetMessageRecord],
+    window: NetAuthorWindow,
     *,
-    names: Mapping[str, str] | None = None,
+    author_name: str | None = None,
 ) -> str:
-    """The transcript reflection reads: a header, then one line per message.
+    """One author's lines as reflection reads them: a header, then one entry per message.
 
-    Lines are ``[<iso>] <name or user id> (<agent>): <body>``; the agent label
-    is omitted when the poster sent none.
+    The header and every entry name the verified author; the agent label in
+    parentheses is what their client claimed. Each entry starts
+    ``[<iso>] <author> (<agent>): `` and every further line of its body is
+    indented, so no body can open a line that reads as someone else's entry.
     """
-    names = names or {}
+    author = author_name or window.author_user_id
     header = f"# sibylnet channel {thread.channel}"
     if thread.thread:
         header += f", thread {thread.thread}"
-    lines = [header, ""]
-    for message in messages:
-        author = names.get(message.author_user_id) or message.author_user_id
-        if message.author_agent:
-            author += f" ({message.author_agent})"
+    lines = [header, f"# messages by {author} ({window.author_user_id})", ""]
+    for message in window.messages:
+        label = author + (f" ({message.author_agent})" if message.author_agent else "")
         stamp = message.created_at.isoformat().replace("+00:00", "Z")
-        lines.append(f"[{stamp}] {author}: {message.body}")
+        first, *rest = message.body.splitlines() or [""]
+        lines.append(f"[{stamp}] {label}: {first}")
+        lines.extend(f"{TRANSCRIPT_CONTINUATION}{line}" for line in rest)
     return "\n".join(lines)
 
 
@@ -697,6 +822,7 @@ def _thread_from_row(row: Mapping[str, object]) -> NetThreadState:
         reflection_source_id=_optional_str(row.get("reflection_source_id")),
         reflection_attempts=_as_int(row.get("reflection_attempts")),
         reflection_error=_optional_str(row.get("reflection_error")),
+        reflection_skipped=_string_tuple(row.get("reflection_skipped")),
     )
 
 
@@ -720,6 +846,12 @@ def _as_int(value: object) -> int:
     return 0
 
 
+def _string_tuple(value: object) -> tuple[str, ...]:
+    if not isinstance(value, list | tuple):
+        return ()
+    return tuple(str(entry) for entry in value if entry)
+
+
 def _optional_str(value: object) -> str | None:
     if value is None or value == "":
         return None
@@ -739,23 +871,30 @@ __all__ = [
     "MAX_REFLECTION_ATTEMPTS",
     "MAX_SESSION_CHARS",
     "MAX_THREAD_CHARS",
+    "PROJECT_PINNED_MARKER",
     "SETTLE_SECONDS",
+    "TRANSCRIPT_CONTINUATION",
+    "NetAuthorWindow",
     "NetChannelSummary",
     "NetCursor",
     "NetFeedPage",
     "NetMessageKind",
     "NetMessageRecord",
+    "NetThreadProjectPinnedError",
     "NetThreadState",
+    "author_windows",
     "claim_net_thread",
     "fail_net_thread",
     "idle_net_threads",
     "list_net_channels",
     "list_net_threads",
     "net_source_title",
+    "net_thread_project",
     "net_thread_window",
     "new_message_id",
     "normalize_body",
     "normalize_channel",
+    "normalize_label",
     "normalize_thread",
     "post_net_message",
     "read_net_feed",
