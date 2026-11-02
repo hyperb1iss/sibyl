@@ -521,8 +521,8 @@ purge rules still apply. Older content archives remain supported but cannot supp
 files.
 
 Receipts are published privately and create-only before the content writes. If those writes fail,
-ciphertext may remain without an authorized execution row. Preserve the failed archive and
-the receipt directory or bucket, then retry the same import after resolving the reported conflict.
+ciphertext may remain without an authorized execution row. Preserve the failed archive and the
+receipt directory or bucket, then retry the same import after resolving the reported conflict.
 Import never replaces conflicting receipt bytes or restores an erased recovery key over current
 destination history.
 
