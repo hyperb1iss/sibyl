@@ -794,6 +794,11 @@ def _report_graph_plan(plan: migrate_graph.GraphPlan, *, resumed: int, share_pri
         )
     for reason, count in sorted(plan.skipped.items()):
         info(f"  left for the target to re-derive or already there: {count} {reason}")
+    for scope, count in sorted(plan.left_behind.items()):
+        warn(
+            f"  {count} {scope}-scoped row(s) stay here: the team server has no matching "
+            "audience and would refuse them; re-capture what the team needs there"
+        )
     for line in plan.dropped_edges[:10]:
         warn(f"  dropped link {line}")
 

@@ -258,6 +258,45 @@ def test_rows_out_of_recall_stay_behind_and_flagged_rows_stay_private() -> None:
     assert plan.kept_private == 1
 
 
+def test_rows_scoped_to_an_audience_the_target_lacks_stay_behind() -> None:
+    """The target authorizes a team or wider scope, and these name source-only audiences.
+
+    Sent as they were, a team row arrives with no team key and every wider
+    scope is refused, so each would fail mid-migration instead of in the plan.
+    """
+    plan = build_plan(
+        [
+            _entity("team_note", "decision", scope="team"),
+            _entity("team_secret", "decision", scope="team", contains_sensitive=True),
+            _entity("org_note", "decision", scope="organization"),
+            _entity("shared_note", "decision", scope="shared"),
+            _entity("public_note", "decision", scope="public"),
+            _entity("agent_note", "decision", scope="delegated"),
+            _entity("project_note", "decision", scope="project"),
+            _entity("unscoped_task", "task", scope=None),
+            _entity("own_note", "decision", scope="private"),
+        ],
+        [SourceEdge("RELATED_TO", "project_note", "team_note")],
+        project=PROJECT,
+    )
+
+    assert {node.source.uuid: node.scope for node in plan.entities} == {
+        "team_secret": "private",
+        "project_note": "project",
+        "unscoped_task": None,
+        "own_note": "private",
+    }
+    assert plan.left_behind == {
+        "delegated": 1,
+        "organization": 1,
+        "public": 1,
+        "shared": 1,
+        "team": 1,
+    }
+    assert _node(plan, "project_note").declares == []
+    assert plan.limited(1).left_behind == plan.left_behind
+
+
 def test_the_category_is_part_of_the_id_so_it_disambiguates_titles() -> None:
     plan = build_plan(
         [
@@ -2677,10 +2716,15 @@ async def test_lock_contention_on_a_status_stays_a_failure() -> None:
 
 
 async def test_a_row_narrowed_from_team_to_project_is_reported_wider() -> None:
+    """A team body an earlier CLI sent is still reported once the row narrows.
+
+    The plan no longer sends team rows, so that earlier body is planned by hand.
+    """
     ledger = _Ledger()
     target = _IdempotentTarget()
     target.lose_ack = True
-    team = build_plan([_entity("decision_1", "decision", scope="team")], [], project=PROJECT)
+    team = build_plan([_entity("decision_1", "decision")], [], project=PROJECT)
+    team.entities[0].scope = "team"
     await _execute(target, ledger, team)
     project = build_plan([_entity("decision_1", "decision", scope="project")], [], project=PROJECT)
 
