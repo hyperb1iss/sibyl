@@ -51,6 +51,10 @@ SKIPPED_TYPES = frozenset({"topic", "passage", "project"})
 RETIRED_STATES = frozenset({"contested", "retired", "quarantined", "superseded", "withdrawn"})
 # Edges the target re-derives or implies, never declared by this pass.
 IMPLIED_EDGES = frozenset({"PART_OF", "MENTIONS"})
+# Scopes a row can land in on the target. The server authorizes every other
+# declared scope against an audience (a team, a delegation) that exists only
+# on the source, or refuses it outright, so such rows are planned out.
+TARGET_SCOPES = frozenset({None, "private", "project"})
 # Predicates the API accepts on `related_to`, keyed by stored edge name.
 DECLARABLE = {
     "SUPERSEDES": "supersedes",
@@ -143,6 +147,8 @@ class GraphPlan:
     dropped_edges: list[str]
     edge_counts: dict[str, int]
     kept_private: int = 0
+    # Rows left on the source because the target cannot take their scope, by scope.
+    left_behind: dict[str, int] = field(default_factory=dict)
 
     @property
     def layers(self) -> list[list[PlannedEntity]]:
@@ -170,6 +176,7 @@ class GraphPlan:
             dropped_edges=self.dropped_edges,
             edge_counts=self.edge_counts,
             kept_private=self.kept_private,
+            left_behind=self.left_behind,
         )
 
 
@@ -290,21 +297,24 @@ def build_plan(
 ) -> GraphPlan:
     """Choose what to create, in what order, declaring which links."""
     skipped: dict[str, int] = defaultdict(int)
+    left_behind: dict[str, int] = defaultdict(int)
     selected: dict[str, SourceEntity] = {}
+    scopes: dict[str, str | None] = {}
     for entity in entities:
         reason = _skip_reason(entity, project)
         if reason:
             skipped[reason] += 1
-        else:
-            selected[entity.uuid] = entity
+            continue
+        scope = _target_scope(entity, share_private=share_private)
+        if scope is not None and (not isinstance(scope, str) or scope not in TARGET_SCOPES):
+            left_behind[str(scope)] += 1
+            continue
+        selected[entity.uuid] = entity
+        scopes[entity.uuid] = scope
 
     names = _unique_names(selected.values())
     planned = {
-        uuid: PlannedEntity(
-            source=entity,
-            name=names[uuid],
-            scope=_target_scope(entity, share_private=share_private),
-        )
+        uuid: PlannedEntity(source=entity, name=names[uuid], scope=scopes[uuid])
         for uuid, entity in selected.items()
     }
 
@@ -390,6 +400,7 @@ def build_plan(
         kept_private=sum(
             1 for node in planned.values() if node.source.sensitive and node.scope == "private"
         ),
+        left_behind=dict(left_behind),
     )
 
 

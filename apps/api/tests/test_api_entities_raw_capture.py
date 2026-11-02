@@ -10,6 +10,7 @@ from sibyl.api.routes.entity_policy import raw_capture_visible_to_reader
 from sibyl.api.schemas import EntityCreate, EntityResponse
 from sibyl.persistence.content_common import ApiIdempotencyRecord, RawCaptureRecord
 from sibyl_core.models.entities import EntityType
+from tests.harness.auth import stub_auth_context
 
 
 def _request(*, idempotency_key: str | None = None) -> MagicMock:
@@ -279,11 +280,23 @@ async def test_remember_capture_creates_raw_archive_record(monkeypatch: pytest.M
     assert archive.capture_surface == "cli"
 
 
+_TEAM = "0f8b6c52-4d2e-4a7a-9c1d-6e5b2a9f3d10"
+
+
 @pytest.mark.asyncio
-@pytest.mark.parametrize("memory_scope", ["private", "project", "team", ["not", "a", "scope"]])
+@pytest.mark.parametrize(
+    ("memory_scope", "scope_key"),
+    [
+        ("private", "project_forged"),
+        ("project", "project_forged"),
+        # A team the writer belongs to: the graph row is keyed to it, the sidecar is not.
+        ("team", _TEAM),
+    ],
+)
 async def test_remember_sidecar_is_filed_under_the_verified_project(
     monkeypatch: pytest.MonkeyPatch,
-    memory_scope: object,
+    memory_scope: str,
+    scope_key: str,
 ) -> None:
     """The sidecar lands in its project and stays private to its writer.
 
@@ -296,8 +309,7 @@ async def test_remember_sidecar_is_filed_under_the_verified_project(
     org = MagicMock()
     org.id = uuid4()
 
-    ctx = MagicMock()
-    ctx.user.id = uuid4()
+    ctx = stub_auth_context(user_id=uuid4())
 
     entity = EntityCreate(
         name="Scoped decision",
@@ -311,7 +323,7 @@ async def test_remember_sidecar_is_filed_under_the_verified_project(
             "project_id": "project_abc",
             "memory_scope": memory_scope,
             # Forged owner fields never reach the sidecar.
-            "scope_key": "project_forged",
+            "scope_key": scope_key,
             "principal_id": "someone-else",
         },
     )
@@ -329,6 +341,10 @@ async def test_remember_sidecar_is_filed_under_the_verified_project(
         patch("sibyl.api.routes.entity_mutations.broadcast_event", AsyncMock()),
         patch("sibyl.api.routes.entity_mutations.verify_entity_project_access", verify_project),
         patch("sibyl.api.routes.entity_captures.save_raw_capture_record", save_capture),
+        patch(
+            "sibyl.api.routes.memory_auth.list_accessible_team_scope_keys",
+            AsyncMock(return_value={_TEAM}),
+        ),
     ):
         await create_entity(
             request=_request(),

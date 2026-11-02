@@ -32,6 +32,7 @@ from sibyl.api.schemas import (
 from sibyl.auth.context import AuthContext
 from sibyl.auth.errors import ProjectAccessDeniedError
 from sibyl_core.auth import ProjectRole
+from sibyl_core.auth.memory_policy import memory_metadata_read_allowed
 from sibyl_core.memory_pipeline.retrieval_keys import (
     MAX_RETRIEVAL_KEY_LENGTH,
     MAX_RETRIEVAL_KEYS,
@@ -70,6 +71,7 @@ def test_bulk_entity_ids_are_idempotent_within_project_and_isolated_between_proj
             ),
             group_id=str(_org().id),
             now=now,
+            authorized_scope_key=project_id,
         )
 
     first = build("project_first")
@@ -311,6 +313,7 @@ def test_bulk_create_metadata_normalizes_declared_retrieval_keys() -> None:
         group_id="org-123",
         now=datetime(2026, 8, 3, tzinfo=UTC),
         principal_id="user-alice",
+        authorized_scope_key=None,
     )
 
     assert metadata["retrieval_keys"] == ["ERR_X"]
@@ -324,6 +327,7 @@ def test_bulk_create_metadata_omits_the_field_without_a_declaration() -> None:
         group_id="org-123",
         now=datetime(2026, 8, 3, tzinfo=UTC),
         principal_id="user-alice",
+        authorized_scope_key=None,
     )
 
     assert "retrieval_keys" not in metadata
@@ -1842,6 +1846,289 @@ async def test_create_entity_drops_project_scope_key_without_a_verified_project(
     assert "scope_key" not in graph_metadata
 
 
+_TEAM = "0f8b6c52-4d2e-4a7a-9c1d-6e5b2a9f3d10"
+_OTHER_TEAM = "7d1e0c44-2b9a-4f63-8e15-3a6c9b2d4f80"
+
+
+@contextmanager
+def _writer_teams(teams: set[str]) -> Any:
+    """Team membership as the write authorization resolves it, with audit muted."""
+    with (
+        patch(
+            "sibyl.api.routes.memory_auth.list_accessible_team_scope_keys",
+            AsyncMock(return_value=teams),
+        ),
+        patch("sibyl.api.routes.memory_auth.log_memory_audit_event", AsyncMock()) as audit,
+    ):
+        yield audit
+
+
+async def _create_with_scope(
+    entity: EntityCreate,
+    *,
+    ctx: AuthContext,
+    teams: set[str],
+    add_mock: AsyncMock,
+    archive: AsyncMock,
+) -> None:
+    with (
+        _writer_teams(teams),
+        patch("sibyl.api.routes.entity_mutations.verify_entity_project_access", AsyncMock()),
+        patch("sibyl_core.tools.core.add", add_mock),
+        patch("sibyl.api.routes.entity_policy.get_entity_graph_runtime", AsyncMock()),
+        patch("sibyl.api.routes.entity_mutations.broadcast_event", AsyncMock()),
+        patch("sibyl.api.routes.entity_mutations.log_audit_event", AsyncMock()),
+        patch("sibyl.api.routes.entity_captures.archive_raw_capture", archive),
+    ):
+        await create_entity(
+            request=_request(),
+            entity=entity,
+            org=_org(),
+            ctx=ctx,
+            content_session=None,
+            sync=False,
+        )
+
+
+def _team_remember(scope_key: str | None = _TEAM, *, scope: object = "team") -> EntityCreate:
+    metadata: dict[str, Any] = {
+        "capture_mode": "remember",
+        "memory_scope": scope,
+        "project_id": "project_cwd",
+    }
+    if scope_key is not None:
+        metadata["scope_key"] = scope_key
+    return EntityCreate(
+        name="On-call escalation",
+        content="Page the platform rotation first.",
+        entity_type=EntityType.EPISODE,
+        metadata=metadata,
+    )
+
+
+def _added() -> AsyncMock:
+    return AsyncMock(return_value=SimpleNamespace(success=True, id="episode_team", message="ok"))
+
+
+@pytest.mark.asyncio
+async def test_create_entity_keys_a_team_memory_to_the_team_its_author_belongs_to() -> None:
+    """`sibyl remember --scope team` reaches the graph keyed to the team it named.
+
+    The stamp took the request's verified project as the key for every scope,
+    so a team row read as team-scoped but keyed to the working project, and no
+    member of the team could read it, its author included.
+    """
+    ctx = _ctx()
+    add_mock = _added()
+    archive = AsyncMock()
+
+    await _create_with_scope(
+        _team_remember(), ctx=ctx, teams={_TEAM}, add_mock=add_mock, archive=archive
+    )
+
+    written = add_mock.await_args.kwargs
+    assert written["memory_scope"] == "team"
+    assert written["scope_key"] == _TEAM
+    assert written["project"] == "project_cwd"
+    stored = written["metadata"]
+    assert stored["memory_scope"] == "team"
+    assert stored["scope_key"] == _TEAM
+    assert stored["principal_id"] == str(ctx.user.id)
+    # The capture sidecar stays filed under the project the route verified.
+    assert archive.await_args.kwargs["project_id"] == "project_cwd"
+
+    def readable(principal: str, *, teams: set[str], projects: set[str]) -> bool:
+        return memory_metadata_read_allowed(
+            stored,
+            principal_id=principal,
+            private_scope_granted=True,
+            accessible_projects=projects,
+            accessible_teams=teams,
+        )
+
+    assert readable(str(ctx.user.id), teams={_TEAM}, projects={"project_cwd"})
+    assert readable("teammate", teams={_TEAM}, projects=set())
+    assert not readable("project-member", teams={_OTHER_TEAM}, projects={"project_cwd"})
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("scope", "scope_key", "status", "reason"),
+    [
+        pytest.param("team", _OTHER_TEAM, 403, "unverified_membership", id="team-not-a-member"),
+        pytest.param("team", None, 400, "missing_scope_key", id="team-without-a-key"),
+        pytest.param("organization", None, 403, "scope_not_enabled", id="organization"),
+        pytest.param("shared", _TEAM, 403, "scope_not_enabled", id="shared"),
+        pytest.param("public", None, 403, "scope_not_enabled", id="public"),
+        pytest.param("delegated", "agent:nova", 403, "unverified_membership", id="delegated"),
+        pytest.param("TEAM", _TEAM, 403, "scope_not_enabled", id="unrecognized"),
+        pytest.param(["team"], _TEAM, 403, "scope_not_enabled", id="not-a-string"),
+    ],
+)
+async def test_create_entity_refuses_a_declared_scope_the_raw_route_refuses(
+    scope: object, scope_key: str | None, status: int, reason: str
+) -> None:
+    """A declared audience is authorized before anything is written, as the raw route does.
+
+    These were written and stamped with the working project's key, so each
+    landed as a row nobody could read rather than as a refusal its writer saw.
+    """
+    add_mock = _added()
+    archive = AsyncMock()
+
+    with pytest.raises(HTTPException) as exc:
+        await _create_with_scope(
+            _team_remember(scope_key, scope=scope),
+            ctx=_ctx(),
+            teams={_TEAM},
+            add_mock=add_mock,
+            archive=archive,
+        )
+
+    assert exc.value.status_code == status
+    assert exc.value.detail == reason
+    add_mock.assert_not_awaited()
+    archive.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_create_entity_refuses_a_team_the_api_key_was_not_granted() -> None:
+    """Membership is not enough when the credential was narrowed to other memory."""
+    ctx = stub_auth_context(api_key_memory_scope_keys={"project\x1fproject_cwd"})
+    add_mock = _added()
+
+    with pytest.raises(HTTPException) as exc:
+        await _create_with_scope(
+            _team_remember(), ctx=ctx, teams={_TEAM}, add_mock=add_mock, archive=AsyncMock()
+        )
+
+    assert exc.value.status_code == 403
+    assert exc.value.detail == "api_key_memory_space_denied"
+    add_mock.assert_not_awaited()
+
+
+def _bulk_runtime(created: list[str]) -> SimpleNamespace:
+    return SimpleNamespace(
+        entity_manager=SimpleNamespace(
+            get=AsyncMock(side_effect=KeyError),
+            create_direct_bulk=AsyncMock(return_value=created),
+        ),
+        relationship_manager=SimpleNamespace(create_bulk=AsyncMock(return_value=(0, 0))),
+    )
+
+
+def _bulk_entry(name: str, metadata: dict[str, Any]) -> EntityCreate:
+    return EntityCreate(
+        name=name,
+        content=f"{name} body",
+        entity_type=EntityType.EPISODE,
+        skip_conflicts=True,
+        metadata=metadata,
+    )
+
+
+@pytest.mark.asyncio
+async def test_create_entities_bulk_keys_each_row_to_its_authorized_audience() -> None:
+    runtime = _bulk_runtime(["episode_team", "episode_project"])
+    batch = EntityBulkCreateRequest(
+        entities=[
+            _bulk_entry(
+                "Team note",
+                {"memory_scope": "team", "scope_key": _TEAM, "project_id": "project_cwd"},
+            ),
+            _bulk_entry(
+                "Project note",
+                {"memory_scope": "project", "scope_key": _TEAM, "project_id": "project_cwd"},
+            ),
+        ]
+    )
+
+    with (
+        _writer_teams({_TEAM}),
+        patch("sibyl.api.routes.entity_bulk.verify_entity_project_access", AsyncMock()),
+        patch(
+            "sibyl.api.routes.entity_policy.get_entity_graph_runtime",
+            AsyncMock(return_value=runtime),
+        ),
+    ):
+        response = await create_entities_bulk(
+            batch=batch, org=_org(), ctx=_ctx(), content_session=None
+        )
+
+    team_row, project_row = runtime.entity_manager.create_direct_bulk.await_args.args[0]
+    assert team_row.metadata["memory_scope"] == "team"
+    assert team_row.metadata["scope_key"] == _TEAM
+    assert project_row.metadata["memory_scope"] == "project"
+    assert project_row.metadata["scope_key"] == "project_cwd"
+    assert [entity.metadata["scope_key"] for entity in response.entities] == [
+        _TEAM,
+        "project_cwd",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_create_entities_bulk_authorizes_each_audience_once() -> None:
+    team_entry = {"memory_scope": "team", "scope_key": _TEAM, "project_id": "project_cwd"}
+    runtime = _bulk_runtime(["episode_a", "episode_b", "episode_c"])
+    batch = EntityBulkCreateRequest(
+        entities=[
+            _bulk_entry("Team note A", team_entry),
+            _bulk_entry("Team note B", team_entry),
+            _bulk_entry("Team note C", {**team_entry, "project_id": "project_other"}),
+        ]
+    )
+    teams = AsyncMock(return_value={_TEAM})
+
+    with (
+        patch("sibyl.api.routes.memory_auth.list_accessible_team_scope_keys", teams),
+        patch("sibyl.api.routes.memory_auth.log_memory_audit_event", AsyncMock()),
+        patch("sibyl.api.routes.entity_bulk.verify_entity_project_access", AsyncMock()),
+        patch(
+            "sibyl.api.routes.entity_policy.get_entity_graph_runtime",
+            AsyncMock(return_value=runtime),
+        ),
+    ):
+        response = await create_entities_bulk(
+            batch=batch, org=_org(), ctx=_ctx(), content_session=None
+        )
+
+    assert [entity.metadata["scope_key"] for entity in response.entities] == [_TEAM] * 3
+    assert teams.await_count == 2
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("metadata", "status"),
+    [
+        pytest.param({"memory_scope": "team", "scope_key": _OTHER_TEAM}, 403, id="foreign-team"),
+        pytest.param({"memory_scope": "organization"}, 403, id="organization"),
+    ],
+)
+async def test_create_entities_bulk_writes_nothing_when_one_scope_is_refused(
+    metadata: dict[str, Any], status: int
+) -> None:
+    runtime = _bulk_runtime(["episode_private", "episode_refused"])
+    batch = EntityBulkCreateRequest(
+        entities=[
+            _bulk_entry("Private note", {"memory_scope": "private"}),
+            _bulk_entry("Refused note", metadata),
+        ]
+    )
+
+    with (
+        _writer_teams({_TEAM}),
+        patch(
+            "sibyl.api.routes.entity_policy.get_entity_graph_runtime",
+            AsyncMock(return_value=runtime),
+        ),
+        pytest.raises(HTTPException) as exc,
+    ):
+        await create_entities_bulk(batch=batch, org=_org(), ctx=_ctx(), content_session=None)
+
+    assert exc.value.status_code == status
+    runtime.entity_manager.create_direct_bulk.assert_not_awaited()
+
+
 def test_bulk_create_binds_scoped_metadata_to_the_authenticated_principal() -> None:
     entity = EntityCreate(
         name="Planted episode",
@@ -1856,6 +2143,7 @@ def test_bulk_create_binds_scoped_metadata_to_the_authenticated_principal() -> N
         group_id=str(_org().id),
         now=datetime.now(UTC),
         principal_id="attacker",
+        authorized_scope_key=None,
     )
 
     assert built.metadata["memory_scope"] == "private"
@@ -1877,13 +2165,14 @@ def test_bulk_create_drops_a_scope_key_the_request_never_verified() -> None:
         group_id=str(_org().id),
         now=datetime.now(UTC),
         principal_id="attacker",
+        authorized_scope_key=None,
     )
 
     assert built.metadata["memory_scope"] == "project"
     assert "scope_key" not in built.metadata
 
 
-def test_bulk_create_scopes_a_project_row_to_the_verified_project() -> None:
+def test_bulk_create_stamps_the_authorized_key_over_the_payloads() -> None:
     entity = EntityCreate(
         name="Project session",
         content="Belongs to a project the request verified.",
@@ -1901,6 +2190,7 @@ def test_bulk_create_scopes_a_project_row_to_the_verified_project() -> None:
         group_id=str(_org().id),
         now=datetime.now(UTC),
         principal_id="author",
+        authorized_scope_key="project_real",
     )
 
     assert built.metadata["scope_key"] == "project_real"
@@ -2801,6 +3091,7 @@ def test_bulk_create_cannot_have_structure_planted_through_metadata() -> None:
         ),
         group_id="org-1",
         now=datetime.now(UTC),
+        authorized_scope_key=None,
     )
 
     assert built.metadata["note"] == "kept"
@@ -2823,6 +3114,7 @@ def test_bulk_create_metadata_drops_a_client_supplied_embedding_stamp() -> None:
         group_id="org-123",
         now=datetime(2026, 9, 26, tzinfo=UTC),
         principal_id="user-alice",
+        authorized_scope_key=None,
     )
 
     assert "embedding_metadata" not in metadata

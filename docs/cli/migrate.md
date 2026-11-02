@@ -92,6 +92,11 @@ them visible to everyone in the project instead. Rows flagged as holding a crede
 private either way, and rows taken out of recall on your instance (contested or retired) are not
 migrated.
 
+Rows scoped to a team, a delegated agent, or a wider audience (organization, shared, public) stay on
+your instance, and the plan counts them by scope. Those audiences exist only where the rows were
+written, so the team server would refuse them. Re-capture what the team needs on the team server
+with `sibyl remember --scope team --scope-key <team>`.
+
 ### Re-running
 
 A ledger under `~/.sibyl/migrations` binds progress to the source server and project, target server,

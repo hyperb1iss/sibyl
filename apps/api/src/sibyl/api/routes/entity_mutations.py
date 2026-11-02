@@ -225,6 +225,7 @@ async def create_entity(
     assignees = entity.metadata.get("assignees") if entity.metadata else None
     technologies = entity.metadata.get("technologies") if entity.metadata else None
     depends_on = entity.metadata.get("depends_on") if entity.metadata else None
+    verified_project_id = str(project) if project else None
     if project:
         await verify_entity_project_access(
             content_session,
@@ -233,6 +234,13 @@ async def create_entity(
             required_role=ProjectRole.CONTRIBUTOR,
             require_existing_project=True,
         )
+    authorized_scope_key = await policy.authorized_graph_scope_key(
+        ctx,
+        metadata=entity.metadata,
+        verified_project_id=verified_project_id,
+        surface="entities_create",
+        request=request,
+    )
     runtime = await policy.get_entity_graph_runtime(group_id)
 
     # Use description as content fallback (frontend sends description, add() needs content)
@@ -277,13 +285,12 @@ async def create_entity(
         )
 
     authorized_principal_id = str(ctx.user.id) if ctx.user is not None else None
-    authorized_scope_key = str(project) if project else None
     declared_memory_scope = request_metadata.get("memory_scope")
     merged_metadata: dict[str, Any] = {
         **serialization.scoped_graph_metadata(
             request_metadata,
             principal_id=authorized_principal_id,
-            verified_project_id=authorized_scope_key,
+            authorized_scope_key=authorized_scope_key,
         ),
         "organization_id": group_id,
     }
@@ -358,7 +365,7 @@ async def create_entity(
             entity_type=entity.entity_type.value,
             tags=list(entity.tags or []),
             metadata=raw_capture_metadata,
-            project_id=authorized_scope_key,
+            project_id=verified_project_id,
             source_capture_id=str(request_metadata["raw_memory_id"])
             if request_metadata.get("raw_memory_id")
             else None,
