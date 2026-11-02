@@ -1204,7 +1204,9 @@ Size an archives volume, or the receipts claim when it holds archives, for:
 - the archives kept: organizations backed up × backups per day × `SIBYL_BACKUP_RETENTION_DAYS` ×
   archive size;
 - staging for the largest running backup: its export is written uncompressed on the same volume
-  before it is compressed, typically five to ten times the archive's size, plus the archive itself;
+  before it is compressed, typically five to ten times the archive's size, plus the archive itself.
+  The backup reads each namespace page by page into a spool in the same staging directory, about the
+  archive's size again, and removes each spool once its export file is written;
 - a reserve for everything else on the volume, `SIBYL_BACKUP_FREE_SPACE_RESERVE_MB` (default 512;
   set it with `backend.env`).
 

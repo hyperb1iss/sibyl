@@ -8,6 +8,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
 from enum import Enum
+from pathlib import Path
 from uuid import UUID
 
 import structlog
@@ -24,7 +25,21 @@ from sibyl_core.backends.surreal.schema_invariants import (
     fetch_declared_fields,
 )
 from sibyl_core.embeddings.provenance import mark_unverified_vector
+from sibyl_core.memory_pipeline.observations import SourceKind
 from sibyl_core.migrate import validation_receipt_archive
+from sibyl_core.migrate.archive_lineage import LineageSection
+from sibyl_core.migrate.archive_stream import (
+    ArchiveSpool,
+    PageReader,
+    SourceCapture,
+    SpooledCollection,
+    Streamed,
+    StreamedObject,
+    capture_snapshot_rows,
+    read_source_capture,
+    spool_path,
+    write_json_file,
+)
 
 log = structlog.get_logger()
 
@@ -437,17 +452,18 @@ def _deserialize_vector(value: object) -> list[float] | object:
     return out
 
 
+def _content_row_sort_key(spec: ContentArchiveTableSpec, row: dict[str, object]) -> str:
+    value = row.get(spec.target_identity_field) or row.get(spec.source_identity_field)
+    if value is not None:
+        return str(value)
+    return json.dumps(row, sort_keys=True, default=str)
+
+
 def _sort_content_rows(
     spec: ContentArchiveTableSpec,
     rows: list[dict[str, object]],
 ) -> list[dict[str, object]]:
-    def _key(row: dict[str, object]) -> str:
-        value = row.get(spec.target_identity_field) or row.get(spec.source_identity_field)
-        if value is not None:
-            return str(value)
-        return json.dumps(row, sort_keys=True, default=str)
-
-    return sorted(rows, key=_key)
+    return sorted(rows, key=lambda row: _content_row_sort_key(spec, row))
 
 
 def _coerce_archive_bool(value: object) -> bool | None:
@@ -498,10 +514,7 @@ def _normalize_content_archive_restore_row(
     return _normalize_backup_archive_flags(normalized)
 
 
-def _content_archive_export_query(
-    spec: ContentArchiveTableSpec,
-    organization_id: str | None,
-) -> tuple[str, dict[str, object]] | None:
+def _content_archive_projection(spec: ContentArchiveTableSpec) -> str:
     projection = "*"
     if spec.name in _RETAINED_OPERATION_TABLES:
         projection += ", type::string(created_at) AS created_at"
@@ -510,7 +523,14 @@ def _content_archive_export_query(
                 ", IF admitted_at != NONE { type::string(admitted_at) } "
                 "ELSE { NONE } AS admitted_at"
             )
-    query = f"SELECT {projection} FROM {spec.name}"  # noqa: S608
+    return projection
+
+
+def _content_archive_export_query(
+    spec: ContentArchiveTableSpec,
+    organization_id: str | None,
+) -> tuple[str, dict[str, object]] | None:
+    query = f"SELECT {_content_archive_projection(spec)} FROM {spec.name}"  # noqa: S608
     if organization_id is None:
         return query + ";", {}
     if spec.name in _GLOBAL_CONTENT_ARCHIVE_TABLES:
@@ -556,21 +576,7 @@ async def _export_surreal_content_archive_payload(
                 tables[spec.name] = []
                 row_counts[spec.name] = 0
                 continue
-            statement, params = query
-            result = await client.execute_query(statement, **params)
-            error = _query_error(result)
-            if error is not None:
-                raise RuntimeError(error)
-            rows = _sort_content_rows(
-                spec,
-                [
-                    _normalize_content_archive_export_row(
-                        spec,
-                        {str(key): _serialize_value(value) for key, value in row.items()},
-                    )
-                    for row in _normalize_records(result)
-                ],
-            )
+            rows = await _read_content_table(client, spec, query)
             tables[spec.name] = rows
             row_counts[spec.name] = len(rows)
         from sibyl_core.memory_pipeline.observations import SourceKind
@@ -594,22 +600,9 @@ async def _export_surreal_content_archive_payload(
             for row in raw_rows
         ]
         row_counts["raw_captures"] = len(raw_rows)
-        receipt_rows = tables["memory_validation_executions"]
-        receipt_section = await asyncio.to_thread(validation_receipt_archive.capture, receipt_rows)
-        spec = _CONTENT_ARCHIVE_TABLES_BY_NAME["memory_validation_executions"]
-        receipt_query = _content_archive_export_query(spec, org_id)
-        assert receipt_query is not None
-        statement, params = receipt_query
-        current = await client.execute_query(statement, **params)
-        current_rows = _sort_content_rows(
-            spec,
-            [
-                {str(key): _serialize_value(value) for key, value in row.items()}
-                for row in _normalize_records(current)
-            ],
+        receipt_section = await _capture_validation_receipts(
+            client, org_id, tables["memory_validation_executions"]
         )
-        if _query_error(current) is not None or current_rows != receipt_rows:
-            raise ValueError("Validation executions changed during receipt archive capture")
     finally:
         await client.close()
 
@@ -625,12 +618,193 @@ async def _export_surreal_content_archive_payload(
     }
 
 
+async def _read_content_table(
+    client: SurrealContentClient,
+    spec: ContentArchiveTableSpec,
+    query: tuple[str, dict[str, object]],
+) -> list[dict[str, object]]:
+    statement, params = query
+    result = await client.execute_query(statement, **params)
+    error = _query_error(result)
+    if error is not None:
+        raise RuntimeError(error)
+    return _sort_content_rows(spec, _content_export_rows(spec, result))
+
+
+def _content_export_rows(spec: ContentArchiveTableSpec, result: object) -> list[dict[str, object]]:
+    return [
+        _normalize_content_archive_export_row(
+            spec,
+            {str(key): _serialize_value(value) for key, value in row.items()},
+        )
+        for row in _normalize_records(result)
+    ]
+
+
+async def _capture_validation_receipts(
+    client: SurrealContentClient,
+    organization_id: str | None,
+    receipt_rows: list[dict[str, object]],
+) -> dict[str, object]:
+    """Capture the receipts these executions name, then prove the executions held still."""
+    receipt_section = await asyncio.to_thread(validation_receipt_archive.capture, receipt_rows)
+    spec = _CONTENT_ARCHIVE_TABLES_BY_NAME["memory_validation_executions"]
+    receipt_query = _content_archive_export_query(spec, organization_id)
+    assert receipt_query is not None
+    statement, params = receipt_query
+    current = await client.execute_query(statement, **params)
+    current_rows = _sort_content_rows(
+        spec,
+        [
+            {str(key): _serialize_value(value) for key, value in row.items()}
+            for row in _normalize_records(current)
+        ],
+    )
+    if _query_error(current) is not None or current_rows != receipt_rows:
+        raise ValueError("Validation executions changed during receipt archive capture")
+    return receipt_section
+
+
 async def export_content_archive_payload(
     organization_id: str | UUID | None = None,
 ) -> dict[str, object]:
     """Export Surreal content/operations tables into a JSON-safe payload."""
 
     return await _export_surreal_content_archive_payload(organization_id)
+
+
+class ContentArchiveCapture:
+    """One organization's content backup, captured to a spool and written as content.json.
+
+    The document is the payload ``export_content_archive_payload`` returns for
+    the organization, after the joint lineage seal the API backup applies.
+    """
+
+    def __init__(self, organization_id: str, workdir: Path) -> None:
+        self.organization_id = organization_id
+        self._spool = ArchiveSpool(spool_path(workdir, "content"))
+        self.source = SourceCapture(SourceKind.RAW_CAPTURE, organization_id, self._spool)
+        self._tables: dict[str, SpooledCollection] = {}
+        self._executions: list[dict[str, object]] = []
+        self._receipts: dict[str, object] = {}
+        self.created_at = ""
+
+    @property
+    def lineage(self) -> LineageSection:
+        return self.source.lineage
+
+    @property
+    def quarantined(self) -> list[dict[str, str]]:
+        return []
+
+    def finish(self, executions: list[dict[str, object]], receipts: dict[str, object]) -> None:
+        self._executions = executions
+        self._receipts = receipts
+        self.created_at = datetime.now(UTC).isoformat()
+
+    def add_table_rows(self, spec: ContentArchiveTableSpec, rows: list[dict[str, object]]) -> None:
+        collection = self._tables.setdefault(spec.name, SpooledCollection(self._spool, (False,)))
+        for row in rows:
+            collection.add((_content_row_sort_key(spec, row),), row)
+
+    def _table(self, spec: ContentArchiveTableSpec) -> tuple[Streamed | list, int]:
+        if spec.name == "raw_captures":
+            rows = (
+                {
+                    key: _serialize_value(value)
+                    for key, value in row.items()
+                    if key != "archive_record_key"
+                }
+                for row in self.source.decoded_rows(set())
+            )
+            return Streamed(rows), self.source.row_count
+        if spec.name == "memory_validation_executions":
+            return self._executions, len(self._executions)
+        collection = self._tables.get(spec.name)
+        if collection is None:
+            return [], 0
+        return Streamed(collection.ordered()), len(collection)
+
+    def document(self, report: list[dict[str, str]]) -> StreamedObject:
+        tables = {spec.name: self._table(spec) for spec in _CONTENT_ARCHIVE_TABLE_SPECS}
+        row_counts = {name: count for name, (_, count) in tables.items()}
+        return StreamedObject(
+            [
+                ("version", CONTENT_ARCHIVE_VERSION),
+                ("source_integrity", self.source.section(set(self.lineage.flagged))),
+                ("validation_receipts", self._receipts),
+                ("created_at", self.created_at),
+                ("organization_id", self.organization_id),
+                ("tables", StreamedObject([(name, rows) for name, (rows, _) in tables.items()])),
+                ("row_counts", row_counts),
+                ("total_rows", sum(row_counts.values())),
+                (
+                    "lineage_validation",
+                    [row for row in report if row["source_kind"] == self.source.kind.value],
+                ),
+            ]
+        )
+
+    def write(self, path: Path, report: list[dict[str, str]]) -> int:
+        return write_json_file(path, self.document(report))
+
+    def close(self) -> None:
+        self._spool.close()
+
+
+async def capture_content_archive(*, organization_id: str, workdir: Path) -> ContentArchiveCapture:
+    """Capture an organization's content tables and raw capture lineage through disk.
+
+    Tables and the raw capture ledger are read in pages inside one read
+    transaction, so neither SurrealDB nor this process holds a whole table.
+    Validation executions keep their own read, receipt capture and re-read,
+    which proves no execution moved while its receipt was copied.
+    """
+    from sibyl_core.services.source_archive_store import read_source_archive_snapshot
+
+    capture = ContentArchiveCapture(organization_id, workdir)
+    client = build_surreal_content_client()
+    try:
+        async with client.read_snapshot() as execute:
+            reader = PageReader(execute) if execute is not None else None
+            for spec in _CONTENT_ARCHIVE_TABLE_SPECS:
+                query = _content_archive_export_query(spec, organization_id)
+                if query is None or spec.name in {"raw_captures", "memory_validation_executions"}:
+                    continue
+                if reader is None:
+                    capture.add_table_rows(spec, await _read_content_table(client, spec, query))
+                    continue
+                async for page in reader.pages(
+                    spec.name,
+                    fields=_content_archive_projection(spec),
+                    where="organization_id = $organization_id",
+                    params={"organization_id": organization_id},
+                ):
+                    capture.add_table_rows(spec, _content_export_rows(spec, page))
+            if reader is None:
+                capture_snapshot_rows(
+                    capture.source,
+                    await read_source_archive_snapshot(
+                        client.execute_query,
+                        kind=SourceKind.RAW_CAPTURE,
+                        organizations=[organization_id],
+                    ),
+                )
+            else:
+                await read_source_capture(capture.source, reader)
+        capture.source.finish()
+        spec = _CONTENT_ARCHIVE_TABLES_BY_NAME["memory_validation_executions"]
+        query = _content_archive_export_query(spec, organization_id)
+        assert query is not None
+        executions = await _read_content_table(client, spec, query)
+        receipts = await _capture_validation_receipts(client, organization_id, executions)
+        capture.finish(executions, receipts)
+    except BaseException:
+        capture.close()
+        raise
+    finally:
+        await client.close()
+    return capture
 
 
 def _prepare_content_source_integrity(payload, tables, organization_id):
@@ -1097,8 +1271,10 @@ async def restore_content_archive_payload(
 __all__ = [
     "CONTENT_ARCHIVE_TABLES",
     "CONTENT_ARCHIVE_VERSION",
+    "ContentArchiveCapture",
     "ContentArchiveRestoreResult",
     "build_surreal_content_client",
+    "capture_content_archive",
     "export_content_archive_payload",
     "restore_content_archive_payload",
 ]

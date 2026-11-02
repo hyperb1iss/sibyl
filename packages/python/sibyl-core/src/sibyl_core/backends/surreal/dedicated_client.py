@@ -45,6 +45,11 @@ from sibyl_core.backends.surreal.url_schemes import (
 )
 
 if TYPE_CHECKING:
+    from uuid import UUID
+
+    from surrealdb.connections.async_ws import AsyncWsSurrealConnection
+    from surrealdb.types import Value
+
     from sibyl_core.backends.surreal.schema_version import SurrealExecute
 
 logger = logging.getLogger(__name__)
@@ -707,6 +712,68 @@ class DedicatedSurrealClient:
             yield control.execute_query
         finally:
             await control.close()
+
+    @asynccontextmanager
+    async def read_snapshot(self) -> AsyncGenerator[SurrealExecute | None]:
+        """Run reads on a socket of their own inside one transaction.
+
+        Every query the yielded executor sends sees the snapshot the
+        transaction opened on, so a namespace read page by page cannot
+        interleave with writers between pages. The transaction is cancelled,
+        never committed. The SDK offers client-side transactions only over
+        WebSocket, so any other URL yields None and the caller reads the
+        snapshot in one statement instead.
+        """
+        if not is_websocket_surreal_url(self._url):
+            yield None
+            return
+        connection = self._new_connection()
+        client = cast(
+            "AsyncWsSurrealConnection", await _at_boundary(self._url, connection.connect())
+        )
+        transaction: UUID | None = None
+        try:
+            transaction = await _at_boundary(self._url, client.begin())
+
+            async def execute(query: str, **params: object) -> object:
+                bound = params or None
+                await check_native_query_request(query, bound)
+                started_at = query_start()
+                error: BaseException | None = None
+                try:
+                    return _checked_query_result(
+                        await _at_boundary(
+                            self._url,
+                            client.query_raw(
+                                query, cast("dict[str, Value] | None", bound), txn_id=transaction
+                            ),
+                        )
+                    )
+                except BaseException as exc:
+                    error = exc
+                    raise
+                finally:
+                    log_query(
+                        query,
+                        client_kind=self._client_kind,
+                        namespace=self._namespace,
+                        database=self._database,
+                        raw=False,
+                        elapsed=elapsed_ms(started_at),
+                        param_keys=sorted(params),
+                        query_label="read_snapshot",
+                        query_origin=_caller_origin(),
+                        error=error,
+                    )
+
+            yield execute
+        finally:
+            try:
+                if transaction is not None:
+                    with contextlib.suppress(Exception):
+                        await _finish_despite_cancellation(client.cancel(transaction))
+            finally:
+                await _finish_despite_cancellation(connection.close())
 
     async def connect(self) -> SurrealClient:
         return await _at_boundary(self._url, self._connect_one())

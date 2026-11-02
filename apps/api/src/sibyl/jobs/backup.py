@@ -22,7 +22,7 @@ import zlib
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
 import structlog
@@ -49,7 +49,7 @@ from sibyl.persistence.backups_runtime import (
     list_enabled_backup_settings,
     update_backup_record,
 )
-from sibyl.persistence.content_archive import export_content_archive_payload
+from sibyl.persistence.content_archive import ContentArchiveCapture, capture_content_archive
 from sibyl_core.backends.archive_store import (
     ArchiveConflict,
     ArchiveStore,
@@ -57,6 +57,10 @@ from sibyl_core.backends.archive_store import (
     archive_name as archive_name_for,
     backup_id_of,
 )
+from sibyl_core.migrate.archive_lineage import seal_lineage
+
+if TYPE_CHECKING:
+    from sibyl_core.migrate.archive_stream import GraphArchiveCapture
 
 log = structlog.get_logger()
 
@@ -356,47 +360,61 @@ async def _build_and_publish(  # noqa: PLR0915
             file_checksums["auth.json"] = await _sha256_file_async(auth_file)
             log.info("backup_auth_snapshot_complete", backup_id=backup_id, size_bytes=auth_size)
 
-        # Step 2: Surreal content backup
-        if include_content_snapshot:
-            log.info("backup_content_snapshot_start", backup_id=backup_id)
-            content_payload = await export_content_archive_payload(organization_id=organization_id)
-            content_size = await _write_json_file_async(
-                content_file,
-                content_payload,
-                default=str,
-            )
-            file_checksums["content.json"] = await _sha256_file_async(content_file)
-            log.info(
-                "backup_content_snapshot_complete",
-                backup_id=backup_id,
-                size_bytes=content_size,
-            )
-
-        # Step 3: Graph backup
-        if include_graph:
-            log.info("backup_graph_start", backup_id=backup_id, organization_id=organization_id)
-            try:
-                from dataclasses import asdict as dc_asdict
-
-                from sibyl_core.tools.admin import create_backup
-
-                graph_result = await create_backup(organization_id=organization_id)
-
-                if not graph_result.success or graph_result.backup_data is None:
-                    raise RuntimeError(f"Graph backup failed: {graph_result.message}")
-
-                entity_count = graph_result.entity_count
-                relationship_count = graph_result.relationship_count
-
-                # Write graph backup
-                backup_dict = dc_asdict(graph_result.backup_data)
-                graph_size = await _write_json_file_async(
-                    graph_file,
-                    backup_dict,
-                    default=str,
+        # Steps 2 and 3: content and graph, each captured page by page through a
+        # spool in the staging directory, sealed together, then written out.
+        captures: list[ContentArchiveCapture | GraphArchiveCapture] = []
+        lineage_report: list[dict[str, str]] = []
+        try:
+            content_capture = None
+            if include_content_snapshot:
+                log.info("backup_content_snapshot_start", backup_id=backup_id)
+                content_capture = await capture_content_archive(
+                    organization_id=organization_id, workdir=tmp_path
                 )
-                file_checksums["graph.json"] = await _sha256_file_async(graph_file)
+                captures.append(content_capture)
 
+            graph_capture = None
+            if include_graph:
+                log.info("backup_graph_start", backup_id=backup_id, organization_id=organization_id)
+                try:
+                    from sibyl_core.tools.admin import capture_graph_backup
+
+                    graph_capture = await capture_graph_backup(
+                        organization_id=organization_id, workdir=tmp_path
+                    )
+                except Exception as e:
+                    log.exception("backup_graph_failed", backup_id=backup_id, error=str(e))
+                    raise
+                captures.append(graph_capture)
+                entity_count = graph_capture.entity_count
+                relationship_count = graph_capture.relationship_count
+
+            # The graph's own seal ran first, inside its capture; the joint seal
+            # carries its quarantines forward and checks each kind against the other.
+            sealed = [
+                capture for capture in (graph_capture, content_capture) if capture is not None
+            ]
+            lineage_report = seal_lineage(
+                [capture.lineage for capture in sealed],
+                [row for capture in sealed for row in capture.quarantined],
+            )
+            if content_capture is not None:
+                content_size = await asyncio.to_thread(
+                    content_capture.write, content_file, lineage_report
+                )
+                content_capture.close()
+                file_checksums["content.json"] = await _sha256_file_async(content_file)
+                log.info(
+                    "backup_content_snapshot_complete",
+                    backup_id=backup_id,
+                    size_bytes=content_size,
+                )
+            if graph_capture is not None:
+                graph_size = await asyncio.to_thread(
+                    graph_capture.write, graph_file, lineage_report
+                )
+                graph_capture.close()
+                file_checksums["graph.json"] = await _sha256_file_async(graph_file)
                 log.info(
                     "backup_graph_complete",
                     backup_id=backup_id,
@@ -404,32 +422,11 @@ async def _build_and_publish(  # noqa: PLR0915
                     relationships=relationship_count,
                     size_bytes=graph_size,
                 )
-
-            except Exception as e:
-                log.exception("backup_graph_failed", backup_id=backup_id, error=str(e))
-                raise
-
-        from sibyl_core.migrate.archive_lineage import seal_archive_lineage
-
-        captured_graph = (
-            await asyncio.to_thread(lambda: json.loads(graph_file.read_text()))
-            if graph_file.exists()
-            else None
-        )
-        captured_content = (
-            await asyncio.to_thread(lambda: json.loads(content_file.read_text()))
-            if content_file.exists()
-            else None
-        )
-        sealed_graph, sealed_content, lineage_report = seal_archive_lineage(
-            captured_graph, captured_content
-        )
-        if sealed_graph is not None:
-            graph_size = await _write_json_file_async(graph_file, sealed_graph, default=str)
-            file_checksums["graph.json"] = await _sha256_file_async(graph_file)
-        if sealed_content is not None:
-            content_size = await _write_json_file_async(content_file, sealed_content, default=str)
-            file_checksums["content.json"] = await _sha256_file_async(content_file)
+        finally:
+            # A spool holds the rows its JSON file now holds, so each goes once
+            # its file is written, and every one goes on failure.
+            for capture in captures:
+                capture.close()
 
         # Step 4: Create metadata
         metadata = BackupMetadata(

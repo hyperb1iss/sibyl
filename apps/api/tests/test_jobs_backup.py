@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import os
 import tarfile
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
@@ -12,6 +12,7 @@ from uuid import uuid4
 import pytest
 
 from sibyl.jobs import backup as backup_jobs
+from tests.archive_capture_fakes import PayloadCapture, content_capture
 
 
 @dataclass
@@ -327,16 +328,17 @@ async def test_run_backup_in_fully_surreal_mode_includes_org_runtime_snapshots(
     tmp_path,
 ) -> None:
     org_id = str(uuid4())
-    graph_result = SimpleNamespace(
-        success=True,
-        backup_data=_GraphBackupPayload(
-            entities=[{"uuid": "entity-1"}],
-            relationships=[{"uuid": "rel-1"}],
+    graph_capture = PayloadCapture(
+        asdict(
+            _GraphBackupPayload(
+                entities=[{"uuid": "entity-1"}],
+                relationships=[{"uuid": "rel-1"}],
+            )
         ),
         entity_count=1,
         relationship_count=1,
-        message="ok",
     )
+    content = content_capture({"version": "1.0", "tables": {"crawl_sources": []}})
 
     monkeypatch.setattr(backup_jobs.settings, "store", "surreal")
     monkeypatch.setattr(backup_jobs.settings, "auth_store", "surreal")
@@ -355,9 +357,9 @@ async def test_run_backup_in_fully_surreal_mode_includes_org_runtime_snapshots(
             AsyncMock(return_value={"version": "1.0", "tables": {"users": []}}),
         ) as export_auth,
         patch(
-            "sibyl.jobs.backup.export_content_archive_payload",
-            AsyncMock(return_value={"version": "1.0", "tables": {"crawl_sources": []}}),
-        ) as export_content,
+            "sibyl.jobs.backup.capture_content_archive",
+            AsyncMock(return_value=content),
+        ) as capture_content,
         patch(
             "sibyl.jobs.backup._update_backup_db",
             AsyncMock(),
@@ -367,9 +369,9 @@ async def test_run_backup_in_fully_surreal_mode_includes_org_runtime_snapshots(
             AsyncMock(),
         ) as broadcast,
         patch(
-            "sibyl_core.tools.admin.create_backup",
-            AsyncMock(return_value=graph_result),
-        ) as create_graph_backup,
+            "sibyl_core.tools.admin.capture_graph_backup",
+            AsyncMock(return_value=graph_capture),
+        ) as capture_graph,
     ):
         result = await backup_jobs.run_backup(
             {},
@@ -385,8 +387,10 @@ async def test_run_backup_in_fully_surreal_mode_includes_org_runtime_snapshots(
     assert "pg_size_bytes" not in result
     assert result["job_id"] == "backup:backup_fixed"
     export_auth.assert_awaited_once_with(organization_id=org_id)
-    export_content.assert_awaited_once_with(organization_id=org_id)
-    create_graph_backup.assert_awaited_once_with(organization_id=org_id)
+    assert capture_content.await_args.kwargs["organization_id"] == org_id
+    assert capture_graph.await_args.kwargs["organization_id"] == org_id
+    assert content.closed
+    assert graph_capture.closed
     assert update_backup_db.await_count == 2
     broadcast.assert_any_await(
         backup_jobs.WSEvent.BACKUP_STARTED,

@@ -1801,6 +1801,58 @@ async def test_live_graph_restore_sends_unstamped_vectors_through_the_sweep(monk
 
 
 @pytest.mark.asyncio
+async def test_live_graph_backup_pages_one_read_transaction(monkeypatch, tmp_path) -> None:
+    import re
+    from dataclasses import asdict
+    from unittest.mock import AsyncMock
+
+    from sibyl_core.migrate import archive_stream
+    from sibyl_core.migrate.archive_lineage import seal_archive_lineage, seal_lineage
+    from sibyl_core.services.graph import RelationshipManager
+    from sibyl_core.services.graph_runtime import GraphRuntime
+    from sibyl_core.tools.admin import capture_graph_backup, create_backup
+
+    run_stamp = re.compile(r'^  "created_at": "[^"]*",$', re.MULTILINE)
+    async with _live_graph_manager() as (client, manager):
+        await _seed_live_graph(manager, client, stamp=_previous_graph_stamp())
+        runtime = GraphRuntime(
+            client=client,
+            entity_manager=manager,
+            relationship_manager=RelationshipManager(client, group_id=client.group_id),
+        )
+        monkeypatch.setattr(
+            "sibyl_core.tools.admin.get_graph_runtime", AsyncMock(return_value=runtime)
+        )
+        count = "RETURN count((SELECT id FROM entity));"
+        async with client.read_snapshot() as execute:
+            assert execute is not None
+            before = await execute(count)
+            await manager.create_direct(
+                Entity(id="after-snapshot", entity_type=EntityType.TOPIC, name="After")
+            )
+            assert await execute(count) == before
+            assert await client.execute_query(count) == before + 1
+
+        monkeypatch.setattr(archive_stream, "ARCHIVE_PAGE_SIZE", 3)
+        result = await create_backup(organization_id=client.group_id)
+        assert result.success, result.message
+        payload = json.loads(json.dumps(asdict(result.backup_data), indent=2, default=str))
+        expected, _, expected_report = seal_archive_lineage(payload, None)
+        capture = await capture_graph_backup(organization_id=client.group_id, workdir=tmp_path)
+        try:
+            report = seal_lineage([capture.lineage], capture.quarantined)
+            capture.write(tmp_path / "graph.json", report)
+        finally:
+            capture.close()
+        written = (tmp_path / "graph.json").read_text()
+        assert report == expected_report
+        assert run_stamp.sub("", written) == run_stamp.sub(
+            "", json.dumps(expected, indent=2, default=str)
+        )
+        assert json.loads(written)["entity_count"] == 14
+
+
+@pytest.mark.asyncio
 async def test_live_chunk_sweep_reads_raw_evidence_and_filters_the_chunk_lane(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
