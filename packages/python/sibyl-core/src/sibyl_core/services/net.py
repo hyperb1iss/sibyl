@@ -271,6 +271,12 @@ def _breaks_lines(text: str) -> bool:
     return any(unicodedata.category(char) in _LINE_BREAKING_CATEGORIES for char in text)
 
 
+def _single_line(text: str) -> str:
+    return "".join(
+        " " if unicodedata.category(char) in _LINE_BREAKING_CATEGORIES else char for char in text
+    )
+
+
 def normalize_body(value: str) -> str:
     """Strip a message body and hold it to 1..``MAX_BODY_CHARS`` characters."""
     body = value.strip()
@@ -697,7 +703,9 @@ def render_net_transcript(
     ``[<iso>] <author> (<agent>): `` and every further line of its body is
     indented, so no body can open a line that reads as someone else's entry.
     """
-    author = author_name or window.author_user_id
+    # A display name is free text; one with a line break could open a line
+    # of its own, so it renders on one line like every other label here.
+    author = _single_line(author_name or window.author_user_id)
     header = f"# sibylnet channel {thread.channel}"
     if thread.thread:
         header += f", thread {thread.thread}"

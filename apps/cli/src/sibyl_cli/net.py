@@ -15,6 +15,7 @@ import json
 import os
 import sys
 import tempfile
+import unicodedata
 from collections.abc import Mapping, Sequence
 from datetime import datetime
 from pathlib import Path
@@ -175,12 +176,23 @@ def _short_time(value: object) -> str:
     return parsed.strftime("%Y-%m-%d %H:%M")
 
 
+def _strip_controls(value: object) -> str:
+    """Drop terminal control characters, keeping newlines and tabs.
+
+    Another agent wrote this text. Rich escapes only its own markup, so an
+    ANSI or OSC sequence would otherwise reach the reader's terminal.
+    """
+    return "".join(
+        char for char in str(value or "") if char in "\n\t" or unicodedata.category(char) != "Cc"
+    )
+
+
 def _author(message: Mapping[str, Any]) -> tuple[str, str | None]:
     author = message.get("author")
     author = author if isinstance(author, Mapping) else {}
     name = author.get("name") or author.get("email") or author.get("user_id") or "unknown"
     agent = author.get("agent")
-    return str(name), str(agent) if agent else None
+    return _strip_controls(name), _strip_controls(agent) if agent else None
 
 
 def _who(message: Mapping[str, Any]) -> str:
@@ -190,14 +202,14 @@ def _who(message: Mapping[str, Any]) -> str:
 
 
 def _where(message: Mapping[str, Any]) -> list[str]:
-    parts = [f"[bold {ELECTRIC_PURPLE}]{escape(str(message.get('channel') or ''))}[/]"]
+    parts = [f"[bold {ELECTRIC_PURPLE}]{escape(_strip_controls(message.get('channel')))}[/]"]
     if thread := message.get("thread"):
-        parts.append(f"[{CORAL}]{escape(str(thread))}[/{CORAL}]")
+        parts.append(f"[{CORAL}]{escape(_strip_controls(thread))}[/{CORAL}]")
     return parts
 
 
 def _first_line(body: object) -> str:
-    text = str(body or "")
+    text = _strip_controls(body)
     line = next((line.strip() for line in text.splitlines() if line.strip()), "")
     return truncate(line, WATCH_LINE_CHARS)
 
@@ -234,7 +246,7 @@ def _print_message(message: Mapping[str, Any]) -> None:
             decision += f" [dim]{escape(str(memory_id))}[/dim]"
         header.append(decision)
     _print("  ".join(header))
-    for line in str(message.get("body") or "").splitlines() or [""]:
+    for line in _strip_controls(message.get("body")).splitlines() or [""]:
         console.print(f"  {escape(line)}", emoji=False, highlight=False)
 
 

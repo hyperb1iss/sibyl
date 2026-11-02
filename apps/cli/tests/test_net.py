@@ -663,3 +663,14 @@ def test_watch_rejects_a_wait_beyond_the_server_cap() -> None:
     result = _invoke(FakeNetClient(), ["watch", "--wait", "26"])
 
     assert result.exit_code == 2
+
+
+def test_terminal_control_sequences_never_reach_the_terminal() -> None:
+    message = _message("m1", "\x1b]0;pwned\x07hi \x1b[2Kthere\nsecond\tline")
+    message["author"]["name"] = "Ada\x1b[31m"
+
+    line = net.watch_line(message)
+
+    assert "\x1b" not in line and "\x07" not in line
+    assert "hi [2Kthere" in line
+    assert "Ada[31m" in line
