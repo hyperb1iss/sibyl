@@ -819,3 +819,9 @@ async def writable_projects_for_memory(*, ctx: AuthContext) -> set[str]:
     """Resolve contributor grants independently of readable memory evidence."""
     projects = await list_accessible_project_graph_ids(ctx, required_role=ProjectRole.CONTRIBUTOR)
     return {str(project_id) for project_id in projects or set()}
+
+
+async def maintained_projects_for_memory(*, ctx: AuthContext) -> set[str]:
+    """Resolve the maintainer grants that retiring someone else's project capture takes."""
+    projects = await list_accessible_project_graph_ids(ctx, required_role=ProjectRole.MAINTAINER)
+    return {str(project_id) for project_id in projects or set()}

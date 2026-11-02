@@ -237,6 +237,7 @@ async def persist_reflection_candidate(
     related_to: Sequence[str] | None = None,
     accessible_projects: Iterable[str] | None = None,
     writable_projects: Iterable[str] | None = None,
+    maintained_projects: Iterable[str] | None = None,
     accessible_teams: Iterable[str] | None = None,
     accessible_delegations: Iterable[str] | None = None,
     memory_scope: MemoryScope | str | None = None,
@@ -249,6 +250,8 @@ async def persist_reflection_candidate(
     publication_candidate_id: str | None = None,
 ) -> ReflectionWriteResult:
     writable_projects = frozenset(writable_projects) if writable_projects is not None else None
+    # Retiring another principal's memory takes these; omitting them grants none.
+    maintained_projects = frozenset(maintained_projects or ())
     accessible_projects = (
         frozenset(accessible_projects) if accessible_projects is not None else None
     )
@@ -307,6 +310,7 @@ async def persist_reflection_candidate(
         runtime=runtime,
         principal_id=principal_id,
         writable_projects=writable_projects,
+        maintained_projects=maintained_projects,
         candidate=candidate,
     )
     entity = _entity_from_candidate(
@@ -480,6 +484,7 @@ async def persist_reflection_candidate(
         organization_id=organization_id,
         principal_id=principal_id,
         writable_projects=writable_projects,
+        maintained_projects=maintained_projects,
         candidate=candidate,
         replacement_entity_id=created_id,
         replacement_source_ids=source_ids,
@@ -663,6 +668,7 @@ async def promote_reflection_candidate_review(
     related_to: Sequence[str] | None = None,
     accessible_projects: Iterable[str] | None = None,
     writable_projects: Iterable[str] | None = None,
+    maintained_projects: Iterable[str] | None = None,
     accessible_teams: Iterable[str] | None = None,
     accessible_delegations: Iterable[str] | None = None,
     allowed_memory_scope_keys: Iterable[str] | None = None,
@@ -710,6 +716,7 @@ async def promote_reflection_candidate_review(
         related_to=related_to,
         accessible_projects=accessible_projects,
         writable_projects=writable_projects,
+        maintained_projects=maintained_projects,
         accessible_teams=accessible_teams,
         accessible_delegations=accessible_delegations,
         native_source_id=plan.raw_source_ids[0] if plan.raw_source_ids else None,
@@ -771,6 +778,7 @@ async def promote_raw_memory(
     related_to: Sequence[str] | None = None,
     accessible_projects: Iterable[str] | None = None,
     writable_projects: Iterable[str] | None = None,
+    maintained_projects: Iterable[str] | None = None,
     accessible_teams: Iterable[str] | None = None,
     accessible_delegations: Iterable[str] | None = None,
     allowed_memory_scope_keys: Iterable[str] | None = None,
@@ -803,6 +811,7 @@ async def promote_raw_memory(
         related_to=related_to,
         accessible_projects=accessible_projects,
         writable_projects=writable_projects,
+        maintained_projects=maintained_projects,
         accessible_teams=accessible_teams,
         accessible_delegations=accessible_delegations,
         native_source_id=plan.candidate_memory.id,
@@ -952,6 +961,7 @@ async def _apply_promotion_plan(
     related_to: Sequence[str] | None,
     accessible_projects: Iterable[str] | None,
     writable_projects: Iterable[str] | None = None,
+    maintained_projects: Iterable[str] | None = None,
     accessible_teams: Iterable[str] | None,
     accessible_delegations: Iterable[str] | None,
     native_source_id: str | None,
@@ -1017,6 +1027,7 @@ async def _apply_promotion_plan(
         related_to=related_to,
         accessible_projects=accessible_projects,
         writable_projects=writable_projects,
+        maintained_projects=maintained_projects,
         accessible_teams=accessible_teams,
         accessible_delegations=accessible_delegations,
         memory_scope=plan.target_scope,

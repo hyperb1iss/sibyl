@@ -224,6 +224,7 @@ async def _auto_review_reflection_candidate(
             accessible_projects=accessible_projects,
             accessible_teams=accessible_teams,
             writable_projects=await memory_auth.writable_projects_for_memory(ctx=ctx),
+            maintained_projects=await memory_auth.maintained_projects_for_memory(ctx=ctx),
         )
 
     audit_action = (

@@ -820,6 +820,11 @@ async def _drain_dream_candidate(
                 principal_id=candidate.principal_id,
                 required_role=ProjectRole.CONTRIBUTOR,
             ),
+            maintained_projects=await _resolve_accessible_projects(
+                group_id=group_id,
+                principal_id=candidate.principal_id,
+                required_role=ProjectRole.MAINTAINER,
+            ),
         )
 
     archived = False
