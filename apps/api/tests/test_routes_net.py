@@ -1,0 +1,487 @@
+"""sibylnet over HTTP: posting, the settled feed, decisions and the listings.
+
+Auth, content and graph run on the embedded engine with persisted members,
+projects and grants, and on a live server too when SIBYL_LIVE_SURREAL_TESTS=1
+names one; identity comes from signed tokens resolved by the native resolver.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import os
+from collections.abc import AsyncIterator, Iterator
+from contextlib import asynccontextmanager
+from types import SimpleNamespace
+from uuid import UUID, uuid4
+
+import httpx
+import pytest
+from fastapi import FastAPI, Request
+from pydantic import SecretStr
+
+from sibyl.api.routes import net as net_routes
+from sibyl.auth.jwt import create_access_token, verify_access_token
+from sibyl.persistence.surreal import content as surreal_content, organization_runtime
+from sibyl.persistence.surreal.auth import SurrealAuthContextResolver
+from sibyl.persistence.surreal.auth_runtime import _common as auth_common
+from sibyl_core.backends.surreal import (
+    SurrealAuthClient,
+    SurrealContentClient,
+    bootstrap_auth_schema,
+)
+from sibyl_core.backends.surreal.content_schema import bootstrap_content_schema
+from sibyl_core.backends.surreal.url_schemes import is_embedded_surreal_url
+from sibyl_core.config import settings
+from sibyl_core.services import content_client, graph_client
+from sibyl_core.services.graph import SurrealGraphClient
+from sibyl_core.services.net import SETTLE_SECONDS, NetCursor
+
+CREDENTIALS = {
+    "username": os.environ.get("SIBYL_SURREAL_USERNAME", "root"),
+    "password": os.environ.get("SIBYL_SURREAL_PASSWORD", "root"),
+}
+
+
+def engine_url(engine: str) -> str:
+    """The embedded engine, or a live server when SIBYL_LIVE_SURREAL_TESTS=1 names one."""
+    if engine == "embedded":
+        return "memory://"
+    if os.environ.get("SIBYL_LIVE_SURREAL_TESTS") != "1":
+        pytest.skip("live SurrealDB tests are disabled")
+    url = os.environ.get("SIBYL_SURREAL_URL", "")
+    if not url or is_embedded_surreal_url(url):
+        pytest.skip("live SurrealDB tests require SIBYL_SURREAL_URL to point at a server")
+    return url
+
+
+def _project_id(prefix: str) -> str:
+    return f"{prefix}_{uuid4().hex[:12]}"
+
+
+# A live server takes about a minute to migrate fresh auth and content
+# namespaces, so the live run migrates them once and isolates each test by its
+# own organization and users; the embedded engine gets fresh stores every time.
+_LIVE = {"namespace": f"verify_net_routes_{uuid4().hex}", "migrated": False}
+
+
+@pytest.fixture(scope="session")
+def live_namespace() -> Iterator[str]:
+    yield str(_LIVE["namespace"])
+    if not _LIVE["migrated"]:
+        return
+
+    async def remove() -> None:
+        client = SurrealAuthClient(
+            url=os.environ["SIBYL_SURREAL_URL"], namespace=str(_LIVE["namespace"]), **CREDENTIALS
+        )
+        try:
+            await client.execute_query(f"REMOVE NAMESPACE IF EXISTS {client.namespace};")
+        finally:
+            await client.close()
+
+    asyncio.run(remove())
+
+
+@pytest.fixture(params=["embedded", "live"])
+async def org(
+    request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch
+) -> AsyncIterator[SimpleNamespace]:
+    url = engine_url(request.param)
+    live = request.param == "live"
+    namespace = (
+        request.getfixturevalue("live_namespace") if live else f"verify_net_routes_{uuid4().hex}"
+    )
+    auth = SurrealAuthClient(url=url, namespace=namespace, **CREDENTIALS)
+    content = SurrealContentClient(url=url, namespace=namespace, **CREDENTIALS)
+    monkeypatch.setattr(settings, "surreal_url", url)
+    monkeypatch.setattr(settings, "jwt_secret", SecretStr("isolated-sibylnet-route-proof-" * 3))
+    if not (live and _LIVE["migrated"]):
+        await bootstrap_auth_schema(auth)
+        await bootstrap_content_schema(content)
+        _LIVE["migrated"] = _LIVE["migrated"] or live
+
+    @asynccontextmanager
+    async def auth_scope():
+        yield auth
+
+    async def content_scope():
+        return content
+
+    monkeypatch.setattr(auth_common, "surreal_auth_client_scope", auth_scope)
+    monkeypatch.setattr(organization_runtime, "surreal_auth_client_scope", auth_scope)
+    monkeypatch.setattr(content_client, "get_shared_surreal_content_client", content_scope)
+    monkeypatch.setattr(surreal_content, "get_shared_surreal_content_client", content_scope)
+    graphs: dict[str, SurrealGraphClient] = {}
+
+    def new_graph_client(group: str) -> SurrealGraphClient:
+        return graphs.setdefault(
+            group,
+            SurrealGraphClient(
+                group_id=group, url=url, namespace_prefix=f"{namespace}_", **CREDENTIALS
+            ),
+        )
+
+    monkeypatch.setattr(graph_client, "_new_graph_client", new_graph_client)
+    resolver = SurrealAuthContextResolver.from_client(auth)
+
+    app = FastAPI()
+
+    @app.middleware("http")
+    async def fixture_identity(request: Request, call_next):
+        token = request.headers["Authorization"].removeprefix("Bearer ")
+        request.state.auth_context = await resolver.resolve(verify_access_token(token))
+        return await call_next(request)
+
+    app.include_router(net_routes.router, prefix="/api")
+    runtime = SimpleNamespace(
+        auth=auth,
+        content=content,
+        app=app,
+        id=str(uuid4()),
+        other_org=str(uuid4()),
+        ada=str(uuid4()),
+        grace=str(uuid4()),
+        vic=str(uuid4()),
+        ozzy=str(uuid4()),
+        shared=_project_id("project"),
+        readonly=_project_id("project"),
+        secret=_project_id("project"),
+    )
+    await seed_auth(runtime)
+    try:
+        yield runtime
+    finally:
+        # The live namespace outlives the test; leave nothing for the next
+        # one's cross-organization distillation pass to find.
+        await content.execute_query(
+            "DELETE net_messages WHERE organization_id = $org; "
+            "DELETE net_threads WHERE organization_id = $org; "
+            "DELETE raw_captures WHERE organization_id = $org;",
+            org=runtime.id,
+        )
+        for group in graphs:
+            graph_client._clients.pop(group, None)
+            graph_client.mark_graph_schema_dirty(group)
+        if live:
+            for client in graphs.values():
+                await client.execute_query(f"REMOVE NAMESPACE IF EXISTS {client.namespace};")
+        for client in graphs.values():
+            await client.close()
+        await content.close()
+        await auth.close()
+
+
+async def seed_auth(org: SimpleNamespace) -> None:
+    names = {org.ada: "Ada", org.grace: "Grace", org.vic: "Vic", org.ozzy: "Ozzy"}
+    project_records = {
+        org.shared: str(uuid4()),
+        org.readonly: str(uuid4()),
+        org.secret: str(uuid4()),
+    }
+    records = {
+        "users": [
+            {"uuid": user, "email": email(org, name), "name": name} for user, name in names.items()
+        ],
+        "organizations": [
+            {"uuid": org.id, "name": "Acme", "slug": f"acme-{org.id[:8]}"},
+            {"uuid": org.other_org, "name": "Elsewhere", "slug": f"else-{org.other_org[:8]}"},
+        ],
+        "organization_members": [
+            {"uuid": str(uuid4()), "organization_id": organization, "user_id": user, "role": role}
+            for organization, user, role in (
+                (org.id, org.ada, "member"),
+                (org.id, org.grace, "member"),
+                (org.id, org.vic, "viewer"),
+                (org.other_org, org.ozzy, "member"),
+            )
+        ],
+        "projects": [
+            {
+                "uuid": record_id,
+                "organization_id": org.id,
+                "name": graph_id,
+                "slug": graph_id,
+                "graph_project_id": graph_id,
+                "visibility": "private",
+                **({"default_memory_scope": "project"} if graph_id == org.shared else {}),
+            }
+            for graph_id, record_id in project_records.items()
+        ],
+        "project_members": [
+            {
+                "uuid": str(uuid4()),
+                "organization_id": org.id,
+                "project_id": project_records[graph_id],
+                "user_id": user,
+                "role": role,
+            }
+            for graph_id, user, role in (
+                (org.shared, org.ada, "project_contributor"),
+                (org.shared, org.grace, "project_contributor"),
+                (org.readonly, org.ada, "project_viewer"),
+                (org.secret, org.grace, "project_contributor"),
+            )
+        ],
+    }
+    for table, rows in records.items():
+        for record in rows:
+            await org.auth.execute_query(f"CREATE {table} CONTENT $record;", record=record)
+
+
+def email(org: SimpleNamespace, name: str) -> str:
+    # Unique per test: the live namespace is shared and emails are a unique index.
+    return f"{name.lower()}+{org.id[:8]}@example.test"
+
+
+def token_for(org: SimpleNamespace, user: str, organization: str | None = None) -> str:
+    return create_access_token(user_id=UUID(user), organization_id=UUID(organization or org.id))
+
+
+@asynccontextmanager
+async def client_for(org: SimpleNamespace, user: str, organization: str | None = None):
+    transport = httpx.ASGITransport(app=org.app)
+    async with httpx.AsyncClient(
+        transport=transport,
+        base_url="http://net.test",
+        headers={"Authorization": f"Bearer {token_for(org, user, organization)}"},
+        timeout=30,
+    ) as client:
+        yield client
+
+
+async def post(org: SimpleNamespace, user: str, **body: object) -> httpx.Response:
+    async with client_for(org, user) as client:
+        return await client.post("/api/net/messages", json=body)
+
+
+async def feed(org: SimpleNamespace, user: str, organization: str | None = None, **params):
+    async with client_for(org, user, organization) as client:
+        return await client.get("/api/net/feed", params=params)
+
+
+async def settle(org: SimpleNamespace) -> None:
+    """Age every message past the settle window instead of sleeping through it."""
+    await org.content.execute_query(
+        f"UPDATE net_messages SET created_at = created_at - {SETTLE_SECONDS + 5}s "  # noqa: S608
+        "WHERE organization_id = $org;",
+        org=org.id,
+    )
+
+
+async def stored_messages(org: SimpleNamespace) -> list[dict[str, object]]:
+    return content_client.normalize_records(
+        await org.content.execute_query(
+            "SELECT * FROM net_messages WHERE organization_id = $org;", org=org.id
+        )
+    )
+
+
+async def stored_captures(org: SimpleNamespace) -> list[dict[str, object]]:
+    return content_client.normalize_records(
+        await org.content.execute_query(
+            "SELECT * FROM raw_captures WHERE organization_id = $org;", org=org.id
+        )
+    )
+
+
+async def test_members_post_and_every_reader_sees_it(org: SimpleNamespace) -> None:
+    posted = await post(
+        org,
+        org.ada,
+        channel=" #Reviews ",
+        body="  Use keyset paging for the feed.  ",
+        thread="gh:acme/app#42",
+        agent="claude-code",
+        session="session-1",
+    )
+
+    assert posted.status_code == 201, posted.text
+    message = posted.json()["message"]
+    assert posted.json()["decision_memory_id"] is None
+    assert message["channel"] == "#reviews"
+    assert message["thread"] == "gh:acme/app#42"
+    assert message["kind"] == "message"
+    assert message["body"] == "Use keyset paging for the feed."
+    assert message["author"] == {
+        "user_id": org.ada,
+        "name": "Ada",
+        "email": email(org, "Ada"),
+        "agent": "claude-code",
+        "session": "session-1",
+    }
+    assert message["api_key_id"] is None
+    assert message["project_id"] is None
+    assert NetCursor.decode(message["cursor"]).uuid == message["id"]
+
+    await settle(org)
+    for reader in (org.grace, org.vic):
+        read = await feed(org, reader)
+        assert read.status_code == 200, read.text
+        assert [m["id"] for m in read.json()["messages"]] == [message["id"]]
+        assert read.json()["more"] is False
+        assert read.json()["next_since"] == read.json()["messages"][0]["cursor"]
+
+    elsewhere = await feed(org, org.ozzy, organization=org.other_org)
+    assert elsewhere.status_code == 200
+    assert elsewhere.json()["messages"] == []
+
+
+async def test_viewers_cannot_post(org: SimpleNamespace) -> None:
+    refused = await post(org, org.vic, channel="#reviews", body="hello")
+
+    assert refused.status_code == 403
+    assert await stored_messages(org) == []
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        {"channel": "bad channel", "body": "x"},
+        {"channel": "#ok", "body": "   "},
+        {"channel": "#ok", "body": "x" * 16_001},
+        {"channel": "#ok", "body": "x", "thread": "two\nlines"},
+        {"channel": "#ok", "body": "x", "thread": "t" * 201},
+        {"channel": "#ok", "body": "x", "agent": "a" * 65},
+        {"channel": "#ok", "body": "x", "session": "s" * 129},
+        {"channel": "#ok", "body": "x", "kind": "chat"},
+    ],
+)
+async def test_malformed_posts_are_refused(org: SimpleNamespace, body: dict[str, object]) -> None:
+    refused = await post(org, org.ada, **body)
+
+    assert refused.status_code == 422, refused.text
+    assert await stored_messages(org) == []
+
+
+@pytest.mark.parametrize(
+    "params",
+    [
+        {"since": "garbage"},
+        {"channel": [f"c{index}" for index in range(33)]},
+        {"channel": "not a channel"},
+        {"thread": "bell\x07"},
+        {"limit": 501},
+        {"wait": 26},
+    ],
+)
+async def test_malformed_feed_reads_are_refused(
+    org: SimpleNamespace, params: dict[str, object]
+) -> None:
+    refused = await feed(org, org.ada, **params)
+
+    assert refused.status_code == 422, refused.text
+
+
+async def test_messages_name_only_projects_the_poster_can_read(org: SimpleNamespace) -> None:
+    hidden = await post(org, org.ada, channel="#reviews", body="x", project_id=org.secret)
+    missing = await post(org, org.ada, channel="#reviews", body="x", project_id="project_nope")
+    readable = await post(org, org.ada, channel="#reviews", body="x", project_id=org.readonly)
+
+    assert hidden.status_code == 403, hidden.text
+    assert missing.status_code == 404, missing.text
+    assert readable.status_code == 201, readable.text
+    assert readable.json()["message"]["project_id"] == org.readonly
+    assert len(await stored_messages(org)) == 1
+
+
+async def test_a_decision_is_remembered_before_it_is_posted(org: SimpleNamespace) -> None:
+    posted = await post(
+        org,
+        org.ada,
+        channel="#decisions",
+        thread="gh:acme/app#42",
+        kind="decision",
+        project_id=org.shared,
+        agent="claude-code",
+        body="\n  Adopt keyset paging everywhere\nOffset paging rescans the index.",
+    )
+
+    assert posted.status_code == 201, posted.text
+    message = posted.json()["message"]
+    memory_id = posted.json()["decision_memory_id"]
+    assert memory_id
+    assert message["decision_memory_id"] == memory_id
+    assert message["kind"] == "decision"
+    rows = await stored_captures(org)
+    assert [row["uuid"] for row in rows] == [memory_id]
+    memory = rows[0]
+    assert memory["title"] == "Adopt keyset paging everywhere"
+    assert memory["raw_content"] == (
+        "Adopt keyset paging everywhere\nOffset paging rescans the index.\n\n"
+        "Recorded in sibylnet channel #decisions, thread gh:acme/app#42, by Ada (claude-code)."
+    )
+    assert memory["principal_id"] == org.ada
+    # The shared project's default write scope is the project, as remember resolves it.
+    assert (memory["memory_scope"], memory["scope_key"]) == ("project", org.shared)
+    assert "sibylnet" in memory["tags"]
+    assert memory["metadata"]["sibylnet"] == {
+        "channel": "#decisions",
+        "thread": "gh:acme/app#42",
+        "message_id": message["id"],
+    }
+    assert memory["metadata"]["remember_kind"] == "decision"
+
+
+async def test_a_refused_decision_posts_nothing(org: SimpleNamespace) -> None:
+    refused = await post(
+        org,
+        org.ada,
+        channel="#decisions",
+        kind="decision",
+        project_id=org.readonly,
+        body="Ship it",
+    )
+
+    assert refused.status_code == 403, refused.text
+    assert await stored_messages(org) == []
+    assert await stored_captures(org) == []
+
+
+async def test_a_watcher_starts_from_now_and_long_polls(org: SimpleNamespace) -> None:
+    assert (await post(org, org.ada, channel="#reviews", body="history")).status_code == 201
+    await settle(org)
+    start = await feed(org, org.grace, limit=0)
+    assert start.status_code == 200
+    assert start.json()["messages"] == []
+    since = start.json()["next_since"]
+
+    async def post_later() -> None:
+        await asyncio.sleep(0.5)
+        assert (await post(org, org.ada, channel="#reviews", body="news")).status_code == 201
+
+    waited, _ = await asyncio.gather(feed(org, org.grace, since=since, wait=10), post_later())
+
+    assert waited.status_code == 200, waited.text
+    assert [m["body"] for m in waited.json()["messages"]] == ["news"]
+    resumed = await feed(org, org.grace, since=waited.json()["next_since"])
+    assert resumed.json()["messages"] == []
+    assert resumed.json()["next_since"] == waited.json()["next_since"]
+
+
+async def test_channels_and_threads_list_newest_first(org: SimpleNamespace) -> None:
+    for body in (
+        {"channel": "#builds", "body": "nightly green", "thread": "nightly"},
+        {"channel": "#reviews", "body": "first", "thread": "gh:acme/app#1"},
+        {"channel": "#reviews", "body": "second", "thread": "gh:acme/app#1"},
+        {"channel": "#reviews", "body": "loose", "project_id": org.shared},
+    ):
+        assert (await post(org, org.ada, **body)).status_code == 201
+
+    async with client_for(org, org.vic) as client:
+        channels = await client.get("/api/net/channels")
+        threads = await client.get("/api/net/threads", params={"channel": "#Reviews"})
+        bad = await client.get("/api/net/threads", params={"channel": "no spaces"})
+
+    assert channels.status_code == 200, channels.text
+    assert [
+        (c["channel"], c["message_count"], c["thread_count"]) for c in channels.json()["channels"]
+    ] == [("#reviews", 3, 1), ("#builds", 1, 1)]
+    assert threads.status_code == 200, threads.text
+    listed = threads.json()["threads"]
+    assert [(t["thread"], t["message_count"], t["project_id"]) for t in listed] == [
+        (None, 1, org.shared),
+        ("gh:acme/app#1", 2, None),
+    ]
+    assert listed[1]["reflected_through"] is None
+    assert listed[1]["first_message_at"] <= listed[1]["last_message_at"]
+    assert bad.status_code == 422
