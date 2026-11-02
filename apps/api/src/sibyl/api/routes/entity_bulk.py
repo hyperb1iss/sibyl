@@ -133,6 +133,9 @@ async def _authorize_bulk_entries(
     landing the entries ahead of it.
     """
     verified_project_ids: set[str] = set()
+    # One decision per declared audience, so a batch resolves team membership
+    # once rather than once per entry.
+    scope_key_by_audience: dict[tuple[str, str, str | None], str | None] = {}
     scope_keys: list[str | None] = []
     for entity in batch.entities:
         serialization.reject_unsupported_bulk_entry(entity)
@@ -147,14 +150,16 @@ async def _authorize_bulk_entries(
                 require_existing_project=True,
             )
             verified_project_ids.add(project_id)
-        scope_keys.append(
-            await policy.authorized_graph_scope_key(
+        fields = entity.metadata or {}
+        audience = (repr(fields.get("memory_scope")), repr(fields.get("scope_key")), project_id)
+        if audience not in scope_key_by_audience:
+            scope_key_by_audience[audience] = await policy.authorized_graph_scope_key(
                 ctx,
                 metadata=entity.metadata,
                 verified_project_id=project_id,
                 surface="entities_bulk_create",
             )
-        )
+        scope_keys.append(scope_key_by_audience[audience])
         if reader_scope is not None:
             await policy.validate_related_to_targets_for_write(
                 entity_manager=entity_manager,

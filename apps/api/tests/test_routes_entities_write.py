@@ -2067,6 +2067,36 @@ async def test_create_entities_bulk_keys_each_row_to_its_authorized_audience() -
 
 
 @pytest.mark.asyncio
+async def test_create_entities_bulk_authorizes_each_audience_once() -> None:
+    team_entry = {"memory_scope": "team", "scope_key": _TEAM, "project_id": "project_cwd"}
+    runtime = _bulk_runtime(["episode_a", "episode_b", "episode_c"])
+    batch = EntityBulkCreateRequest(
+        entities=[
+            _bulk_entry("Team note A", team_entry),
+            _bulk_entry("Team note B", team_entry),
+            _bulk_entry("Team note C", {**team_entry, "project_id": "project_other"}),
+        ]
+    )
+    teams = AsyncMock(return_value={_TEAM})
+
+    with (
+        patch("sibyl.api.routes.memory_auth.list_accessible_team_scope_keys", teams),
+        patch("sibyl.api.routes.memory_auth.log_memory_audit_event", AsyncMock()),
+        patch("sibyl.api.routes.entity_bulk.verify_entity_project_access", AsyncMock()),
+        patch(
+            "sibyl.api.routes.entity_policy.get_entity_graph_runtime",
+            AsyncMock(return_value=runtime),
+        ),
+    ):
+        response = await create_entities_bulk(
+            batch=batch, org=_org(), ctx=_ctx(), content_session=None
+        )
+
+    assert [entity.metadata["scope_key"] for entity in response.entities] == [_TEAM] * 3
+    assert teams.await_count == 2
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("metadata", "status"),
     [
