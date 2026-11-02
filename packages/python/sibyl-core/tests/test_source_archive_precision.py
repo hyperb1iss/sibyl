@@ -139,6 +139,8 @@ async def test_native_one_nanosecond_restore_race_is_rejected(runtime):
         organizations=[runtime.client.group_id],
     )
     original = runtime.client.execute_query
+    # Diverge the destination so the restore plans to rewrite this source.
+    await original("UPDATE entity SET content='Diverged evidence' WHERE uuid='precision';")
     mutated = False
 
     async def change(statement, **params):
@@ -157,6 +159,7 @@ async def test_native_one_nanosecond_restore_race_is_rejected(runtime):
             kind=SourceKind.GRAPH_ENTITY,
             organizations=[runtime.client.group_id],
             clean=True,
+            skip_existing=False,
         )
     assert mutated
     from sibyl_core.backends.surreal.records import normalize_records

@@ -541,7 +541,13 @@ def _content_archive_export_query(
     )
 
 
-def _clean_content_archive_statements(organization_id: str | None) -> str:
+_AUXILIARY_CHANGED = "archive auxiliary destination changed before restore"
+
+
+async def _plan_auxiliary_cleanup(client, organization_id: str | None) -> list:
+    """Page the auxiliary rows a clean restore wipes; relation tables go first."""
+    from sibyl_core.services.source_archive_store import plan_cleanup
+
     wipe_specs = sorted(
         [
             spec
@@ -549,16 +555,54 @@ def _clean_content_archive_statements(organization_id: str | None) -> str:
             if spec.name != "raw_captures"
             and spec.name not in _RETAINED_OPERATION_TABLES
             and spec.name not in _DREAM_ARCHIVE_TABLES
+            and (organization_id is None or spec.name not in _GLOBAL_CONTENT_ARCHIVE_TABLES)
         ],
         key=lambda spec: spec.name not in _CONTENT_RELATION_ARCHIVE_TABLES,
     )
-    if organization_id is None:
-        return "\n".join(spec.delete_all_sql for spec in wipe_specs)
-    return "\n".join(
-        f"DELETE FROM {spec.name} WHERE organization_id = $organization_id;"  # noqa: S608
-        for spec in wipe_specs
-        if spec.name not in _GLOBAL_CONTENT_ARCHIVE_TABLES
-    )
+    pages = []
+    for spec in wipe_specs:
+        pages += await plan_cleanup(
+            client.execute_query,
+            spec.name,
+            organization_field="organization_id",
+            scope="true" if organization_id is None else "organization_id = $organization_id",
+            keep=lambda _identity: False,
+            **({} if organization_id is None else {"organization_id": organization_id}),
+        )
+    return pages
+
+
+@dataclass(frozen=True)
+class _AuxiliaryRow:
+    """One checked auxiliary write and the identity it lands on."""
+
+    table: str
+    identity_field: str
+    identity: str
+    statement: str
+    parameters: dict[str, object]
+
+
+async def _check_auxiliary_ownership(client, rows: list[_AuxiliaryRow], organization_id: str):
+    """Refuse, before any write, an archive row whose identity another organization holds."""
+    from sibyl_core.services.source_archive_store import restore_batches
+
+    by_table: dict[tuple[str, str], list[str]] = {}
+    for row in rows:
+        by_table.setdefault((row.table, row.identity_field), []).append(row.identity)
+    for (table, identity_field), identities in by_table.items():
+        for batch in restore_batches(identities):
+            # Each probe carries its own value: the embedded engine does not
+            # bind query parameters inside a closure.
+            owners = await client.execute_query(
+                "RETURN array::flatten($probes.map(|$probe| (SELECT VALUE organization_id "  # noqa: S608
+                f"FROM {table} WHERE {identity_field} = $probe.identity)));",
+                probes=[{"identity": identity} for identity in batch],
+            )
+            if not isinstance(owners, list):
+                raise TypeError("archive auxiliary ownership read returned an invalid shape")
+            if any(owner != organization_id for owner in owners):
+                raise ValueError("archive identity belongs to another organization")
 
 
 async def _export_surreal_content_archive_payload(
@@ -1026,9 +1070,8 @@ def _ordered_validation_history(rows):
 
 
 async def _prepare_auxiliary_content_restore(client, tables, organization_id, *, legacy=False):
-    """Validate and compile non-source writes for the source-local transaction."""
-    statements: list[str] = []
-    parameters: dict[str, object] = {"organization_id": organization_id}
+    """Validate and compile non-source writes, one checked statement per row."""
+    restores: list[_AuxiliaryRow] = []
     tables_restored = rows_restored = 0
     errors: list[str] = []
     dropped_fields: dict[str, set[str]] = {}
@@ -1098,8 +1141,6 @@ async def _prepare_auxiliary_content_restore(client, tables, organization_id, *,
             if spec.name == "eval_attempts" and record.get("admitted_at") is None:
                 record.pop("admitted_at", None)
             index = rows_restored
-            parameters[f"archive_record_{index}"] = record
-            parameters[f"archive_identity_{index}"] = identity
             try:
                 statement = _auxiliary_restore_statement(
                     spec, organization_id, record, legacy=legacy
@@ -1108,13 +1149,82 @@ async def _prepare_auxiliary_content_restore(client, tables, organization_id, *,
                 if len(errors) < 50:
                     errors.append(f"{spec.name} invalid archive row ({type(exc).__name__})")
                 continue
-            statements.append(
-                f"FOR $archive_once IN [true] {{ LET $record = $archive_record_{index}; "
-                f"LET $identity = $archive_identity_{index}; {statement} }};"
+            restores.append(
+                _AuxiliaryRow(
+                    table=spec.name,
+                    identity_field=spec.target_identity_field,
+                    identity=identity,
+                    statement=(
+                        f"FOR $archive_once IN [true] {{ LET $record = $archive_record_{index}; "
+                        f"LET $identity = $archive_identity_{index}; {statement} }};"
+                    ),
+                    parameters={
+                        f"archive_record_{index}": record,
+                        f"archive_identity_{index}": identity,
+                    },
+                )
             )
             rows_restored += 1
 
-    return tables_restored, rows_restored, errors, dropped_fields, "\n".join(statements), parameters
+    return tables_restored, rows_restored, errors, dropped_fields, restores
+
+
+async def _restore_content_sources_and_rows(
+    client,
+    integrity,
+    auxiliary_restores: list[_AuxiliaryRow],
+    pending_receipts,
+    *,
+    scope,
+    organization_id: str | None,
+    clean: bool,
+    global_scope: bool,
+) -> tuple[list[str], list[dict[str, str]]]:
+    """Plan the content restore, then write it in bounded transactions.
+
+    Returns the restored source ids and the integrity conflicts.
+    """
+    from sibyl_core.memory_pipeline.observations import SourceKind
+    from sibyl_core.services.source_archive_store import (
+        apply_cleanup,
+        apply_source_restore,
+        interrupted_restore,
+        plan_source_restore,
+        restore_batches,
+    )
+
+    # Decide every write, and raise every refusal the destination's state alone
+    # can cause, before receipts publish or any row changes.
+    plan = await plan_source_restore(
+        client.execute_query,
+        integrity,
+        kind=SourceKind.RAW_CAPTURE,
+        organizations=scope,
+        clean=clean,
+        skip_existing=False,
+        global_scope=global_scope,
+    )
+    if organization_id is not None:
+        await _check_auxiliary_ownership(client, auxiliary_restores, organization_id)
+    cleanup = await _plan_auxiliary_cleanup(client, organization_id) if clean else []
+    await asyncio.to_thread(validation_receipt_archive.publish, pending_receipts)
+    # Raw captures land first with their own clean deletes, then the auxiliary
+    # wipe, then auxiliary rows in archive order. Each auxiliary statement
+    # checks its row against the destination inside its batch's transaction.
+    try:
+        await apply_source_restore(client.execute_query, plan)
+        await apply_cleanup(client.execute_query, cleanup, refusal=_AUXILIARY_CHANGED)
+        for batch in restore_batches(auxiliary_restores):
+            parameters: dict[str, object] = {"organization_id": organization_id}
+            for row in batch:
+                parameters.update(row.parameters)
+            statements = "\n".join(row.statement for row in batch)
+            await client.execute_query(
+                f"BEGIN TRANSACTION;\n{statements}\nCOMMIT TRANSACTION;", **parameters
+            )
+    except Exception as exc:
+        raise RuntimeError(interrupted_restore(exc)) from exc
+    return plan.restored, plan.conflicts
 
 
 async def restore_content_archive_payload(
@@ -1138,7 +1248,6 @@ async def restore_content_archive_payload(
     if organization_id is not None and global_scope:
         raise ValueError("global content scope cannot be applied to an organization-scoped archive")
 
-    from sibyl_core.memory_pipeline.observations import SourceKind
     from sibyl_core.migrate.archive_lineage import seal_archive_lineage
 
     _, sealed, _ = seal_archive_lineage(None, payload)
@@ -1161,15 +1270,12 @@ async def restore_content_archive_payload(
             integrity, legacy_dropped = await _filter_legacy_source_fields(client, integrity, scope)
             if legacy_dropped:
                 dropped_fields["raw_captures"] = legacy_dropped
-        from sibyl_core.services.source_archive_store import restore_source_integrity
-
         (
             auxiliary_tables,
             auxiliary_rows,
             errors,
             auxiliary_dropped,
-            auxiliary_sql,
-            auxiliary_parameters,
+            auxiliary_restores,
         ) = await _prepare_auxiliary_content_restore(
             client, tables, organization_id, legacy=payload.get("version", "1.0") == "1.0"
         )
@@ -1180,51 +1286,23 @@ async def restore_content_archive_payload(
         pending_receipts = await asyncio.to_thread(
             validation_receipt_archive.prepare_payload, payload
         )
-        specs = [
-            spec
-            for spec in _CONTENT_ARCHIVE_TABLE_SPECS
-            if spec.name != "raw_captures"
-            and (organization_id is None or spec.name not in _GLOBAL_CONTENT_ARCHIVE_TABLES)
-        ]
-        predicate = "" if organization_id is None else " WHERE organization_id = $organization_id"
-        snapshot_fields = ", ".join(
-            f"{spec.name}: (SELECT * FROM {spec.name}{predicate} ORDER BY id)"  # noqa: S608
-            for spec in specs
-        )
-        snapshot = f"crypto::sha256(type::string({{{snapshot_fields}}}))"
-        fingerprints = await client.execute_query(
-            f"RETURN {{ fingerprint: {snapshot} }};", organization_id=organization_id
-        )
-        auxiliary_parameters["archive_auxiliary_fingerprint"] = _normalize_records(fingerprints)[0][
-            "fingerprint"
-        ]
-        auxiliary_sql = (
-            f"IF {snapshot} != $archive_auxiliary_fingerprint {{ "
-            "THROW 'archive auxiliary destination changed before restore'; };\n"
-            + (_clean_content_archive_statements(organization_id) if clean else "")
-            + auxiliary_sql
-        )
         try:
-            await asyncio.to_thread(validation_receipt_archive.publish, pending_receipts)
-            restored = await restore_source_integrity(
-                client.execute_query,
+            restored_ids, integrity_conflicts = await _restore_content_sources_and_rows(
+                client,
                 integrity,
-                kind=SourceKind.RAW_CAPTURE,
-                organizations=scope,
+                auxiliary_restores,
+                pending_receipts,
+                scope=scope,
+                organization_id=organization_id,
                 clean=clean,
-                skip_existing=False,
                 global_scope=global_scope,
-                auxiliary_statements=auxiliary_sql,
-                auxiliary_parameters=auxiliary_parameters,
             )
         except Exception as exc:
             return ContentArchiveRestoreResult(
                 success=False, tables_restored=0, rows_restored=0, errors=[str(exc)]
             )
-        restored_ids = restored["restored_source_ids"]
         rows_restored += len(restored_ids)
         tables_restored += 1
-        integrity_conflicts = restored["conflicts"]
         quarantined = [
             {
                 "source_id": identity,

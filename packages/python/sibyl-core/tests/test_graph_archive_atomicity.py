@@ -1,4 +1,4 @@
-"""Public graph restore commits sources and every companion as one unit."""
+"""Public graph restore refuses a bad archive before any write and fences each batch."""
 
 import os
 from contextlib import asynccontextmanager
@@ -122,10 +122,13 @@ async def test_malformed_graph_companion_rejects_before_destination(
 
 
 @pytest.mark.parametrize("clean", [False, True])
-async def test_companion_nanosecond_change_fences_source_restore(
+async def test_companion_nanosecond_change_refuses_its_batch(
     runtime, destination, monkeypatch, clean
 ):
+    # A clean restore deletes the destination episode; a merge that does not
+    # skip existing companions rewrites it. Either way it decided on that row.
     await episode(destination.client, "racing-episode")
+    await episode(runtime.client, "racing-episode")
     backup = await create_backup(organization_id=runtime.client.group_id)
     assert backup.success, backup.message
     monkeypatch.setattr(
@@ -134,14 +137,15 @@ async def test_companion_nanosecond_change_fences_source_restore(
     execute = destination.client.execute_query
     changed = False
     preserved = None
+    marker = (
+        "archive destination changed before restore"
+        if clean
+        else "archive companion destination changed before restore"
+    )
 
     async def race(query, **parameters):
         nonlocal changed, preserved
-        if (
-            "BEGIN TRANSACTION" in query
-            and "archive_companion_fingerprint" in query
-            and not changed
-        ):
+        if "BEGIN TRANSACTION" in query and marker in query and not changed:
             changed = True
             await execute(
                 "UPDATE episode SET created_at=d'2026-09-10T02:47:11.572211764Z' WHERE uuid='racing-episode';"
@@ -151,7 +155,10 @@ async def test_companion_nanosecond_change_fences_source_restore(
 
     monkeypatch.setattr(destination.client, "execute_query", race)
     result = await restore_backup(
-        backup.backup_data, organization_id=runtime.client.group_id, clean=clean
+        backup.backup_data,
+        organization_id=runtime.client.group_id,
+        clean=clean,
+        skip_existing=False,
     )
     assert changed
     assert not result.success
@@ -349,7 +356,7 @@ async def test_native_relationship_restore_respects_existing_identity(
     assert result.relationships_skipped == (0 if clean else 2 if skip_existing else 1)
 
 
-async def test_native_relationship_skip_snapshot_change_fences_restore(
+async def test_native_relationship_rewrite_refuses_a_concurrent_edit(
     native_archive_runtimes, monkeypatch
 ):
     source_runtime, destination_runtime = native_archive_runtimes
@@ -379,7 +386,7 @@ async def test_native_relationship_skip_snapshot_change_fences_restore(
 
     async def race(query, **parameters):
         nonlocal changed, preserved
-        if "BEGIN TRANSACTION" in query and "archive_companion_fingerprint" in parameters:
+        if "BEGIN TRANSACTION" in query and "companion_digest" in parameters:
             assert not changed
             changed = True
             await destination_runtime.relationship_manager.create_direct_bulk(
@@ -390,7 +397,7 @@ async def test_native_relationship_skip_snapshot_change_fences_restore(
 
     monkeypatch.setattr(destination_runtime.client, "execute_query", race)
     result = await restore_backup(
-        backup.backup_data, organization_id=organization, skip_existing=True
+        backup.backup_data, organization_id=organization, skip_existing=False
     )
     assert changed
     assert not result.success

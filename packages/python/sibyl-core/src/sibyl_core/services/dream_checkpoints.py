@@ -501,11 +501,15 @@ def archive_dream_restore_statement(table: str, record: dict[str, object]) -> st
     # These checked scalar values become literal JSON, never executable archive SQL.
     incarnation = canonical(request["incarnation"])
     generation = request["generation"]
+    # Plain variables keep the lookups indexed: SurrealDB 3.2 scans the whole
+    # table for `source_id = $record.source_id`.
     return f"""
-        LET $source = (SELECT * FROM raw_captures WHERE uuid = $record.source_id
-            AND organization_id = $record.organization_id LIMIT 1)[0];
-        LET $state = (SELECT * FROM source_states WHERE source_id = $record.source_id
-            AND organization_id = $record.organization_id AND source_kind = 'raw_capture' LIMIT 1)[0];
+        LET $record_source = $record.source_id;
+        LET $record_organization = $record.organization_id;
+        LET $source = (SELECT * FROM raw_captures WHERE uuid = $record_source
+            AND organization_id = $record_organization LIMIT 1)[0];
+        LET $state = (SELECT * FROM source_states WHERE source_id = $record_source
+            AND organization_id = $record_organization AND source_kind = 'raw_capture' LIMIT 1)[0];
         IF $source = NONE OR $state = NONE OR $state.deleted != false
             OR $state.incarnation != {incarnation} OR $state.generation < {generation} {{
             THROW 'Dream archive source was revoked or replaced';

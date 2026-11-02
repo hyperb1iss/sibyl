@@ -16,6 +16,7 @@ from typing import Annotated, Any
 from uuid import uuid4
 
 import typer
+from rich.markup import escape
 
 from sibyl.cli.common import console, error, info, run_async, success, warn
 from sibyl.config import settings
@@ -617,6 +618,8 @@ def _restore_graph_payload(backup_dict: dict[str, object], org_id: str, *, clean
                 )
             else:
                 warn(f"  Graph restore completed with errors: {len(result.errors)}")
+                for issue in result.errors[:10]:
+                    console.print(f"  [dim]{escape(issue)}[/dim]")
 
             return result.success
         except Exception as exc:

@@ -606,6 +606,7 @@ async def restore_backup(
     mentions_skipped = 0
     integrity_conflicts: list[dict[str, str]] = []
     quarantined: list[dict[str, str]] = []
+    writing = False
 
     try:
         from dataclasses import asdict
@@ -616,11 +617,18 @@ async def restore_backup(
             normalize_relationship_payloads,
         )
         from sibyl_core.migrate.archive_lineage import seal_archive_lineage
-        from sibyl_core.migrate.graph_companion_restore import prepare_companion_restore
+        from sibyl_core.migrate.graph_companion_restore import (
+            apply_companions,
+            plan_companions,
+            prepare_companion_restore,
+        )
         from sibyl_core.migrate.graph_companions import relationship_from_archive
         from sibyl_core.migrate.legacy_source_archive import build_legacy_source_archive
         from sibyl_core.services.graph_entity_store import _entity_record
-        from sibyl_core.services.source_archive_store import restore_source_integrity
+        from sibyl_core.services.source_archive_store import (
+            apply_source_restore,
+            plan_source_restore,
+        )
 
         # Validate the entire payload before any source or companion can change.
         episodes = [
@@ -654,18 +662,17 @@ async def restore_backup(
             integrity, unavailable_ids = build_legacy_source_archive(
                 records, kind=SourceKind.GRAPH_ENTITY, organizations=[organization_id]
             )
-        runtime = await get_graph_runtime(organization_id)
-        driver = runtime.client
-        companions = await prepare_companion_restore(
-            driver,
+        companions = prepare_companion_restore(
             organization_id=organization_id,
             episodes=episodes,
             relationships=relationships,
             mentions=mentions,
-            skip_existing=skip_existing,
-            clean=clean,
         )
-        restored = await restore_source_integrity(
+        runtime = await get_graph_runtime(organization_id)
+        driver = runtime.client
+        # Every write is decided, and every refusal raised, before the first
+        # one is sent. The writes then go out in bounded transactions.
+        plan = await plan_source_restore(
             driver.execute_query,
             integrity,
             kind=SourceKind.GRAPH_ENTITY,
@@ -673,15 +680,23 @@ async def restore_backup(
             skip_existing=skip_existing,
             clean=clean,
             clean_graph_auxiliary=clean,
-            auxiliary_preconditions=companions.preconditions,
-            auxiliary_statements=companions.statements,
-            auxiliary_parameters=companions.parameters,
         )
-        restored_ids = restored["restored_source_ids"]
+        companion_writes = await plan_companions(
+            driver,
+            companions,
+            skip_existing=skip_existing,
+            clean=clean,
+            entities={identity for _, identity in plan.present},
+        )
+        writing = True
+        await apply_source_restore(driver.execute_query, plan)
+        await apply_companions(driver, companion_writes)
+        companion_counts = companion_writes.counts
+        restored_ids = plan.restored
         await _reopen_graph_embedding_plane(driver, organization_id)
         entities_restored = len(restored_ids)
         entities_skipped = backup_data.entity_count - entities_restored
-        integrity_conflicts = restored["conflicts"]
+        integrity_conflicts = plan.conflicts
         quarantined.extend(
             {
                 "source_id": identity,
@@ -691,12 +706,12 @@ async def restore_backup(
             for identity in restored_ids
             if identity in unavailable_ids
         )
-        episodes_restored = companions.episodes_restored
-        episodes_skipped = companions.episodes_skipped
-        relationships_restored = companions.relationships_restored
-        relationships_skipped = companions.relationships_skipped
-        mentions_restored = companions.mentions_restored
-        mentions_skipped = companions.mentions_skipped
+        episodes_restored = companion_counts.episodes_restored
+        episodes_skipped = companion_counts.episodes_skipped
+        relationships_restored = companion_counts.relationships_restored
+        relationships_skipped = companion_counts.relationships_skipped
+        mentions_restored = companion_counts.mentions_restored
+        mentions_skipped = companion_counts.mentions_skipped
 
         duration = time.time() - start_time
         log.info(
@@ -731,13 +746,18 @@ async def restore_backup(
 
     except Exception as e:
         log.exception("Restore failed", error=str(e))
+        message = str(e)
+        if writing:
+            from sibyl_core.services.source_archive_store import interrupted_restore
+
+            message = interrupted_restore(e)
         return RestoreResult(
             success=False,
             entities_restored=entities_restored,
             relationships_restored=relationships_restored,
             entities_skipped=entities_skipped,
             relationships_skipped=relationships_skipped,
-            errors=[str(e), *errors[:49]],
+            errors=[message, *errors[:49]],
             duration_seconds=time.time() - start_time,
             episodes_restored=episodes_restored,
             episodes_skipped=episodes_skipped,

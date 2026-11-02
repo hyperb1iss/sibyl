@@ -490,6 +490,16 @@ rollback. Preserve the failed archive and destination, inspect the reported stag
 after correcting the cause. The loader accepts only Sibyl archives and API backups; it does not read
 raw database dumps or archives from other memory systems.
 
+The content and graph stages each plan before they write, then write in bounded transactions, so no
+request or transaction grows with the organization. An archive the destination refuses outright (a
+foreign record at a source's key, a row whose identity another organization holds, a relationship or
+mention whose endpoint is missing) fails before anything is written. Raw captures land first, with
+their source history; the content stage's history checks (retained operation history, revoked
+validation or dream sources) run as those rows are written. The graph stage writes entities with
+their source history, then episodes, relationships and mentions. A failure partway leaves whole
+sources behind, never a row without its history, and running the same import again finishes the
+restore: sources already restored are recognized and skipped.
+
 ### Completed validation receipts
 
 Content archive 2.3 includes encrypted completion receipts for the archived validation executions. A
@@ -510,8 +520,8 @@ request and key before any content writes. Existing destination history, source 
 purge rules still apply. Older content archives remain supported but cannot supply omitted journal
 files.
 
-Receipts are published privately and create-only before the content transaction. If that transaction
-fails, ciphertext may remain without an authorized execution row. Preserve the failed archive and
+Receipts are published privately and create-only before the content writes. If those writes fail,
+ciphertext may remain without an authorized execution row. Preserve the failed archive and
 the receipt directory or bucket, then retry the same import after resolving the reported conflict.
 Import never replaces conflicting receipt bytes or restores an erased recovery key over current
 destination history.

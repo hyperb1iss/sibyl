@@ -233,3 +233,49 @@ async def test_legacy_operation_without_generated_date_repeats_without_rewrite(
     assert not conflicting.success
     assert any("retained operation history" in error for error in conflicting.errors)
     assert await fingerprint(destination) == before
+
+
+async def test_content_restore_sends_bounded_batches(archive_stores, monkeypatch):
+    from sibyl_core.services import source_archive_store
+
+    monkeypatch.setattr(source_archive_store, "ARCHIVE_RESTORE_BATCH_SIZE", 2)
+    source, destination = archive_stores
+    org = str(uuid4())
+    for index in range(5):
+        await raw(source, org, f"capture-{index}")
+    for index in range(3):
+        await source.execute_query(
+            "CREATE content_changefeed_cursors CONTENT $record;",
+            record={
+                "uuid": str(uuid4()),
+                "organization_id": org,
+                "table_name": "raw_captures",
+                "consumer_name": f"consumer-{index}",
+                "versionstamp": index,
+            },
+        )
+    monkeypatch.setattr(content_archive, "build_surreal_content_client", lambda: source)
+    payload = await content_archive.export_content_archive_payload(org)
+    monkeypatch.setattr(content_archive, "build_surreal_content_client", lambda: destination)
+    execute = destination.execute_query
+    sent: list[dict] = []
+
+    async def recording(query, **parameters):
+        sent.append(parameters)
+        return await execute(query, **parameters)
+
+    monkeypatch.setattr(destination, "execute_query", recording)
+    result = await content_archive.restore_content_archive_payload(payload, clean=True)
+
+    assert result.success, result.errors
+    assert result.rows_restored == 8
+    rows = [
+        len(parameters[name])
+        for parameters in sent
+        for name in ("units", "keys", "writes", "records")
+        if isinstance(parameters.get(name), list)
+    ] + [sum(name.startswith("archive_record_") for name in parameters) for parameters in sent]
+    assert max(rows) <= 2
+    for table in ("raw_captures", "content_changefeed_cursors"):
+        query = f"SELECT uuid FROM {table} ORDER BY uuid;"  # noqa: S608
+        assert await execute(query) == await source.execute_query(query)

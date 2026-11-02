@@ -37,14 +37,51 @@ from sibyl_core.tools.admin import (
 @pytest.fixture
 def archive_restore(monkeypatch):
     """Expose serialized source units; real transactional behavior has SDK controls."""
+    from sibyl_core.memory_pipeline.observations import SourceKind
+    from sibyl_core.migrate.graph_companion_restore import (
+        CompanionRestoreResult,
+        CompanionRestoreWrites,
+    )
     from sibyl_core.migrate.source_integrity import validate_integrity_archive
+    from sibyl_core.services.source_archive_store import SourceRestorePlan
 
-    async def restored(_execute, payload, *, kind, organizations, **_policy):
+    def source_plan(restored):
+        return SourceRestorePlan(
+            kind=SourceKind.GRAPH_ENTITY,
+            cleanup=[],
+            batches=[],
+            restored=restored,
+            conflicts=[],
+            present=set(),
+        )
+
+    async def planned(_execute, payload, *, kind, organizations, **_policy):
         rows, _, _ = validate_integrity_archive(payload, kind=kind, organizations=organizations)
-        return {"restored_source_ids": [row["uuid"] for row in rows], "conflicts": []}
+        return source_plan([row["uuid"] for row in rows])
 
-    seam = AsyncMock(side_effect=restored)
-    monkeypatch.setattr("sibyl_core.services.source_archive_store.restore_source_integrity", seam)
+    async def companions_planned(_client, plan, **_policy):
+        return CompanionRestoreWrites(
+            counts=CompanionRestoreResult(
+                episodes_restored=len(plan.episodes),
+                episodes_skipped=0,
+                relationships_restored=len(plan.relationships),
+                relationships_skipped=0,
+                mentions_restored=len(plan.mentions),
+                mentions_skipped=0,
+            )
+        )
+
+    seam = AsyncMock(side_effect=planned)
+    seam.plan = source_plan
+    seam.companions = AsyncMock(side_effect=companions_planned)
+    monkeypatch.setattr("sibyl_core.services.source_archive_store.plan_source_restore", seam)
+    monkeypatch.setattr(
+        "sibyl_core.services.source_archive_store.apply_source_restore", AsyncMock()
+    )
+    monkeypatch.setattr(
+        "sibyl_core.migrate.graph_companion_restore.plan_companions", seam.companions
+    )
+    monkeypatch.setattr("sibyl_core.migrate.graph_companion_restore.apply_companions", AsyncMock())
     return seam
 
 
@@ -347,10 +384,7 @@ class TestRestoreBackup:
         entity_manager.create_direct_bulk.assert_not_awaited()
         entity_manager.create_direct.assert_not_awaited()
         relationship_manager.create_bulk.assert_not_awaited()
-        assert (
-            len(archive_restore.await_args.kwargs["auxiliary_parameters"]["archive_relationships"])
-            == 1
-        )
+        assert len(archive_restore.companions.await_args.args[1].relationships) == 1
         relationship_manager.create.assert_not_awaited()
 
     @pytest.mark.asyncio
@@ -591,7 +625,7 @@ class TestRestoreBackup:
         self, archive_restore
     ) -> None:
         archive_restore.side_effect = None
-        archive_restore.return_value = {"restored_source_ids": ["entity-2"], "conflicts": []}
+        archive_restore.return_value = archive_restore.plan(["entity-2"])
         org_id = "00000000-0000-0000-0000-000000000111"
         entity_manager = AsyncMock()
         relationship_manager = AsyncMock()
@@ -938,9 +972,7 @@ class TestRestoreBackup:
 
         assert result.success is True
         restored_entities = archived_entities(archive_restore)
-        restored_relationships = archive_restore.await_args.kwargs["auxiliary_parameters"][
-            "archive_relationships"
-        ]
+        restored_relationships = archive_restore.companions.await_args.args[1].relationships
         assert [entity.id for entity in restored_entities] == ["project-1", "task-1"]
         assert restored_entities[1].metadata["source_ids"] == ["source:task"]
         assert restored_relationships[0]["source_id"] == "task-1"

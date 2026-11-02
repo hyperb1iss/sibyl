@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable, Sequence
+from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
 
@@ -196,186 +198,120 @@ def _mark_unverified_entity_vector(record: dict[str, Any]) -> None:
     mark_unverified_vector(attributes, has_vector=bool(record.get("name_embedding")))
 
 
-async def restore_source_integrity(
-    execute_query: SurrealExecute,
-    payload: object,
+# A restore carries at most this many source units, companions, or deleted rows
+# in one request and one transaction, whatever the size of the organization.
+ARCHIVE_RESTORE_BATCH_SIZE = 200
+
+_DESTINATION_CHANGED = "archive destination changed before restore"
+
+
+def restore_batches[T](items: Sequence[T]) -> list[list[T]]:
+    """Cut restore work into the bounded batches one transaction carries."""
+    size = ARCHIVE_RESTORE_BATCH_SIZE
+    return [list(items[start : start + size]) for start in range(0, len(items), size)]
+
+
+@dataclass
+class _UnitDecision:
+    """What restoring one source unit does to the destination."""
+
+    delete: str | None = None
+    write: dict[str, Any] | None = None
+    ledger: dict[str, Any] | None = None
+    association: dict[str, Any] | None = None
+    retire_association: bool = False
+    conflict: str | None = None
+
+
+def _decide_unit(
     *,
     kind: SourceKind,
-    organizations: list[str],
-    clean: bool = False,
-    skip_existing: bool = True,
-    global_scope: bool = False,
-    clean_graph_auxiliary: bool = False,
-    auxiliary_preconditions: str = "",
-    auxiliary_statements: str = "",
-    auxiliary_parameters: dict[str, Any] | None = None,
-) -> dict[str, Any]:
-    """Restore complete source units without lowering destination trust history."""
+    record_key: str | None,
+    incoming_state: dict[str, Any],
+    row: dict[str, Any] | None,
+    association: dict[str, Any] | None,
+    previous: dict[str, Any] | None,
+    previous_row: dict[str, Any] | None,
+    prior_association: dict[str, Any] | None,
+    skip_existing: bool,
+) -> _UnitDecision:
+    """Decide one unit against its destination state, never lowering trust history."""
     from copy import deepcopy
 
-    from sibyl_core.migrate.source_integrity import validate_integrity_archive
-
-    if clean_graph_auxiliary and (not clean or kind is not SourceKind.GRAPH_ENTITY):
-        raise ValueError("graph companion cleanup requires a scoped clean graph restore")
-    if global_scope and kind is not SourceKind.RAW_CAPTURE:
-        raise ValueError("global restore scope is only supported for the shared raw source store")
-    rows, states, associations = validate_integrity_archive(
-        payload, kind=kind, organizations=organizations
+    fresh = previous is None and previous_row is None and prior_association is None
+    same_state = previous is not None and all(
+        previous.get(name) == incoming_state.get(name)
+        for name in ("incarnation", "generation", "deleted")
     )
-    before = await read_source_archive_snapshot(
-        execute_query,
-        kind=kind,
-        organizations=None if global_scope else organizations,
-        include_graph_auxiliary=clean_graph_auxiliary,
+    forward = previous is not None and (
+        previous["incarnation"] == incoming_state["incarnation"]
+        and previous["generation"] < incoming_state["generation"]
+        and not previous["deleted"]
     )
-    table, org_field = source_table(kind)
-    row_scope = "true" if global_scope else f"{org_field} IN $organizations"
-    ledger_scope = "true" if global_scope else "organization_id IN $organizations"
-
-    def row_key(row):
-        return row[org_field], row["uuid"]
-
-    def state_key(state):
-        return state["organization_id"], state["source_id"]
-
-    def association_key(association):
-        return association["organization_id"], association["target_id"]
-
-    old_rows = {row_key(row): row for row in before["source_rows"]}
-    old_states = {state_key(state): state for state in before["source_states"]}
-    old_associations = {association_key(row): row for row in before["derivations"]}
-    incoming_rows = {row_key(row): row for row in rows}
-    incoming_states = {state_key(state): state for state in states}
-    incoming_associations = {association_key(row): row for row in associations}
-    writes: list[dict[str, Any]] = []
-    ledger_writes: list[dict[str, Any]] = []
-    association_writes: list[dict[str, Any]] = []
-    deletes: list[str] = []
-    conflicts: list[dict[str, str]] = []
-    restored: list[str] = []
-
-    for key, incoming_state in incoming_states.items():
-        row = incoming_rows.get(key)
-        previous = old_states.get(key)
-        previous_row = old_rows.get(key)
-        prior_association = old_associations.get(key)
-        fresh = previous is None and previous_row is None and prior_association is None
-        same_state = previous is not None and all(
-            previous.get(field) == incoming_state.get(field)
-            for field in ("incarnation", "generation", "deleted")
-        )
-        forward = previous is not None and (
-            previous["incarnation"] == incoming_state["incarnation"]
-            and previous["generation"] < incoming_state["generation"]
-            and not previous["deleted"]
-        )
-        trusted = fresh or ((same_state or forward) and (row is None or previous_row is not None))
-        if previous is not None and previous["deleted"] and row is not None:
-            conflicts.append(
-                {"organization_id": key[0], "source_id": key[1], "reason": "retained_tombstone"}
+    trusted = fresh or ((same_state or forward) and (row is None or previous_row is not None))
+    if previous is not None and previous["deleted"] and row is not None:
+        return _UnitDecision(conflict="retained_tombstone")
+    if row is not None and previous_row is not None and not trusted:
+        recallable, audience = _source_visibility(previous_row, kind)
+        _, incoming_audience = _source_visibility(row, kind)
+        if not recallable or audience != incoming_audience:
+            return _UnitDecision(
+                conflict="retained_source_revocation"
+                if not recallable
+                else "retained_source_authority"
             )
-            continue
-        if row is not None and previous_row is not None and not trusted:
-            recallable, audience = _source_visibility(previous_row, kind)
-            _, incoming_audience = _source_visibility(row, kind)
-            if not recallable or audience != incoming_audience:
-                conflicts.append(
-                    {
-                        "organization_id": key[0],
-                        "source_id": key[1],
-                        "reason": "retained_source_revocation"
-                        if not recallable
-                        else "retained_source_authority",
-                    }
-                )
-                continue
-        if row is None:
-            if fresh or forward:
-                if previous_row is not None:
-                    deletes.append(previous_row["archive_record_key"])
-                ledger_writes.append(incoming_state)
-            elif not same_state:
-                conflicts.append(
-                    {
-                        "organization_id": key[0],
-                        "source_id": key[1],
-                        "reason": "retained_high_water",
-                    }
-                )
-                continue
-        elif previous_row is not None and (skip_existing or same_state):
-            if not same_state:
-                conflicts.append(
-                    {
-                        "organization_id": key[0],
-                        "source_id": key[1],
-                        "reason": "existing_source_preserved",
-                    }
-                )
-                continue
-        else:
-            record = deepcopy(row)
-            record_key = record.pop("archive_record_key", None)
-            if not isinstance(record_key, str) or not record_key.startswith(table + ":"):
-                raise ValueError("archive source record key does not match its table")
+    decision = _UnitDecision()
+    if row is None:
+        if fresh or forward:
             if previous_row is not None:
-                record_key = previous_row["archive_record_key"]
-                record["revision"] = max(record["revision"], previous_row["revision"] + 1)
-            if (
-                key in incoming_associations
-                or prior_association is not None
-                or (previous_row or {}).get("derivation_required") is True
-            ):
-                record["derivation_required"] = True
-            if kind is SourceKind.GRAPH_ENTITY:
-                _mark_unverified_entity_vector(record)
-            writes.append({"key": record_key, "record": record})
-            restored.append(key[1])
-            if trusted:
-                ledger_writes.append({**incoming_state, "revision": record["revision"]})
-            else:
-                if prior_association is not None:
-                    association_writes.append({**prior_association, "active": False})
-                conflicts.append(
-                    {
-                        "organization_id": key[0],
-                        "source_id": key[1],
-                        "reason": "incoming_lineage_not_adopted",
-                    }
-                )
-        association = incoming_associations.get(key)
-        if association is not None and trusted:
-            if prior_association is not None and prior_association["active"] is False:
-                continue
-            association_writes.append(association)
+                decision.delete = previous_row["archive_record_key"]
+            decision.ledger = incoming_state
+        elif not same_state:
+            return _UnitDecision(conflict="retained_high_water")
+    elif previous_row is not None and (skip_existing or same_state):
+        if not same_state:
+            return _UnitDecision(conflict="existing_source_preserved")
+    else:
+        record = deepcopy(row)
+        record.pop("archive_record_key", None)
+        if previous_row is not None:
+            record_key = previous_row["archive_record_key"]
+            record["revision"] = max(record["revision"], previous_row["revision"] + 1)
+        if (
+            association is not None
+            or prior_association is not None
+            or (previous_row or {}).get("derivation_required") is True
+        ):
+            record["derivation_required"] = True
+        if kind is SourceKind.GRAPH_ENTITY:
+            _mark_unverified_entity_vector(record)
+        decision.write = {"key": record_key, "record": record}
+        if trusted:
+            decision.ledger = {**incoming_state, "revision": record["revision"]}
+        else:
+            decision.retire_association = prior_association is not None
+            decision.conflict = "incoming_lineage_not_adopted"
+    if association is not None and trusted:
+        if prior_association is not None and prior_association["active"] is False:
+            return decision
+        decision.association = association
+    return decision
 
-    if clean:
-        deletes.extend(
-            row["archive_record_key"] for key, row in old_rows.items() if key not in incoming_states
-        )
-    companion_sql = _graph_auxiliary_snapshot_sql() if clean_graph_auxiliary else ""
-    companion_field = ", graph_auxiliary: $graph_auxiliary" if clean_graph_auxiliary else ""
-    companion_cleanup = (
-        """FOR $row IN array::concat($graph_auxiliary.relates_to,
-        $graph_auxiliary.mentions, $graph_auxiliary.episode) { DELETE type::record($row.archive_record_key); };"""
-        if clean_graph_auxiliary
-        else ""
-    )
-    query = f"""BEGIN TRANSACTION;
-        LET $rows = SELECT *, type::string(id) AS archive_record_key OMIT id
-            FROM {table} WHERE {row_scope} ORDER BY {org_field}, uuid;
-        LET $states = SELECT * OMIT id FROM source_states
-            WHERE {ledger_scope} AND source_kind=$kind
-            ORDER BY organization_id, source_id;
-        LET $associations = SELECT * OMIT id FROM memory_derivations
-            WHERE {ledger_scope} AND target_kind=$kind
-            ORDER BY organization_id, target_id;
-        {companion_sql}
-        IF crypto::sha256(type::string({{ source_rows: $rows, source_states: $states, derivations: $associations {companion_field} }})) != $expected {{
-            THROW 'archive destination changed before restore';
-        }};
-        {auxiliary_preconditions}
-        {companion_cleanup}
+
+def _archive_record_key(row: dict[str, Any] | None, table: str) -> str | None:
+    if row is None:
+        return None
+    record_key = row.get("archive_record_key")
+    if not isinstance(record_key, str) or not record_key.startswith(table + ":"):
+        raise ValueError("archive source record key does not match its table")
+    return record_key
+
+
+def _source_write_statements(org_field: str) -> str:
+    # Each loop binds a row's fields to plain variables before filtering on
+    # them: SurrealDB 3.2 plans `field = $row.field` as a whole-table scan and
+    # `field = $value` as an index lookup.
+    return f"""
         FOR $key IN $deletes {{ DELETE type::record($key); }};
         FOR $entry IN $writes {{
             LET $existing = (SELECT * FROM type::record($entry.key))[0];
@@ -391,35 +327,368 @@ async def restore_source_integrity(
             UPSERT $key CONTENT $state;
         }};
         FOR $association IN $association_writes {{
+            LET $organization = $association.organization_id;
+            LET $target = $association.target_id;
             LET $existing = (SELECT id FROM memory_derivations
-                WHERE organization_id=$association.organization_id AND target_kind=$kind
-                    AND target_id=$association.target_id LIMIT 1)[0];
+                WHERE organization_id=$organization AND target_kind=$kind
+                    AND target_id=$target LIMIT 1)[0];
             IF $existing = NONE {{ CREATE memory_derivations CONTENT $association; }}
             ELSE {{ UPDATE $existing.id CONTENT $association; }};
         }};
-        {auxiliary_statements}
+    """
+
+
+def _conflict(key: tuple[str, str], reason: str) -> dict[str, str]:
+    return {"organization_id": key[0], "source_id": key[1], "reason": reason}
+
+
+_RECORDS_PROJECTION = "$records.map(|$record| (SELECT * FROM $record)[0])"
+
+
+@dataclass(frozen=True)
+class CleanupPage:
+    """Rows a clean restore deletes, with the digest of their planned contents."""
+
+    records: list[Any]
+    digest: str
+
+
+async def plan_cleanup(
+    execute_query: SurrealExecute,
+    table: str,
+    *,
+    organization_field: str,
+    scope: str,
+    keep: Callable[[tuple[object, object]], bool],
+    **params: Any,
+) -> list[CleanupPage]:
+    """Find the rows in scope that ``keep`` rejects, one bounded page at a time.
+
+    Pages walk the table in record order and resume after the last id, so a
+    page costs the same at any depth. ``WITH NOINDEX`` keeps the plan a scan
+    that stops at the page limit rather than an index plan that sorts the
+    whole table for every page.
+    """
+    cursor: object = None
+    pages: list[CleanupPage] = []
+    while True:
+        bound = {**params, "restore_page_size": ARCHIVE_RESTORE_BATCH_SIZE}
+        seek = ""
+        if cursor is not None:
+            seek = " AND id > $restore_cursor"
+            bound["restore_cursor"] = cursor
+        result = await execute_query(
+            f"SELECT id, {organization_field} AS organization, uuid FROM {table} "
+            f"WITH NOINDEX WHERE {scope}{seek} ORDER BY id LIMIT $restore_page_size;",
+            **bound,
+        )
+        rows = [row for row in result if isinstance(row, dict)] if isinstance(result, list) else []
+        if not rows:
+            return pages
+        cursor = rows[-1]["id"]
+        doomed = [row["id"] for row in rows if not keep((row.get("organization"), row.get("uuid")))]
+        if doomed:
+            digest = await execute_query(
+                f"RETURN crypto::sha256(type::string({_RECORDS_PROJECTION}));", records=doomed
+            )
+            if not isinstance(digest, str):
+                raise ValueError("archive cleanup read returned an invalid shape")
+            pages.append(CleanupPage(records=doomed, digest=digest))
+        if len(rows) < ARCHIVE_RESTORE_BATCH_SIZE:
+            return pages
+
+
+async def apply_cleanup(
+    execute_query: SurrealExecute,
+    pages: Sequence[CleanupPage],
+    *,
+    refusal: str = _DESTINATION_CHANGED,
+) -> None:
+    """Delete each planned page, refusing one whose rows moved since it was read."""
+    for page in pages:
+        await execute_query(
+            f"""BEGIN TRANSACTION;
+            IF crypto::sha256(type::string({_RECORDS_PROJECTION})) != $expected {{
+                THROW '{refusal}';
+            }};
+            FOR $record IN $records {{ DELETE $record; }};
+            COMMIT TRANSACTION;""",
+            records=page.records,
+            expected=page.digest,
+        )
+
+
+def interrupted_restore(error: BaseException) -> str:
+    """Describe a restore that failed after its first committed write."""
+    return (
+        "restore stopped partway; the whole units already written are kept, and "
+        f"running the same import again finishes it: {error}"
+    )
+
+
+def _unit_state_projection(table: str, org_field: str) -> str:
+    """Everything a source unit's restore decision reads, found by its identity.
+
+    Each unit carries its own kind: the embedded engine does not bind query
+    parameters inside a closure.
+    """
+    return f"""$units.map(|$unit| {{
+        row: (SELECT *, type::string(id) AS archive_record_key OMIT id FROM {table}
+            WHERE {org_field} = $unit.organization AND uuid = $unit.source LIMIT 1)[0],
+        state: (SELECT * OMIT id FROM source_states
+            WHERE organization_id = $unit.organization AND source_kind = $unit.kind
+                AND source_id = $unit.source LIMIT 1)[0],
+        association: (SELECT * OMIT id FROM memory_derivations
+            WHERE organization_id = $unit.organization AND target_kind = $unit.kind
+                AND target_id = $unit.source LIMIT 1)[0]
+    }})"""
+
+
+@dataclass
+class _UnitBatch:
+    """One bounded transaction of source units and the state they were planned on."""
+
+    units: list[dict[str, str]]
+    digest: str
+    deletes: list[str] = field(default_factory=list)
+    writes: list[dict[str, Any]] = field(default_factory=list)
+    ledger_writes: list[dict[str, Any]] = field(default_factory=list)
+    association_writes: list[dict[str, Any]] = field(default_factory=list)
+    retired_associations: list[dict[str, str]] = field(default_factory=list)
+
+    def changes_anything(self) -> bool:
+        return bool(
+            self.deletes
+            or self.writes
+            or self.ledger_writes
+            or self.association_writes
+            or self.retired_associations
+        )
+
+
+@dataclass
+class SourceRestorePlan:
+    """Every write a restore makes, decided before the first one is sent."""
+
+    kind: SourceKind
+    cleanup: list[CleanupPage]
+    batches: list[_UnitBatch]
+    restored: list[str]
+    conflicts: list[dict[str, str]]
+    # Archive identities that have a source row once the restore lands.
+    present: set[tuple[str, str]]
+
+
+async def plan_source_restore(
+    execute_query: SurrealExecute,
+    payload: object,
+    *,
+    kind: SourceKind,
+    organizations: list[str],
+    clean: bool = False,
+    skip_existing: bool = True,
+    global_scope: bool = False,
+    clean_graph_auxiliary: bool = False,
+) -> SourceRestorePlan:
+    """Read the destination a bounded batch at a time and decide every write.
+
+    Nothing is written. An archive the destination refuses, such as one whose
+    row lands on a physical key another source holds, fails here.
+    """
+    from sibyl_core.migrate.source_integrity import validate_integrity_archive
+
+    if clean_graph_auxiliary and (not clean or kind is not SourceKind.GRAPH_ENTITY):
+        raise ValueError("graph companion cleanup requires a scoped clean graph restore")
+    if global_scope and kind is not SourceKind.RAW_CAPTURE:
+        raise ValueError("global restore scope is only supported for the shared raw source store")
+    rows, states, associations = validate_integrity_archive(
+        payload, kind=kind, organizations=organizations
+    )
+    table, org_field = source_table(kind)
+    projection = _unit_state_projection(table, org_field)
+    incoming_rows = {(row[org_field], row["uuid"]): row for row in rows}
+    incoming_states = {(state["organization_id"], state["source_id"]): state for state in states}
+    incoming_associations = {
+        (row["organization_id"], row["target_id"]): row for row in associations
+    }
+    plan = SourceRestorePlan(
+        kind=kind, cleanup=[], batches=[], restored=[], conflicts=[], present=set()
+    )
+    # Identities whose destination row this restore deletes before it writes.
+    retired: set[tuple[str, str]] = set()
+
+    def vacated(holder: tuple[object, object]) -> bool:
+        """Whether this restore deletes the source holding a physical key first."""
+        return holder in retired or (
+            clean and (global_scope or holder[0] in organizations) and holder not in incoming_states
+        )
+
+    # Units without an incoming row only retire destination rows. Planning and
+    # writing them first frees any physical key a later unit's row reuses.
+    keys = sorted(incoming_states, key=lambda key: (key in incoming_rows, key))
+    for batch_keys in restore_batches(keys):
+        record_keys = {
+            key: record_key
+            for key in batch_keys
+            if (record_key := _archive_record_key(incoming_rows.get(key), table)) is not None
+        }
+        units = [
+            {"organization": key[0], "source": key[1], "kind": kind.value} for key in batch_keys
+        ]
+        read = normalize_records(
+            await execute_query(
+                f"""RETURN {{
+                    LET $fenced = {projection};
+                    RETURN {{
+                        units: $fenced,
+                        digest: crypto::sha256(type::string($fenced)),
+                        occupants: $keys.map(|$key|
+                            (SELECT {org_field} AS organization, uuid FROM type::record($key))[0])
+                    }};
+                }};""",
+                units=units,
+                keys=list(record_keys.values()),
+            )
+        )
+        found = read[0].get("units") if len(read) == 1 else None
+        occupants = read[0].get("occupants") if len(read) == 1 else None
+        digest = read[0].get("digest") if len(read) == 1 else None
+        if (
+            not isinstance(found, list)
+            or len(found) != len(batch_keys)
+            or not isinstance(occupants, list)
+            or len(occupants) != len(record_keys)
+            or not isinstance(digest, str)
+        ):
+            raise ValueError("source archive restore read returned an invalid shape")
+        occupant_at = dict(zip(record_keys.values(), occupants, strict=True))
+        batch = _UnitBatch(units=units, digest=digest)
+        for key, destination in zip(batch_keys, found, strict=True):
+            current = destination if isinstance(destination, dict) else {}
+            previous_row = current.get("row")
+            decision = _decide_unit(
+                kind=kind,
+                record_key=record_keys.get(key),
+                incoming_state=incoming_states[key],
+                row=incoming_rows.get(key),
+                association=incoming_associations.get(key),
+                previous=current.get("state"),
+                previous_row=previous_row,
+                prior_association=current.get("association"),
+                skip_existing=skip_existing,
+            )
+            if decision.write is not None:
+                occupant = occupant_at.get(decision.write["key"]) if previous_row is None else None
+                if occupant is not None and not vacated(
+                    (occupant.get("organization"), occupant.get("uuid"))
+                ):
+                    raise ValueError("archive physical record identity conflicts with destination")
+                batch.writes.append(decision.write)
+                plan.restored.append(key[1])
+            if decision.conflict is not None:
+                plan.conflicts.append(_conflict(key, decision.conflict))
+            if decision.delete is not None:
+                batch.deletes.append(decision.delete)
+                retired.add(key)
+            if decision.ledger is not None:
+                batch.ledger_writes.append(decision.ledger)
+            if decision.retire_association:
+                batch.retired_associations.append({"organization": key[0], "source": key[1]})
+            if decision.association is not None:
+                batch.association_writes.append(decision.association)
+            if decision.write is not None or (previous_row is not None and decision.delete is None):
+                plan.present.add(key)
+        if batch.changes_anything():
+            plan.batches.append(batch)
+
+    if clean_graph_auxiliary:
+        for companion in ("relates_to", "mentions", "episode"):
+            plan.cleanup += await plan_cleanup(
+                execute_query,
+                companion,
+                organization_field="group_id",
+                scope="group_id IN $organizations",
+                keep=lambda _identity: False,
+                organizations=organizations,
+            )
+    if clean:
+        plan.cleanup += await plan_cleanup(
+            execute_query,
+            table,
+            organization_field=org_field,
+            scope="true" if global_scope else f"{org_field} IN $organizations",
+            keep=incoming_states.__contains__,
+            **({} if global_scope else {"organizations": organizations}),
+        )
+    return plan
+
+
+async def apply_source_restore(execute_query: SurrealExecute, plan: SourceRestorePlan) -> None:
+    """Send a planned restore, one bounded transaction at a time.
+
+    Clean deletes go first, so a unit whose row reuses a vacated physical key
+    finds it free. Each transaction refuses to commit when what it was planned
+    against has moved. A unit's row, ledger state and derivation association
+    always commit together, so a failure partway leaves whole units behind,
+    and running the same restore again finishes it: units already restored
+    read as unchanged and are skipped.
+    """
+    await apply_cleanup(execute_query, plan.cleanup)
+    table, org_field = source_table(plan.kind)
+    write = f"""BEGIN TRANSACTION;
+        LET $fenced = {_unit_state_projection(table, org_field)};
+        IF crypto::sha256(type::string($fenced)) != $expected {{
+            THROW '{_DESTINATION_CHANGED}';
+        }};
+        {_source_write_statements(org_field)}
+        FOR $retired IN $retired_associations {{
+            LET $organization = $retired.organization;
+            LET $target = $retired.source;
+            UPDATE memory_derivations SET active = false
+                WHERE organization_id=$organization AND target_kind=$kind
+                    AND target_id=$target;
+        }};
         COMMIT TRANSACTION;
     """
-    extra = auxiliary_parameters or {}
-    if set(extra) & {
-        "organizations",
-        "kind",
-        "expected",
-        "deletes",
-        "writes",
-        "ledger_writes",
-        "association_writes",
-    }:
-        raise ValueError("archive auxiliary parameters conflict with source bindings")
-    await execute_query(
-        query,
+    for batch in plan.batches:
+        await execute_query(
+            write,
+            units=batch.units,
+            kind=plan.kind.value,
+            expected=batch.digest,
+            deletes=batch.deletes,
+            writes=native_archive_parameters(batch.writes),
+            ledger_writes=batch.ledger_writes,
+            association_writes=batch.association_writes,
+            retired_associations=batch.retired_associations,
+        )
+
+
+async def restore_source_integrity(
+    execute_query: SurrealExecute,
+    payload: object,
+    *,
+    kind: SourceKind,
+    organizations: list[str],
+    clean: bool = False,
+    skip_existing: bool = True,
+    global_scope: bool = False,
+    clean_graph_auxiliary: bool = False,
+) -> dict[str, Any]:
+    """Restore complete source units without lowering destination trust history.
+
+    Every write is planned before the first one is sent, and each goes out in
+    a bounded, fenced transaction; see ``apply_source_restore``.
+    """
+    plan = await plan_source_restore(
+        execute_query,
+        payload,
+        kind=kind,
         organizations=organizations,
-        kind=kind.value,
-        expected=before["fingerprint"],
-        deletes=deletes,
-        writes=native_archive_parameters(writes),
-        ledger_writes=ledger_writes,
-        association_writes=association_writes,
-        **extra,
+        clean=clean,
+        skip_existing=skip_existing,
+        global_scope=global_scope,
+        clean_graph_auxiliary=clean_graph_auxiliary,
     )
-    return {"restored_source_ids": restored, "conflicts": conflicts}
+    await apply_source_restore(execute_query, plan)
+    return {"restored_source_ids": plan.restored, "conflicts": plan.conflicts}
