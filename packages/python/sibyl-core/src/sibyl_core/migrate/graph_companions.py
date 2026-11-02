@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import Any
 
 from sibyl_core.migrate.legacy_graph_archive import (
@@ -29,45 +30,56 @@ def relationship_from_archive(payload: dict[str, Any]) -> Relationship:
     return Relationship.model_validate(record)
 
 
+def relationship_payload(row: dict[str, Any]) -> dict[str, Any]:
+    """One native relates_to row as its archive payload, dates declared by path."""
+    relationship = relationship_from_surreal_row({**row, "record_id": row["archive_record_key"]})
+    record = relationship.model_dump(mode="python")
+    if relationship.operational_derivation_required or relationship.operational_source_binding:
+        record["operational_derivation_required"] = relationship.operational_derivation_required
+        record["operational_source_binding"] = relationship.operational_source_binding
+    encoded = encode_record(record)
+    return {**encoded["record"], DATETIME_PATHS: encoded["datetimes"]}
+
+
+def episode_payload(row: dict[str, Any], *, organization_id: str) -> dict[str, Any]:
+    return episode_payload_from_node(
+        episode_from_payload(row, organization_id=organization_id),
+        organization_id=organization_id,
+    )
+
+
+def mention_payload(
+    row: dict[str, Any], records: Callable[[str], str], *, organization_id: str
+) -> dict[str, Any]:
+    """One native mentions row, its endpoints resolved from record keys to uuids."""
+    return mention_payload_from_edge(
+        mention_from_payload(
+            {
+                **row,
+                "source_id": records(row["source_record_key"]),
+                "target_id": records(row["target_record_key"]),
+            },
+            organization_id=organization_id,
+        ),
+        organization_id=organization_id,
+    )
+
+
 def companion_payloads(
     snapshot: dict[str, Any], *, organization_id: str
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]]:
     """Serialize companions from the same precise native snapshot as sources."""
     auxiliary = snapshot["graph_auxiliary"]
-    relationships = []
-    for row in auxiliary["relates_to"]:
-        relationship = relationship_from_surreal_row(
-            {**row, "record_id": row["archive_record_key"]}
-        )
-        record = relationship.model_dump(mode="python")
-        if relationship.operational_derivation_required or relationship.operational_source_binding:
-            record["operational_derivation_required"] = relationship.operational_derivation_required
-            record["operational_source_binding"] = relationship.operational_source_binding
-        encoded = encode_record(record)
-        relationships.append({**encoded["record"], DATETIME_PATHS: encoded["datetimes"]})
+    relationships = [relationship_payload(row) for row in auxiliary["relates_to"]]
     episodes = [
-        episode_payload_from_node(
-            episode_from_payload(row, organization_id=organization_id),
-            organization_id=organization_id,
-        )
-        for row in auxiliary["episode"]
+        episode_payload(row, organization_id=organization_id) for row in auxiliary["episode"]
     ]
     records = {
         row["archive_record_key"]: row["uuid"]
         for row in [*snapshot["source_rows"], *auxiliary["episode"]]
     }
     mentions = [
-        mention_payload_from_edge(
-            mention_from_payload(
-                {
-                    **row,
-                    "source_id": records[row["source_record_key"]],
-                    "target_id": records[row["target_record_key"]],
-                },
-                organization_id=organization_id,
-            ),
-            organization_id=organization_id,
-        )
+        mention_payload(row, records.__getitem__, organization_id=organization_id)
         for row in auxiliary["mentions"]
     ]
     return relationships, episodes, mentions

@@ -6,7 +6,7 @@ Provides maintenance and diagnostic capabilities.
 import time
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
 import structlog
@@ -44,6 +44,11 @@ from sibyl_core.models.entities import (
 from sibyl_core.models.memory_scope import MemoryScope
 from sibyl_core.models.sources import Community, Document, Source
 from sibyl_core.models.tasks import Epic, ErrorPattern, Milestone, Note, Project, Task, Team
+
+if TYPE_CHECKING:
+    from pathlib import Path
+
+    from sibyl_core.migrate.archive_stream import GraphArchiveCapture
 
 log = structlog.get_logger()
 
@@ -496,6 +501,51 @@ async def create_backup(*, organization_id: str) -> BackupResult:
             episode_count=0,
             mention_count=0,
         )
+
+
+async def capture_graph_backup(*, organization_id: str, workdir: "Path") -> "GraphArchiveCapture":
+    """Capture an organization's graph for the API backup through a disk spool.
+
+    The same document ``create_backup`` assembles in memory, read in pages
+    inside one read transaction so neither SurrealDB nor this process holds
+    the whole graph. An embedded engine has no client-side transactions and
+    is read in one statement, as ``create_backup`` reads it.
+    """
+    from sibyl_core.memory_pipeline.observations import SourceKind
+    from sibyl_core.migrate.archive_stream import (
+        GraphArchiveCapture,
+        PageReader,
+        read_graph_capture,
+    )
+    from sibyl_core.services.source_archive_store import read_source_archive_snapshot
+
+    runtime = await get_graph_runtime(organization_id)
+    client = runtime.client
+    capture = GraphArchiveCapture(organization_id, workdir)
+    try:
+        async with client.read_snapshot() as execute:
+            if execute is None:
+                capture.unpaged_scheme = client.url_scheme
+                capture.add_snapshot(
+                    await read_source_archive_snapshot(
+                        client.execute_query,
+                        kind=SourceKind.GRAPH_ENTITY,
+                        organizations=[organization_id],
+                        include_graph_auxiliary=True,
+                    )
+                )
+            else:
+                await read_graph_capture(capture, PageReader(execute))
+        capture.finish()
+    except BaseException:
+        capture.close()
+        raise
+    log.info(
+        "Graph backup captured",
+        entities=capture.entity_count,
+        relationships=capture.relationship_count,
+    )
+    return capture
 
 
 async def _reopen_graph_embedding_plane(driver: Any, organization_id: str) -> None:

@@ -13,7 +13,7 @@ import asyncio
 import io
 import json
 import tarfile
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
@@ -28,6 +28,7 @@ from sibyl.jobs import backup as backup_jobs
 from sibyl.persistence.backups_common import BackupListResult, BackupRecord
 from sibyl_core.backends import archive_store, s3_archive_store
 from sibyl_core.backends.archive_store import RangeNotSatisfiable, parse_byte_range
+from tests.archive_capture_fakes import PayloadCapture, content_capture
 
 BUCKET = "sibyl-backups"
 
@@ -176,29 +177,28 @@ def deployment(monkeypatch, tmp_path):
             }
         ),
         content=AsyncMock(
-            side_effect=lambda organization_id: {
-                "version": "1.0",
-                "organization_id": organization_id,
-                "tables": {
-                    "secret_rows": [
-                        {"uuid": "r1", "organization_id": organization_id, "key": "recovery"}
-                    ]
-                },
-            }
+            side_effect=lambda *, organization_id, workdir: content_capture(
+                {
+                    "version": "1.0",
+                    "organization_id": organization_id,
+                    "tables": {
+                        "secret_rows": [
+                            {"uuid": "r1", "organization_id": organization_id, "key": "recovery"}
+                        ]
+                    },
+                }
+            )
         ),
         graph=AsyncMock(
-            side_effect=lambda organization_id: SimpleNamespace(
-                success=True,
-                backup_data=_GraphPayload("2.0", organization_id, [{"uuid": "e1"}], []),
+            side_effect=lambda *, organization_id, workdir: PayloadCapture(
+                asdict(_GraphPayload("2.0", organization_id, [{"uuid": "e1"}], [])),
                 entity_count=1,
-                relationship_count=0,
-                message="ok",
             )
         ),
     )
     monkeypatch.setattr(backup_jobs, "export_auth_archive_payload", exports.auth)
-    monkeypatch.setattr(backup_jobs, "export_content_archive_payload", exports.content)
-    monkeypatch.setattr("sibyl_core.tools.admin.create_backup", exports.graph)
+    monkeypatch.setattr(backup_jobs, "capture_content_archive", exports.content)
+    monkeypatch.setattr("sibyl_core.tools.admin.capture_graph_backup", exports.graph)
     monkeypatch.setattr(backup_routes, "get_backup_record", records.get)
     monkeypatch.setattr(backup_routes, "list_backup_records", records.list)
     return SimpleNamespace(

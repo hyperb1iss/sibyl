@@ -1,6 +1,7 @@
 """The API backup producer feeds public CLI restore and existing source fences."""
 
 import asyncio
+import json
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock
@@ -299,6 +300,38 @@ async def _authenticated_download(auth, org):
         return response
 
 
+def _historical_content_capture(content_version):
+    """The current content capture, written as an older content archive version."""
+    capture_current = content_archive.capture_content_archive
+
+    async def capture(*, organization_id, workdir):
+        current = await capture_current(organization_id=organization_id, workdir=workdir)
+        write_current = current.write
+
+        def write(path, report):
+            write_current(path, report)
+            payload = json.loads(path.read_text())
+            payload.pop("validation_receipts")
+            omitted = (
+                set()
+                if content_version == "2.2"
+                else {"memory_validation_executions", "memory_validation_attempts"}
+            )
+            if content_version == "2.0":
+                omitted |= {"dream_source_checkpoints", "dream_source_cursors"}
+            for table in omitted:
+                assert payload["tables"].pop(table) == []
+                payload["row_counts"].pop(table)
+            payload["version"] = content_version
+            path.write_text(json.dumps(payload, indent=2))
+            return path.stat().st_size
+
+        current.write = write
+        return current
+
+    return capture
+
+
 @pytest.mark.parametrize("content_version", ["2.0", "2.1", "2.2", "2.3"])
 def test_actual_api_backup_public_import_retains_auth_and_source_revocation(
     monkeypatch, tmp_path, content_version
@@ -315,24 +348,9 @@ def test_actual_api_backup_public_import_retains_auth_and_source_revocation(
     active = "source"
     closes = _configure_stores(monkeypatch, stores, lambda: active, org, tmp_path)
     if content_version != "2.3":
-
-        async def historical_content(organization_id):
-            payload = await content_archive.export_content_archive_payload(organization_id)
-            payload.pop("validation_receipts")
-            omitted = (
-                set()
-                if content_version == "2.2"
-                else {"memory_validation_executions", "memory_validation_attempts"}
-            )
-            if content_version == "2.0":
-                omitted |= {"dream_source_checkpoints", "dream_source_cursors"}
-            for table in omitted:
-                assert payload["tables"].pop(table) == []
-                payload["row_counts"].pop(table)
-            payload["version"] = content_version
-            return payload
-
-        monkeypatch.setattr(backup, "export_content_archive_payload", historical_content)
+        monkeypatch.setattr(
+            backup, "capture_content_archive", _historical_content_capture(content_version)
+        )
 
     with asyncio.Runner() as loop:
         # Keep embedded stores in one loop; the production CLI still calls its real restore owners.
