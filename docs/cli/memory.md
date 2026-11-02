@@ -81,8 +81,9 @@ which org owners and admins have everywhere; a contributor's attempt is refused 
 `project_maintainer_required` and changes nothing.
 
 Promotion follows the same rule when the memory it publishes supersedes or contradicts an older one.
-Your own memories and those you maintain are marked no longer valid and leave recall. Anyone else's
-stays as it is, and the promotion receipt lists it under `invalidation_skipped_source_ids`.
+Memories that you or the candidate's author wrote, and memories in projects you maintain, are marked
+no longer valid and leave recall. Anyone else's stays as it is, and the promotion receipt lists it
+under `invalidation_skipped_source_ids`.
 
 Raw memories change only through `correct`. `sibyl entity delete raw_memory:<id>` refuses and prints
 the `correct --action delete` command instead, because a graph delete can never remove a raw memory
