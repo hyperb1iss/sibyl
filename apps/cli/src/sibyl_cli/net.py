@@ -187,12 +187,24 @@ def _strip_controls(value: object) -> str:
     )
 
 
+def _one_line(value: object) -> str:
+    """A label on one line: control characters dropped, line and paragraph breaks and tabs as spaces.
+
+    Names are free text a member sets on their own profile. One with a line
+    break would print a second line shaped like another author's message.
+    """
+    return "".join(
+        " " if char in "\n\t" or unicodedata.category(char) in {"Zl", "Zp"} else char
+        for char in _strip_controls(value)
+    )
+
+
 def _author(message: Mapping[str, Any]) -> tuple[str, str | None]:
     author = message.get("author")
     author = author if isinstance(author, Mapping) else {}
     name = author.get("name") or author.get("email") or author.get("user_id") or "unknown"
     agent = author.get("agent")
-    return _strip_controls(name), _strip_controls(agent) if agent else None
+    return _one_line(name), _one_line(agent) if agent else None
 
 
 def _who(message: Mapping[str, Any]) -> str:
@@ -202,9 +214,9 @@ def _who(message: Mapping[str, Any]) -> str:
 
 
 def _where(message: Mapping[str, Any]) -> list[str]:
-    parts = [f"[bold {ELECTRIC_PURPLE}]{escape(_strip_controls(message.get('channel')))}[/]"]
+    parts = [f"[bold {ELECTRIC_PURPLE}]{escape(_one_line(message.get('channel')))}[/]"]
     if thread := message.get("thread"):
-        parts.append(f"[{CORAL}]{escape(_strip_controls(thread))}[/{CORAL}]")
+        parts.append(f"[{CORAL}]{escape(_one_line(thread))}[/{CORAL}]")
     return parts
 
 

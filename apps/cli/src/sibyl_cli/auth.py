@@ -31,6 +31,7 @@ from sibyl_cli.client import (
     get_client,
     resolve_api_base_url,
 )
+from sibyl_cli.client_transport import _environment_auth_token
 from sibyl_cli.common import (
     console,
     create_table,
@@ -873,11 +874,16 @@ def status_cmd(
     refresh = str(creds.get("refresh_token") or "").strip()
     expires_at = creds.get("access_token_expires_at")
 
-    if not token:
+    # Requests prefer a SIBYL_AUTH_TOKEN bound to this server over a stored
+    # login, so the status answers for whichever credential they would send.
+    env_token = _environment_auth_token(api_url)
+    if not token and not env_token:
         error("No auth token found (set one with: sibyl auth set-token <token>)")
         raise typer.Exit(1)
 
-    if not json_output:
+    if not json_output and env_token:
+        info(f"Using SIBYL_AUTH_TOKEN (server: {escape(api_url)})")
+    elif not json_output:
         if expires_at is not None and time.time() >= int(expires_at):
             info(f"Stored access token is expired (server: {escape(api_url)})")
         elif expires_at is not None:
