@@ -119,6 +119,51 @@ async def _enqueue_bulk_memory_extraction(
         }
 
 
+async def _authorize_bulk_entries(
+    batch: EntityBulkCreateRequest,
+    *,
+    ctx: AuthContext,
+    content_session: Any,
+    entity_manager: Any,
+    reader_scope: policy.ReaderScope | None,
+) -> list[str | None]:
+    """Admit every entry before anything is written, returning each one's scope key.
+
+    A refused project, scope or link target fails the whole batch rather than
+    landing the entries ahead of it.
+    """
+    verified_project_ids: set[str] = set()
+    scope_keys: list[str | None] = []
+    for entity in batch.entities:
+        serialization.reject_unsupported_bulk_entry(entity)
+        project = entity.metadata.get("project_id") if entity.metadata else None
+        project_id = str(project) if project else None
+        if project_id and project_id not in verified_project_ids:
+            await verify_entity_project_access(
+                content_session,
+                ctx,
+                project_id,
+                required_role=ProjectRole.CONTRIBUTOR,
+                require_existing_project=True,
+            )
+            verified_project_ids.add(project_id)
+        scope_keys.append(
+            await policy.authorized_graph_scope_key(
+                ctx,
+                metadata=entity.metadata,
+                verified_project_id=project_id,
+                surface="entities_bulk_create",
+            )
+        )
+        if reader_scope is not None:
+            await policy.validate_related_to_targets_for_write(
+                entity_manager=entity_manager,
+                related_to=entity.related_to,
+                scope=reader_scope,
+            )
+    return scope_keys
+
+
 @router.post(
     "/bulk",
     response_model=EntityBulkCreateResponse,
@@ -133,7 +178,6 @@ async def create_entities_bulk(
 ) -> EntityBulkCreateResponse:
     group_id = str(org.id)
     runtime = await policy.get_entity_graph_runtime(group_id)
-    verified_project_ids: set[str] = set()
     # One snapshot of what this caller may read, taken before anything is
     # written and reused for every entry. Resolving per entry let a membership
     # change mid-request make sibling order matter, and re-resolving after
@@ -144,33 +188,24 @@ async def create_entities_bulk(
         if any(entity.related_to for entity in batch.entities)
         else None
     )
-
-    for entity in batch.entities:
-        serialization.reject_unsupported_bulk_entry(entity)
-        project = entity.metadata.get("project_id") if entity.metadata else None
-        project_id = str(project) if project else None
-        if project_id and project_id not in verified_project_ids:
-            await verify_entity_project_access(
-                content_session,
-                ctx,
-                project_id,
-                required_role=ProjectRole.CONTRIBUTOR,
-                require_existing_project=True,
-            )
-            verified_project_ids.add(project_id)
-        if reader_scope is not None:
-            await policy.validate_related_to_targets_for_write(
-                entity_manager=runtime.entity_manager,
-                related_to=entity.related_to,
-                scope=reader_scope,
-            )
+    scope_keys = await _authorize_bulk_entries(
+        batch,
+        ctx=ctx,
+        content_session=content_session,
+        entity_manager=runtime.entity_manager,
+        reader_scope=reader_scope,
+    )
 
     now = datetime.now(UTC)
     principal_id = str(ctx.user.id) if ctx.user is not None else None
     entities: list[Entity] = []
-    for requested in batch.entities:
+    for requested, scope_key in zip(batch.entities, scope_keys, strict=True):
         built = serialization.entity_from_bulk_create(
-            requested, group_id=group_id, now=now, principal_id=principal_id
+            requested,
+            group_id=group_id,
+            now=now,
+            principal_id=principal_id,
+            authorized_scope_key=scope_key,
         )
         # Bulk rows go through the same id guard as single writes, so a
         # batch cannot replace another member's memory or move a row out of
@@ -336,8 +371,11 @@ async def create_entities_bulk(
             group_id=group_id,
             now=now,
             principal_id=principal_id,
+            authorized_scope_key=scope_key,
         )
-        for entity_id, entity in zip(created_ids, batch.entities, strict=True)
+        for entity_id, entity, scope_key in zip(
+            created_ids, batch.entities, scope_keys, strict=True
+        )
     ]
     return EntityBulkCreateResponse(
         entities=responses,

@@ -1,14 +1,16 @@
 """Canonical policy ownership for entity routes."""
 
 import asyncio
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime
 from functools import partial
 from typing import Any
 
 import structlog
-from fastapi import HTTPException
+from fastapi import HTTPException, Request
 
+from sibyl.api.routes import memory_auth
 from sibyl.auth.api_key_common import api_key_memory_scope_key
 from sibyl.auth.authorization import verify_entity_project_access
 from sibyl.auth.context import AuthContext
@@ -23,6 +25,7 @@ from sibyl.persistence.auth_runtime import (
 from sibyl.persistence.content_common import RawCaptureRecord
 from sibyl_core.auth import MemoryPolicyContext, ProjectRole
 from sibyl_core.auth.memory_policy import (
+    MemoryPolicyAction,
     MemoryPolicyDecision,
     authorize_memory_correction,
     authorize_memory_read,
@@ -407,6 +410,45 @@ async def reader_scope(ctx: AuthContext) -> ReaderScope:
         accessible_projects=await accessible_project_ids_for_read(ctx),
         memory_grants=reader_memory_grants(ctx),
     )
+
+
+# Declared scopes a graph write keys to the project the request verified. A
+# private row drops the key when it is stamped, and an undeclared row has none.
+_PROJECT_KEYED_SCOPES = frozenset({"private", "project"})
+
+
+async def authorized_graph_scope_key(
+    ctx: AuthContext,
+    *,
+    metadata: Mapping[str, Any] | None,
+    verified_project_id: str | None,
+    surface: str,
+    request: Request | None = None,
+) -> str | None:
+    """The scope key a graph write is stamped with, once its declared scope passes.
+
+    Undeclared, private and project writes key to the project the request
+    already verified, so a payload never addresses a row at a project its
+    writer has not proved access to. Every other declared scope names its own
+    audience: it is authorized exactly as ``POST /memory/raw`` authorizes it,
+    and the key it names is stamped only after that passes. A refused scope
+    raises before anything is written.
+    """
+    fields = metadata or {}
+    declared = fields.get("memory_scope")
+    if declared is None or (isinstance(declared, str) and declared in _PROJECT_KEYED_SCOPES):
+        return verified_project_id
+    declared_key = fields.get("scope_key")
+    decision = await memory_auth.authorize_memory_policy(
+        ctx=ctx,
+        action=MemoryPolicyAction.WRITE,
+        memory_scope=str(declared),
+        scope_key=str(declared_key) if declared_key not in (None, "") else None,
+        surface=surface,
+        request=request,
+        project_id=verified_project_id,
+    )
+    return decision.scope_key
 
 
 async def validate_related_to_targets_for_write(

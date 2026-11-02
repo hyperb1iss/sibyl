@@ -58,19 +58,19 @@ def scoped_graph_metadata(
     metadata: dict[str, Any] | None,
     *,
     principal_id: str | None,
-    verified_project_id: str | None,
+    authorized_scope_key: str | None,
 ) -> dict[str, Any]:
     """Stamp a write's scope metadata from the authenticated request context.
 
-    The scope key is taken from the project this request already proved access
-    to, so a payload cannot address a row at a project the caller is not a
-    contributor on.
+    The scope key is the one the route authorized for the declared scope (see
+    ``entity_policy.authorized_graph_scope_key``), never the payload's, so a
+    write cannot address a row at an audience its writer was not admitted to.
     """
     declared = (metadata or {}).get("memory_scope")
     return stamp_memory_scope_metadata(
         metadata,
         memory_scope=declared,
-        scope_key=verified_project_id,
+        scope_key=authorized_scope_key,
         principal_id=principal_id,
     )
 
@@ -121,9 +121,9 @@ def bulk_create_metadata(
     group_id: str,
     now: datetime,
     principal_id: str | None,
+    authorized_scope_key: str | None,
 ) -> dict[str, Any]:
     request_metadata = without_client_embedding_stamp(strip_structure_metadata(entity.metadata))
-    project_id = str(request_metadata.get("project_id") or "").strip()
     metadata: dict[str, Any] = {
         "category": entity.category,
         "languages": entity.languages or [],
@@ -133,7 +133,7 @@ def bulk_create_metadata(
         **scoped_graph_metadata(
             request_metadata,
             principal_id=principal_id,
-            verified_project_id=project_id or None,
+            authorized_scope_key=authorized_scope_key,
         ),
     }
     # The bulk path builds its Entity rows directly rather than through add(),
@@ -191,6 +191,7 @@ def entity_from_bulk_create(
     *,
     group_id: str,
     now: datetime,
+    authorized_scope_key: str | None,
     principal_id: str | None = None,
 ) -> Entity:
     content = entity.content or entity.description or entity.name
@@ -199,6 +200,7 @@ def entity_from_bulk_create(
         group_id=group_id,
         now=now,
         principal_id=principal_id,
+        authorized_scope_key=authorized_scope_key,
     )
     return Entity(
         id=_generate_id(entity.entity_type.value, *bulk_identity_parts(entity, metadata)),
@@ -229,6 +231,7 @@ def entity_response_from_bulk_create(
     entity_id: str,
     group_id: str,
     now: datetime,
+    authorized_scope_key: str | None,
     principal_id: str | None = None,
 ) -> EntityResponse:
     content = entity.content or entity.description or entity.name
@@ -237,6 +240,7 @@ def entity_response_from_bulk_create(
         group_id=group_id,
         now=now,
         principal_id=principal_id,
+        authorized_scope_key=authorized_scope_key,
     )
     return EntityResponse(
         id=entity_id,

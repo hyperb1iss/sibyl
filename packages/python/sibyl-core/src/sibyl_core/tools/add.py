@@ -745,7 +745,8 @@ async def add(
         conflict_threshold: Minimum similarity score (0.0-1.0) to flag as potential conflict.
               Default 0.85. Higher = fewer false positives, lower = catch more conflicts.
         memory_scope: Authorized audience for the row, resolved by the calling surface.
-        scope_key: Authorized audience key (a verified project, never a payload value).
+        scope_key: Authorized audience key: a verified project, or a team the writer
+              was authorized to write to; never an unchecked payload value.
         principal_id: Authenticated author of the write.
         accessible_projects: Projects this caller may read, resolved by the calling
               surface. Decides whether a declared supersedes/contradicts may name a
