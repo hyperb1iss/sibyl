@@ -277,11 +277,19 @@ def post_message(
         typer.Option("--decision", help="Also remember the message as a decision memory"),
     ] = False,
     project: Annotated[
-        str | None, typer.Option("--project", "-p", help="Project ID or name")
+        str | None,
+        typer.Option(
+            "--project",
+            "-p",
+            help=(
+                "Project ID or name. A plain message names one only when given; a decision "
+                "defaults to the linked project"
+            ),
+        ),
     ] = None,
     all_projects: Annotated[
         bool,
-        typer.Option("--all-projects", help="Do not auto-scope to the linked project"),
+        typer.Option("--all-projects", help="Do not scope a decision to the linked project"),
     ] = False,
     agent: Annotated[
         str | None,
@@ -312,7 +320,12 @@ def post_message(
         error("Provide a message body as an argument or on stdin.")
         raise typer.Exit(1)
 
-    effective_project = project or (None if all_projects else resolve_project_from_cwd())
+    # Only a decision is remembered, so only a decision defaults to the linked
+    # project, like remember. A plain message names a project when asked to:
+    # naming one takes contributor access and pins the thread it starts.
+    effective_project = project
+    if decision and project is None and not all_projects:
+        effective_project = resolve_project_from_cwd()
     agent_label = agent or detect_agent()
     session_id = session or detect_session()
 

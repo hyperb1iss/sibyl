@@ -29,12 +29,18 @@ Thread state. Every post upserts one ``net_threads`` row per
 ``(organization, channel, thread)``, addressed by a record id derived from
 that key, so concurrent first posts to a new thread conflict on one record and
 the client replays the loser instead of tripping the unique index. Threadless
-messages share the thread ``''`` so the key stays total. The first post that
-names a project pins the thread to it, and a later post naming a different one
-is refused in the same statement, so a thread's project can never be moved by
-whoever writes last. A new post also resets the distillation retry budget: new
-material deserves a fresh one. The distillation job claims idle rows with a
-conditional update before it reflects them.
+messages share the thread ``''`` so the key stays total.
+
+Project pins. The first post to a named thread that names a project pins the
+thread to it, so its project can never be moved by whoever writes last. A
+later plain message naming a different project is refused in the same
+statement; a decision never is, because its project only decides where its
+own memory goes, and it leaves an existing pin alone. Threadless messages
+never pin: ``''`` is everyone's inbox, and a project named on one of them
+scopes only that message's decision memory. A new post also resets the
+distillation retry budget, since new material deserves a fresh one. The
+distillation job claims idle rows with a conditional update before it
+reflects them.
 """
 
 from __future__ import annotations
@@ -111,21 +117,25 @@ _THREAD_RECORD = (
 PROJECT_PINNED_MARKER = "net_thread_project_pinned"
 # The pin is checked before anything is written, inside the same statement as
 # the write, so two first posts naming different projects conflict on the
-# thread record and the replayed loser sees the winner's pin.
+# thread record and the replayed loser sees the winner's pin. Only a plain
+# message on a named thread can be refused; the threadless row never holds a
+# project, so it never pins.
 _POST_MESSAGE = f"""
 RETURN {{
     LET $key = {_THREAD_RECORD};
     LET $pinned = (SELECT VALUE project_id FROM $key)[0];
-    IF $project_id != NONE AND $pinned != NONE AND $pinned != $project_id {{
+    IF $kind = 'message' AND $thread != '' AND $project_id != NONE
+        AND $pinned != NONE AND $pinned != $project_id {{
         THROW '{PROJECT_PINNED_MARKER}';
     }};
+    LET $pin = IF $thread = '' {{ NONE }} ELSE {{ $pinned ?? $project_id }};
     CREATE net_messages CONTENT $record RETURN NONE;
     LET $created = (SELECT VALUE created_at FROM net_messages WHERE uuid = $uuid)[0];
     UPSERT $key SET
         organization_id = $organization_id,
         channel = $channel,
         thread = $thread,
-        project_id = project_id ?? $project_id,
+        project_id = $pin,
         message_count = (message_count ?? 0) + 1,
         first_message_at = first_message_at ?? $created,
         last_message_at = time::max([last_message_at ?? $created, $created]),
@@ -431,7 +441,9 @@ async def post_net_message(
     The message and the thread upsert share a single ``RETURN`` block, so a
     conflicting post to the same thread replays both together and the count
     never drifts from the rows. Raises ``NetThreadProjectPinnedError``, with
-    nothing written, when ``project_id`` differs from the thread's pin.
+    nothing written, when a plain message on a named thread names a project
+    other than the thread's pin. The message keeps the project it named
+    either way.
     """
     uuid = message_id or new_message_id()
     record = {
@@ -462,6 +474,7 @@ async def post_net_message(
                 organization_id=organization_id,
                 channel=channel,
                 thread=thread,
+                kind=kind,
                 project_id=project_id,
             )
         except Exception as failure:

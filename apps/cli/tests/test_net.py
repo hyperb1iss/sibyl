@@ -259,7 +259,7 @@ def test_codex_inside_claude_code_is_labelled_codex(monkeypatch: pytest.MonkeyPa
 
 
 @patch("sibyl_cli.net.resolve_project_from_cwd", return_value="project_abc")
-def test_post_scopes_to_the_linked_project_and_detected_agent(
+def test_a_plain_post_names_no_project_and_carries_the_detected_agent(
     mock_resolve: Any, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setenv("CLAUDECODE", "1")
@@ -274,13 +274,39 @@ def test_post_scopes_to_the_linked_project_and_detected_agent(
         body="LGTM once CI passes",
         thread="gh:acme/app#42",
         decision=False,
-        project_id="project_abc",
+        project_id=None,
         agent="claude-code",
         session="cc-session",
     )
     output = _plain(result.stdout)
     assert "Posted msg-1 to #reviews gh:acme/app#42" in output
     assert len(output.strip().splitlines()) == 1
+    # A plain message never reads the linked project.
+    mock_resolve.assert_not_called()
+
+
+@patch("sibyl_cli.net.resolve_project_from_cwd", return_value="project_abc")
+def test_a_plain_post_names_a_project_only_when_asked(mock_resolve: Any) -> None:
+    client = FakeNetClient()
+
+    result = _invoke(client, ["post", "#reviews", "ping", "--project", "project_xyz"])
+
+    assert result.exit_code == 0, result.stdout
+    assert client.post_net_message.await_args.kwargs["project_id"] == "project_xyz"
+    mock_resolve.assert_not_called()
+
+
+@patch("sibyl_cli.net.resolve_project_from_cwd", return_value="project_abc")
+def test_a_decision_scopes_to_the_linked_project_like_remember(mock_resolve: Any) -> None:
+    client = FakeNetClient()
+
+    linked = _invoke(client, ["post", "@ada", "--decision", "Ship it"])
+    unscoped = _invoke(client, ["post", "@ada", "--decision", "--all-projects", "Ship it"])
+    chosen = _invoke(client, ["post", "@ada", "--decision", "-p", "project_xyz", "Ship it"])
+
+    assert (linked.exit_code, unscoped.exit_code, chosen.exit_code) == (0, 0, 0)
+    projects = [call.kwargs["project_id"] for call in client.post_net_message.await_args_list]
+    assert projects == ["project_abc", None, "project_xyz"]
     mock_resolve.assert_called_once_with()
 
 

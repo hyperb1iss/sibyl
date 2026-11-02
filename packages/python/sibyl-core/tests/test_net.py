@@ -132,12 +132,13 @@ async def post(
     org: str = ORG,
     project_id: str | None = None,
     agent: str | None = "claude-code",
+    kind: net.NetMessageKind = "message",
 ) -> net.NetMessageRecord:
     return await post_net_message(
         organization_id=org,
         channel=channel,
         thread=thread,
-        kind="message",
+        kind=kind,
         body=body,
         author_user_id=author,
         project_id=project_id,
@@ -353,6 +354,34 @@ async def test_the_first_project_named_pins_the_thread(store: SurrealContentClie
         await net_thread_project(organization_id=ORG, channel="#reviews", thread="pinned")
         == "project_a"
     )
+
+    # A decision is never refused over a pin and never moves it; its message
+    # keeps the project it named, which is where its memory went.
+    decided = await post(
+        thread="pinned", author=GRACE, project_id="project_b", kind="decision", body="b wins"
+    )
+    assert decided.project_id == "project_b"
+    state = await thread_state("#reviews", "pinned")
+    assert (state.project_id, state.message_count) == ("project_a", 3)
+
+
+async def test_a_decision_pins_an_unpinned_thread(store: SurrealContentClient) -> None:
+    await post(thread="fresh")
+    await post(thread="fresh", project_id="project_b", kind="decision")
+
+    assert (await thread_state("#reviews", "fresh")).project_id == "project_b"
+    with pytest.raises(NetThreadProjectPinnedError):
+        await post(thread="fresh", project_id="project_a")
+
+
+async def test_threadless_posts_never_pin(store: SurrealContentClient) -> None:
+    await post("@ada", project_id="project_a")
+    await post("@ada", author=GRACE, project_id="project_b")
+    await post("@ada", author=GRACE, project_id="project_c", kind="decision")
+    await post("@ada")
+
+    state = await thread_state("@ada", "")
+    assert (state.project_id, state.message_count) == (None, 4)
 
 
 async def test_channel_summary_counts_real_threads_newest_first(

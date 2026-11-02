@@ -198,7 +198,12 @@ async def test_an_author_who_left_the_pinned_project_lands_in_private(
     org: SimpleNamespace, reflections: list[SimpleNamespace]
 ) -> None:
     posted = await post(
-        org, org.grace, channel="#secret", body="Rotate the keys", project_id=org.secret
+        org,
+        org.grace,
+        channel="#secret",
+        thread="rotation",
+        body="Rotate the keys",
+        project_id=org.secret,
     )
     assert posted.status_code == 201, posted.text
     await go_quiet(org)

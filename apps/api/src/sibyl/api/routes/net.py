@@ -9,14 +9,19 @@ dedupe (by message id), permissions on what they act on, and loop limits.
 
 Naming a graph project on a post takes contributor access to it, within
 the project grants of the API key the caller used, the same narrowing a
-remembered write gets. The first post that names a project pins its thread to
-that project; a later post naming another one is refused with 409, and a post
-naming none always goes through. A ``decision`` is remembered first, through
-the same scope resolution, project check and memory policy as
-``POST /memory/raw``, and is posted only once that write succeeds; a refused
-write refuses the post. ``Idempotency-Key`` is honored as it is on
-``POST /memory/raw``, so a retried decision neither duplicates its memory nor
-leaves one behind without its message.
+remembered write gets. On a named thread, the first post that names a
+project pins the thread to it. A later plain message naming a different
+project is refused with 409; a post naming none always goes through, and so
+does a decision, whose project only decides where its own memory goes.
+Threadless messages never pin.
+
+A ``decision`` is remembered first, through the same scope resolution,
+project check and memory policy as ``POST /memory/raw``, and is posted only
+once that write succeeds; a refused write refuses the post.
+``Idempotency-Key`` is honored as it is on ``POST /memory/raw``: a retry of a
+request that completed gets the first response back and writes nothing. A
+request interrupted after its decision was remembered but before it finished
+runs again on retry, so that decision can be remembered twice.
 """
 
 from __future__ import annotations
@@ -317,9 +322,8 @@ async def post_message(
     )
     if replayed is not None:
         return replayed
-    if request.project_id:
-        # Checked before a decision is remembered, so a refused post leaves
-        # no memory behind; the write itself checks again atomically.
+    if request.project_id and thread and not decision:
+        # Answered here for a clear refusal; the write checks again atomically.
         pinned = await net_thread_project(
             organization_id=str(org.id), channel=request.channel, thread=thread
         )
@@ -355,14 +359,9 @@ async def post_message(
             decision_memory_id=decision_memory_id,
         )
     except NetThreadProjectPinnedError as exc:
+        # Only a plain message is refused, so no decision memory is behind it.
         pinned = await net_thread_project(
             organization_id=str(org.id), channel=request.channel, thread=thread
-        )
-        log.warning(
-            "net_message_pin_race",
-            organization_id=str(org.id),
-            channel=request.channel,
-            decision_memory_id=decision_memory_id,
         )
         raise _pinned_conflict(request.channel, thread, pinned) from exc
     log.info(

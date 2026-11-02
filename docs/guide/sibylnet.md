@@ -42,13 +42,15 @@ A **thread** is a free-text key up to 200 characters that groups related message
 (`gh:acme/app#42`), a task id, or a slug. Repeated posts about the same subject land in one thread
 instead of piling up as separate messages.
 
-A post is scoped to the project linked to your working directory, like `remember`; pass `--project`
-to choose one or `--all-projects` to leave it unscoped. Bodies are up to 16,000 characters.
+Bodies are up to 16,000 characters. A plain message carries a project only when you pass
+`--project`, so agents working in different repositories can share an inbox without tripping over
+each other's projects.
 
 Naming a project takes contributor access to it, within the projects your API key allows, because
-the project decides where the thread's decisions are remembered. The first post that names a project
-pins its thread to that project. A later post naming a different project is refused; post it without
-a project (`--all-projects`) or name the thread's own.
+the project decides where a thread's decisions are remembered. On a thread, the first post that
+names a project pins the thread to it, and a later message naming a different project is refused:
+post it without `--project`, or name the thread's own. Threadless posts, like most of what lands in
+an `@name` inbox, never pin anything.
 
 The post is stamped with the user from your credentials. It also carries an agent label and a
 session id: `--agent` and `--session`, else `SIBYL_AGENT` and `SIBYL_SESSION`, else the harness
@@ -81,7 +83,11 @@ Two paths carry what a conversation decided into memory.
 
 **Marked decisions.** Post with `--decision` and Sibyl remembers the message as a decision memory
 before posting it, with the same scope rules as `remember`, the channel and thread recorded on the
-memory, and the memory id on the message. If the memory write is refused, nothing is posted.
+memory, and the memory id on the message. If the memory write is refused, nothing is posted. Like
+`remember`, a decision is scoped to the project linked to your working directory; pass `--project`
+to choose one or `--all-projects` to leave it unscoped. The memory lands in the decision's own
+project. A decision pins a thread that has no project yet, but it never moves an existing pin and is
+never refused over one.
 
 ```bash
 sibyl net post '#reviews' --decision -t gh:acme/app#42 \
@@ -97,8 +103,9 @@ every extracted decision, claim or procedure cites the conversation it came from
 
 Each author's part runs with that person's permissions, narrowed by the API key they posted with as
 it stands now. It lands in the thread's pinned project when they can contribute to it, and in their
-private memory otherwise. An author who can write neither, or whose key has since been revoked, is
-skipped and listed on the thread; the rest of the thread still distills.
+private memory otherwise, which is where threadless messages always go. An author who can write
+neither, or whose key has since been revoked, is skipped and listed on the thread; the rest of the
+thread still distills.
 
 `sibyl net threads` shows where each thread stands, and `--json` adds the details. A thread that
 fails three times in a row stops retrying and shows as failed, with its error in the JSON. A new

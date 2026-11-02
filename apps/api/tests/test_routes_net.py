@@ -481,7 +481,7 @@ async def test_a_restricted_key_cannot_tag_a_project_outside_its_grants(
     assert [row["body"] for row in await stored_messages(org)].count("x") == 1
 
 
-async def test_a_pinned_thread_cannot_be_retargeted(org: SimpleNamespace) -> None:
+async def test_a_pinned_thread_refuses_only_a_plain_retarget(org: SimpleNamespace) -> None:
     pinned = await post(
         org, org.grace, channel="#reviews", thread="t", body="start", project_id=org.other
     )
@@ -495,12 +495,12 @@ async def test_a_pinned_thread_cannot_be_retargeted(org: SimpleNamespace) -> Non
     same = await post(
         org, org.ada, channel="#reviews", thread="t", body="same", project_id=org.other
     )
-    refused_decision = await post(
+    decided = await post(
         org,
         org.ada,
         channel="#reviews",
         thread="t",
-        body="Decided elsewhere",
+        body="Decided in our own project",
         kind="decision",
         project_id=org.shared,
     )
@@ -512,14 +512,68 @@ async def test_a_pinned_thread_cannot_be_retargeted(org: SimpleNamespace) -> Non
     assert viewer.status_code == 403, viewer.text
     assert plain.status_code == 201, plain.text
     assert same.status_code == 201, same.text
-    assert refused_decision.status_code == 409, refused_decision.text
-    # Refused before the memory write, so no decision is left behind.
-    assert await stored_captures(org) == []
+    # A decision is accepted into a thread pinned elsewhere: its memory goes
+    # to its own project and the pin stays where it was.
+    assert decided.status_code == 201, decided.text
+    assert decided.json()["message"]["project_id"] == org.shared
+    [memory] = await stored_captures(org)
+    assert memory["uuid"] == decided.json()["decision_memory_id"]
+    assert (memory["memory_scope"], memory["scope_key"]) == ("project", org.shared)
     async with client_for(org, org.vic) as client:
         threads = (await client.get("/api/net/threads", params={"channel": "#reviews"})).json()
     assert [(t["thread"], t["project_id"], t["message_count"]) for t in threads["threads"]] == [
-        ("t", org.other, 3)
+        ("t", org.other, 4)
     ]
+
+
+async def test_agents_from_different_projects_share_one_inbox(org: SimpleNamespace) -> None:
+    # Ada works in a repository linked to the shared project, Grace in one
+    # linked to the other; the CLI names a project only on their decisions.
+    posts = [
+        await post(org, org.ada, channel="@vic", body="Review my branch?"),
+        await post(org, org.grace, channel="@vic", body="Mine too"),
+        await post(
+            org,
+            org.ada,
+            channel="@vic",
+            body="Keyset paging",
+            kind="decision",
+            project_id=org.shared,
+        ),
+        await post(
+            org,
+            org.grace,
+            channel="@vic",
+            body="Two-phase migration",
+            kind="decision",
+            project_id=org.other,
+        ),
+        # Naming a project explicitly on a threadless post pins nothing either.
+        await post(org, org.ada, channel="@vic", body="FYI", project_id=org.shared),
+        await post(org, org.grace, channel="@vic", body="FYI too", project_id=org.other),
+    ]
+
+    assert [response.status_code for response in posts] == [201] * len(posts)
+    memories = {row["title"]: row for row in await stored_captures(org)}
+    assert memories["Keyset paging"]["metadata"]["project_id"] == org.shared
+    assert memories["Two-phase migration"]["metadata"]["project_id"] == org.other
+    async with client_for(org, org.vic) as client:
+        threads = (await client.get("/api/net/threads", params={"channel": "@vic"})).json()
+    assert [(t["thread"], t["project_id"], t["message_count"]) for t in threads["threads"]] == [
+        (None, None, 6)
+    ]
+
+
+async def test_a_project_viewer_can_post_plain_messages(org: SimpleNamespace) -> None:
+    # Ada only views the read-only project; a plain post from its repository
+    # names no project, so nothing about that project is checked.
+    plain = await post(org, org.ada, channel="#readonly-room", body="Question about the API")
+    threaded = await post(
+        org, org.ada, channel="#readonly-room", thread="q1", body="Follow-up question"
+    )
+
+    assert plain.status_code == 201, plain.text
+    assert threaded.status_code == 201, threaded.text
 
 
 async def test_a_retried_decision_lands_once(org: SimpleNamespace) -> None:
@@ -675,7 +729,8 @@ async def test_channels_and_threads_list_newest_first(org: SimpleNamespace) -> N
     assert threads.status_code == 200, threads.text
     listed = threads.json()["threads"]
     assert [(t["thread"], t["message_count"], t["project_id"]) for t in listed] == [
-        (None, 1, org.shared),
+        # The threadless row never takes a project, even from a post that names one.
+        (None, 1, None),
         ("gh:acme/app#1", 2, None),
     ]
     assert listed[1]["reflected_through"] is None

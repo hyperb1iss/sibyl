@@ -26,6 +26,13 @@ author who can write neither is skipped. Skips are recorded on the thread and
 are not failures: the thread settles and its retry budget is untouched.
 Anything else, a store or reflection error, fails the attempt and the whole
 window is retried; parts reflected before the error are reflected again then.
+
+Key grants. A key's authority is rebuilt from the grants it holds now, not
+the ones it held when the message was posted. That is sound only because a
+key's project and memory-space grants cannot be widened after it is created:
+today a key is created and revoked, never edited, so its current grants are
+at most what it posted with. If key grants ever become editable, store the
+grants a post was made under and intersect them with the current ones here.
 """
 
 from __future__ import annotations
