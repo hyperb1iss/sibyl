@@ -11,10 +11,18 @@ from tests.test_reflection_identity import content_store as content_store
 from tests.test_reflection_identity import runtime as runtime
 
 
-@pytest.mark.parametrize("can_write", [False, True])
-async def test_project_supersession_requires_write_grants(
-    runtime, content_store, monkeypatch, can_write
+@pytest.mark.parametrize(
+    ("writable", "maintained", "superseded"),
+    [
+        pytest.param([], [], False, id="no-write-grant"),
+        pytest.param(["project_b"], [], False, id="contributor"),
+        pytest.param(["project_b"], ["project_b"], True, id="maintainer"),
+    ],
+)
+async def test_project_supersession_takes_correction_authority(
+    runtime, content_store, monkeypatch, writable, maintained, superseded
 ):
+    """A row with no recorded owner is someone else's, so superseding it takes maintainer."""
     await runtime.entity_manager.create_direct(
         Entity(
             id="project-target",
@@ -44,7 +52,8 @@ async def test_project_supersession_requires_write_grants(
         principal_id="owner",
         accessible_projects={"project_b"},
         memory_scope="private",
-        writable_projects=(value for value in (["project_b"] if can_write else [])),
+        writable_projects=(value for value in writable),
+        maintained_projects=(value for value in maintained),
         related_to=["project-target"],
     )
     assert result.response.success
@@ -54,7 +63,7 @@ async def test_project_supersession_requires_write_grants(
         edge.target_id == "project-target" and edge.relationship_type.value == "RELATED_TO"
         for edge in relationships
     )
-    if can_write:
+    if superseded:
         assert target.observed_revision > before.observed_revision
         assert target.metadata["invalidated_by_entity_id"] == result.response.id
     else:
