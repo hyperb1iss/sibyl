@@ -365,6 +365,13 @@ async def drain_reflection_review(
                 source_surface="reflection_review_drain",
             )
             decision = authorize_memory_read(policy_context=policy_context)
+            if decision.allowed and not memory_auth.api_key_memory_scope_allowed(
+                ctx,
+                memory_scope=candidate.memory_scope.value,
+                scope_key=candidate.scope_key,
+            ):
+                # Reads on every other surface hold a key to its memory spaces.
+                decision = replace(decision, allowed=False, reason="api_key_memory_space_denied")
             if not decision.allowed:
                 results.append(
                     ReflectionReviewDrainItem(

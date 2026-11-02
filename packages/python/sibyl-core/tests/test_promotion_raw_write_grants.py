@@ -214,3 +214,39 @@ async def test_sharing_requires_project_write_grants(runtime, content_store, can
         assert result.reason == "shared"
     else:
         assert result.reason == "unverified_membership"
+
+
+@pytest.mark.parametrize(
+    ("granted", "reason"),
+    [
+        pytest.param({f"private\x1f{_PROMOTER}"}, "api_key_memory_space_denied", id="private-only"),
+        pytest.param({f"private\x1f{_PROMOTER}", "team\x1fteam_a"}, "promoted", id="team-granted"),
+    ],
+)
+async def test_raw_promotion_holds_its_source_to_the_api_keys_memory_spaces(
+    runtime, content_store, granted, reason
+):
+    source = await remember_raw_memory(
+        organization_id=runtime.client.group_id,
+        principal_id="teammate",
+        source_id="team-note",
+        title="Team convention",
+        raw_content="The team reviews migrations in pairs.",
+        memory_scope="team",
+        scope_key="team_a",
+        embedding_provider=None,
+    )
+    result = await promote_raw_memory(
+        raw_memory_id=source.id,
+        organization_id=source.organization_id,
+        principal_id=_PROMOTER,
+        promote_to_scope="private",
+        accessible_teams={"team_a"},
+        allowed_memory_scope_keys=granted,
+    )
+
+    assert result.reason == reason
+    current = await get_raw_memory(organization_id=source.organization_id, memory_id=source.id)
+    assert current is not None
+    if reason != "promoted":
+        assert "promoted_entity_id" not in current.metadata

@@ -440,3 +440,119 @@ async def test_dream_cycle_resolves_membership_for_the_capture_principal(
     assert "high_impact_scope" in reported["exception_reasons"]
     assert ("policy_denied" in reported["exception_reasons"]) is denied
     assert ("unverified_membership" in reported["policy_reasons"]) is denied
+
+
+TEAMMATE_ID = "00000000-0000-0000-0000-000000000333"
+_PRIVATE_ONLY_KEY = {f"private\x1f{USER_ID}"}
+
+
+def _stock_teammates_candidate(store: dict[str, RawMemory]) -> RawMemory:
+    """A pending candidate another member reflected from a team-scoped capture."""
+    store["source-team"] = _row(
+        id="source-team",
+        principal_id=TEAMMATE_ID,
+        memory_scope=MemoryScope.TEAM,
+        scope_key=TEAM,
+    )
+    candidate = _row(
+        id="candidate-team",
+        source_id="source-team",
+        principal_id=TEAMMATE_ID,
+        memory_scope=MemoryScope.TEAM,
+        scope_key=TEAM,
+        capture_surface="reflection_candidate",
+        tags=["reflection", "team-only"],
+        metadata={
+            "capture_surface": "reflection_candidate",
+            "remember_kind": "rule",
+            "confidence": 0.95,
+            "raw_source_ids": ["source-team"],
+            "domain": "sibyl",
+        },
+        provenance={"raw_source_ids": ["source-team"]},
+    )
+    store["candidate-team"] = candidate
+    return candidate
+
+
+@pytest.mark.parametrize("route", _PREVIEW_ROUTES)
+@pytest.mark.parametrize(
+    ("key", "allowed"),
+    [
+        pytest.param(_PRIVATE_ONLY_KEY, False, id="private-only-key"),
+        pytest.param(_PRIVATE_ONLY_KEY | {f"team\x1f{TEAM}"}, True, id="team-granted-key"),
+    ],
+)
+async def test_rest_preview_holds_sources_to_the_api_keys_memory_spaces(
+    store, route, key, allowed
+) -> None:
+    """A key granted only private memory cannot read a team candidate through promotion."""
+    _stock_teammates_candidate(store)
+    with ExitStack() as stack:
+        _rest_auth(stack, teams={TEAM})
+        response = await route(
+            ReflectionPromotionRequest(candidate_id="candidate-team", promote_to_scope="private"),
+            http_request=_http_request(),
+            org=SimpleNamespace(id=ORG_ID),
+            ctx=_ctx(api_key_memory_scope_keys=key),
+        )
+
+    assert response.allowed is allowed
+    if not allowed:
+        assert response.reason == "api_key_memory_space_denied"
+
+
+@pytest.mark.parametrize("route", [promote_reflection_candidate, promote_memory])
+async def test_rest_promote_refuses_unreadable_sources_before_reserving(store, route) -> None:
+    """The refusal lands before the reservation, so the author's own promote still works."""
+    _stock_teammates_candidate(store)
+    with ExitStack() as stack:
+        _rest_auth(stack, teams={TEAM})
+        reserve = stack.enter_context(
+            patch.object(memory_reflection, "_reserve_promotion", AsyncMock())
+        )
+        persist = stack.enter_context(
+            patch.object(memory_reflection, "persist_reflection_candidate", AsyncMock())
+        )
+        response = await route(
+            ReflectionPromotionRequest(candidate_id="candidate-team", promote_to_scope="private"),
+            http_request=_http_request(),
+            org=SimpleNamespace(id=ORG_ID),
+            ctx=_ctx(api_key_memory_scope_keys=_PRIVATE_ONLY_KEY),
+        )
+
+    reserve.assert_not_awaited()
+    persist.assert_not_awaited()
+    assert response.success is False
+    assert response.reason == "api_key_memory_space_denied"
+    assert "promoted_entity_id" not in store["candidate-team"].metadata
+
+
+async def test_drain_skips_candidates_outside_the_api_keys_memory_spaces(store) -> None:
+    candidate = _stock_teammates_candidate(store)
+    with ExitStack() as stack:
+        _rest_auth(stack, teams={TEAM})
+        stack.enter_context(
+            patch(
+                "sibyl.api.routes.memory_review.list_reflection_candidate_reviews",
+                AsyncMock(return_value=[candidate]),
+            )
+        )
+        preview = stack.enter_context(
+            patch(
+                "sibyl.api.routes.memory_review.preview_reflection_candidate_promotion",
+                AsyncMock(),
+            )
+        )
+        response = await drain_reflection_review(
+            ReflectionReviewDrainRequest(dry_run=True, limit=1, promote_to_scope="private"),
+            http_request=_http_request(),
+            org=SimpleNamespace(id=ORG_ID),
+            ctx=_ctx(api_key_memory_scope_keys=_PRIVATE_ONLY_KEY),
+        )
+
+    preview.assert_not_awaited()
+    item = response.results[0]
+    assert item.outcome == "skip"
+    assert item.reason == "policy_denied"
+    assert item.policy_reasons == ["api_key_memory_space_denied"]

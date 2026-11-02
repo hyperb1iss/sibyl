@@ -590,6 +590,7 @@ async def _resolve_raw_memory_share_plan(
             accessible_projects=accessible_projects,
             accessible_teams=accessible_teams,
             accessible_delegations=accessible_delegations,
+            allowed_memory_scope_keys=allowed_memory_scope_keys,
         )
     if source_denial is not None:
         return _promotion_denied(

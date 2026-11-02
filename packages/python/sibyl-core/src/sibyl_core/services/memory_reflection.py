@@ -1404,6 +1404,7 @@ async def _resolve_reflection_promotion_plan(
         accessible_projects=accessible_projects,
         accessible_teams=accessible_teams,
         accessible_delegations=accessible_delegations,
+        allowed_memory_scope_keys=allowed_memory_scope_keys,
     )
     if source_scope_denial is not None:
         return source_scope_denial
@@ -1610,6 +1611,7 @@ async def _resolve_raw_memory_promotion_plan(
         accessible_projects=accessible_projects,
         accessible_teams=accessible_teams,
         accessible_delegations=accessible_delegations,
+        allowed_memory_scope_keys=allowed_memory_scope_keys,
     )
     if source_scope_denial is not None:
         return source_scope_denial
