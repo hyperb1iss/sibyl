@@ -1,0 +1,565 @@
+"""sibylnet storage: names, cursors, the settled feed, thread state and distillation claims.
+
+The database tests run on the embedded engine and, when
+SIBYL_LIVE_SURREAL_TESTS=1 names a server in SIBYL_SURREAL_URL, on that
+server too: the embedded engine is more lenient than 3.x, so every statement
+the module issues is proven on both.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import os
+from collections.abc import AsyncIterator, Iterator
+from contextlib import asynccontextmanager
+from datetime import UTC, datetime, timedelta
+from uuid import uuid4
+
+import pytest
+
+from sibyl_core.backends.surreal import SurrealContentClient
+from sibyl_core.backends.surreal.content_schema import bootstrap_content_schema
+from sibyl_core.backends.surreal.url_schemes import is_embedded_surreal_url
+from sibyl_core.services import content_client, net
+from sibyl_core.services.net import (
+    NetCursor,
+    NetThreadState,
+    claim_net_thread,
+    fail_net_thread,
+    idle_net_threads,
+    list_net_channels,
+    list_net_threads,
+    net_source_title,
+    net_thread_window,
+    normalize_body,
+    normalize_channel,
+    normalize_thread,
+    post_net_message,
+    read_net_feed,
+    render_net_transcript,
+    settle_net_thread,
+)
+
+ORG = str(uuid4())
+OTHER_ORG = str(uuid4())
+ADA = str(uuid4())
+GRACE = str(uuid4())
+
+CREDENTIALS = {
+    "username": os.environ.get("SIBYL_SURREAL_USERNAME", "root"),
+    "password": os.environ.get("SIBYL_SURREAL_PASSWORD", "root"),
+}
+
+
+def engine_url(engine: str) -> str:
+    if engine == "embedded":
+        return "memory://"
+    if os.environ.get("SIBYL_LIVE_SURREAL_TESTS") != "1":
+        pytest.skip("live SurrealDB tests are disabled")
+    url = os.environ.get("SIBYL_SURREAL_URL", "")
+    if not url or is_embedded_surreal_url(url):
+        pytest.skip("live SurrealDB tests require SIBYL_SURREAL_URL to point at a server")
+    return url
+
+
+# A live server takes about a minute to migrate a fresh content namespace, so
+# the live run migrates one namespace once and clears the sibylnet tables
+# before each test; the embedded engine gets a fresh store every time.
+_LIVE = {"namespace": f"verify_net_{uuid4().hex}", "migrated": False}
+
+
+@pytest.fixture(scope="session")
+def live_namespace() -> Iterator[str]:
+    yield str(_LIVE["namespace"])
+    if not _LIVE["migrated"]:
+        return
+
+    async def remove() -> None:
+        client = SurrealContentClient(
+            url=os.environ["SIBYL_SURREAL_URL"], namespace=str(_LIVE["namespace"]), **CREDENTIALS
+        )
+        try:
+            await client.execute_query(f"REMOVE NAMESPACE IF EXISTS {client.namespace};")
+        finally:
+            await client.close()
+
+    asyncio.run(remove())
+
+
+@pytest.fixture(params=["embedded", "live"])
+async def store(
+    request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch
+) -> AsyncIterator[SurrealContentClient]:
+    url = engine_url(request.param)
+    live = request.param == "live"
+    namespace = request.getfixturevalue("live_namespace") if live else f"verify_net_{uuid4().hex}"
+    client = SurrealContentClient(url=url, namespace=namespace, **CREDENTIALS)
+    try:
+        if not (live and _LIVE["migrated"]):
+            await bootstrap_content_schema(client)
+            _LIVE["migrated"] = _LIVE["migrated"] or live
+        await client.execute_query("DELETE net_messages; DELETE net_threads;")
+
+        @asynccontextmanager
+        async def session():
+            yield client
+
+        monkeypatch.setattr("sibyl_core.services.content_client.surreal_content_client", session)
+        yield client
+    finally:
+        await client.close()
+
+
+async def age(client: SurrealContentClient, seconds: int) -> None:
+    """Move every stored instant back, as if the posts happened ``seconds`` ago."""
+    await client.execute_query(
+        f"UPDATE net_messages SET created_at = created_at - {seconds}s;"
+        f"UPDATE net_threads SET last_message_at = last_message_at - {seconds}s, "
+        f"first_message_at = first_message_at - {seconds}s;"
+    )
+
+
+async def post(
+    channel: str = "#reviews",
+    body: str = "ship it",
+    *,
+    thread: str = "",
+    author: str = ADA,
+    org: str = ORG,
+    project_id: str | None = None,
+    agent: str | None = "claude-code",
+) -> net.NetMessageRecord:
+    return await post_net_message(
+        organization_id=org,
+        channel=channel,
+        thread=thread,
+        kind="message",
+        body=body,
+        author_user_id=author,
+        project_id=project_id,
+        author_agent=agent,
+    )
+
+
+async def thread_state(channel: str, thread: str = "", org: str = ORG) -> NetThreadState:
+    states = await list_net_threads(organization_id=org, channel=channel)
+    return next(state for state in states if state.thread == thread)
+
+
+# --- names and cursors -----------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        ("#Reviews ", "#reviews"),
+        ("@ada", "@ada"),
+        ("build-bot.v2_x", "build-bot.v2_x"),
+        ("#" + "a" * 64, "#" + "a" * 64),
+    ],
+)
+def test_channel_names_normalize(raw: str, expected: str) -> None:
+    assert normalize_channel(raw) == expected
+
+
+@pytest.mark.parametrize("raw", ["", "#", "@@ada", "-ops", "#a b", "a" * 65, "#ops/x", "ops!"])
+def test_channel_names_refuse_garbage(raw: str) -> None:
+    with pytest.raises(ValueError):
+        normalize_channel(raw)
+
+
+def test_threads_and_bodies_are_bounded() -> None:
+    assert normalize_thread(None) == ""
+    assert normalize_thread("  gh:acme/app#42 ") == "gh:acme/app#42"
+    assert normalize_thread("x" * 200) == "x" * 200
+    for bad in ("x" * 201, "line\nbreak", "tab\there", "bell\x07"):
+        with pytest.raises(ValueError):
+            normalize_thread(bad)
+    assert normalize_body("  hi  ") == "hi"
+    assert normalize_body("x" * 16_000) == "x" * 16_000
+    for bad in ("", "   \n ", "x" * 16_001):
+        with pytest.raises(ValueError):
+            normalize_body(bad)
+
+
+def test_cursors_round_trip_with_nanoseconds() -> None:
+    cursor = NetCursor(created_at="2026-11-02T10:00:00.123456789Z", uuid=str(uuid4()))
+    assert NetCursor.decode(cursor.encode()) == cursor
+    start = NetCursor(created_at="2026-11-02T10:00:00Z", uuid="")
+    assert NetCursor.decode(start.encode()) == start
+
+
+@pytest.mark.parametrize(
+    "token",
+    [
+        "",
+        "not base64 !!",
+        NetCursor(created_at="yesterday", uuid="").encode(),
+        NetCursor(created_at="2026-11-02T10:00:00Z", uuid="not-a-uuid").encode(),
+        "MjAyNi0xMS0wMlQxMDowMDowMFo",  # a timestamp with no separator
+    ],
+)
+def test_cursors_refuse_garbage(token: str) -> None:
+    with pytest.raises(ValueError):
+        NetCursor.decode(token)
+
+
+def test_transcript_names_each_poster_and_their_agent() -> None:
+    state = NetThreadState(
+        organization_id=ORG,
+        channel="#reviews",
+        thread="gh:acme/app#42",
+        project_id=None,
+        message_count=2,
+        first_message_at=None,
+        last_message_at=None,
+        reflected_through=None,
+        reflection_source_id=None,
+        reflection_attempts=0,
+        reflection_error=None,
+    )
+    stamp = datetime(2026, 11, 2, 10, 0, tzinfo=UTC)
+    messages = [
+        net.NetMessageRecord(
+            id=str(uuid4()),
+            organization_id=ORG,
+            channel="#reviews",
+            thread="gh:acme/app#42",
+            kind="message",
+            body=body,
+            project_id=None,
+            author_user_id=author,
+            api_key_id=None,
+            author_agent=agent,
+            author_session=None,
+            decision_memory_id=None,
+            created_at=stamp + timedelta(minutes=index),
+            cursor=NetCursor(created_at="2026-11-02T10:00:00Z", uuid=""),
+        )
+        for index, (author, agent, body) in enumerate(
+            [(ADA, "claude-code", "Use keyset paging."), (GRACE, None, "Agreed.")]
+        )
+    ]
+
+    transcript = render_net_transcript(state, messages, names={ADA: "Ada"})
+
+    assert transcript.splitlines() == [
+        "# sibylnet channel #reviews, thread gh:acme/app#42",
+        "",
+        "[2026-11-02T10:00:00Z] Ada (claude-code): Use keyset paging.",
+        f"[2026-11-02T10:01:00Z] {GRACE}: Agreed.",
+    ]
+    assert net_source_title("#reviews", "gh:acme/app#42") == "sibylnet #reviews gh:acme/app#42"
+    assert net_source_title("@ada", "") == "sibylnet @ada"
+
+
+# --- posting and thread state ----------------------------------------------
+
+
+async def test_posts_count_on_their_thread(store: SurrealContentClient) -> None:
+    first = await post(thread="gh:acme/app#42", project_id="project_a")
+    await post(thread="gh:acme/app#42", author=GRACE)
+    last = await post(thread="gh:acme/app#42", project_id="project_b", agent=None)
+    await post(body="no thread here")
+
+    threaded = await thread_state("#reviews", "gh:acme/app#42")
+    threadless = await thread_state("#reviews", "")
+
+    assert threaded.message_count == 3
+    assert threaded.first_message_at == first.created_at
+    assert threaded.last_message_at == last.created_at
+    # The latest project anyone named wins; a post naming none keeps it.
+    assert threaded.project_id == "project_b"
+    assert threaded.reflected_through is None
+    assert threaded.reflection_attempts == 0
+    assert threadless.message_count == 1
+    assert first.author_agent == "claude-code"
+    assert last.author_agent is None
+    assert first.cursor.uuid == first.id
+
+
+async def test_channel_summary_counts_real_threads_newest_first(
+    store: SurrealContentClient,
+) -> None:
+    await post("#builds", thread="nightly")
+    await post("#reviews", thread="gh:acme/app#1")
+    await post("#reviews", thread="gh:acme/app#2")
+    await post("#reviews")
+    await post("#hidden", org=OTHER_ORG)
+
+    channels = await list_net_channels(organization_id=ORG)
+
+    assert [(c.channel, c.message_count, c.thread_count) for c in channels] == [
+        ("#reviews", 3, 2),
+        ("#builds", 1, 1),
+    ]
+    threads = await list_net_threads(organization_id=ORG, channel="#reviews")
+    assert [state.thread for state in threads] == ["", "gh:acme/app#2", "gh:acme/app#1"]
+
+
+# --- the feed ----------------------------------------------------------------
+
+
+async def test_feed_holds_back_rows_inside_the_settle_window(
+    store: SurrealContentClient,
+) -> None:
+    await post(body="still committing")
+
+    unsettled = await read_net_feed(organization_id=ORG, since=None)
+    assert unsettled.messages == []
+
+    await age(store, 5)
+    settled = await read_net_feed(organization_id=ORG, since=None)
+    assert [message.body for message in settled.messages] == ["still committing"]
+
+
+async def test_feed_tail_then_pages_forward_without_gaps(store: SurrealContentClient) -> None:
+    for index in range(5):
+        await post(body=f"m{index}")
+    await post(body="elsewhere", org=OTHER_ORG)
+    await age(store, 10)
+
+    tail = await read_net_feed(organization_id=ORG, since=None, limit=2)
+    assert [m.body for m in tail.messages] == ["m3", "m4"]
+    assert tail.next_since == tail.messages[-1].cursor
+    assert tail.more is False
+
+    everything = await read_net_feed(organization_id=ORG, since=None, limit=500)
+    first = everything.messages[0]
+    assert [m.body for m in everything.messages] == ["m0", "m1", "m2", "m3", "m4"]
+
+    page = await read_net_feed(organization_id=ORG, since=first.cursor, limit=2)
+    assert [m.body for m in page.messages] == ["m1", "m2"]
+    assert page.more is True
+    page = await read_net_feed(organization_id=ORG, since=page.next_since, limit=2)
+    assert [m.body for m in page.messages] == ["m3", "m4"]
+    assert page.more is False
+    drained = await read_net_feed(organization_id=ORG, since=page.next_since, limit=2)
+    assert drained.messages == []
+    assert drained.next_since == page.next_since
+
+
+async def test_feed_cursor_drains_rows_sharing_a_timestamp(store: SurrealContentClient) -> None:
+    for index in range(4):
+        await post(body=f"tie{index}")
+    await store.execute_query(
+        "LET $tie = time::now() - 30s; UPDATE net_messages SET created_at = $tie;"
+    )
+    await post(body="after")
+    await age(store, 5)
+    ordered = (await read_net_feed(organization_id=ORG, since=None, limit=10)).messages
+    assert ordered[-1].body == "after"
+    assert len({m.cursor.created_at for m in ordered[:4]}) == 1
+
+    seen: list[str] = []
+    cursor = ordered[0].cursor
+    seen.append(ordered[0].id)
+    while True:
+        page = await read_net_feed(organization_id=ORG, since=cursor, limit=1)
+        if not page.messages:
+            break
+        seen.extend(m.id for m in page.messages)
+        cursor = page.next_since
+
+    assert seen == [m.id for m in ordered]
+
+
+async def test_feed_filters_by_channel_and_thread(store: SurrealContentClient) -> None:
+    await post("#reviews", "r", thread="gh:acme/app#42")
+    await post("#reviews", "r2")
+    await post("#builds", "b")
+    await post("@ada", "inbox")
+    await age(store, 5)
+
+    def bodies(page: net.NetFeedPage) -> list[str]:
+        return [m.body for m in page.messages]
+
+    assert bodies(await read_net_feed(organization_id=ORG, since=None, channels=["#builds"])) == [
+        "b"
+    ]
+    assert bodies(
+        await read_net_feed(organization_id=ORG, since=None, channels=["#builds", "@ada"])
+    ) == ["b", "inbox"]
+    assert bodies(
+        await read_net_feed(organization_id=ORG, since=None, thread="gh:acme/app#42")
+    ) == ["r"]
+    with pytest.raises(ValueError):
+        await read_net_feed(
+            organization_id=ORG, since=None, channels=[f"c{index}" for index in range(33)]
+        )
+
+
+async def test_feed_starts_from_now_with_a_zero_limit(store: SurrealContentClient) -> None:
+    await post(body="history")
+    await age(store, 10)
+
+    start = await read_net_feed(organization_id=ORG, since=None, limit=0)
+    assert start.messages == []
+    assert start.next_since.uuid == ""
+
+    await post(body="news")
+    await asyncio.sleep(net.SETTLE_SECONDS + 0.5)
+    page = await read_net_feed(organization_id=ORG, since=start.next_since)
+    assert [m.body for m in page.messages] == ["news"]
+
+
+# --- distillation claims ----------------------------------------------------
+
+
+async def test_idle_threads_are_claimed_once_and_settled(store: SurrealContentClient) -> None:
+    first = await post(thread="t1", body="decide keyset paging")
+    second = await post(thread="t1", author=GRACE, body="agreed")
+    await post(thread="busy", body="still talking")
+    await age(store, 120)
+    await store.execute_query(
+        "UPDATE net_threads SET last_message_at = time::now() WHERE thread = 'busy';"
+    )
+
+    candidates = await idle_net_threads(idle_minutes=1, limit=10)
+    assert [(c.channel, c.thread) for c in candidates] == [("#reviews", "t1")]
+
+    claimed = await claim_net_thread(candidates[0])
+    assert claimed is not None
+    assert claimed.reflection_attempts == 1
+    assert await claim_net_thread(candidates[0]) is None
+    assert await idle_net_threads(idle_minutes=1, limit=10) == []
+
+    window = await net_thread_window(claimed)
+    assert [m.id for m in window] == [first.id, second.id]
+
+    await settle_net_thread(claimed, through_message_id=second.id, source_id="session_1")
+    settled = await thread_state("#reviews", "t1")
+    assert settled.reflected_through == window[-1].created_at
+    assert settled.reflection_source_id == "session_1"
+    assert settled.reflection_attempts == 0
+    assert await idle_net_threads(idle_minutes=1, limit=10) == []
+
+    third = await post(thread="t1", body="one more thing")
+    await age(store, 120)
+    again = [c for c in await idle_net_threads(idle_minutes=1, limit=10) if c.thread == "t1"]
+    assert len(again) == 1
+    reclaimed = await claim_net_thread(again[0])
+    assert reclaimed is not None
+    assert [m.id for m in await net_thread_window(reclaimed)] == [third.id]
+
+
+async def test_failed_attempts_stop_after_the_retry_budget(store: SurrealContentClient) -> None:
+    await post(thread="stuck")
+    await age(store, 120)
+
+    for attempt in range(1, net.MAX_REFLECTION_ATTEMPTS + 1):
+        candidates = await idle_net_threads(idle_minutes=1, limit=10)
+        assert len(candidates) == 1
+        claimed = await claim_net_thread(candidates[0])
+        assert claimed is not None
+        assert claimed.reflection_attempts == attempt
+        await fail_net_thread(claimed, reason=f"principal_cannot_write {attempt}")
+
+    state = await thread_state("#reviews", "stuck")
+    assert state.reflection_error == f"principal_cannot_write {net.MAX_REFLECTION_ATTEMPTS}"
+    assert state.reflection_attempts == net.MAX_REFLECTION_ATTEMPTS
+    assert await idle_net_threads(idle_minutes=1, limit=10) == []
+
+
+async def test_expired_claims_can_be_taken_over(store: SurrealContentClient) -> None:
+    await post(thread="orphaned")
+    await age(store, 120)
+    candidate = (await idle_net_threads(idle_minutes=1, limit=10))[0]
+    assert await claim_net_thread(candidate) is not None
+
+    await store.execute_query(
+        "UPDATE net_threads SET reflection_claimed_at = "
+        f"time::now() - {net.CLAIM_LEASE_MINUTES + 1}m;"
+    )
+
+    taken = await claim_net_thread(candidate)
+    assert taken is not None
+    assert taken.reflection_attempts == 2
+
+
+async def test_window_keeps_the_oldest_messages_under_the_character_cap(
+    store: SurrealContentClient,
+) -> None:
+    posted = [await post(thread="long", body=f"{index}" * net.MAX_BODY_CHARS) for index in range(5)]
+    await age(store, 120)
+    claimed = await claim_net_thread((await idle_net_threads(idle_minutes=1, limit=10))[0])
+    assert claimed is not None
+
+    window = await net_thread_window(claimed)
+
+    assert [m.id for m in window] == [m.id for m in posted[:3]]
+
+
+async def test_an_empty_window_settles_at_the_last_message(store: SurrealContentClient) -> None:
+    await post(thread="vanished")
+    await age(store, 120)
+    await store.execute_query("DELETE net_messages;")
+    claimed = await claim_net_thread((await idle_net_threads(idle_minutes=1, limit=10))[0])
+    assert claimed is not None
+
+    assert await net_thread_window(claimed) == []
+    await settle_net_thread(claimed, through_message_id=None)
+
+    state = await thread_state("#reviews", "vanished")
+    assert state.reflected_through == state.last_message_at
+    assert await idle_net_threads(idle_minutes=1, limit=10) == []
+
+
+# --- concurrency, on a server only ------------------------------------------
+# The embedded engine misses write-write conflicts and is clamped to one
+# connection, so it cannot show what concurrent writers do; these run live.
+
+
+@pytest.fixture
+async def live_store(
+    request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch
+) -> AsyncIterator[SurrealContentClient]:
+    url = engine_url("live")
+    client = SurrealContentClient(
+        url=url, namespace=request.getfixturevalue("live_namespace"), **CREDENTIALS
+    )
+    try:
+        if not _LIVE["migrated"]:
+            await bootstrap_content_schema(client)
+            _LIVE["migrated"] = True
+        await client.execute_query("DELETE net_messages; DELETE net_threads;")
+
+        @asynccontextmanager
+        async def session():
+            yield client
+
+        monkeypatch.setattr("sibyl_core.services.content_client.surreal_content_client", session)
+        yield client
+    finally:
+        await client.close()
+
+
+async def test_concurrent_first_posts_share_one_thread_row(
+    live_store: SurrealContentClient,
+) -> None:
+    posted = await asyncio.gather(
+        *(post(thread="race", body=f"r{index}", author=ADA) for index in range(16))
+    )
+
+    state = await thread_state("#reviews", "race")
+    assert state.message_count == len(posted) == 16
+    assert state.first_message_at == min(message.created_at for message in posted)
+    assert state.last_message_at == max(message.created_at for message in posted)
+    rows = await live_store.execute_query(
+        "SELECT count() AS rows FROM net_threads WHERE thread = 'race' GROUP ALL;"
+    )
+    assert content_client.normalize_records(rows)[0]["rows"] == 1
+
+
+async def test_concurrent_claims_leave_exactly_one_winner(
+    live_store: SurrealContentClient,
+) -> None:
+    await post(thread="contested")
+    await age(live_store, 120)
+    candidate = (await idle_net_threads(idle_minutes=1, limit=10))[0]
+
+    claims = await asyncio.gather(*(claim_net_thread(candidate) for _ in range(8)))
+
+    winners = [claim for claim in claims if claim is not None]
+    assert len(winners) == 1
+    assert winners[0].reflection_attempts == 1
