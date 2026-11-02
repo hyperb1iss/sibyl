@@ -16,7 +16,7 @@ from sibyl_core.migrate.source_integrity import (
 )
 
 
-def _source_table(kind: SourceKind) -> tuple[str, str]:
+def source_table(kind: SourceKind) -> tuple[str, str]:
     if kind is SourceKind.GRAPH_ENTITY:
         return "entity", "group_id"
     return "raw_captures", "organization_id"
@@ -35,6 +35,39 @@ def _graph_auxiliary_snapshot_sql() -> str:
     };"""
 
 
+type DatetimePath = tuple[Any, str | int, str]
+
+
+def datetime_paths(root: Any) -> list[DatetimePath]:
+    """Every datetime under ``root``: its parent, its key, and its SurrealQL field path."""
+    dates: list[DatetimePath] = []
+
+    def collect(value: Any, path: str) -> None:
+        if isinstance(value, dict | list):
+            items = value.items() if isinstance(value, dict) else enumerate(value)
+            for key, item in items:
+                if isinstance(key, int):
+                    child = f"{path}[{key}]"
+                else:
+                    escaped = key.replace("\\", "\\\\").replace("`", "\\`")
+                    child = f"{path}.`{escaped}`" if path else f"`{escaped}`"
+                if isinstance(item, datetime):
+                    dates.append((value, key, child))
+                else:
+                    collect(item, child)
+
+    collect(root, "")
+    return dates
+
+
+def apply_datetime_texts(dates: list[DatetimePath], texts: object) -> None:
+    """Replace each truncated SDK datetime with the server's own text for it."""
+    if not isinstance(texts, list) or len(texts) != len(dates):
+        raise ValueError("source archive datetime capture returned an invalid shape")
+    for (parent, key, _), text in zip(dates, texts, strict=True):
+        parent[key] = ArchiveDatetime.parse(text)
+
+
 async def read_source_archive_snapshot(
     execute_query: SurrealExecute,
     *,
@@ -43,7 +76,7 @@ async def read_source_archive_snapshot(
     include_graph_auxiliary: bool = False,
 ) -> dict[str, Any]:
     """Read live sources, absent-source history, and target associations together."""
-    table, org_field = _source_table(kind)
+    table, org_field = source_table(kind)
     row_scope = f"{org_field} IN $organizations" if organizations is not None else "true"
     ledger_scope = "organization_id IN $organizations" if organizations is not None else "true"
     if include_graph_auxiliary and (kind is not SourceKind.GRAPH_ENTITY or organizations is None):
@@ -82,23 +115,7 @@ async def read_source_archive_snapshot(
 
     # The SDK truncates native nanoseconds. Capture typed datetime text only
     # after proving the second source-local read matches the original snapshot.
-    dates: list[tuple[Any, str | int, str]] = []
-
-    def collect(value: Any, path: str) -> None:
-        if isinstance(value, dict | list):
-            items = value.items() if isinstance(value, dict) else enumerate(value)
-            for key, item in items:
-                if isinstance(key, int):
-                    child = f"{path}[{key}]"
-                else:
-                    escaped = key.replace("\\", "\\\\").replace("`", "\\`")
-                    child = f"{path}.`{escaped}`" if path else f"`{escaped}`"
-                if isinstance(item, datetime):
-                    dates.append((value, key, child))
-                else:
-                    collect(item, child)
-
-    collect(snapshot, "")
+    dates = datetime_paths(snapshot)
     if dates:
         captured = normalize_records(
             await execute_query(
@@ -115,11 +132,7 @@ async def read_source_archive_snapshot(
                 paths=[path for _, _, path in dates],
             )
         )
-        texts = captured[0].get("datetimes") if len(captured) == 1 else None
-        if not isinstance(texts, list) or len(texts) != len(dates):
-            raise ValueError("source archive datetime capture returned an invalid shape")
-        for (parent, key, _), text in zip(dates, texts, strict=True):
-            parent[key] = ArchiveDatetime.parse(text)
+        apply_datetime_texts(dates, captured[0].get("datetimes") if len(captured) == 1 else None)
     snapshot["fingerprint"] = fingerprint
     return snapshot
 
@@ -215,7 +228,7 @@ async def restore_source_integrity(
         organizations=None if global_scope else organizations,
         include_graph_auxiliary=clean_graph_auxiliary,
     )
-    table, org_field = _source_table(kind)
+    table, org_field = source_table(kind)
     row_scope = "true" if global_scope else f"{org_field} IN $organizations"
     ledger_scope = "true" if global_scope else "organization_id IN $organizations"
 

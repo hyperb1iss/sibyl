@@ -2,6 +2,7 @@
 
 import hashlib
 from copy import deepcopy
+from dataclasses import dataclass, field
 from typing import Any
 
 from sibyl_core.memory_pipeline.observations import (
@@ -17,20 +18,123 @@ from sibyl_core.services.memory_derivations import observation_from_record
 from sibyl_core.services.source_observations import graph_evidence
 
 
-def seal_archive_lineage(
-    graph_payload: dict[str, Any] | None,
-    content_payload: dict[str, Any] | None,
-) -> tuple[dict[str, Any] | None, dict[str, Any] | None, list[dict[str, str]]]:
-    """Quarantine mismatched captured dependencies before publishing the archive.
+@dataclass
+class LineageSection:
+    """What sealing reads from one kind's capture, without the source bodies.
+
+    Rows arrive one at a time through ``add_row``, so a capture that streams
+    its rows to disk keeps only these digests. Sealing retires associations in
+    place and names the rows that must be marked ``derivation_required``.
+    """
+
+    kind: SourceKind
+    associations: list[dict[str, Any]]
+    observed: dict[SourceIdentity, SourceObservation] = field(default_factory=dict)
+    target_digests: dict[tuple[str, str], str] = field(default_factory=dict)
+    flagged: set[tuple[str, str]] = field(default_factory=set)
+
+    def __post_init__(self) -> None:
+        self._targets = {
+            (association["organization_id"], association["target_id"])
+            for association in self.associations
+        }
+
+    def add_row(self, row: dict[str, Any], state: dict[str, Any]) -> None:
+        org_field = "group_id" if self.kind is SourceKind.GRAPH_ENTITY else "organization_id"
+        key = (row[org_field], row["uuid"])
+        if state["deleted"] and key not in self._targets:
+            return
+        entity = entity_from_surreal_row(row) if self.kind is SourceKind.GRAPH_ENTITY else None
+        if not state["deleted"]:
+            source = SourceIdentity(key[0], self.kind, key[1])
+            self.observed[source] = SourceObservation(
+                source=source,
+                generation=state["generation"],
+                revision=state["revision"],
+                incarnation=state["incarnation"],
+                content_sha256=graph_evidence(entity)
+                if entity is not None
+                else evidence_hash({"version": 1, "raw_content": row["raw_content"]}),
+                durable=True,
+            )
+        if key in self._targets:
+            self.target_digests[key] = (
+                graph_target_digest(entity)
+                if entity is not None
+                else hashlib.sha256(row["raw_content"].encode()).hexdigest()
+            )
+
+
+def lineage_section(
+    kind: SourceKind,
+    rows: list[dict[str, Any]],
+    states: list[dict[str, Any]],
+    associations: list[dict[str, Any]],
+) -> LineageSection:
+    section = LineageSection(kind=kind, associations=associations)
+    state_map = {(state["organization_id"], state["source_id"]): state for state in states}
+    org_field = "group_id" if kind is SourceKind.GRAPH_ENTITY else "organization_id"
+    for row in rows:
+        section.add_row(row, state_map[(row[org_field], row["uuid"])])
+    return section
+
+
+def seal_lineage(
+    sections: list[LineageSection], prior: list[dict[str, str]]
+) -> list[dict[str, str]]:
+    """Retire contradicted associations and report every unresolved dependency.
 
     Each namespace supplies its own coherent capture. Sources omitted from a
     standalone archive remain unresolved and protected, so a later coherent
     content restore may satisfy them. Present but contradictory source evidence
     retires the archived target association without rewriting its observations.
     """
+    observed: dict[SourceIdentity, SourceObservation] = {}
+    for section in sections:
+        observed.update(section.observed)
+    kinds = {section.kind for section in sections}
+    report = [dict(row) for row in prior]
+    for section in sections:
+        for association in section.associations:
+            if not association["active"]:
+                continue
+            key = (association["organization_id"], association["target_id"])
+            mismatch = section.target_digests.get(key) != association["body_sha256"]
+            unresolved = False
+            for value in association["observations"]:
+                original = observation_from_record(value)
+                if original.source.kind not in kinds:
+                    unresolved = True
+                    continue
+                current = observed.get(original.source)
+                if current is None or not original.same_evidence(current):
+                    mismatch = True
+            if mismatch or unresolved:
+                if key in section.target_digests:
+                    section.flagged.add(key)
+                if mismatch:
+                    association["active"] = False
+                report.append(
+                    {
+                        "organization_id": association["organization_id"],
+                        "source_kind": section.kind.value,
+                        "source_id": association["target_id"],
+                        "status": "quarantined" if mismatch else "unresolved",
+                        "reason": "captured_dependency_mismatch"
+                        if mismatch
+                        else "external_dependency_omitted",
+                    }
+                )
+    return report
+
+
+def seal_archive_lineage(
+    graph_payload: dict[str, Any] | None,
+    content_payload: dict[str, Any] | None,
+) -> tuple[dict[str, Any] | None, dict[str, Any] | None, list[dict[str, str]]]:
+    """Quarantine mismatched captured dependencies before publishing the archive."""
     graph, content = deepcopy(graph_payload), deepcopy(content_payload)
-    sections = {}
-    observed = {}
+    captured = []
     for kind, payload, current_version in (
         (SourceKind.GRAPH_ENTITY, graph, "3.0"),
         (SourceKind.RAW_CAPTURE, content, "2.0"),
@@ -46,82 +150,38 @@ def seal_archive_lineage(
         rows, states, associations = validate_integrity_archive(
             section, kind=kind, organizations=organizations
         )
-        sections[kind] = (payload, organizations, rows, states, associations)
-        org_field = "group_id" if kind is SourceKind.GRAPH_ENTITY else "organization_id"
-        state_map = {(state["organization_id"], state["source_id"]): state for state in states}
+        captured.append(
+            (
+                payload,
+                organizations,
+                rows,
+                states,
+                lineage_section(kind, rows, states, associations),
+            )
+        )
+    report = seal_lineage(
+        [lineage for *_, lineage in captured],
+        [
+            row
+            for payload in (graph, content)
+            if payload is not None
+            for row in payload.get("lineage_validation", [])
+            if isinstance(row, dict) and row.get("status") == "quarantined"
+        ],
+    )
+    for payload, organizations, rows, states, lineage in captured:
+        org_field = "group_id" if lineage.kind is SourceKind.GRAPH_ENTITY else "organization_id"
         for row in rows:
-            source = SourceIdentity(row[org_field], kind, row["uuid"])
-            state = state_map[(source.organization_id, source.id)]
-            if state["deleted"]:
-                continue
-            digest = (
-                graph_evidence(entity_from_surreal_row(row))
-                if kind is SourceKind.GRAPH_ENTITY
-                else evidence_hash({"version": 1, "raw_content": row["raw_content"]})
-            )
-            observed[source] = SourceObservation(
-                source=source,
-                generation=state["generation"],
-                revision=state["revision"],
-                incarnation=state["incarnation"],
-                content_sha256=digest,
-                durable=True,
-            )
-    report = [
-        dict(row)
-        for payload in (graph, content)
-        if payload is not None
-        for row in payload.get("lineage_validation", [])
-        if isinstance(row, dict) and row.get("status") == "quarantined"
-    ]
-    for kind, (payload, organizations, rows, states, associations) in sections.items():
-        org_field = "group_id" if kind is SourceKind.GRAPH_ENTITY else "organization_id"
-        row_map = {(row[org_field], row["uuid"]): row for row in rows}
-        for association in associations:
-            if not association["active"]:
-                continue
-            target = row_map.get((association["organization_id"], association["target_id"]))
-            target_digest = None
-            if target is not None:
-                target_digest = (
-                    graph_target_digest(entity_from_surreal_row(target))
-                    if kind is SourceKind.GRAPH_ENTITY
-                    else hashlib.sha256(target["raw_content"].encode()).hexdigest()
-                )
-            mismatch = target_digest != association["body_sha256"]
-            unresolved = False
-            for value in association["observations"]:
-                original = observation_from_record(value)
-                if original.source.kind not in sections:
-                    unresolved = True
-                    continue
-                current = observed.get(original.source)
-                if current is None or not original.same_evidence(current):
-                    mismatch = True
-            if mismatch or unresolved:
-                identity = association["target_id"]
-                row = row_map.get((association["organization_id"], identity))
-                if row is not None:
-                    row["derivation_required"] = True
-                if mismatch:
-                    association["active"] = False
-                report.append(
-                    {
-                        "organization_id": association["organization_id"],
-                        "source_kind": kind.value,
-                        "source_id": identity,
-                        "status": "quarantined" if mismatch else "unresolved",
-                        "reason": "captured_dependency_mismatch"
-                        if mismatch
-                        else "external_dependency_omitted",
-                    }
-                )
+            if (row[org_field], row["uuid"]) in lineage.flagged:
+                row["derivation_required"] = True
         payload["source_integrity"] = build_integrity_archive(
-            kind=kind,
+            kind=lineage.kind,
             organizations=organizations,
             source_rows=rows,
             source_states=states,
-            derivations=associations,
+            derivations=lineage.associations,
         )
-        payload["lineage_validation"] = [row for row in report if row["source_kind"] == kind.value]
+        payload["lineage_validation"] = [
+            row for row in report if row["source_kind"] == lineage.kind.value
+        ]
     return graph, content, report
