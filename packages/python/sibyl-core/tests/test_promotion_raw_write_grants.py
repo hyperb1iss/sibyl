@@ -165,6 +165,42 @@ async def test_promotion_hands_maintainer_grants_to_invalidation(
     assert result.metadata[key] == [target.id]
 
 
+async def test_promoting_someone_elses_candidate_keeps_its_authors_supersessions(
+    runtime, content_store
+):
+    """The candidate's author may retire their own captures whoever promotes it."""
+    own = await _project_capture(runtime, author="source-author")
+    foreign = await _project_capture(runtime, author="third-party")
+    replacement = await remember_raw_memory(
+        organization_id=runtime.client.group_id,
+        principal_id="source-author",
+        source_id="project-replacement",
+        title="Revised guidance",
+        raw_content="Use the revised convention.",
+        memory_scope="project",
+        scope_key=_PROJECT,
+        metadata={"project_id": _PROJECT, "supersedes_source_ids": [own.id, foreign.id]},
+        embedding_provider=None,
+    )
+    result = await promote_raw_memory(
+        raw_memory_id=replacement.id,
+        organization_id=replacement.organization_id,
+        principal_id=_PROMOTER,
+        promote_to_scope="project",
+        promote_to_scope_key=_PROJECT,
+        accessible_projects={_PROJECT},
+        writable_projects={_PROJECT},
+    )
+
+    assert result.success, result.reason
+    assert result.metadata["invalidated_source_ids"] == [own.id]
+    assert result.metadata["invalidation_skipped_source_ids"] == [foreign.id]
+    retired = await get_raw_memory(organization_id=own.organization_id, memory_id=own.id)
+    kept = await get_raw_memory(organization_id=foreign.organization_id, memory_id=foreign.id)
+    assert retired is not None and "invalid_at" in retired.metadata
+    assert kept == foreign
+
+
 @pytest.mark.parametrize("grant_iterator", [False, True])
 async def test_project_promotion_preserves_write_grants_across_stages(
     runtime, content_store, grant_iterator

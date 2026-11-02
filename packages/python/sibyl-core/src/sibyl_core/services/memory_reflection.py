@@ -238,6 +238,7 @@ async def persist_reflection_candidate(
     accessible_projects: Iterable[str] | None = None,
     writable_projects: Iterable[str] | None = None,
     maintained_projects: Iterable[str] | None = None,
+    candidate_author_id: str | None = None,
     accessible_teams: Iterable[str] | None = None,
     accessible_delegations: Iterable[str] | None = None,
     memory_scope: MemoryScope | str | None = None,
@@ -312,6 +313,7 @@ async def persist_reflection_candidate(
         writable_projects=writable_projects,
         maintained_projects=maintained_projects,
         candidate=candidate,
+        candidate_author_id=candidate_author_id,
     )
     entity = _entity_from_candidate(
         candidate,
@@ -489,6 +491,7 @@ async def persist_reflection_candidate(
         replacement_entity_id=created_id,
         replacement_source_ids=source_ids,
         authorized_entity_ids=superseded_ids,
+        candidate_author_id=candidate_author_id,
     )
 
     receipt = {
@@ -1028,6 +1031,7 @@ async def _apply_promotion_plan(
         accessible_projects=accessible_projects,
         writable_projects=writable_projects,
         maintained_projects=maintained_projects,
+        candidate_author_id=plan.candidate_memory.principal_id,
         accessible_teams=accessible_teams,
         accessible_delegations=accessible_delegations,
         memory_scope=plan.target_scope,

@@ -432,26 +432,63 @@ def _with_authorized_supersedes(
     return sanitized
 
 
+def _retirement_allowed(
+    *,
+    author_id: str | None,
+    memory_scope: MemoryScope | str | None,
+    scope_key: str | None,
+    principal_id: str | None,
+    writable_projects: Iterable[str] | None,
+    maintained_projects: Iterable[str] | None,
+    candidate_author_id: str | None,
+) -> bool:
+    if authorize_memory_correction(
+        principal_id=principal_id,
+        author_id=author_id,
+        memory_scope=memory_scope,
+        scope_key=scope_key,
+        accessible_projects=writable_projects,
+        maintained_projects=maintained_projects,
+    ).allowed:
+        return True
+    # A promoted candidate keeps its author's authority over their own
+    # memories, inside the projects this promotion may write.
+    return (
+        candidate_author_id is not None
+        and candidate_author_id == author_id
+        and authorize_memory_correction(
+            principal_id=candidate_author_id,
+            author_id=author_id,
+            memory_scope=memory_scope,
+            scope_key=scope_key,
+            accessible_projects=writable_projects,
+        ).allowed
+    )
+
+
 def _raw_memory_retirement_allowed(
     *,
     memory: RawMemory,
     principal_id: str | None,
     writable_projects: Iterable[str] | None,
     maintained_projects: Iterable[str] | None,
+    candidate_author_id: str | None = None,
 ) -> bool:
     """Whether a promotion may stamp this capture invalid.
 
     Recall stops serving an invalidated capture, the same effect as a
-    ``mark_stale`` correction, so the correction rule decides it.
+    ``mark_stale`` correction, so the correction rule decides it, for the
+    promoter or for the author of the candidate being promoted.
     """
-    return authorize_memory_correction(
-        principal_id=principal_id,
+    return _retirement_allowed(
         author_id=memory.principal_id,
         memory_scope=memory.memory_scope,
         scope_key=memory.scope_key,
-        accessible_projects=writable_projects,
+        principal_id=principal_id,
+        writable_projects=writable_projects,
         maintained_projects=maintained_projects,
-    ).allowed
+        candidate_author_id=candidate_author_id,
+    )
 
 
 def _promoted_entity_owner_id(entity: Any, metadata: Mapping[str, object]) -> str | None:
@@ -506,6 +543,7 @@ def _promoted_entity_retirement_allowed(
     principal_id: str | None,
     writable_projects: Iterable[str] | None,
     maintained_projects: Iterable[str] | None,
+    candidate_author_id: str | None = None,
 ) -> bool:
     """Whether a promotion may supersede or invalidate this graph memory.
 
@@ -513,14 +551,15 @@ def _promoted_entity_retirement_allowed(
     rule as the capture it came from.
     """
     metadata, target_scope, target_scope_key = _promoted_entity_scope(entity)
-    return authorize_memory_correction(
-        principal_id=principal_id,
+    return _retirement_allowed(
         author_id=_promoted_entity_owner_id(entity, metadata),
         memory_scope=target_scope,
         scope_key=target_scope_key,
-        accessible_projects=writable_projects,
+        principal_id=principal_id,
+        writable_projects=writable_projects,
         maintained_projects=maintained_projects,
-    ).allowed
+        candidate_author_id=candidate_author_id,
+    )
 
 
 def suppression_target_visible(
@@ -598,6 +637,7 @@ async def _authorized_superseded_entity_ids(
     writable_projects: Iterable[str] | None,
     maintained_projects: Iterable[str] | None,
     candidate: ReflectionCandidate,
+    candidate_author_id: str | None = None,
 ) -> list[str]:
     authorized_ids: list[str] = []
     for entity_id in _superseded_entity_ids(candidate.metadata):
@@ -615,6 +655,7 @@ async def _authorized_superseded_entity_ids(
             principal_id=principal_id,
             writable_projects=writable_projects,
             maintained_projects=maintained_projects,
+            candidate_author_id=candidate_author_id,
         ):
             authorized_ids.append(entity_id)
     return authorized_ids

@@ -761,6 +761,7 @@ async def _invalidate_promoted_entity_targets(
     principal_id: str | None,
     writable_projects: Iterable[str] | None,
     maintained_projects: Iterable[str] | None,
+    candidate_author_id: str | None,
     invalid_at: datetime,
     reason: str,
     replacement_entity_id: str,
@@ -778,6 +779,7 @@ async def _invalidate_promoted_entity_targets(
             principal_id=principal_id,
             writable_projects=writable_projects,
             maintained_projects=maintained_projects,
+            candidate_author_id=candidate_author_id,
         ):
             continue
         metadata = _temporal_invalidation_metadata(
@@ -803,11 +805,13 @@ async def _apply_candidate_temporal_invalidations(
     replacement_entity_id: str,
     replacement_source_ids: Sequence[str],
     authorized_entity_ids: Sequence[str],
+    candidate_author_id: str | None = None,
 ) -> dict[str, Any]:
     """Stamp what the candidate supersedes or contradicts as no longer valid.
 
     Each target is retired only under the correction rule: its author may
-    retire it, and anyone else needs project maintainer on its project.
+    retire it, and anyone else needs project maintainer on its project. A
+    promoted candidate's author counts as an author of their own targets.
     """
     targets = _candidate_temporal_invalidation_targets(candidate)
     invalid_at = _temporal_invalidation_cutoff(candidate)
@@ -829,6 +833,7 @@ async def _apply_candidate_temporal_invalidations(
                     principal_id=principal_id,
                     writable_projects=writable_projects,
                     maintained_projects=maintained_projects,
+                    candidate_author_id=candidate_author_id,
                 )
             ),
             None,
@@ -854,6 +859,7 @@ async def _apply_candidate_temporal_invalidations(
                     principal_id=principal_id,
                     writable_projects=writable_projects,
                     maintained_projects=maintained_projects,
+                    candidate_author_id=candidate_author_id,
                     invalid_at=invalid_at,
                     reason=target.reason,
                     replacement_entity_id=replacement_entity_id,
@@ -868,6 +874,7 @@ async def _apply_candidate_temporal_invalidations(
             principal_id=principal_id,
             writable_projects=writable_projects,
             maintained_projects=maintained_projects,
+            candidate_author_id=candidate_author_id,
             invalid_at=invalid_at,
             reason="supersession",
             replacement_entity_id=replacement_entity_id,
