@@ -10,6 +10,7 @@ This is the worker entrypoint. Job implementations are in:
 - source_imports.py: import_source_archive, drain_source_import
 - raw_promotion.py: promote_raw_captures
 - raw_changefeed.py: poll_raw_capture_changefeed, poll_all_raw_capture_changefeeds
+- net.py: distill_idle_net_threads
 """
 
 import time
@@ -40,6 +41,7 @@ from sibyl.jobs.entities import (
 from sibyl.jobs.expiry import expire_time_boxed_captures
 from sibyl.jobs.lifecycle_repair import repair_lifecycle_all_orgs
 from sibyl.jobs.memory_extraction import extract_memory_entities
+from sibyl.jobs.net import distill_idle_net_threads
 from sibyl.jobs.operational_distillation import distill_operational_experience_notes
 from sibyl.jobs.privacy import purge_due_deleted_personal_memories
 from sibyl.jobs.probes import replay_memory_probes, replay_memory_probes_all_orgs
@@ -316,6 +318,14 @@ def get_schedule_specs() -> list[ScheduleSpec]:
     )
     schedule_specs.append(
         ScheduleSpec(
+            name="distill_idle_net_threads",
+            function=distill_idle_net_threads,
+            schedule_label="*/5 * * * *",
+            minute=set(range(0, 60, 5)),
+        )
+    )
+    schedule_specs.append(
+        ScheduleSpec(
             name="consolidate_all_orgs",
             function=consolidate_all_orgs,
             schedule_label="0 3 * * *",
@@ -411,6 +421,7 @@ class WorkerSettings:
         expire_time_boxed_captures,
         run_reflection_dream_cycle,
         run_reflection_dream_cycle_all_orgs,
+        distill_idle_net_threads,
         # Probe replay
         replay_memory_probes,
         replay_memory_probes_all_orgs,
