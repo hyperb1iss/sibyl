@@ -1208,12 +1208,13 @@ async def _restore_content_sources_and_rows(
         await _check_auxiliary_ownership(client, auxiliary_restores, organization_id)
     cleanup = await _plan_auxiliary_cleanup(client, organization_id) if clean else []
     await asyncio.to_thread(validation_receipt_archive.publish, pending_receipts)
-    # Raw captures land first with their own clean deletes, then the auxiliary
-    # wipe, then auxiliary rows in archive order. Each auxiliary statement
-    # checks its row against the destination inside its batch's transaction.
+    # The auxiliary wipe goes first: deleting a raw capture also deletes the
+    # relation edges that end at it, which would move a planned wipe page.
+    # Then raw captures with their own clean deletes, then auxiliary rows in
+    # archive order, each statement checking its row inside its batch.
     try:
-        await apply_source_restore(client.execute_query, plan)
         await apply_cleanup(client.execute_query, cleanup, refusal=_AUXILIARY_CHANGED)
+        await apply_source_restore(client.execute_query, plan)
         for batch in restore_batches(auxiliary_restores):
             parameters: dict[str, object] = {"organization_id": organization_id}
             for row in batch:

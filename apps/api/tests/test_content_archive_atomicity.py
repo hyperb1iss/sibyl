@@ -279,3 +279,29 @@ async def test_content_restore_sends_bounded_batches(archive_stores, monkeypatch
     for table in ("raw_captures", "content_changefeed_cursors"):
         query = f"SELECT uuid FROM {table} ORDER BY uuid;"  # noqa: S608
         assert await execute(query) == await source.execute_query(query)
+
+
+async def test_clean_restore_wipes_edges_of_captures_it_also_deletes(archive_stores, monkeypatch):
+    source, destination = archive_stores
+    org = str(uuid4())
+    await raw(source, org, "kept")
+    for identity in ("kept", "stale-new", "stale-old"):
+        await raw(destination, org, identity)
+    # An edge between two captures the archive does not carry: deleting either
+    # capture removes it, so the wipe has to run before the capture deletes.
+    await destination.execute_query(
+        "LET $new = (SELECT VALUE id FROM raw_captures WHERE uuid = 'stale-new')[0];"
+        "LET $old = (SELECT VALUE id FROM raw_captures WHERE uuid = 'stale-old')[0];"
+        "RELATE $new->supersedes->$old SET uuid = 'stale-edge', organization_id = $org,"
+        " raw_memory_id = 'stale-new', superseded_raw_memory_id = 'stale-old';",
+        org=org,
+    )
+    monkeypatch.setattr(content_archive, "build_surreal_content_client", lambda: source)
+    payload = await content_archive.export_content_archive_payload(org)
+    monkeypatch.setattr(content_archive, "build_surreal_content_client", lambda: destination)
+
+    result = await content_archive.restore_content_archive_payload(payload, clean=True)
+
+    assert result.success, result.errors
+    assert await destination.execute_query("SELECT uuid FROM raw_captures;") == [{"uuid": "kept"}]
+    assert await destination.execute_query("SELECT uuid FROM supersedes;") == []
