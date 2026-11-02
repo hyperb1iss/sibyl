@@ -389,6 +389,12 @@ receipts.
 Drain pending reflection candidates through automatic review. By default this previews the drain;
 `--apply` commits safe promotions.
 
+`--archive-exceptions` archives a candidate only when you could correct it: one you captured, or
+someone else's project candidate on a project you maintain (org owners and admins maintain every
+project). Any other candidate stays pending for review, and its result lists why, for example
+`project_maintainer_required`. The scheduled dream cycle reviews each candidate as its author, so it
+archives as before.
+
 #### Synopsis
 
 ```bash
