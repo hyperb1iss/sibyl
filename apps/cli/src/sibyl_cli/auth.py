@@ -123,7 +123,10 @@ def _context_for_server(api_url: str) -> str | None:
     if selected and selected in matches:
         return selected
     if len(matches) > 1:
-        error(f"{api_url} is configured by more than one context: {', '.join(sorted(matches))}.")
+        error(
+            f"{escape(api_url)} is configured by more than one context: "
+            f"{escape(', '.join(sorted(matches)))}."
+        )
         info("Name the one to log in to: sibyl -C <name> auth login")
         raise typer.Exit(1)
     return matches[0]
@@ -150,8 +153,9 @@ def _scope_for_login_target(
     ambient = _effective_context_name()
     if ambient and ambient != matched:
         warn(
-            f"Logging in to {api_url}, which is not the selected context "
-            f"'{ambient}'. Storing the credential for {matched or 'this server'}."
+            f"Logging in to {escape(api_url)}, which is not the selected context "
+            f"'{escape(ambient)}'. Storing the credential for "
+            f"{escape(matched or 'this server')}."
         )
     return _current_credential_scope(matched) if matched else None
 
@@ -528,7 +532,7 @@ def _login_via_device_flow(
         api_url=api_url, insecure=insecure
     )
 
-    info(f"User code: {user_code}")
+    info(f"User code: {escape(user_code)}")
     if no_browser:
         print(verify)
         raise _NoBrowserLoginPrinted(
@@ -536,7 +540,7 @@ def _login_via_device_flow(
         )
     else:
         webbrowser.open(verify, new=1, autoraise=True)
-        info(f"Opened browser to approve: {verify}")
+        info(f"Opened browser to approve: {escape(verify)}")
 
     deadline = time.monotonic() + max(30, timeout_seconds, expires_in)
     tok = _poll_device_token(
@@ -631,10 +635,10 @@ def _login_auto(
                 break_glass_reason=break_glass_reason,
             )
         except SibylClientError as e:
-            error(str(e))
+            error(escape(str(e)))
             raise typer.Exit(1) from e
         except _OAuthLoginError as e:
-            error(str(e))
+            error(escape(str(e)))
             if e.payload is not None:
                 print_json(e.payload)
             raise typer.Exit(1) from e
@@ -647,7 +651,7 @@ def _login_auto(
             credential_scope_name=credential_scope_name,
         )
         _warn_if_env_token_overrides_login()
-        success(f"Login complete (saved credentials for {api_url})")
+        success(f"Login complete (saved credentials for {escape(api_url)})")
         return True
 
     # 2) Device flow (preferred for browser-based login)
@@ -666,7 +670,7 @@ def _login_auto(
             credential_scope_name=credential_scope_name,
         )
         _warn_if_env_token_overrides_login()
-        success(f"Login complete (saved credentials for {api_url})")
+        success(f"Login complete (saved credentials for {escape(api_url)})")
         return True
     except _NoBrowserLoginPrinted as e:
         success(str(e))
@@ -677,10 +681,10 @@ def _login_auto(
     except httpx.HTTPStatusError as e:
         # Not supported on server -> fall through to OAuth.
         if e.response.status_code not in {404, 405}:
-            error(f"Device login failed: {e}")
+            error(f"Device login failed: {escape(str(e))}")
             raise typer.Exit(1) from e
     except _DeviceLoginError as e:
-        error(str(e))
+        error(escape(str(e)))
         if e.payload is not None:
             print_json(e.payload)
         raise typer.Exit(1) from e
@@ -705,7 +709,7 @@ def _login_auto(
             credential_scope_name=credential_scope_name,
         )
         _warn_if_env_token_overrides_login()
-        success(f"Login complete (saved credentials for {api_url})")
+        success(f"Login complete (saved credentials for {escape(api_url)})")
         return True
     except _NoBrowserLoginPrinted as e:
         success(str(e))
@@ -715,7 +719,7 @@ def _login_auto(
         raise typer.Exit(1) from e
     except httpx.HTTPStatusError as e:
         if e.response.status_code not in {404, 405}:
-            error(f"OAuth login failed: {e}")
+            error(f"OAuth login failed: {escape(str(e))}")
             raise typer.Exit(1) from e
     except _OAuthLoginError as e:
         # OAuth isn't available / misconfigured -> try local.
@@ -783,7 +787,7 @@ def _settle_login_org(api_url: str, context_name: str | None, saved_scope: str |
     try:
         me, listing = _identity()
     except SibylClientError as e:
-        warn(f"Signed in, but could not confirm which org this login uses: {e}")
+        warn(f"Signed in, but could not confirm which org this login uses: {escape(str(e))}")
         return
 
     current = me.get("organization") or {}
@@ -803,9 +807,9 @@ def _settle_login_org(api_url: str, context_name: str | None, saved_scope: str |
         if len(teams) > 1:
             warn(
                 f"Signed in to your personal org. This server also has team orgs: "
-                f"{', '.join(str(org.get('slug')) for org in teams)}."
+                f"{escape(', '.join(str(org.get('slug')) for org in teams))}."
             )
-            info(f"Work in one with: sibyl -C {ctx.name} org switch <slug>")
+            info(f"Work in one with: sibyl -C {escape(ctx.name)} org switch <slug>")
             return
         target_slug = str(teams[0].get("slug") or "")
         if not target_slug:
@@ -814,11 +818,11 @@ def _settle_login_org(api_url: str, context_name: str | None, saved_scope: str |
     try:
         switched = _switch(target_slug)
     except SibylClientError as e:
-        warn(f"Signed in, but could not switch to org '{target_slug}': {e}")
+        warn(f"Signed in, but could not switch to org '{escape(target_slug)}': {escape(str(e))}")
         return
     token = str(switched.get("access_token") or "").strip()
     if not token:
-        warn(f"Signed in, but the switch to org '{target_slug}' returned no token")
+        warn(f"Signed in, but the switch to org '{escape(target_slug)}' returned no token")
         return
     try:
         expires_in = int(switched["expires_in"]) if switched.get("expires_in") is not None else None
@@ -836,7 +840,8 @@ def _settle_login_org(api_url: str, context_name: str | None, saved_scope: str |
     pin_context_org(ctx.name, target_slug)
     clear_client_cache()
     organization = switched.get("organization") or {}
-    success(f"Using org {organization.get('name') or target_slug} ({target_slug})")
+    org_name = str(organization.get("name") or target_slug)
+    success(f"Using org {escape(org_name)} ({escape(target_slug)})")
 
 
 def _warn_if_env_token_overrides_login() -> None:
@@ -866,12 +871,12 @@ def status_cmd() -> None:
         raise typer.Exit(1)
 
     if expires_at is not None and time.time() >= int(expires_at):
-        info(f"Stored access token is expired (server: {api_url})")
+        info(f"Stored access token is expired (server: {escape(api_url)})")
     elif expires_at is not None:
         remaining = max(0, int(int(expires_at) - time.time()))
-        info(f"Stored access token expires in {remaining}s (server: {api_url})")
+        info(f"Stored access token expires in {remaining}s (server: {escape(api_url)})")
     else:
-        info(f"Stored access token has no saved expiry (server: {api_url})")
+        info(f"Stored access token has no saved expiry (server: {escape(api_url)})")
 
     if refresh:
         info("Refresh token found")
@@ -890,10 +895,10 @@ def status_cmd() -> None:
     try:
         _run()
     except SibylClientError as e:
-        error(str(e))
+        error(escape(str(e)))
         raise typer.Exit(1) from e
 
-    success(f"Auth is valid (server: {api_url})")
+    success(f"Auth is valid (server: {escape(api_url)})")
 
 
 @app.command("set-token")
@@ -913,7 +918,7 @@ def set_token_cmd(
     scope_name = _current_credential_scope()
     set_tokens(api_url, token.strip(), credential_scope=scope_name)
     warm_pending_replay_identity(api_url, token.strip(), credential_scope=scope_name)
-    success(f"Auth token saved for {api_url}; refresh credentials cleared")
+    success(f"Auth token saved for {escape(api_url)}; refresh credentials cleared")
 
 
 @app.command("clear-token")
@@ -940,7 +945,7 @@ def clear_token_cmd(
     else:
         api_url = _compute_api_url(server)
         clear_tokens(api_url, credential_scope=_current_credential_scope())
-        success(f"Auth tokens cleared for {api_url}")
+        success(f"Auth tokens cleared for {escape(api_url)}")
 
 
 @app.command("login")
@@ -1038,7 +1043,7 @@ def login_cmd(
         existing = get_context(context)
         if existing:
             update_context(context, server_url=server_url, insecure=insecure)
-            info(f"Updated context '{context}' with server {server_url}")
+            info(f"Updated context '{escape(context)}' with server {escape(server_url)}")
         else:
             active = get_active_context_name()
             activate = use or not active
@@ -1046,12 +1051,15 @@ def login_cmd(
                 name=context, server_url=server_url, set_active=activate, insecure=insecure
             )
             if activate:
-                success(f"Created context '{context}' and set as active")
+                success(f"Created context '{escape(context)}' and set as active")
             else:
-                success(f"Created context '{context}'; the active context is still '{active}'")
+                success(
+                    f"Created context '{escape(context)}'; "
+                    f"the active context is still '{escape(str(active))}'"
+                )
                 info(
-                    f"Target it with: sibyl -C {context} <command>, or make it active "
-                    f"with: sibyl config context use {context}"
+                    f"Target it with: sibyl -C {escape(context)} <command>, or make it active "
+                    f"with: sibyl config context use {escape(context)}"
                 )
 
         clear_client_cache()
@@ -1091,7 +1099,7 @@ def local_signup_cmd(
             success("Auth tokens saved to ~/.sibyl/auth.json")
         print_json(result)
     except SibylClientError as e:
-        error(str(e))
+        error(escape(str(e)))
         raise typer.Exit(1) from e
 
 
@@ -1186,7 +1194,7 @@ def api_key_list(
     try:
         keys = _run()
     except SibylClientError as e:
-        error(str(e))
+        error(escape(str(e)))
         raise typer.Exit(1) from e
 
     if json_output:
@@ -1283,7 +1291,7 @@ def api_key_create(
         result = _run()
         print_json(result)
     except SibylClientError as e:
-        error(str(e))
+        error(escape(str(e)))
         raise typer.Exit(1) from e
 
 
@@ -1299,5 +1307,5 @@ def api_key_revoke(api_key_id: str) -> None:
         result = _run()
         print_json(result)
     except SibylClientError as e:
-        error(str(e))
+        error(escape(str(e)))
         raise typer.Exit(1) from e

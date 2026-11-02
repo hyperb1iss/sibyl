@@ -7,6 +7,7 @@ All commands communicate with the REST API.
 from typing import Annotated
 
 import typer
+from rich.markup import escape
 
 from sibyl_cli.client import SibylClientError, get_client
 from sibyl_cli.common import (
@@ -84,8 +85,8 @@ def list_sources(
 
                 table.add_row(
                     src.get("id", ""),
-                    truncate(src.get("name", ""), 20),
-                    truncate(src.get("url", ""), 30),
+                    escape(truncate(src.get("name", ""), 20)),
+                    escape(truncate(src.get("url", ""), 30)),
                     f"[{status_color}]{status_val}[/{status_color}]",
                     str(src.get("document_count", 0)),
                     str(src.get("chunk_count", 0)),
@@ -339,7 +340,7 @@ def link_status(
             table = create_table("Source", "Source Name", "Pending Chunks")
             for src in sources:
                 table.add_row(
-                    src.get("name", ""),
+                    escape(src.get("name") or ""),
                     str(src.get("pending", 0)),
                 )
             console.print(table)
@@ -392,7 +393,9 @@ def link_graph(
             sources_processed = response.get("sources_processed", [])
             chunks = response.get("chunks_processed", 0)
             for src in sources_processed:
-                console.print(f"Would process chunks from [{NEON_CYAN}]{src}[/{NEON_CYAN}]")
+                console.print(
+                    f"Would process chunks from [{NEON_CYAN}]{escape(str(src))}[/{NEON_CYAN}]"
+                )
             console.print(f"\nTotal: [{CORAL}]{chunks}[/{CORAL}] chunks")
             return
 
@@ -401,7 +404,7 @@ def link_graph(
             return
 
         if status == "error":
-            error(response.get("error", "Unknown error"))
+            error(escape(str(response.get("error", "Unknown error"))))
             raise typer.Exit(1)
 
         console.print(f"\n[{SUCCESS_GREEN}]✓[/{SUCCESS_GREEN}] Graph integration complete\n")

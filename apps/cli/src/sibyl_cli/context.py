@@ -8,6 +8,7 @@ between environments (local, staging, prod).
 from typing import Annotated
 
 import typer
+from rich.markup import escape
 
 from sibyl_cli.client import SibylClientError, clear_client_cache, get_client
 from sibyl_cli.common import (
@@ -145,12 +146,14 @@ def callback(
 
     # Table output
     console.print()
-    console.print(f"  [{ELECTRIC_PURPLE}]Context:[/{ELECTRIC_PURPLE}] [bold]{active.name}[/bold]")
+    console.print(
+        f"  [{ELECTRIC_PURPLE}]Context:[/{ELECTRIC_PURPLE}] [bold]{escape(active.name)}[/bold]"
+    )
     source_label = "pinned by directory" if pinned_by_dir else "active"
     console.print(f"  [{SUCCESS_GREEN}]({source_label})[/{SUCCESS_GREEN}]")
     console.print()
-    console.print(f"  [{NEON_CYAN}]Server:[/{NEON_CYAN}]   {active.server_url}")
-    console.print(f"  [{NEON_CYAN}]Org:[/{NEON_CYAN}]      {active.org_slug or '[dim]auto[/dim]'}")
+    console.print(f"  [{NEON_CYAN}]Server:[/{NEON_CYAN}]   {escape(active.server_url)}")
+    console.print(f"  [{NEON_CYAN}]Org:[/{NEON_CYAN}]      {_org_label(active.org_slug)}")
     if linked_project:
         console.print(
             f"  [{NEON_CYAN}]Project:[/{NEON_CYAN}]  {linked_project} [dim](linked)[/dim]"
@@ -181,9 +184,11 @@ def callback(
         console.print(
             f"  [{ELECTRIC_PURPLE}]───────────────────────────────────────[/{ELECTRIC_PURPLE}]"
         )
-        console.print(f"  [{NEON_CYAN}]{project_data.get('name', 'Unknown')}[/{NEON_CYAN}]")
+        console.print(
+            f"  [{NEON_CYAN}]{escape(str(project_data.get('name', 'Unknown')))}[/{NEON_CYAN}]"
+        )
         if project_data.get("description"):
-            console.print(f"  [dim]{project_data['description']}[/dim]")
+            console.print(f"  [dim]{escape(str(project_data['description']))}[/dim]")
 
         # Progress bar
         if total > 0:
@@ -216,7 +221,7 @@ def callback(
             console.print("  [red]⚠ Critical:[/red]")
             for task in critical_tasks[:2]:  # Show top 2 critical
                 console.print(
-                    f"    [red]●[/red] {task.get('name', '')} [{CORAL}]{task.get('id', '')}[/{CORAL}]"
+                    f"    [red]●[/red] {escape(str(task.get('name', '')))} [{CORAL}]{task.get('id', '')}[/{CORAL}]"
                 )
 
         # Epics with progress
@@ -228,7 +233,8 @@ def callback(
                 epic_pct = epic.get("progress_pct", 0)
                 mini_bar = "█" * int(epic_pct / 20) + "░" * (5 - int(epic_pct / 20))
                 console.print(
-                    f"    [{SUCCESS_GREEN}]{mini_bar}[/{SUCCESS_GREEN}] {epic_pct:.0f}% {epic.get('name', '')}"
+                    f"    [{SUCCESS_GREEN}]{mini_bar}[/{SUCCESS_GREEN}] {epic_pct:.0f}% "
+                    f"{escape(str(epic.get('name', '')))}"
                 )
 
         # Actionable tasks
@@ -243,10 +249,15 @@ def callback(
                     "review": ELECTRIC_YELLOW,
                 }.get(status, CORAL)
                 console.print(
-                    f"  [{status_color}]●[/{status_color}] {task.get('name', '')} [{CORAL}]{task.get('id', '')}[/{CORAL}]"
+                    f"  [{status_color}]●[/{status_color}] {escape(str(task.get('name', '')))} "
+                    f"[{CORAL}]{task.get('id', '')}[/{CORAL}]"
                 )
 
     console.print()
+
+
+def _org_label(org_slug: str | None) -> str:
+    return escape(org_slug) if org_slug else "[dim]auto[/dim]"
 
 
 def _context_to_dict(ctx: Context) -> dict:
@@ -331,12 +342,14 @@ def _show_path_context(project_id: str, json_out: bool) -> None:
     # Display
     console.print()
     project_name = project_data.get("name", project_id) if project_data else project_id
-    console.print(f"  [{ELECTRIC_PURPLE}]Project:[/{ELECTRIC_PURPLE}] [bold]{project_name}[/bold]")
+    console.print(
+        f"  [{ELECTRIC_PURPLE}]Project:[/{ELECTRIC_PURPLE}] [bold]{escape(str(project_name))}[/bold]"
+    )
     console.print(f"  [{SUCCESS_GREEN}](detected from path)[/{SUCCESS_GREEN}]")
     console.print()
-    console.print(f"  [{NEON_CYAN}]Server:[/{NEON_CYAN}]  {server_url}")
+    console.print(f"  [{NEON_CYAN}]Server:[/{NEON_CYAN}]  {escape(server_url)}")
     if matched_path:
-        console.print(f"  [{NEON_CYAN}]Path:[/{NEON_CYAN}]    {matched_path}")
+        console.print(f"  [{NEON_CYAN}]Path:[/{NEON_CYAN}]    {escape(str(matched_path))}")
 
     # Show project summary if we have data
     if project_data:
@@ -356,7 +369,7 @@ def _show_path_context(project_id: str, json_out: bool) -> None:
         pct = float(pct_obj) if isinstance(pct_obj, int | float) else 0.0
 
         if project_data.get("description"):
-            console.print(f"  [dim]{project_data['description']}[/dim]")
+            console.print(f"  [dim]{escape(str(project_data['description']))}[/dim]")
 
         # Progress bar
         if total > 0:
@@ -504,16 +517,16 @@ def pack_cmd(
             print_json(pack)
             return
         if markdown:
-            console.print(pack.get("markdown") or "")
+            console.print(pack.get("markdown") or "", markup=False, soft_wrap=True)
             return
 
         console.print()
         console.print(f"  [{ELECTRIC_PURPLE}]Context Pack[/{ELECTRIC_PURPLE}]")
-        console.print(f"  [{NEON_CYAN}]Goal:[/{NEON_CYAN}] {pack.get('goal', goal)}")
+        console.print(f"  [{NEON_CYAN}]Goal:[/{NEON_CYAN}] {escape(str(pack.get('goal', goal)))}")
         console.print(f"  [{NEON_CYAN}]Intent:[/{NEON_CYAN}] {pack.get('intent', intent)}")
         console.print(f"  [{NEON_CYAN}]Layer:[/{NEON_CYAN}] {pack.get('layer', layer)}")
         if pack.get("domain"):
-            console.print(f"  [{NEON_CYAN}]Domain:[/{NEON_CYAN}] {pack['domain']}")
+            console.print(f"  [{NEON_CYAN}]Domain:[/{NEON_CYAN}] {escape(str(pack['domain']))}")
         if pack.get("project"):
             console.print(f"  [{NEON_CYAN}]Project:[/{NEON_CYAN}] {pack['project']}")
         elif pack.get("scope") == ALL_PROJECTS_SCOPE:
@@ -528,33 +541,36 @@ def pack_cmd(
 
         for section in sections:
             console.print(
-                f"  [{ELECTRIC_PURPLE}]{section.get('title', 'Context')}[/{ELECTRIC_PURPLE}]"
+                f"  [{ELECTRIC_PURPLE}]{escape(str(section.get('title', 'Context')))}[/{ELECTRIC_PURPLE}]"
             )
             for item in section.get("items", []):
                 name = item.get("name", "Untitled")
                 item_type = item.get("type", "memory")
                 item_id = item.get("id", "")
                 console.print(
-                    f"    [{NEON_CYAN}]{name}[/{NEON_CYAN}] "
+                    f"    [{NEON_CYAN}]{escape(str(name))}[/{NEON_CYAN}] "
                     f"[dim]({item_type})[/dim] [{CORAL}]{item_id}[/{CORAL}]"
                 )
                 reason = item.get("reason")
                 if reason:
-                    console.print(f"      [dim]{reason}[/dim]")
+                    console.print(f"      [dim]{escape(str(reason))}[/dim]")
                 content = item.get("content")
                 if content:
-                    console.print(f"      {_format_context_pack_preview(content)}", soft_wrap=True)
+                    console.print(
+                        f"      {escape(_format_context_pack_preview(content))}", soft_wrap=True
+                    )
                 related_items = item.get("related") or []
                 if related_items:
                     labels = [
-                        f"{related.get('relationship', 'RELATED_TO')} {related.get('name', related.get('id', ''))}"
+                        f"{related.get('relationship', 'RELATED_TO')} "
+                        f"{escape(str(related.get('name', related.get('id', ''))))}"
                         for related in related_items[:related_limit]
                     ]
                     console.print(f"      [dim]Related: {'; '.join(labels)}[/dim]")
             console.print()
 
         if hint := pack.get("usage_hint"):
-            console.print(f"  [dim]{hint}[/dim]")
+            console.print(f"  [dim]{escape(str(hint))}[/dim]")
 
     _run()
 
@@ -591,9 +607,9 @@ def list_cmd(
 
         table.add_row(
             marker,
-            f"[{name_style}]{ctx.name}[/{name_style}]" if name_style else ctx.name,
-            ctx.server_url,
-            ctx.org_slug or "[dim]auto[/dim]",
+            f"[{name_style}]{escape(ctx.name)}[/{name_style}]" if name_style else escape(ctx.name),
+            escape(ctx.server_url),
+            _org_label(ctx.org_slug),
             ctx.default_project or "[dim]none[/dim]",
         )
 
@@ -613,7 +629,7 @@ def show_cmd(
     if name:
         ctx = get_context(name)
         if not ctx:
-            error(f"Context '{name}' not found")
+            error(f"Context '{escape(name)}' not found")
             raise typer.Exit(1)
     else:
         ctx = get_active_context()
@@ -633,12 +649,14 @@ def show_cmd(
 
     # Table output
     console.print()
-    console.print(f"  [{ELECTRIC_PURPLE}]Context:[/{ELECTRIC_PURPLE}] [bold]{ctx.name}[/bold]")
+    console.print(
+        f"  [{ELECTRIC_PURPLE}]Context:[/{ELECTRIC_PURPLE}] [bold]{escape(ctx.name)}[/bold]"
+    )
     if is_active:
         console.print(f"  [{SUCCESS_GREEN}](active)[/{SUCCESS_GREEN}]")
     console.print()
-    console.print(f"  [{NEON_CYAN}]Server:[/{NEON_CYAN}]   {ctx.server_url}")
-    console.print(f"  [{NEON_CYAN}]Org:[/{NEON_CYAN}]      {ctx.org_slug or '[dim]auto[/dim]'}")
+    console.print(f"  [{NEON_CYAN}]Server:[/{NEON_CYAN}]   {escape(ctx.server_url)}")
+    console.print(f"  [{NEON_CYAN}]Org:[/{NEON_CYAN}]      {_org_label(ctx.org_slug)}")
     console.print(
         f"  [{NEON_CYAN}]Project:[/{NEON_CYAN}]  {ctx.default_project or '[dim]none[/dim]'}"
     )
@@ -687,14 +705,14 @@ def create_cmd(
         print_json(result)
         return
 
-    success(f"Created context '{name}'")
+    success(f"Created context '{escape(name)}'")
     if use:
         info("Set as active context")
     if insecure:
         info("SSL verification disabled")
     console.print()
-    console.print(f"  [{NEON_CYAN}]Server:[/{NEON_CYAN}]  {ctx.server_url}")
-    console.print(f"  [{NEON_CYAN}]Org:[/{NEON_CYAN}]     {ctx.org_slug or '[dim]auto[/dim]'}")
+    console.print(f"  [{NEON_CYAN}]Server:[/{NEON_CYAN}]  {escape(ctx.server_url)}")
+    console.print(f"  [{NEON_CYAN}]Org:[/{NEON_CYAN}]     {_org_label(ctx.org_slug)}")
     console.print(
         f"  [{NEON_CYAN}]Project:[/{NEON_CYAN}] {ctx.default_project or '[dim]none[/dim]'}"
     )
@@ -710,10 +728,10 @@ def use_cmd(
     """Set the active context."""
     ctx = get_context(name)
     if not ctx:
-        error(f"Context '{name}' not found")
+        error(f"Context '{escape(name)}' not found")
         contexts = list_contexts()
         if contexts:
-            info(f"Available: {', '.join(c.name for c in contexts)}")
+            info(f"Available: {escape(', '.join(c.name for c in contexts))}")
         raise typer.Exit(1)
 
     set_active_context(name)
@@ -725,8 +743,8 @@ def use_cmd(
         print_json(result)
         return
 
-    success(f"Switched to context '{name}'")
-    console.print(f"  [{NEON_CYAN}]Server:[/{NEON_CYAN}] {ctx.server_url}")
+    success(f"Switched to context '{escape(name)}'")
+    console.print(f"  [{NEON_CYAN}]Server:[/{NEON_CYAN}] {escape(ctx.server_url)}")
 
 
 @app.command("update")
@@ -777,9 +795,9 @@ def update_cmd(
         print_json(result)
         return
 
-    success(f"Updated context '{name}'")
-    console.print(f"  [{NEON_CYAN}]Server:[/{NEON_CYAN}]  {ctx.server_url}")
-    console.print(f"  [{NEON_CYAN}]Org:[/{NEON_CYAN}]     {ctx.org_slug or '[dim]auto[/dim]'}")
+    success(f"Updated context '{escape(name)}'")
+    console.print(f"  [{NEON_CYAN}]Server:[/{NEON_CYAN}]  {escape(ctx.server_url)}")
+    console.print(f"  [{NEON_CYAN}]Org:[/{NEON_CYAN}]     {_org_label(ctx.org_slug)}")
     console.print(
         f"  [{NEON_CYAN}]Project:[/{NEON_CYAN}] {ctx.default_project or '[dim]none[/dim]'}"
     )
@@ -792,7 +810,7 @@ def delete_cmd(
     """Delete a context."""
     ctx = get_context(name)
     if not ctx:
-        error(f"Context '{name}' not found")
+        error(f"Context '{escape(name)}' not found")
         raise typer.Exit(1)
 
     active_name = get_active_context_name()
@@ -800,11 +818,11 @@ def delete_cmd(
 
     deleted = delete_context(name)
     if deleted:
-        success(f"Deleted context '{name}'")
+        success(f"Deleted context '{escape(name)}'")
         if is_active:
             info("No active context. Use 'sibyl config context use <name>' to set one.")
     else:
-        error(f"Failed to delete context '{name}'")
+        error(f"Failed to delete context '{escape(name)}'")
         raise typer.Exit(1)
 
 
@@ -831,10 +849,10 @@ def link_cmd(
 
     ctx = get_context(name)
     if not ctx:
-        error(f"Context '{name}' not found")
+        error(f"Context '{escape(name)}' not found")
         contexts = list_contexts()
         if contexts:
-            info(f"Available: {', '.join(c.name for c in contexts)}")
+            info(f"Available: {escape(', '.join(c.name for c in contexts))}")
         raise typer.Exit(1)
 
     link_target = resolve_link_target(path, this_worktree=this_worktree, fields=("context",))
@@ -847,8 +865,10 @@ def link_cmd(
         )
     clear_client_cache()  # New connections under this path use the pinned context
 
-    success(f"Pinned [{NEON_CYAN}]{target_path}[/{NEON_CYAN}] to context '{name}'")
-    console.print(f"  [{NEON_CYAN}]Server:[/{NEON_CYAN}] {ctx.server_url}")
+    success(
+        f"Pinned [{NEON_CYAN}]{escape(str(target_path))}[/{NEON_CYAN}] to context '{escape(name)}'"
+    )
+    console.print(f"  [{NEON_CYAN}]Server:[/{NEON_CYAN}] {escape(ctx.server_url)}")
     info("Commands under this directory now route to this server")
 
 
@@ -862,9 +882,9 @@ def unlink_cmd(
     target_path = resolve_unlink_target(path, "context")
     if remove_path_context(target_path):
         clear_client_cache()
-        success(f"Unpinned context from [{NEON_CYAN}]{target_path}[/{NEON_CYAN}]")
+        success(f"Unpinned context from [{NEON_CYAN}]{escape(str(target_path))}[/{NEON_CYAN}]")
     else:
-        info(f"No context pin found for {target_path}")
+        info(f"No context pin found for {escape(str(target_path))}")
 
 
 @app.command("clear")

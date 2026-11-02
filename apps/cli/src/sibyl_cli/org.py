@@ -90,7 +90,7 @@ def pin_context_org(context_name: str | None, slug: str) -> None:
     if ctx is None or ctx.org_slug == slug:
         return
     config_store.update_context(context_name, org_slug=slug)
-    info(f"Context '{context_name}' now uses org '{slug}'")
+    info(f"Context '{escape(context_name)}' now uses org '{escape(slug)}'")
 
 
 class OrgRole(StrEnum):
@@ -137,7 +137,7 @@ def list_cmd(
             return
         orgs = _listed_orgs(result)
     except SibylClientError as e:
-        error(str(e))
+        error(escape(str(e)))
         raise typer.Exit(1) from e
 
     if not orgs:
@@ -197,7 +197,7 @@ def create_cmd(
                 success("Switched org (tokens saved to ~/.sibyl/auth.json)")
         print_json(result)
     except SibylClientError as e:
-        error(str(e))
+        error(escape(str(e)))
         raise typer.Exit(1) from e
 
 
@@ -228,7 +228,7 @@ def switch_cmd(slug: str) -> None:
             success("Org switched (tokens saved to ~/.sibyl/auth.json)")
         print_json(result)
     except SibylClientError as e:
-        error(str(e))
+        error(escape(str(e)))
         raise typer.Exit(1) from e
 
 
@@ -261,7 +261,7 @@ def list_members_cmd(
             console.print("[dim]No members found[/dim]")
             return
 
-        table = Table(title=f"Members of {slug}")
+        table = Table(title=f"Members of {escape(slug)}")
         table.add_column("User", style="cyan")
         table.add_column("Email", style="dim")
         table.add_column("Role", style="magenta")
@@ -270,15 +270,15 @@ def list_members_cmd(
         for member in members:
             user = member.get("user", {})
             table.add_row(
-                user.get("name") or user.get("id", "Unknown"),
-                user.get("email") or "-",
+                escape(str(user.get("name") or user.get("id", "Unknown"))),
+                escape(str(user.get("email") or "-")),
                 member.get("role", "-"),
                 member.get("created_at", "-")[:10] if member.get("created_at") else "-",
             )
 
         console.print(table)
     except SibylClientError as e:
-        error(str(e))
+        error(escape(str(e)))
         raise typer.Exit(1) from e
 
 
@@ -300,7 +300,7 @@ def add_member_cmd(
         success(f"Added user {user_id} as {role.value}")
         print_json(result)
     except SibylClientError as e:
-        error(str(e))
+        error(escape(str(e)))
         raise typer.Exit(1) from e
 
 
@@ -324,9 +324,9 @@ def remove_member_cmd(
 
     try:
         _run()
-        success(f"Removed user {user_id} from {slug}")
+        success(f"Removed user {user_id} from {escape(slug)}")
     except SibylClientError as e:
-        error(str(e))
+        error(escape(str(e)))
         raise typer.Exit(1) from e
 
 
@@ -348,5 +348,5 @@ def update_role_cmd(
         success(f"Updated {user_id} to {role.value}")
         print_json(result)
     except SibylClientError as e:
-        error(str(e))
+        error(escape(str(e)))
         raise typer.Exit(1) from e

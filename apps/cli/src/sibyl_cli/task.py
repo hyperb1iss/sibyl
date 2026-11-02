@@ -13,6 +13,7 @@ from typing import Annotated, Any
 from uuid import UUID
 
 import typer
+from rich.markup import escape
 
 from sibyl_cli.client import SibylClientError, get_client
 from sibyl_cli.common import (
@@ -280,10 +281,10 @@ def _output_tasks_table(
         meta = e.get("metadata", {})
         table.add_row(
             e.get("id", ""),
-            e.get("name", ""),  # Full title, no truncation
+            escape(e.get("name") or ""),  # Full title, no truncation
             format_status(meta.get("status", "unknown")),
             format_priority(meta.get("priority", "medium")),
-            ", ".join(meta.get("assignees", []))[:20] or "-",
+            escape(", ".join(meta.get("assignees", []))[:20]) or "-",
         )
 
     console.print(table)
@@ -464,12 +465,12 @@ def _display_task_panel(entity: dict) -> None:
     """Display a task entity as a rich panel with related entities."""
     meta = entity.get("metadata", {})
     lines = [
-        f"[{ELECTRIC_PURPLE}]Title:[/{ELECTRIC_PURPLE}] {entity.get('name', '')}",
+        f"[{ELECTRIC_PURPLE}]Title:[/{ELECTRIC_PURPLE}] {escape(str(entity.get('name', '')))}",
         f"[{ELECTRIC_PURPLE}]Status:[/{ELECTRIC_PURPLE}] {format_status(meta.get('status', 'unknown'))}",
         f"[{ELECTRIC_PURPLE}]Priority:[/{ELECTRIC_PURPLE}] {format_priority(meta.get('priority', 'medium'))}",
         "",
         f"[{NEON_CYAN}]Description:[/{NEON_CYAN}]",
-        entity.get("description") or "[dim]No description[/dim]",
+        escape(entity.get("description") or "") or "[dim]No description[/dim]",
     ]
 
     if meta.get("project_id"):
@@ -481,17 +482,17 @@ def _display_task_panel(entity: dict) -> None:
     if meta.get("assignees"):
         lines.insert(
             4,
-            f"[{ELECTRIC_PURPLE}]Assignees:[/{ELECTRIC_PURPLE}] {', '.join(meta['assignees'])}",
+            f"[{ELECTRIC_PURPLE}]Assignees:[/{ELECTRIC_PURPLE}] {escape(', '.join(meta['assignees']))}",
         )
 
     if meta.get("feature"):
-        lines.append(f"\n[{CORAL}]Feature:[/{CORAL}] {meta['feature']}")
+        lines.append(f"\n[{CORAL}]Feature:[/{CORAL}] {escape(str(meta['feature']))}")
 
     if meta.get("branch_name"):
-        lines.append(f"[{CORAL}]Branch:[/{CORAL}] {meta['branch_name']}")
+        lines.append(f"[{CORAL}]Branch:[/{CORAL}] {escape(str(meta['branch_name']))}")
 
     if meta.get("technologies"):
-        lines.append(f"[{CORAL}]Tech:[/{CORAL}] {', '.join(meta['technologies'])}")
+        lines.append(f"[{CORAL}]Tech:[/{CORAL}] {escape(', '.join(meta['technologies']))}")
 
     # Show related entities
     related_entities = entity.get("related", [])
@@ -502,7 +503,7 @@ def _display_task_panel(entity: dict) -> None:
             lines.append(
                 f"  [{CORAL}]{rel.get('relationship', '')}[/{CORAL}] {direction} "
                 f"[{ELECTRIC_PURPLE}]{rel.get('entity_type', '')}[/{ELECTRIC_PURPLE}]: "
-                f"{rel.get('name', '')} [{CORAL}]{rel.get('id', '')}[/{CORAL}]"
+                f"{escape(str(rel.get('name', '')))} [{CORAL}]{rel.get('id', '')}[/{CORAL}]"
             )
 
     panel = create_panel("\n".join(lines), title=f"Task {entity.get('id', '')}")
@@ -575,13 +576,15 @@ def start_task(
                 print_mutation_receipt(response)
                 branch = response.get("data", {}).get("branch_name")
                 if branch:
-                    info(f"Branch: {branch}")
+                    info(f"Branch: {escape(str(branch))}")
                 # Fetch and display the task with full context
                 entity = await client.get_entity(resolved_id)
                 console.print()
                 _display_task_panel(entity)
             else:
-                error(f"Failed to start task: {response.get('message', 'Unknown error')}")
+                error(
+                    f"Failed to start task: {escape(str(response.get('message', 'Unknown error')))}"
+                )
                 raise typer.Exit(1)
 
         except SibylClientError as e:
@@ -624,7 +627,9 @@ def block_task(
                 success(f"Task blocked: {task_id}")
                 print_mutation_receipt(response)
             else:
-                error(f"Failed to block task: {response.get('message', 'Unknown error')}")
+                error(
+                    f"Failed to block task: {escape(str(response.get('message', 'Unknown error')))}"
+                )
                 raise typer.Exit(1)
 
         except SibylClientError as e:
@@ -666,7 +671,9 @@ def unblock_task(
                 success(f"Task unblocked: {task_id}")
                 print_mutation_receipt(response)
             else:
-                error(f"Failed to unblock task: {response.get('message', 'Unknown error')}")
+                error(
+                    f"Failed to unblock task: {escape(str(response.get('message', 'Unknown error')))}"
+                )
                 raise typer.Exit(1)
 
         except SibylClientError as e:
@@ -721,7 +728,9 @@ def submit_review(
                 success(f"Task submitted for review: {task_id}")
                 print_mutation_receipt(response)
             else:
-                error(f"Failed to submit for review: {response.get('message', 'Unknown error')}")
+                error(
+                    f"Failed to submit for review: {escape(str(response.get('message', 'Unknown error')))}"
+                )
                 raise typer.Exit(1)
 
         except SibylClientError as e:
@@ -811,7 +820,9 @@ def complete_task(
                         f"{citation_usage.get('cited_count', len(cited_ids))}"
                     )
             else:
-                error(f"Failed to complete task: {response.get('message', 'Unknown error')}")
+                error(
+                    f"Failed to complete task: {escape(str(response.get('message', 'Unknown error')))}"
+                )
                 raise typer.Exit(1)
 
         except SibylClientError as e:
@@ -912,14 +923,14 @@ def archive_task(
                 success(f"Task archived: {results[0]['id']}")
                 print_mutation_receipt(results[0])
             else:
-                error(f"Failed: {_archive_error_detail(results[0])}")
+                error(f"Failed: {escape(_archive_error_detail(results[0]))}")
         else:
             success(f"Archived {archived} task(s)")
             if failed:
                 error(f"Failed: {failed} task(s)")
                 failed_results = [result for result in results if not result.get("success")]
                 for result in failed_results:
-                    detail = _archive_error_detail(result)
+                    detail = escape(_archive_error_detail(result))
                     console.print(f"  [{CORAL}]{result['id']}[/{CORAL}] {detail}")
 
         if failed:
@@ -1034,11 +1045,13 @@ def create_task(
                 success(f"Task created: {task_id}")
                 print_mutation_receipt(response)
                 if assignee:
-                    info(f"Assigned to: {assignee}")
+                    info(f"Assigned to: {escape(assignee)}")
                 if dep_list:
                     info(f"Dependencies: {', '.join(dep_list)}")
             else:
-                error(f"Failed to create task: {response.get('message', 'Unknown error')}")
+                error(
+                    f"Failed to create task: {escape(str(response.get('message', 'Unknown error')))}"
+                )
                 raise typer.Exit(1)
 
         except SibylClientError as e:
@@ -1161,7 +1174,9 @@ def update_task(
                 print_mutation_receipt(response)
                 info(f"Fields: {', '.join(response.get('data', {}).keys())}")
             else:
-                error(f"Failed to update task: {response.get('message', 'Unknown error')}")
+                error(
+                    f"Failed to update task: {escape(str(response.get('message', 'Unknown error')))}"
+                )
                 raise typer.Exit(1)
 
         except SibylClientError as e:
@@ -1303,13 +1318,13 @@ def list_notes(
 
                 # Icon based on author type
                 icon = "🤖" if author_type == "agent" else "👤"
-                author_display = f"{icon} {author_name}" if author_name else icon
+                author_display = f"{icon} {escape(str(author_name))}" if author_name else icon
 
                 # Color based on author type
                 color = NEON_CYAN if author_type == "agent" else ELECTRIC_PURPLE
 
                 console.print(f"[{color}]{author_display}[/{color}] [dim]{created_at}[/dim]")
-                console.print(f"  {note.get('content', '')}\n")
+                console.print(f"  {escape(str(note.get('content', '')))}\n")
 
             console.print(f"[dim]{len(notes)} note(s)[/dim]")
 

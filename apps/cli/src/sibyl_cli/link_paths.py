@@ -7,6 +7,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
+from rich.markup import escape
+
 from sibyl_cli.common import info
 from sibyl_cli.config_store import (
     canonical_link_path,
@@ -71,13 +73,15 @@ def resolve_link_target(
     outranking = _worktree_pin_above(own_path, Path(worktree_root), fields)
     if outranking:
         info(
-            f"{outranking} pins this worktree and outranks repository links, so the link is "
-            f"stored on {own_path} itself (sibyl project links --prune reviews worktree pins)"
+            f"{escape(outranking)} pins this worktree and outranks repository links, so the "
+            f"link is stored on {escape(str(own_path))} itself (sibyl project links --prune "
+            "reviews worktree pins)"
         )
         return LinkTarget(str(own_path))
     info(
-        f"{worktree_root} is a git worktree, so the link is stored at {target} in its "
-        "repository and applies to every worktree of it (--this-worktree pins only this one)"
+        f"{escape(worktree_root)} is a git worktree, so the link is stored at "
+        f"{escape(target)} in its repository and applies to every worktree of it "
+        "(--this-worktree pins only this one)"
     )
     own = str(Path(requested).expanduser().resolve())
     return LinkTarget(target, own if any(get_path_link(own)) else None)
@@ -96,5 +100,8 @@ def resolve_unlink_target(path: str | None, field: LinkField) -> str:
     target, worktree_root = canonical_link_path(requested)
     if worktree_root is None:
         return requested
-    info(f"{worktree_root} is a git worktree; this removes the link on {target} in its repository")
+    info(
+        f"{escape(worktree_root)} is a git worktree; this removes the link on "
+        f"{escape(target)} in its repository"
+    )
     return target

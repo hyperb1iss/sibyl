@@ -12,6 +12,7 @@ from os import environ
 from typing import Annotated, Any, cast
 
 import typer
+from rich.markup import escape
 from typer.core import TyperGroup
 
 from sibyl_cli import config_store, memory_admin, root_commands, state
@@ -253,14 +254,14 @@ def _reject_unknown_context() -> None:
         # resolver still refuses to fall through if a name is used later.
         return
     if state.command_path() in _CONTEXT_REPAIR_COMMANDS:
-        warn(f"Selected context '{name}' ({source}) does not exist; ignoring it.")
+        warn(f"Selected context '{escape(name)}' ({source}) does not exist; ignoring it.")
         state.ignore_context_selection()
         return
 
     known = [c.name for c in config_store.list_contexts()]
-    error(f"Unknown context '{name}' selected by {source}.")
+    error(f"Unknown context '{escape(name)}' selected by {source}.")
     if known:
-        info(f"Known contexts: {', '.join(known)}")
+        info(f"Known contexts: {escape(', '.join(known))}")
     else:
         info("No contexts are configured. Create one with: sibyl init")
     if remedy := _SELECTION_REMEDIES.get(source):
@@ -369,7 +370,7 @@ def _print_version_lines(data: dict[str, object]) -> None:
     server_text = str(server_version) if server_version else "unknown"
     current = client_version()
 
-    console.print(f"  [dim]Server:  {server_text}[/dim]")
+    console.print(f"  [dim]Server:  {escape(server_text)}[/dim]")
     console.print(f"  [dim]Client:  {current}[/dim]")
 
     runtime = data.get("runtime")
@@ -381,7 +382,10 @@ def _print_version_lines(data: dict[str, object]) -> None:
     if server_text == "0.0.0":
         warn("Server reports no version — its image was built without provenance.")
     elif server_is_ahead(client=current, server=server_text):
-        warn(f"Server is newer than this CLI ({server_text} > {current}) — run `sibyl update`.")
+        warn(
+            f"Server is newer than this CLI ({escape(server_text)} > {current}) "
+            "— run `sibyl update`."
+        )
 
 
 def _print_pending_write_health() -> None:
@@ -393,7 +397,7 @@ def _print_pending_write_health() -> None:
     triage = current_pending_write_triage()
     warn(pending_writes_headline(triage))
     for line in pending_writes_notice_lines(triage):
-        console.print(f"  [dim]{line}[/dim]")
+        console.print(f"  [dim]{escape(line)}[/dim]")
 
 
 @app.command()
@@ -425,7 +429,7 @@ def health(
                     return
 
                 if healthy:
-                    success(f"{server} is healthy")
+                    success(f"{escape(str(server))} is healthy")
                     _print_version_lines(data)
                     if counts := data.get("counts"):
                         console.print(f"  [dim]Entities: {counts.get('entities', 0)}[/dim]")
@@ -433,7 +437,7 @@ def health(
                             f"  [dim]Relationships: {counts.get('relationships', 0)}[/dim]"
                         )
                 else:
-                    error(f"{server} is unhealthy: {status}")
+                    error(f"{escape(str(server))} is unhealthy: {escape(str(status))}")
 
                 _print_pending_write_health()
 
@@ -492,7 +496,7 @@ def init_cmd(
     try:
         if existing:
             if not force:
-                error(f"Context '{context_name}' already exists. Use --force to update it.")
+                error(f"Context '{escape(context_name)}' already exists. Use --force to update it.")
                 raise typer.Exit(1)
             ctx = config_store.update_context(
                 context_name,
@@ -514,7 +518,7 @@ def init_cmd(
             )
             action = "created"
     except ValueError as exc:
-        error(str(exc))
+        error(escape(str(exc)))
         raise typer.Exit(1) from None
 
     if json_output:
@@ -531,9 +535,10 @@ def init_cmd(
         )
         return
 
-    success(f"{action.capitalize()} context '{context_name}'")
-    console.print(f"  [{NEON_CYAN}]Server:[/{NEON_CYAN}]  {ctx.server_url}")
-    console.print(f"  [{NEON_CYAN}]Org:[/{NEON_CYAN}]     {ctx.org_slug or '[dim]auto[/dim]'}")
+    success(f"{action.capitalize()} context '{escape(context_name)}'")
+    console.print(f"  [{NEON_CYAN}]Server:[/{NEON_CYAN}]  {escape(ctx.server_url)}")
+    org_text = escape(ctx.org_slug) if ctx.org_slug else "[dim]auto[/dim]"
+    console.print(f"  [{NEON_CYAN}]Org:[/{NEON_CYAN}]     {org_text}")
     console.print(
         f"  [{NEON_CYAN}]Project:[/{NEON_CYAN}] {ctx.default_project or '[dim]none[/dim]'}"
     )
@@ -595,11 +600,11 @@ def main() -> None:
     try:
         app()
     except config_store.ConfigStoreError as exc:
-        error(str(exc))
+        error(escape(str(exc)))
         raise SystemExit(1) from None
     except config_store.UnknownContextError as exc:
         # Backstop for any resolver reached without passing the root callback.
-        error(str(exc))
+        error(escape(str(exc)))
         raise typer.Exit(1) from exc
     finally:
         notify_pending_writes()

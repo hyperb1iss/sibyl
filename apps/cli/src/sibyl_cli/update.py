@@ -18,6 +18,7 @@ from typing import Annotated
 
 import typer
 from packaging.version import Version
+from rich.markup import escape
 from rich.panel import Panel
 from rich.table import Table
 
@@ -381,7 +382,7 @@ def update_cli() -> bool:
     else:
         error("Failed to update CLI")
         if result.stderr:
-            console.print(f"[dim]{result.stderr.strip()}[/dim]")
+            console.print(f"[dim]{escape(result.stderr.strip())}[/dim]")
         return False
 
 
@@ -398,7 +399,7 @@ def sync_skills_after_cli_update() -> bool:
 
     warn("CLI updated, but skill refresh failed")
     if result.stderr:
-        console.print(f"[dim]{result.stderr.strip()}[/dim]")
+        console.print(f"[dim]{escape(result.stderr.strip())}[/dim]")
     return False
 
 
@@ -416,7 +417,7 @@ def upgrade_container_runtime(plan: ContainerPlan) -> bool:
     try:
         result = subprocess.run(command, check=False, env=env)
     except OSError as exc:
-        error(f"Could not run {shown}: {exc}")
+        error(f"Could not run {shown}: {escape(str(exc))}")
         return False
 
     pinned = plan.runtime.image_tag()
@@ -563,11 +564,12 @@ def update(
         elif server_is_ahead(client=cli_current, server=server_version):
             table.add_row(
                 "Server",
-                f"[{ELECTRIC_YELLOW}]{server_version}[/{ELECTRIC_YELLOW}] (ahead of this CLI)",
+                f"[{ELECTRIC_YELLOW}]{escape(server_version)}[/{ELECTRIC_YELLOW}] "
+                "(ahead of this CLI)",
             )
             has_updates = True
         else:
-            table.add_row("Server", f"[{SUCCESS_GREEN}]{server_version}[/{SUCCESS_GREEN}]")
+            table.add_row("Server", f"[{SUCCESS_GREEN}]{escape(server_version)}[/{SUCCESS_GREEN}]")
 
     if do_containers and not container_plans:
         table.add_row("Containers", "[dim]Not installed[/dim]")

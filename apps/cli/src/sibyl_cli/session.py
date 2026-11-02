@@ -6,6 +6,7 @@ from datetime import UTC, datetime
 from typing import Annotated, Any
 
 import typer
+from rich.markup import escape
 
 from sibyl_cli.client import SibylClientError, get_client
 from sibyl_cli.common import (
@@ -195,19 +196,23 @@ async def _build_session_bundle(
 def _render_bundle(bundle: dict[str, Any]) -> None:
     context = bundle.get("context", {})
     lines = [
-        f"[{NEON_CYAN}]Server:[/{NEON_CYAN}] {context.get('server_url', 'unknown')}",
+        f"[{NEON_CYAN}]Server:[/{NEON_CYAN}] {escape(str(context.get('server_url', 'unknown')))}",
     ]
 
     if context.get("context_name"):
-        lines.append(f"[{NEON_CYAN}]Context:[/{NEON_CYAN}] {context.get('context_name')}")
+        lines.append(
+            f"[{NEON_CYAN}]Context:[/{NEON_CYAN}] {escape(str(context.get('context_name')))}"
+        )
     if context.get("project_name"):
-        lines.append(f"[{NEON_CYAN}]Project:[/{NEON_CYAN}] {context.get('project_name')}")
+        lines.append(
+            f"[{NEON_CYAN}]Project:[/{NEON_CYAN}] {escape(str(context.get('project_name')))}"
+        )
     elif context.get("project_id"):
         lines.append(f"[{NEON_CYAN}]Project:[/{NEON_CYAN}] {context.get('project_id')}")
     if context.get("matched_path"):
-        lines.append(f"[{NEON_CYAN}]Path:[/{NEON_CYAN}] {context.get('matched_path')}")
+        lines.append(f"[{NEON_CYAN}]Path:[/{NEON_CYAN}] {escape(str(context.get('matched_path')))}")
     if bundle.get("query"):
-        lines.append(f"[{NEON_CYAN}]Focus:[/{NEON_CYAN}] {bundle.get('query')}")
+        lines.append(f"[{NEON_CYAN}]Focus:[/{NEON_CYAN}] {escape(str(bundle.get('query')))}")
 
     tasks = bundle.get("tasks", [])
     if tasks:
@@ -217,7 +222,8 @@ def _render_bundle(bundle: dict[str, Any]) -> None:
             status = format_status(task.get("status", "unknown"))
             priority = format_priority(task.get("priority", "medium"))
             lines.append(
-                f"  {status} {task.get('name', '')} {priority} [{CORAL}]{task.get('id', '')}[/{CORAL}]"
+                f"  {status} {escape(str(task.get('name', '')))} {priority} "
+                f"[{CORAL}]{task.get('id', '')}[/{CORAL}]"
             )
     else:
         lines.append("")
@@ -230,15 +236,17 @@ def _render_bundle(bundle: dict[str, Any]) -> None:
         lines.append(f"[{ELECTRIC_PURPLE}]Relevant Memory[/{ELECTRIC_PURPLE}]")
         for entity in relevant_entities:
             lines.append(
-                f"  [{NEON_CYAN}]{entity.get('name', 'Unknown')}[/{NEON_CYAN}] [{CORAL}]{entity.get('id', '')}[/{CORAL}]"
+                f"  [{NEON_CYAN}]{escape(str(entity.get('name', 'Unknown')))}[/{NEON_CYAN}] "
+                f"[{CORAL}]{entity.get('id', '')}[/{CORAL}]"
             )
             preview = entity.get("preview")
             if preview:
-                lines.append(f"    [dim]{preview}[/dim]")
+                lines.append(f"    [dim]{escape(str(preview))}[/dim]")
 
     lines.append("")
     lines.append(
-        f"[{ELECTRIC_PURPLE}]Remember Next[/{ELECTRIC_PURPLE}] {bundle.get('remember_next', '')}"
+        f"[{ELECTRIC_PURPLE}]Remember Next[/{ELECTRIC_PURPLE}] "
+        f"{escape(str(bundle.get('remember_next', '')))}"
     )
 
     console.print()

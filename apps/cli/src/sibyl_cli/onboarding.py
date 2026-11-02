@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import httpx
 from rich.console import Console
+from rich.markup import escape
 from rich.prompt import Confirm, Prompt
 
 from sibyl_cli import config_store
@@ -62,7 +63,9 @@ def prompt_server_url() -> str:
         url = url.rstrip("/")
 
     console.print()
-    console.print(f"  [{SUCCESS_GREEN}]✓[/{SUCCESS_GREEN}] Server URL set to [bold]{url}[/bold]")
+    console.print(
+        f"  [{SUCCESS_GREEN}]✓[/{SUCCESS_GREEN}] Server URL set to [bold]{escape(url)}[/bold]"
+    )
     return url
 
 
@@ -89,7 +92,7 @@ def test_connection(url: str) -> bool:
                 version = data.get("version", "unknown")
                 console.print(
                     f"  [{SUCCESS_GREEN}]✓[/{SUCCESS_GREEN}] Connected! "
-                    f"Server version [bold]{version}[/bold]"
+                    f"Server version [bold]{escape(str(version))}[/bold]"
                 )
                 return True
             console.print(
@@ -98,14 +101,17 @@ def test_connection(url: str) -> bool:
             return False
         except httpx.ConnectError:
             console.print(
-                f"  [{ELECTRIC_YELLOW}]![/{ELECTRIC_YELLOW}] Could not connect to server at {url}"
+                f"  [{ELECTRIC_YELLOW}]![/{ELECTRIC_YELLOW}] "
+                f"Could not connect to server at {escape(url)}"
             )
             console.print(
                 f"    [dim]Run[/dim] [bold {NEON_CYAN}]sibyl up[/bold {NEON_CYAN}] [dim]to start locally[/dim]"
             )
             return False
         except Exception as e:
-            console.print(f"  [{ELECTRIC_YELLOW}]![/{ELECTRIC_YELLOW}] Connection error: {e}")
+            console.print(
+                f"  [{ELECTRIC_YELLOW}]![/{ELECTRIC_YELLOW}] Connection error: {escape(str(e))}"
+            )
             return False
 
 

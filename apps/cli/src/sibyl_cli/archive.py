@@ -3,6 +3,7 @@
 from typing import Annotated
 
 import typer
+from rich.markup import escape
 
 from sibyl_cli.client import SibylClientError, get_client
 from sibyl_cli.common import (
@@ -57,7 +58,7 @@ def list_archive(
                 rows = [
                     (
                         capture.get("id", ""),
-                        truncate(capture.get("title", ""), 46),
+                        escape(truncate(capture.get("title", ""), 46)),
                         capture.get("entity_type", ""),
                         capture.get("capture_surface") or "unknown",
                     )
@@ -100,7 +101,7 @@ def show_archive_capture(
                     return
 
                 lines = [
-                    f"[{ELECTRIC_PURPLE}]Title:[/{ELECTRIC_PURPLE}] {capture.get('title', '')}",
+                    f"[{ELECTRIC_PURPLE}]Title:[/{ELECTRIC_PURPLE}] {escape(str(capture.get('title', '')))}",
                     f"[{ELECTRIC_PURPLE}]Type:[/{ELECTRIC_PURPLE}] {capture.get('entity_type', '')}",
                     f"[{ELECTRIC_PURPLE}]Archive ID:[/{ELECTRIC_PURPLE}] {capture.get('id', '')}",
                 ]
@@ -119,20 +120,20 @@ def show_archive_capture(
                     )
                 if capture.get("tags"):
                     lines.append(
-                        f"[{ELECTRIC_PURPLE}]Tags:[/{ELECTRIC_PURPLE}] {', '.join(capture.get('tags', []))}"
+                        f"[{ELECTRIC_PURPLE}]Tags:[/{ELECTRIC_PURPLE}] {escape(', '.join(capture.get('tags', [])))}"
                     )
 
                 metadata = capture.get("metadata", {})
                 if metadata:
                     lines.extend(["", f"[{CORAL}]Metadata:[/{CORAL}]"])
                     for key, value in metadata.items():
-                        lines.append(f"  {key}: {truncate(str(value), 80)}")
+                        lines.append(f"  {escape(str(key))}: {escape(truncate(str(value), 80))}")
 
                 lines.extend(
                     [
                         "",
                         f"[{NEON_CYAN}]Raw Content:[/{NEON_CYAN}]",
-                        capture.get("raw_content", ""),
+                        escape(capture.get("raw_content") or ""),
                     ]
                 )
 

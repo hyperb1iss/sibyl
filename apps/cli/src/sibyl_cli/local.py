@@ -27,6 +27,7 @@ from typing import Annotated
 import typer
 import yaml
 from packaging.version import InvalidVersion, Version
+from rich.markup import escape
 from rich.table import Table
 
 from sibyl_cli.common import (
@@ -245,7 +246,10 @@ def compose_config_for(image_tag: str, current: dict | None = None) -> dict:
     except (KeyError, TypeError):
         existing = None
     if isinstance(existing, str) and upgraded_surreal_image(existing) is None:
-        warn(f"Leaving the SurrealDB image {existing} as written; this CLI runs {SURREAL_IMAGE}.")
+        warn(
+            f"Leaving the SurrealDB image {escape(existing)} as written; "
+            f"this CLI runs {SURREAL_IMAGE}."
+        )
         config["services"]["surrealdb"]["image"] = existing
     return config
 
@@ -297,7 +301,7 @@ def check_docker() -> bool:
         console.print("\nCheck that the Docker daemon is healthy and try again.")
         return False
     except Exception as e:
-        error(f"Failed to check Docker: {e}")
+        error(f"Failed to check Docker: {escape(str(e))}")
         return False
 
     return True
@@ -961,7 +965,7 @@ def status() -> None:
                 ports = ", ".join(
                     p.split("->")[0].split(":")[-1] for p in ports.split(", ") if "->" in p
                 )
-            table.add_row(name, status, ports)
+            table.add_row(escape(name), escape(status), escape(ports))
 
     console.print(table)
 

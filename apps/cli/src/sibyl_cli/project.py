@@ -7,6 +7,7 @@ All commands communicate with the REST API to ensure proper event broadcasting.
 from typing import Annotated
 
 import typer
+from rich.markup import escape
 
 from sibyl_cli.client import SibylClientError, get_client
 from sibyl_cli.common import (
@@ -60,8 +61,8 @@ def _print_pinned_context(context_name: str | None) -> None:
     if not context_name:
         return
     ctx = get_context(context_name)
-    server = f" [dim]{ctx.server_url}[/dim]" if ctx else ""
-    console.print(f"  → context [{NEON_CYAN}]{context_name}[/{NEON_CYAN}]{server}")
+    server = f" [dim]{escape(ctx.server_url)}[/dim]" if ctx else ""
+    console.print(f"  → context [{NEON_CYAN}]{escape(str(context_name))}[/{NEON_CYAN}]{server}")
 
 
 @app.command("list")
@@ -118,9 +119,9 @@ def list_projects(
                 meta = e.get("metadata", {})
                 table.add_row(
                     e.get("id", ""),
-                    truncate(e.get("name", ""), 30),
+                    escape(truncate(e.get("name", ""), 30)),
                     meta.get("status", "active"),
-                    truncate(e.get("description") or "", 40),
+                    escape(truncate(e.get("description") or "", 40)),
                 )
 
             console.print(table)
@@ -176,11 +177,11 @@ def show_project(
             pct = meta.get("progress_pct", 0.0)
 
             lines = [
-                f"[{ELECTRIC_PURPLE}]Name:[/{ELECTRIC_PURPLE}] {entity.get('name', '')}",
+                f"[{ELECTRIC_PURPLE}]Name:[/{ELECTRIC_PURPLE}] {escape(str(entity.get('name', '')))}",
                 f"[{ELECTRIC_PURPLE}]Status:[/{ELECTRIC_PURPLE}] {meta.get('status', 'active')}",
                 "",
                 f"[{NEON_CYAN}]Description:[/{NEON_CYAN}]",
-                entity.get("description") or "[dim]No description[/dim]",
+                escape(entity.get("description") or "") or "[dim]No description[/dim]",
                 "",
                 f"[{NEON_CYAN}]Task Summary:[/{NEON_CYAN}]",
             ]
@@ -200,7 +201,7 @@ def show_project(
 
             if meta.get("tech_stack"):
                 lines.append(
-                    f"\n[{NEON_CYAN}]Tech Stack:[/{NEON_CYAN}] {', '.join(meta['tech_stack'])}"
+                    f"\n[{NEON_CYAN}]Tech Stack:[/{NEON_CYAN}] {escape(', '.join(meta['tech_stack']))}"
                 )
 
             # Show critical tasks first (high priority / CRITICAL in name)
@@ -210,7 +211,7 @@ def show_project(
                 for task in critical_tasks:
                     status = task.get("status", "")
                     lines.append(
-                        f"  [red]●[/red] {task.get('name', '')} "
+                        f"  [red]●[/red] {escape(str(task.get('name', '')))} "
                         f"[dim]{status}[/dim] [{CORAL}]{task.get('id', '')}[/{CORAL}]"
                     )
 
@@ -224,7 +225,7 @@ def show_project(
                     mini_bar = "█" * int(epic_pct / 10) + "░" * (10 - int(epic_pct / 10))
                     lines.append(
                         f"  [{SUCCESS_GREEN}]{mini_bar}[/{SUCCESS_GREEN}] {epic_pct:.0f}% "
-                        f"{epic.get('name', '')} ({epic_total} tasks)"
+                        f"{escape(str(epic.get('name', '')))} ({epic_total} tasks)"
                     )
 
             # Show actionable tasks (doing, blocked, review) - now returned as "related"
@@ -240,7 +241,7 @@ def show_project(
                     }.get(status, CORAL)
                     lines.append(
                         f"  [{status_color}]{status}[/{status_color}] "
-                        f"{task.get('name', '')} [{CORAL}]{task.get('id', '')}[/{CORAL}]"
+                        f"{escape(str(task.get('name', '')))} [{CORAL}]{task.get('id', '')}[/{CORAL}]"
                     )
 
             default_scope = await _default_memory_scope(client, str(entity.get("id") or project_id))
@@ -428,7 +429,7 @@ def project_progress(
 def _retire_shadowing_pin(pin: str | None) -> None:
     """Remove a worktree's own link that would override the repository link just written."""
     if pin and remove_path_mapping(pin):
-        info(f"Removed the worktree's own link on {pin}, which would have overridden it")
+        info(f"Removed the worktree's own link on {escape(pin)}, which would have overridden it")
 
 
 @app.command("link")
@@ -470,7 +471,7 @@ def link_project(
             project = await client.get_entity(project_id)
             project_name = project.get("name", "Unknown")
         except SibylClientError as exc:
-            error(f"Project not found: {project_id}. {PROJECT_RELINK_HINT}.")
+            error(f"Project not found: {escape(project_id)}. {PROJECT_RELINK_HINT}.")
             raise typer.Exit(1) from exc
 
         # Pin the project together with the context it lives on, so this directory
@@ -479,8 +480,10 @@ def link_project(
         set_path_mapping(target_path, project_id, context=context_name)
         _retire_shadowing_pin(link_target.shadowing_pin)
 
-        success(f"Linked [{NEON_CYAN}]{target_path}[/{NEON_CYAN}]")
-        console.print(f"  → [{ELECTRIC_PURPLE}]{project_name}[/{ELECTRIC_PURPLE}] ({project_id})")
+        success(f"Linked [{NEON_CYAN}]{escape(target_path)}[/{NEON_CYAN}]")
+        console.print(
+            f"  → [{ELECTRIC_PURPLE}]{escape(str(project_name))}[/{ELECTRIC_PURPLE}] ({project_id})"
+        )
         _print_pinned_context(context_name)
         info("Commands in this directory now route to this project and server")
 
@@ -543,19 +546,22 @@ def relink_project(
                     if projects:
                         console.print("  Candidates:")
                         for project in projects[:10]:
-                            console.print(f"  - {project.get('id')}  {project.get('name', '')}")
+                            console.print(
+                                f"  - {project.get('id')}  {escape(str(project.get('name', '')))}"
+                            )
                     info("Run: sibyl project relink --id <project>")
                     raise typer.Exit(1)
 
             set_path_mapping(target_path, selected_id, context=context_name)
             _retire_shadowing_pin(link_target.shadowing_pin)
-            success(f"Relinked [{NEON_CYAN}]{target_path}[/{NEON_CYAN}]")
+            success(f"Relinked [{NEON_CYAN}]{escape(target_path)}[/{NEON_CYAN}]")
             console.print(
-                f"  → [{ELECTRIC_PURPLE}]{selected_name}[/{ELECTRIC_PURPLE}] ({selected_id})"
+                f"  → [{ELECTRIC_PURPLE}]{escape(str(selected_name))}[/{ELECTRIC_PURPLE}] "
+                f"({selected_id})"
             )
             _print_pinned_context(context_name)
         except (SibylClientError, ValueError) as exc:
-            error(str(exc))
+            error(escape(str(exc)))
             info(PROJECT_RELINK_HINT)
             raise typer.Exit(1) from exc
 
@@ -577,9 +583,9 @@ def unlink_project(
     target_path = resolve_unlink_target(path, "project")
 
     if remove_path_mapping(target_path):
-        success(f"Unlinked [{NEON_CYAN}]{target_path}[/{NEON_CYAN}]")
+        success(f"Unlinked [{NEON_CYAN}]{escape(target_path)}[/{NEON_CYAN}]")
     else:
-        info(f"No link found for {target_path}")
+        info(f"No link found for {escape(target_path)}")
 
 
 @app.command("links")
@@ -619,13 +625,15 @@ def list_links(
     for mapped_path in sorted(project_map.keys() | context_map.keys()):
         is_current = mapped_path == current_path
         marker = f"[{SUCCESS_GREEN}]* [/{SUCCESS_GREEN}]" if is_current else "  "
-        console.print(f"{marker}[{NEON_CYAN}]{mapped_path}[/{NEON_CYAN}]")
+        console.print(f"{marker}[{NEON_CYAN}]{escape(mapped_path)}[/{NEON_CYAN}]")
         if project_id := project_map.get(mapped_path):
             console.print(f"    → [{CORAL}]{project_id}[/{CORAL}]")
         if context_name := context_map.get(mapped_path):
             ctx = get_context(context_name)
-            server = f" [dim]{ctx.server_url}[/dim]" if ctx else ""
-            console.print(f"    → context [{NEON_CYAN}]{context_name}[/{NEON_CYAN}]{server}")
+            server = f" [dim]{escape(ctx.server_url)}[/dim]" if ctx else ""
+            console.print(
+                f"    → context [{NEON_CYAN}]{escape(context_name)}[/{NEON_CYAN}]{server}"
+            )
 
     if current_path:
         console.print("\n[dim]* = current directory[/dim]")
@@ -640,32 +648,29 @@ def _prune_links(*, apply: bool) -> None:
     actions = plan_link_cleanup()
     changes = [action for action in actions if action.changes]
     for action in actions:
-        stored = _describe_link(action.project, action.context)
-        kept = _describe_link(action.kept_project, action.kept_context)
-        path = f"[{NEON_CYAN}]{action.path}[/{NEON_CYAN}]"
+        stored = escape(_describe_link(action.project, action.context))
+        kept = escape(_describe_link(action.kept_project, action.kept_context))
+        target = escape(str(action.target))
+        path = f"[{NEON_CYAN}]{escape(action.path)}[/{NEON_CYAN}]"
         if action.action == "drop_empty":
             console.print(f"  drop  {path}  (empty link)")
         elif action.action == "drop_missing":
             console.print(f"  drop  {path}  (its checkout is gone)")
         elif action.action == "lift":
-            console.print(
-                f"  move  {path} → [{NEON_CYAN}]{action.target}[/{NEON_CYAN}]  ({stored})"
-            )
+            console.print(f"  move  {path} → [{NEON_CYAN}]{target}[/{NEON_CYAN}]  ({stored})")
         elif action.action == "drop_redundant":
-            console.print(f"  drop  {path}  ({action.target} already provides {kept})")
+            console.print(f"  drop  {path}  ({target} already provides {kept})")
         elif action.action == "keep_differs":
             console.print(
-                f"  keep  {path}  (pins {stored}, unlike {action.target} with {kept}; "
-                f"remove it with: sibyl project unlink --path {action.path})"
+                f"  keep  {path}  (pins {stored}, unlike {target} with {kept}; "
+                f"remove it with: sibyl project unlink --path {escape(action.path)})"
             )
         elif action.action == "keep_shadowed":
             console.print(
                 f"  keep  {path}  (removing it would expose a pin higher up in this worktree)"
             )
         else:
-            console.print(
-                f"  keep  {path}  (pins {stored}; other worktrees of {action.target} disagree)"
-            )
+            console.print(f"  keep  {path}  (pins {stored}; other worktrees of {target} disagree)")
     if not changes:
         success("Directory links are already tidy")
         return
@@ -673,7 +678,7 @@ def _prune_links(*, apply: bool) -> None:
         try:
             apply_link_cleanup(actions)
         except LinkCleanupConflictError as exc:
-            error(str(exc))
+            error(escape(str(exc)))
             raise typer.Exit(1) from exc
         success(f"Applied {len(changes)} link changes")
     else:

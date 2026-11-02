@@ -6,6 +6,8 @@ from difflib import unified_diff
 from itertools import pairwise
 from typing import Any, cast
 
+from rich.markup import escape
+
 from sibyl_cli.common import console, create_table
 from sibyl_cli.id_resolution import resolve_raw_memory_id_prefix
 
@@ -89,15 +91,15 @@ def print_memory_source_inspect(data: dict[str, object], *, full_content: bool =
         scope = f"{scope}:{scope_key}" if scope else str(scope_key)
     policy = _format_policy_state(data.get("policy_allowed"))
     if reason := data.get("policy_reason"):
-        policy = f"{policy} ({reason})"
+        policy = f"{policy} ({escape(str(reason))})"
     content_state = "redacted" if data.get("content_redacted") else "visible"
 
     table = create_table(None, "Field", "Value", expand=False)
     table.add_row("ID", str(data.get("id") or ""))
-    table.add_row("Source", str(data.get("source_id") or ""))
+    table.add_row("Source", escape(str(data.get("source_id") or "")))
     table.add_row("Revision", str(data.get("revision") or ""))
-    table.add_row("Title", str(data.get("title") or ""))
-    table.add_row("Scope", scope)
+    table.add_row("Title", escape(str(data.get("title") or "")))
+    table.add_row("Scope", escape(scope))
     table.add_row("Project", str(data.get("project_id") or ""))
     table.add_row("Review", str(data.get("review_state") or ""))
     promotion = data.get("promotion_state")
@@ -117,7 +119,7 @@ def print_memory_source_inspect(data: dict[str, object], *, full_content: bool =
     if isinstance(raw_content, str) and raw_content:
         console.print()
         content = raw_content if full_content else _format_memory_preview(raw_content)
-        console.print(content, soft_wrap=True)
+        console.print(content, markup=False, soft_wrap=True)
 
 
 def _dict_items(value: object) -> list[dict[str, object]]:
@@ -151,7 +153,7 @@ def _print_blame_revisions(
         table.add_row(
             str(item.get("revision") or ""),
             str(item.get("created_at") or ""),
-            str(item.get("reason") or ""),
+            escape(str(item.get("reason") or "")),
         )
     table.add_row(str(source.get("revision") or "current"), "current", "canonical body")
     console.print(table)
@@ -190,7 +192,7 @@ def _print_blame_table(
     console.print(f"\n[bold]{title}[/bold]\n")
     table = create_table(None, *(label for label, _ in columns), expand=False)
     for row in rows:
-        table.add_row(*(str(row.get(key) or "") for _, key in columns))
+        table.add_row(*(escape(str(row.get(key) or "")) for _, key in columns))
     console.print(table)
 
 

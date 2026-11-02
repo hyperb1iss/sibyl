@@ -7,6 +7,7 @@ All commands communicate with the REST API to ensure proper event broadcasting.
 from typing import Annotated
 
 import typer
+from rich.markup import escape
 
 from sibyl_cli.client import SibylClientError, get_client
 from sibyl_cli.common import (
@@ -78,7 +79,7 @@ def explore_related(
                 rel = meta.get("relationship_type", "-") if meta else "-"
                 table.add_row(
                     e.get("id", ""),
-                    truncate(e.get("name", ""), 35),
+                    escape(truncate(e.get("name", ""), 35)),
                     e.get("type", ""),
                     rel,
                 )
@@ -144,7 +145,8 @@ def explore_traverse(
                 )
                 for e in by_distance[dist][:10]:  # Limit per hop
                     hop_branch.add(
-                        f"[{CORAL}]{e.get('type', '')}[/{CORAL}] {truncate(e.get('name', ''), 40)}"
+                        f"[{CORAL}]{e.get('type', '')}[/{CORAL}] "
+                        f"{escape(truncate(e.get('name', ''), 40))}"
                     )
                 if len(by_distance[dist]) > 10:
                     hop_branch.add(f"[dim]... and {len(by_distance[dist]) - 10} more[/dim]")
@@ -226,7 +228,7 @@ def explore_dependencies(
 
                 console.print(
                     f"  {i:3}. [{NEON_CYAN}]{e.get('id', '')}[/{NEON_CYAN}] "
-                    f"{truncate(e.get('name', ''), 40)} "
+                    f"{escape(truncate(e.get('name', ''), 40))} "
                     f"{format_status(status)}{dep_str}"
                 )
 

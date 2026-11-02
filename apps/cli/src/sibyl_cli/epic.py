@@ -9,6 +9,7 @@ than tasks: planning -> in_progress -> completed/archived.
 from typing import Annotated, Any
 
 import typer
+from rich.markup import escape
 
 from sibyl_cli.client import SibylClientError, get_client
 from sibyl_cli.common import (
@@ -156,7 +157,7 @@ def list_epics(
                 progress_str = f"{completed}/{total}" if total > 0 else "-"
                 table.add_row(
                     e.get("id", ""),
-                    e.get("name", ""),  # Full title, no truncation
+                    escape(e.get("name") or ""),  # Full title, no truncation
                     format_epic_status(meta.get("status", "planning")),
                     format_priority(meta.get("priority", "medium")),
                     progress_str,
@@ -176,7 +177,7 @@ def _format_task_line(task: dict, include_id: bool = True) -> str:
     meta = task.get("metadata", {})
     priority = meta.get("priority", "medium")
     task_id = task.get("id", "")
-    name = task.get("name", "")
+    name = escape(str(task.get("name", "")))
 
     priority_marker = {
         "critical": "[#ff6363]●[/#ff6363]",
@@ -222,7 +223,7 @@ def show_epic(
             # ══════════════════════════════════════════════════════════════════
             console.print()
             console.print(
-                f"[bold {ELECTRIC_PURPLE}]═══ Epic: {entity.get('name', '')} ═══[/bold {ELECTRIC_PURPLE}]"
+                f"[bold {ELECTRIC_PURPLE}]═══ Epic: {escape(str(entity.get('name', '')))} ═══[/bold {ELECTRIC_PURPLE}]"
             )
             console.print()
             console.print(f"[{NEON_CYAN}]ID:[/{NEON_CYAN}]       {resolved_id}")
@@ -241,22 +242,25 @@ def show_epic(
 
             if meta.get("assignees"):
                 console.print(
-                    f"[{NEON_CYAN}]Leads:[/{NEON_CYAN}]    {', '.join(meta['assignees'])}"
+                    f"[{NEON_CYAN}]Leads:[/{NEON_CYAN}]    {escape(', '.join(meta['assignees']))}"
                 )
 
             if meta.get("tags"):
-                console.print(f"[{NEON_CYAN}]Tags:[/{NEON_CYAN}]     {', '.join(meta['tags'])}")
+                console.print(
+                    f"[{NEON_CYAN}]Tags:[/{NEON_CYAN}]     {escape(', '.join(meta['tags']))}"
+                )
 
             # Description
             console.print()
-            desc = entity.get("description") or "[dim]No description[/dim]"
+            description = entity.get("description")
+            desc = escape(description) if description else "[dim]No description[/dim]"
             console.print(f"[{CORAL}]Description:[/{CORAL}]")
             console.print(f"  {desc}")
 
             if meta.get("learnings"):
                 console.print()
                 console.print(f"[{CORAL}]Learnings:[/{CORAL}]")
-                console.print(f"  {meta['learnings']}")
+                console.print(f"  {escape(str(meta['learnings']))}")
 
             # ══════════════════════════════════════════════════════════════════
             # TASKS - Full list with IDs
@@ -385,7 +389,7 @@ def show_epic(
 
                         for e in entities[:10]:  # Cap at 10 per type
                             e_id = e.get("id", "")
-                            e_name = e.get("name", "")
+                            e_name = escape(str(e.get("name", "")))
                             # Show cross-project indicator if relevant
                             cross_proj = (
                                 ""
@@ -487,7 +491,7 @@ def create_epic(
             if response.get("id"):
                 success(f"Epic created: {response['id']}")
                 if assignee:
-                    info(f"Lead: {assignee}")
+                    info(f"Lead: {escape(assignee)}")
             else:
                 error("Failed to create epic")
                 raise typer.Exit(1)
@@ -532,7 +536,9 @@ def start_epic(
             if response.get("success") or response.get("id"):
                 success(f"Epic started: {epic_id}")
             else:
-                error(f"Failed to start epic: {response.get('message', 'Unknown error')}")
+                error(
+                    f"Failed to start epic: {escape(str(response.get('message', 'Unknown error')))}"
+                )
                 raise typer.Exit(1)
 
         except SibylClientError as e:
@@ -579,7 +585,10 @@ def complete_epic(
                 if learnings:
                     info("Learnings captured")
             else:
-                error(f"Failed to complete epic: {response.get('message', 'Unknown error')}")
+                error(
+                    "Failed to complete epic: "
+                    f"{escape(str(response.get('message', 'Unknown error')))}"
+                )
                 raise typer.Exit(1)
 
         except SibylClientError as e:
@@ -623,7 +632,10 @@ def archive_epic(
             if response.get("success") or response.get("id"):
                 success(f"Epic archived: {resolved_id}")
             else:
-                error(f"Failed to archive epic: {response.get('message', 'Unknown error')}")
+                error(
+                    "Failed to archive epic: "
+                    f"{escape(str(response.get('message', 'Unknown error')))}"
+                )
                 raise typer.Exit(1)
 
         except SibylClientError as e:
@@ -701,7 +713,10 @@ def update_epic(
                 success(f"Epic updated: {resolved_id}")
                 info(f"Fields: {', '.join(updates.keys())}")
             else:
-                error(f"Failed to update epic: {response.get('message', 'Unknown error')}")
+                error(
+                    "Failed to update epic: "
+                    f"{escape(str(response.get('message', 'Unknown error')))}"
+                )
                 raise typer.Exit(1)
 
         except SibylClientError as e:
@@ -968,9 +983,9 @@ def roadmap(
             if output:
                 with open(output, "w") as f:
                     f.write(content)
-                success(f"Roadmap written to {output}")
+                success(f"Roadmap written to {escape(str(output))}")
             else:
-                console.print(content)
+                console.print(content, markup=False, soft_wrap=True)
 
         except SibylClientError as e:
             handle_client_error(e)
@@ -1032,10 +1047,10 @@ def list_epic_tasks(
                 meta = e.get("metadata", {})
                 table.add_row(
                     e.get("id", ""),
-                    e.get("name", ""),  # Full title, no truncation
+                    escape(e.get("name") or ""),  # Full title, no truncation
                     format_status(meta.get("status", "unknown")),
                     format_priority(meta.get("priority", "medium")),
-                    ", ".join(meta.get("assignees", []))[:20] or "-",
+                    escape(", ".join(meta.get("assignees", []))[:20]) or "-",
                 )
 
             console.print(table)

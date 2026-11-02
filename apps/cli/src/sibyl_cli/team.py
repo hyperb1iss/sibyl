@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import cast
 
 import typer
+from rich.markup import escape
 
 from sibyl_cli.client import SibylClientError, get_client
 from sibyl_cli.common import handle_client_error, print_json, run_async, success
@@ -56,7 +57,7 @@ def create_team_cmd(
                 print_json(data)
                 return
             print_team(cast("dict[str, object]", data))
-            success(f"Created team: {data.get('slug') or data.get('id')}")
+            success(f"Created team: {escape(str(data.get('slug') or data.get('id')))}")
         except SibylClientError as e:
             handle_client_error(e)
 

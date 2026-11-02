@@ -6,6 +6,7 @@ Commands for managing ~/.sibyl/config.toml settings.
 from typing import Annotated
 
 import typer
+from rich.markup import escape
 from rich.table import Table
 
 from sibyl_cli import config_store
@@ -78,17 +79,17 @@ def config_show() -> None:
                 if not value:
                     display_value = "[dim]not set[/dim]"
                 elif _is_sensitive(full_key) and isinstance(value, str) and len(value) > 8:
-                    display_value = f"{value[:4]}{'•' * 8}{value[-4:]}"
+                    display_value = escape(f"{value[:4]}{'•' * 8}{value[-4:]}")
                 else:
-                    display_value = str(value)
-                table.add_row(full_key, display_value)
+                    display_value = escape(str(value))
+                table.add_row(escape(full_key), display_value)
 
     add_rows(config)
 
     console.print()
     console.print(table)
     console.print()
-    console.print(f"[dim]Config file: {config_store.config_path()}[/dim]")
+    console.print(f"[dim]Config file: {escape(str(config_store.config_path()))}[/dim]")
     console.print()
 
 
@@ -99,10 +100,10 @@ def config_get(
     """Get a configuration value."""
     value = config_store.get(key)
     if value is None:
-        error(f"Key '{key}' not found")
+        error(f"Key '{escape(key)}' not found")
         raise typer.Exit(1)
 
-    console.print(value)
+    console.print(value, markup=False)
 
 
 @app.command("set")
@@ -112,7 +113,7 @@ def config_set(
 ) -> None:
     """Set a configuration value."""
     config_store.set_value(key, value)
-    success(f"Set {key} = {value}")
+    success(f"Set {escape(key)} = {escape(value)}")
 
 
 @app.command("path")
@@ -120,7 +121,7 @@ def config_path() -> None:
     """Show config file path."""
     path = config_store.config_path()
     exists = "[green]exists[/green]" if path.exists() else "[dim]not created yet[/dim]"
-    console.print(f"{path} ({exists})")
+    console.print(f"{escape(str(path))} ({exists})")
 
 
 @app.command("reset")
@@ -139,16 +140,16 @@ def config_edit() -> None:
     path = config_store.config_path()
 
     if config_store.ensure_config_file():
-        info(f"Created default config at {path}")
+        info(f"Created default config at {escape(str(path))}")
 
     # Get editor
     editor = os.environ.get("EDITOR", os.environ.get("VISUAL", "nano"))
 
     try:
         subprocess.run([editor, str(path)], check=True)
-        success(f"Config file saved: {path}")
+        success(f"Config file saved: {escape(str(path))}")
     except FileNotFoundError:
-        error(f"Editor '{editor}' not found. Set EDITOR environment variable.")
+        error(f"Editor '{escape(editor)}' not found. Set EDITOR environment variable.")
         raise typer.Exit(1) from None
     except subprocess.CalledProcessError:
         error("Editor exited with error.")

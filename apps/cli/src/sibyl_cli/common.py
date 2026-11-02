@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING
 import typer
 from rich import box
 from rich.console import Console
+from rich.markup import escape
 from rich.panel import Panel
 from rich.progress import Progress, SpinnerColumn, TextColumn
 from rich.table import Table
@@ -362,7 +363,7 @@ def notify_pending_writes() -> None:
             return
         lines = pending_writes_notice_lines(current_pending_write_triage())
         for line in lines:
-            err_console.print(f"[{ELECTRIC_YELLOW}]![/{ELECTRIC_YELLOW}] {line}")
+            err_console.print(f"[{ELECTRIC_YELLOW}]![/{ELECTRIC_YELLOW}] {escape(line)}")
     except (Exception, SystemExit):
         return
     # Claimed only once the line is out, so a queue we failed to read stays
@@ -490,15 +491,18 @@ def handle_client_error(
     A structured server envelope (error code, request id, remediation) wins;
     bare errors fall back to a status-specific label.
     """
+    # Server details and remediation echo stored text; escape them so a
+    # bracket in the payload cannot be parsed as Rich markup.
+    detail = escape(e.detail or str(e))
     if e.error_code or e.request_id or e.remediation:
-        label = e.error_code or "api_error"
-        error(f"{label}: {e.detail or str(e)}")
+        label = escape(e.error_code or "api_error")
+        error(f"{label}: {detail}")
         if e.request_id:
-            console.print(f"  [{NEON_CYAN}]→[/{NEON_CYAN}] request_id: {e.request_id}")
+            console.print(f"  [{NEON_CYAN}]→[/{NEON_CYAN}] request_id: {escape(e.request_id)}")
         if e.remediation:
-            console.print(f"  [{NEON_CYAN}]→[/{NEON_CYAN}] {e.remediation}")
+            console.print(f"  [{NEON_CYAN}]→[/{NEON_CYAN}] {escape(e.remediation)}")
     elif "Cannot connect" in str(e):
-        error(str(e))
+        error(escape(str(e)))
     elif e.status_code == 401:
         error("Authentication required")
         console.print(f"  [{NEON_CYAN}]→[/{NEON_CYAN}] sibyl auth login         [dim]Log in[/dim]")
@@ -507,13 +511,13 @@ def handle_client_error(
             "[dim]Create a local account[/dim]"
         )
     elif e.status_code == 403:
-        error(f"Access denied: {e.detail or str(e)}")
+        error(f"Access denied: {detail}")
     elif e.status_code == 404:
-        error(f"{not_found_label}: {e.detail or str(e)}")
+        error(f"{not_found_label}: {detail}")
     elif e.status_code == 400:
-        error(f"{invalid_request_label}: {e.detail or str(e)}")
+        error(f"{invalid_request_label}: {detail}")
     elif e.status_code == 409:
-        error(f"{conflict_label}: {e.detail or str(e)}")
+        error(f"{conflict_label}: {detail}")
     else:
-        error(str(e))
+        error(escape(str(e)))
     raise typer.Exit(1)

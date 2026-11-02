@@ -10,6 +10,7 @@ import asyncio
 from typing import Annotated, Protocol
 
 import typer
+from rich.markup import escape
 
 from sibyl_cli.client import SibylClientError, get_client
 from sibyl_cli.common import (
@@ -60,7 +61,7 @@ def _format_service(service: str) -> str:
         "cli": "#ff6ac1",  # Coral
     }
     color = service_colors.get(service.lower(), "white")
-    return f"[{color}]{service:7}[/{color}]"
+    return f"[{color}]{escape(service):7}[/{color}]"
 
 
 def _print_entry(entry: dict) -> None:
@@ -74,14 +75,14 @@ def _print_entry(entry: dict) -> None:
     # Format context as key=value pairs
     context_str = ""
     if context:
-        pairs = [f"[dim]{k}=[/dim]{v}" for k, v in context.items()]
+        pairs = [f"[dim]{escape(str(k))}=[/dim]{escape(str(v))}" for k, v in context.items()]
         context_str = " " + " ".join(pairs)
 
     console.print(
         f"[dim]{timestamp}[/dim] "
         f"{_format_service(service)} "
         f"{_format_level(level)} "
-        f"{event}{context_str}"
+        f"{escape(str(event))}{context_str}"
     )
 
 
@@ -215,7 +216,7 @@ async def _stream_logs(
     except asyncio.CancelledError:
         console.print("\n[dim]Stream stopped[/dim]")
     except Exception as e:
-        error(f"WebSocket error: {e}")
+        error(f"WebSocket error: {escape(str(e))}")
         raise typer.Exit(1) from None
 
 
