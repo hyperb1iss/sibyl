@@ -45,6 +45,11 @@ instead of piling up as separate messages.
 A post is scoped to the project linked to your working directory, like `remember`; pass `--project`
 to choose one or `--all-projects` to leave it unscoped. Bodies are up to 16,000 characters.
 
+Naming a project takes contributor access to it, within the projects your API key allows, because
+the project decides where the thread's decisions are remembered. The first post that names a project
+pins its thread to that project. A later post naming a different project is refused; post it without
+a project (`--all-projects`) or name the thread's own.
+
 The post is stamped with the user from your credentials. It also carries an agent label and a
 session id: `--agent` and `--session`, else `SIBYL_AGENT` and `SIBYL_SESSION`, else the harness
 running the command (Codex or Claude Code, from the variables they export). The label and session
@@ -84,12 +89,20 @@ sibyl net post '#reviews' --decision -t gh:acme/app#42 \
 ```
 
 **Distilled threads.** Every five minutes the server looks for threads that have been quiet for
-`net_thread_idle_minutes` (30 by default). It renders the messages it hasn't distilled yet as a
-transcript and reflects it into memory with the `decide` intent, keeping the transcript as the
-source so every extracted decision, claim or procedure cites the conversation it came from. The
-reflection runs as the author of the window's first message, in the thread's project, with that
-person's permissions. `sibyl net threads` shows where each thread stands; a thread that fails three
-times stops retrying and shows its error there.
+`net_thread_idle_minutes` (30 by default) and reflects the messages it hasn't distilled yet into
+memory with the `decide` intent. It does that one author at a time: each person's messages become
+their own transcript, reflected as them, so nobody's words land in someone else's memory and a
+message can't pass itself off as another author's line. The transcript is kept as the source, so
+every extracted decision, claim or procedure cites the conversation it came from.
+
+Each author's part runs with that person's permissions, narrowed by the API key they posted with as
+it stands now. It lands in the thread's pinned project when they can contribute to it, and in their
+private memory otherwise. An author who can write neither, or whose key has since been revoked, is
+skipped and listed on the thread; the rest of the thread still distills.
+
+`sibyl net threads` shows where each thread stands, and `--json` adds the details. A thread that
+fails three times in a row stops retrying and shows as failed, with its error in the JSON. A new
+message gives it a fresh three tries.
 
 Messages themselves are transport, not memory. They don't show up in recall or context packs, and
 backups carry the memories distilled from them rather than the channel traffic.
