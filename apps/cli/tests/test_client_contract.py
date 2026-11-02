@@ -10,6 +10,7 @@ from sibyl_cli.client_admin import ClientAdminMixin
 from sibyl_cli.client_auth import ClientAuthMixin
 from sibyl_cli.client_graph import ClientGraphMixin
 from sibyl_cli.client_memory import ClientMemoryMixin
+from sibyl_cli.client_net import ClientNetMixin
 from sibyl_cli.client_sources import ClientSourcesMixin
 from sibyl_cli.client_transport import ClientTransportMixin
 from sibyl_cli.client_work import ClientWorkMixin
@@ -105,6 +106,12 @@ PUBLIC_METHOD_OWNERS = {
         "context_pack",
         "reflect",
     },
+    ClientNetMixin: {
+        "post_net_message",
+        "net_feed",
+        "list_net_channels",
+        "list_net_threads",
+    },
     ClientSourcesMixin: {
         "source_import_status",
         "start_source_import",
@@ -139,7 +146,7 @@ def test_public_methods_resolve_directly_to_one_canonical_owner() -> None:
         if not name.startswith("_")
     }
 
-    assert len(expected) == 99
+    assert len(expected) == 103
     assert actual == expected
     assert {
         name

@@ -7,6 +7,7 @@ from sibyl_cli.client_admin import ClientAdminMixin
 from sibyl_cli.client_auth import ClientAuthMixin
 from sibyl_cli.client_graph import ClientGraphMixin
 from sibyl_cli.client_memory import ClientMemoryMixin
+from sibyl_cli.client_net import ClientNetMixin
 from sibyl_cli.client_sources import ClientSourcesMixin
 from sibyl_cli.client_transport import (
     BUFFERED_WRITE_METHODS,
@@ -50,6 +51,7 @@ class SibylClient(
     ClientGraphMixin,
     ClientWorkMixin,
     ClientMemoryMixin,
+    ClientNetMixin,
     ClientSourcesMixin,
     ClientAdminMixin,
     ClientTransportMixin,

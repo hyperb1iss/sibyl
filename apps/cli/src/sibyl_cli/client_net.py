@@ -1,0 +1,69 @@
+"""sibylnet channel client operations."""
+
+from collections.abc import Sequence
+from typing import Any
+
+
+class ClientNetMixin:
+    """sibylnet channel client operations."""
+
+    async def post_net_message(
+        self,
+        *,
+        channel: str,
+        body: str,
+        thread: str | None = None,
+        decision: bool = False,
+        project_id: str | None = None,
+        agent: str | None = None,
+        session: str | None = None,
+    ) -> dict[str, Any]:
+        """Post a message, or a decision that is also remembered, to a channel."""
+        data: dict[str, Any] = {
+            "channel": channel,
+            "body": body,
+            "kind": "decision" if decision else "message",
+        }
+        if thread:
+            data["thread"] = thread
+        if project_id:
+            data["project_id"] = project_id
+        if agent:
+            data["agent"] = agent
+        if session:
+            data["session"] = session
+        # A channel message is live coordination. Replaying it from the write
+        # buffer after the conversation moved on would hand its receivers a
+        # stale instruction, so a failed post fails now and the caller retries.
+        return await self._request("POST", "/net/messages", json=data, _buffer_pending=False)
+
+    async def net_feed(
+        self,
+        *,
+        since: str | None = None,
+        channels: Sequence[str] = (),
+        thread: str | None = None,
+        limit: int | None = None,
+        wait: int = 0,
+    ) -> dict[str, Any]:
+        """Read messages after a cursor, or the newest ``limit`` without one."""
+        params: dict[str, Any] = {}
+        if since:
+            params["since"] = since
+        if channels:
+            params["channel"] = list(channels)
+        if thread:
+            params["thread"] = thread
+        if limit is not None:
+            params["limit"] = limit
+        if wait:
+            params["wait"] = wait
+        return await self._request("GET", "/net/feed", params=params)
+
+    async def list_net_channels(self) -> dict[str, Any]:
+        """List channels by most recent activity."""
+        return await self._request("GET", "/net/channels")
+
+    async def list_net_threads(self, channel: str) -> dict[str, Any]:
+        """List a channel's threads by most recent activity."""
+        return await self._request("GET", "/net/threads", params={"channel": channel})
