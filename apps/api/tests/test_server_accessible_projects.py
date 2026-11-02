@@ -1599,6 +1599,9 @@ async def test_reflect_mcp_memory_links_single_active_task_when_persisting(monke
     monkeypatch.setattr(
         mcp_context_module, "get_writable_projects", AsyncMock(return_value={"project-a"})
     )
+    monkeypatch.setattr(
+        mcp_context_module, "get_maintained_projects", AsyncMock(return_value={"project-a"})
+    )
     ctx = McpContext(org_id=str(uuid4()), user_id=str(uuid4()), scopes=["mcp"])
     pack = ReflectionPack(
         source_title="Planning",
@@ -1653,6 +1656,8 @@ async def test_reflect_mcp_memory_links_single_active_task_when_persisting(monke
     ]
     assert reflect_memory.await_args.kwargs["principal_id"] == ctx.user_id
     assert reflect_memory.await_args.kwargs["accessible_projects"] == {"project-a"}
+    assert reflect_memory.await_args.kwargs["writable_projects"] == {"project-a"}
+    assert reflect_memory.await_args.kwargs["maintained_projects"] == {"project-a"}
     assert reflect_memory.await_args.kwargs["memory_scope"] == "project"
     assert reflect_memory.await_args.kwargs["scope_key"] == "project-a"
     assert reflect_memory.await_args.kwargs["persist_review"] is False

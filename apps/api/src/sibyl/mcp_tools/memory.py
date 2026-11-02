@@ -394,6 +394,7 @@ async def _reflect_mcp_memory(
         principal_id=ctx.user_id,
         accessible_projects=accessible_projects,
         writable_projects=await mcp_context.get_writable_projects(ctx) if persist else set(),
+        maintained_projects=await mcp_context.get_maintained_projects(ctx) if persist else set(),
         memory_scope=memory_scope,
         scope_key=scope_key,
         persist=persist,
