@@ -57,6 +57,7 @@ async def reflect_memory(
     principal_id: str | None = None,
     accessible_projects: set[str] | None = None,
     writable_projects: set[str] | None = None,
+    maintained_projects: set[str] | None = None,
     allowed_memory_scope_keys: frozenset[str] | None = None,
     memory_scope: str | MemoryScope | None = None,
     scope_key: str | None = None,
@@ -369,6 +370,7 @@ async def reflect_memory(
             related_to=related_to,
             accessible_projects=accessible_projects,
             writable_projects=writable_projects,
+            maintained_projects=maintained_projects,
             memory_scope=memory_scope,
             scope_key=scope_key,
         )

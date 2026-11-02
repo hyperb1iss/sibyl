@@ -80,6 +80,11 @@ project). Correcting someone else's project memory takes project maintainer acce
 which org owners and admins have everywhere; a contributor's attempt is refused with
 `project_maintainer_required` and changes nothing.
 
+Promotion follows the same rule when the memory it publishes supersedes or contradicts an older one.
+Memories that you or the candidate's author wrote, and memories in projects you maintain, are marked
+no longer valid and leave recall. Anyone else's stays as it is, and the promotion receipt lists it
+under `invalidation_skipped_source_ids`.
+
 Raw memories change only through `correct`. `sibyl entity delete raw_memory:<id>` refuses and prints
 the `correct --action delete` command instead, because a graph delete can never remove a raw memory
 and a failed write would otherwise wait in the pending-write queue.
@@ -384,6 +389,12 @@ receipts.
 
 Drain pending reflection candidates through automatic review. By default this previews the drain;
 `--apply` commits safe promotions.
+
+`--archive-exceptions` archives a candidate only when you could correct it: one you captured, or
+someone else's project candidate on a project you maintain (org owners and admins maintain every
+project). Any other candidate stays pending for review, and its result lists why, for example
+`project_maintainer_required`. The scheduled dream cycle reviews each candidate as its author, so it
+archives as before.
 
 #### Synopsis
 

@@ -39,8 +39,9 @@ from sibyl_core.services.memory_policy import (
     _metadata_dict_values,
     _metadata_str,
     _metadata_str_values,
+    _promoted_entity_retirement_allowed,
     _promoted_entity_write_allowed,
-    _raw_memory_write_allowed,
+    _raw_memory_retirement_allowed,
     raw_memory_source_fingerprint,
     suppression_target_visible,
 )
@@ -759,6 +760,8 @@ async def _invalidate_promoted_entity_targets(
     entity_ids: Sequence[str],
     principal_id: str | None,
     writable_projects: Iterable[str] | None,
+    maintained_projects: Iterable[str] | None,
+    candidate_author_id: str | None,
     invalid_at: datetime,
     reason: str,
     replacement_entity_id: str,
@@ -771,10 +774,12 @@ async def _invalidate_promoted_entity_targets(
         target = await runtime.entity_manager.get(entity_id)
         if target is None:
             continue
-        if not _promoted_entity_write_allowed(
+        if not _promoted_entity_retirement_allowed(
             entity=target,
             principal_id=principal_id,
             writable_projects=writable_projects,
+            maintained_projects=maintained_projects,
+            candidate_author_id=candidate_author_id,
         ):
             continue
         metadata = _temporal_invalidation_metadata(
@@ -795,11 +800,19 @@ async def _apply_candidate_temporal_invalidations(
     organization_id: str,
     principal_id: str | None,
     writable_projects: Iterable[str] | None,
+    maintained_projects: Iterable[str] | None,
     candidate: ReflectionCandidate,
     replacement_entity_id: str,
     replacement_source_ids: Sequence[str],
     authorized_entity_ids: Sequence[str],
+    candidate_author_id: str | None = None,
 ) -> dict[str, Any]:
+    """Stamp what the candidate supersedes or contradicts as no longer valid.
+
+    Each target is retired only under the correction rule: its author may
+    retire it, and anyone else needs project maintainer on its project. A
+    promoted candidate's author counts as an author of their own targets.
+    """
     targets = _candidate_temporal_invalidation_targets(candidate)
     invalid_at = _temporal_invalidation_cutoff(candidate)
     invalidated_source_ids: list[str] = []
@@ -815,10 +828,12 @@ async def _apply_candidate_temporal_invalidations(
             (
                 candidate
                 for candidate in target_memories
-                if _raw_memory_write_allowed(
+                if _raw_memory_retirement_allowed(
                     memory=candidate,
                     principal_id=principal_id,
-                    accessible_projects=writable_projects,
+                    writable_projects=writable_projects,
+                    maintained_projects=maintained_projects,
+                    candidate_author_id=candidate_author_id,
                 )
             ),
             None,
@@ -843,6 +858,8 @@ async def _apply_candidate_temporal_invalidations(
                     entity_ids=[promoted_entity_id],
                     principal_id=principal_id,
                     writable_projects=writable_projects,
+                    maintained_projects=maintained_projects,
+                    candidate_author_id=candidate_author_id,
                     invalid_at=invalid_at,
                     reason=target.reason,
                     replacement_entity_id=replacement_entity_id,
@@ -856,6 +873,8 @@ async def _apply_candidate_temporal_invalidations(
             entity_ids=authorized_entity_ids,
             principal_id=principal_id,
             writable_projects=writable_projects,
+            maintained_projects=maintained_projects,
+            candidate_author_id=candidate_author_id,
             invalid_at=invalid_at,
             reason="supersession",
             replacement_entity_id=replacement_entity_id,

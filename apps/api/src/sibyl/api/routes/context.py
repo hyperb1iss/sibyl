@@ -711,6 +711,11 @@ async def reflect_context(
                 if request.persist
                 else set()
             ),
+            maintained_projects=(
+                await memory_auth.maintained_projects_for_memory(ctx=ctx)
+                if request.persist
+                else set()
+            ),
             memory_scope=resolved_scope.memory_scope.value,
             scope_key=resolved_scope.scope_key,
             persist=request.persist,

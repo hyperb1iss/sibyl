@@ -3026,6 +3026,7 @@ async def test_auto_review_reflection_candidate_promotes_safe_candidate() -> Non
         accessible_projects={"project_123", "read_only_source"},
         accessible_teams=set(),
         writable_projects={"project_123"},
+        maintained_projects={"project_123", "read_only_source"},
     )
     audit.assert_awaited_once_with(
         action="memory.reflect.auto_promote",
@@ -3446,6 +3447,7 @@ async def test_promote_reflection_candidate_verifies_project_target() -> None:
         accessible_projects={"project_123", "read_only_source"},
         accessible_teams=set(),
         writable_projects={"project_123"},
+        maintained_projects={"project_123", "read_only_source"},
     )
     audit.assert_awaited_once_with(
         action="memory.reflect.promote",
@@ -3547,6 +3549,7 @@ async def test_promote_memory_routes_imported_raw_memory() -> None:
         accessible_projects={"project_123", "read_only_source"},
         accessible_teams=set(),
         writable_projects={"project_123"},
+        maintained_projects={"project_123", "read_only_source"},
     )
     audit.assert_awaited_once()
     assert response.success is True

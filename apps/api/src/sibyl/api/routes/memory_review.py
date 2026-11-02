@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from dataclasses import replace
 from datetime import UTC, datetime
 
@@ -20,6 +21,8 @@ from sibyl.auth.context import AuthContext
 from sibyl.auth.dependencies import get_auth_context, get_current_organization, require_org_role
 from sibyl_core.auth import AuthOrganization, MemoryPolicyContext, OrganizationRole
 from sibyl_core.auth.memory_policy import (
+    MemoryPolicyDecision,
+    authorize_memory_correction,
     authorize_memory_read,
 )
 from sibyl_core.services.memory import (
@@ -74,6 +77,32 @@ def _should_archive_reflection_exception(
     if not exception_reasons:
         return False
     return bool(exception_reasons & archive_reasons) and exception_reasons <= archive_reasons
+
+
+def _authorize_candidate_archive(
+    candidate: RawMemory,
+    *,
+    ctx: AuthContext,
+    writable_projects: set[str],
+    maintained_projects: set[str],
+    accessible_teams: set[str] | None,
+) -> MemoryPolicyDecision:
+    """Whether this drain may archive the candidate.
+
+    Archiving takes a candidate out of review for good, so seeing it is not
+    enough: the correction rule decides, and someone else's project candidate
+    takes project maintainer. The scheduled dream cycle archives each
+    candidate as its own author, so it always clears this bar.
+    """
+    return authorize_memory_correction(
+        principal_id=ctx.user_id,
+        author_id=candidate.principal_id,
+        memory_scope=candidate.memory_scope,
+        scope_key=candidate.scope_key,
+        accessible_projects=writable_projects,
+        maintained_projects=maintained_projects,
+        accessible_teams=accessible_teams,
+    )
 
 
 async def _archive_reflection_exception_candidate(
@@ -224,6 +253,7 @@ async def _auto_review_reflection_candidate(
             accessible_projects=accessible_projects,
             accessible_teams=accessible_teams,
             writable_projects=await memory_auth.writable_projects_for_memory(ctx=ctx),
+            maintained_projects=await memory_auth.maintained_projects_for_memory(ctx=ctx),
         )
 
     audit_action = (
@@ -312,6 +342,14 @@ async def drain_reflection_review(
         source_accessible_projects = await memory_auth.list_accessible_project_graph_ids(ctx)
         readable_projects = {str(project_id) for project_id in source_accessible_projects or set()}
         accessible_teams = await memory_auth.accessible_teams_for_share(ctx=ctx)
+        archiving = request.archive_exceptions and not request.dry_run
+        writable_projects: set[str] = set()
+        maintained_projects: set[str] = set()
+        if archiving:
+            writable_projects, maintained_projects = await asyncio.gather(
+                memory_auth.writable_projects_for_memory(ctx=ctx),
+                memory_auth.maintained_projects_for_memory(ctx=ctx),
+            )
         results: list[ReflectionReviewDrainItem] = []
         for candidate in candidates:
             policy_context = MemoryPolicyContext(
@@ -327,6 +365,13 @@ async def drain_reflection_review(
                 source_surface="reflection_review_drain",
             )
             decision = authorize_memory_read(policy_context=policy_context)
+            if decision.allowed and not memory_auth.api_key_memory_scope_allowed(
+                ctx,
+                memory_scope=candidate.memory_scope.value,
+                scope_key=candidate.scope_key,
+            ):
+                # Reads on every other surface hold a key to its memory spaces.
+                decision = replace(decision, allowed=False, reason="api_key_memory_space_denied")
             if not decision.allowed:
                 results.append(
                     ReflectionReviewDrainItem(
@@ -361,32 +406,41 @@ async def drain_reflection_review(
                     accessible_teams=accessible_teams,
                 )
                 archived = False
+                archive_denial: str | None = None
                 review_state = response.review_state
-                if (
-                    request.archive_exceptions
-                    and not request.dry_run
-                    and _should_archive_reflection_exception(
-                        response,
-                        archive_reasons=archive_reasons,
-                    )
+                if archiving and _should_archive_reflection_exception(
+                    response,
+                    archive_reasons=archive_reasons,
                 ):
-                    archived_memory = await _archive_reflection_exception_candidate(
-                        response=response,
-                        org=org,
+                    archive_decision = _authorize_candidate_archive(
+                        candidate,
                         ctx=ctx,
-                        request=http_request,
-                        project_id=request.project,
+                        writable_projects=writable_projects,
+                        maintained_projects=maintained_projects,
+                        accessible_teams=accessible_teams,
                     )
-                    archived = archived_memory is not None
-                    if archived_memory is not None:
-                        review_state = archived_memory.review_state
-                results.append(
-                    serialization.drain_item_from_autonomy(
-                        response,
-                        archived=archived,
-                        review_state=review_state,
-                    )
+                    if archive_decision.allowed:
+                        archived_memory = await _archive_reflection_exception_candidate(
+                            response=response,
+                            org=org,
+                            ctx=ctx,
+                            request=http_request,
+                            project_id=request.project,
+                        )
+                        archived = archived_memory is not None
+                        if archived_memory is not None:
+                            review_state = archived_memory.review_state
+                    else:
+                        archive_denial = archive_decision.reason
+                item = serialization.drain_item_from_autonomy(
+                    response,
+                    archived=archived,
+                    review_state=review_state,
                 )
+                if archive_denial is not None:
+                    # Left pending for someone who may retire it; say why.
+                    item.policy_reasons.append(archive_denial)
+                results.append(item)
             except HTTPException as exc:
                 results.append(
                     serialization.drain_error_item(

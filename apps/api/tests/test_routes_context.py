@@ -1130,8 +1130,8 @@ class TestReflectRoute:
         """These tests reflect into a project that opted into project scope.
 
         The resolver itself is covered in test_project_default_scope; here it
-        stands in as "shared project, contributor writer" so the assertions
-        stay about the route.
+        stands in as "shared project, contributor writer, no maintainer
+        grants" so the assertions stay about the route.
         """
         from sibyl_core.auth.memory_policy import DefaultWriteScope
         from sibyl_core.models.memory_scope import MemoryScope
@@ -1141,7 +1141,13 @@ class TestReflectRoute:
                 return DefaultWriteScope(MemoryScope.PROJECT, project_id, "default_scope_project")
             return DefaultWriteScope(MemoryScope.PRIVATE, None, "default_scope_no_project")
 
-        with patch("sibyl.api.routes.memory_auth.resolve_capture_default_scope", shared):
+        with (
+            patch("sibyl.api.routes.memory_auth.resolve_capture_default_scope", shared),
+            patch(
+                "sibyl.api.routes.memory_auth.maintained_projects_for_memory",
+                AsyncMock(return_value=set()),
+            ),
+        ):
             yield
 
     @pytest.mark.asyncio

@@ -9,6 +9,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from sibyl.jobs.reflection import _candidate_target_scope_key, run_reflection_dream_cycle
+from sibyl_core.auth import ProjectRole
 from sibyl_core.models.reflection import ReflectionPack
 from sibyl_core.services.memory import (
     ReflectionPromotionPreview,
@@ -297,6 +298,62 @@ async def test_reflection_dream_cycle_dry_run_writes_no_memory() -> None:
 
     assert audit.await_args.kwargs["action"] == "memory.reflect.dream_review"
     assert audit.await_args.kwargs["derived_ids"] == []
+
+
+@pytest.mark.asyncio
+async def test_dream_promotion_carries_the_authors_maintainer_grants() -> None:
+    """Retiring someone else's capture takes maintainer, resolved for the candidate's author."""
+    candidate = _raw_memory(
+        id="candidate-1",
+        capture_surface="reflection_candidate",
+        metadata={"suggested_memory_scope": "private", "confidence": 0.94},
+    )
+    grants = {
+        ProjectRole.VIEWER: {"project-a", "project-b"},
+        ProjectRole.CONTRIBUTOR: {"project-a", "project-b"},
+        ProjectRole.MAINTAINER: {"project-a"},
+    }
+    lookup = AsyncMock(
+        side_effect=lambda *, user_id, org_id, required_role=ProjectRole.VIEWER: set(
+            grants[required_role]
+        )
+    )
+    with (
+        patch(
+            "sibyl_core.services.automatic_reflection.automatically_review_reflection",
+            AsyncMock(
+                return_value=SimpleNamespace(
+                    candidate=candidate, executions=("critic-fixture",), candidate_ids=()
+                )
+            ),
+        ),
+        patch(
+            "sibyl.jobs.reflection.list_reflection_dream_source_memories",
+            AsyncMock(return_value=[]),
+        ),
+        patch(
+            "sibyl.jobs.reflection.list_reflection_candidate_reviews",
+            AsyncMock(return_value=[candidate]),
+        ),
+        patch("sibyl.jobs.reflection.resolve_accessible_project_graph_ids", lookup),
+        patch(
+            "sibyl.jobs.reflection.preview_reflection_candidate_promotion",
+            AsyncMock(return_value=_preview()),
+        ),
+        patch(
+            "sibyl.jobs.reflection.promote_reflection_candidate_review",
+            AsyncMock(return_value=_promotion()),
+        ) as promote,
+        patch("sibyl.jobs.reflection.log_memory_audit_event", AsyncMock()),
+    ):
+        await run_reflection_dream_cycle({}, ORG_ID, source_limit=0, candidate_limit=1)
+
+    promote.assert_awaited_once()
+    kwargs = promote.await_args.kwargs
+    assert kwargs["principal_id"] == USER_ID
+    assert kwargs["writable_projects"] == {"project-a", "project-b"}
+    assert kwargs["maintained_projects"] == {"project-a"}
+    lookup.assert_any_await(user_id=USER_ID, org_id=ORG_ID, required_role=ProjectRole.MAINTAINER)
 
 
 @pytest.mark.asyncio

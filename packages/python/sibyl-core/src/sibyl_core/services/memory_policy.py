@@ -12,6 +12,7 @@ import structlog
 from sibyl_core.auth.memory_policy import (
     MemoryPolicyAction,
     MemoryPolicyDecision,
+    authorize_memory_correction,
     authorize_memory_read,
     authorize_memory_reflect,
     authorize_memory_share,
@@ -431,21 +432,63 @@ def _with_authorized_supersedes(
     return sanitized
 
 
-def _raw_memory_write_allowed(
+def _retirement_allowed(
+    *,
+    author_id: str | None,
+    memory_scope: MemoryScope | str | None,
+    scope_key: str | None,
+    principal_id: str | None,
+    writable_projects: Iterable[str] | None,
+    maintained_projects: Iterable[str] | None,
+    candidate_author_id: str | None,
+) -> bool:
+    if authorize_memory_correction(
+        principal_id=principal_id,
+        author_id=author_id,
+        memory_scope=memory_scope,
+        scope_key=scope_key,
+        accessible_projects=writable_projects,
+        maintained_projects=maintained_projects,
+    ).allowed:
+        return True
+    # A promoted candidate keeps its author's authority over their own
+    # memories, inside the projects this promotion may write.
+    return (
+        candidate_author_id is not None
+        and candidate_author_id == author_id
+        and authorize_memory_correction(
+            principal_id=candidate_author_id,
+            author_id=author_id,
+            memory_scope=memory_scope,
+            scope_key=scope_key,
+            accessible_projects=writable_projects,
+        ).allowed
+    )
+
+
+def _raw_memory_retirement_allowed(
     *,
     memory: RawMemory,
     principal_id: str | None,
-    accessible_projects: Iterable[str] | None,
+    writable_projects: Iterable[str] | None,
+    maintained_projects: Iterable[str] | None,
+    candidate_author_id: str | None = None,
 ) -> bool:
-    if memory.memory_scope is MemoryScope.PRIVATE and memory.principal_id != principal_id:
-        return False
-    decision = authorize_memory_write(
-        principal_id=principal_id,
+    """Whether a promotion may stamp this capture invalid.
+
+    Recall stops serving an invalidated capture, the same effect as a
+    ``mark_stale`` correction, so the correction rule decides it, for the
+    promoter or for the author of the candidate being promoted.
+    """
+    return _retirement_allowed(
+        author_id=memory.principal_id,
         memory_scope=memory.memory_scope,
         scope_key=memory.scope_key,
-        accessible_projects=accessible_projects,
+        principal_id=principal_id,
+        writable_projects=writable_projects,
+        maintained_projects=maintained_projects,
+        candidate_author_id=candidate_author_id,
     )
-    return decision.allowed
 
 
 def _promoted_entity_owner_id(entity: Any, metadata: Mapping[str, object]) -> str | None:
@@ -459,27 +502,32 @@ def _promoted_entity_owner_id(entity: Any, metadata: Mapping[str, object]) -> st
     return None
 
 
-def _promoted_entity_write_allowed(
-    *,
-    entity: Any,
-    principal_id: str | None,
-    writable_projects: Iterable[str] | None,
-) -> bool:
+def _promoted_entity_scope(entity: Any) -> tuple[Mapping[str, object], MemoryScope, str | None]:
     raw_metadata = getattr(entity, "metadata", {})
     metadata = raw_metadata if isinstance(raw_metadata, Mapping) else {}
     target_scope = _resolve_memory_scope(
         _metadata_str(metadata, "memory_scope"),
         _metadata_str(metadata, "project_id"),
     )
-    if target_scope is MemoryScope.PRIVATE:
-        owner_id = _promoted_entity_owner_id(entity, metadata)
-        if not owner_id or owner_id != principal_id:
-            return False
     target_scope_key = _resolve_scope_key(
         target_scope,
         _metadata_str(metadata, "scope_key"),
         _metadata_str(metadata, "project_id"),
     )
+    return metadata, target_scope, target_scope_key
+
+
+def _promoted_entity_write_allowed(
+    *,
+    entity: Any,
+    principal_id: str | None,
+    writable_projects: Iterable[str] | None,
+) -> bool:
+    metadata, target_scope, target_scope_key = _promoted_entity_scope(entity)
+    if target_scope is MemoryScope.PRIVATE:
+        owner_id = _promoted_entity_owner_id(entity, metadata)
+        if not owner_id or owner_id != principal_id:
+            return False
     decision = authorize_memory_write(
         principal_id=principal_id,
         memory_scope=target_scope,
@@ -487,6 +535,31 @@ def _promoted_entity_write_allowed(
         accessible_projects=writable_projects,
     )
     return decision.allowed
+
+
+def _promoted_entity_retirement_allowed(
+    *,
+    entity: Any,
+    principal_id: str | None,
+    writable_projects: Iterable[str] | None,
+    maintained_projects: Iterable[str] | None,
+    candidate_author_id: str | None = None,
+) -> bool:
+    """Whether a promotion may supersede or invalidate this graph memory.
+
+    The graph row answers to whoever promoted it, under the same correction
+    rule as the capture it came from.
+    """
+    metadata, target_scope, target_scope_key = _promoted_entity_scope(entity)
+    return _retirement_allowed(
+        author_id=_promoted_entity_owner_id(entity, metadata),
+        memory_scope=target_scope,
+        scope_key=target_scope_key,
+        principal_id=principal_id,
+        writable_projects=writable_projects,
+        maintained_projects=maintained_projects,
+        candidate_author_id=candidate_author_id,
+    )
 
 
 def suppression_target_visible(
@@ -562,7 +635,9 @@ async def _authorized_superseded_entity_ids(
     runtime: Any,
     principal_id: str | None,
     writable_projects: Iterable[str] | None,
+    maintained_projects: Iterable[str] | None,
     candidate: ReflectionCandidate,
+    candidate_author_id: str | None = None,
 ) -> list[str]:
     authorized_ids: list[str] = []
     for entity_id in _superseded_entity_ids(candidate.metadata):
@@ -575,10 +650,12 @@ async def _authorized_superseded_entity_ids(
             continue
         if target_entity is None:
             continue
-        if _promoted_entity_write_allowed(
+        if _promoted_entity_retirement_allowed(
             entity=target_entity,
             principal_id=principal_id,
             writable_projects=writable_projects,
+            maintained_projects=maintained_projects,
+            candidate_author_id=candidate_author_id,
         ):
             authorized_ids.append(entity_id)
     return authorized_ids

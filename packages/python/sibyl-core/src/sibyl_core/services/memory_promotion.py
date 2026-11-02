@@ -9,7 +9,6 @@ from datetime import UTC, datetime
 from typing import Any
 
 from sibyl_core.auth.memory_policy import (
-    authorize_memory_read,
     memory_scope_policy_key,
     stamp_memory_scope_metadata,
 )
@@ -27,6 +26,7 @@ from sibyl_core.services.memory_identity import (
 )
 from sibyl_core.services.memory_lifecycle import _relationship
 from sibyl_core.services.memory_policy import (
+    _authorize_share_source_read,
     _candidate_source_ids,
     _metadata_float,
     _metadata_str,
@@ -95,15 +95,26 @@ def _source_scope_denial(
     accessible_projects: Iterable[str] | None,
     accessible_teams: Iterable[str] | None = None,
     accessible_delegations: Iterable[str] | None = None,
+    allowed_memory_scope_keys: Iterable[str] | None = None,
 ) -> ReflectionPromotionResult | None:
+    """Refuse unless the caller may read every source the promotion publishes.
+
+    An API key's memory spaces bound the sources as well as the target, so a
+    key granted only private memory cannot promote from a team space its
+    owner belongs to. This runs while planning, before any reservation is
+    written onto the candidate.
+    """
+    granted = (
+        frozenset(allowed_memory_scope_keys) if allowed_memory_scope_keys is not None else None
+    )
     for memory in memories:
-        read_decision = authorize_memory_read(
+        read_decision = _authorize_share_source_read(
+            memory=memory,
             principal_id=principal_id,
-            memory_scope=memory.memory_scope,
-            scope_key=memory.scope_key,
             accessible_projects=accessible_projects,
             accessible_teams=accessible_teams,
             accessible_delegations=accessible_delegations,
+            allowed_memory_scope_keys=granted,
         )
         if not read_decision.allowed:
             return _promotion_denied(
