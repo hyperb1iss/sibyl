@@ -20,6 +20,7 @@ from sibyl_core.embeddings.provenance import vector_space_predicate
 from sibyl_core.embeddings.providers import EmbeddingMetadata, EmbeddingProvider
 from sibyl_core.memory_pipeline.retrieval import CandidateSourceFailure, CandidateSourceResult
 from sibyl_core.models.context import ContextFacet
+from sibyl_core.models.entities import EntityType
 from sibyl_core.retrieval._search_candidates import (
     _candidate_from_edge_record,
     _candidate_from_episode_record,
@@ -987,9 +988,77 @@ def _node_filter_clause(search_filter: SearchFilter) -> tuple[list[str], dict[st
         clauses.append("labels CONTAINS $node_label")
         params["node_label"] = search_filter.node_labels[0]
     if search_filter.project_ids:
-        clauses.append("(project_id IN $project_ids OR attributes.project_id IN $project_ids)")
-        params["project_ids"] = list(search_filter.project_ids)
+        project_clause, project_params = _node_project_clause(search_filter)
+        clauses.append(project_clause)
+        params.update(project_params)
     return clauses, params
+
+
+# Plain comparisons only. On SurrealDB 3.2.4, `!field`, `??` and `?:` are not
+# pushed into the scan and decode every row they test: on 5,000 rows they cost
+# 2 to 27 times the same test written with `=` and `IN`, and turned a 12 ms
+# expansion hydration into 336 ms. Absent and empty are spelled out instead,
+# since the read rule treats NONE, NULL and '' alike.
+_ABSENT = "[NONE, NULL]"
+_BLANK = "[NONE, NULL, '']"
+_KEYED_MEMORY_SCOPES = (
+    MemoryScope.PROJECT.value,
+    MemoryScope.TEAM.value,
+    MemoryScope.DELEGATED.value,
+)
+
+
+def _row_scope_is(test: str) -> str:
+    """The row's scope passes `test`: the bag's stamp, else the column."""
+    return (
+        f"(attributes.memory_scope {test}"
+        f" OR (attributes.memory_scope IN {_ABSENT} AND memory_scope {test}))"
+    )
+
+
+def _node_project_clause(search_filter: SearchFilter) -> tuple[str, dict[str, Any]]:
+    """Narrow a node lane to the plan's projects without losing project-less rows.
+
+    A row addressed to a project, by its column, its bag, or a project row's own
+    id, is read when the plan authorizes that project. A project-less row has no
+    project to narrow by, so it is read when the read rule could admit it: a
+    legacy unscoped row, the reader's own private row, or a row keyed to one of
+    the reader's projects, teams or delegations. Narrowing by project alone hid
+    all of them from every reader holding a project, while a reader holding none
+    got no narrowing and saw them.
+
+    Everything else stays out of the pool, another member's private row above
+    all, so it can neither take a lane slot from a readable row nor depend on
+    the Python gate alone to stay hidden. The gate still decides; this clause
+    only has to never drop a row it would admit.
+    """
+    params: dict[str, Any] = {"project_ids": list(search_filter.project_ids)}
+    readable = [f"(attributes.memory_scope IN {_ABSENT} AND memory_scope IN {_ABSENT})"]
+    if search_filter.projectless_owner:
+        # A private row's owner is principal_id, or scope_key when that is
+        # empty, the same fallback memory_metadata_read_allowed takes.
+        private = _row_scope_is(f"= '{MemoryScope.PRIVATE.value}'")
+        readable.append(
+            "((attributes.principal_id = $projectless_owner"
+            f" OR (attributes.principal_id IN {_BLANK}"
+            f" AND attributes.scope_key = $projectless_owner)) AND {private})"
+        )
+        params["projectless_owner"] = search_filter.projectless_owner
+    if search_filter.projectless_scope_keys:
+        keyed = _row_scope_is("IN $keyed_memory_scopes")
+        readable.append(f"(attributes.scope_key IN $projectless_scope_keys AND {keyed})")
+        params["keyed_memory_scopes"] = list(_KEYED_MEMORY_SCOPES)
+        params["projectless_scope_keys"] = list(search_filter.projectless_scope_keys)
+    project_row = EntityType.PROJECT.value
+    clause = (
+        "(project_id IN $project_ids"
+        " OR attributes.project_id IN $project_ids"
+        f" OR (uuid IN $project_ids AND entity_type = '{project_row}')"
+        f" OR (project_id IN {_BLANK} AND attributes.project_id IN {_BLANK}"
+        f" AND entity_type != '{project_row}'"
+        f" AND ({' OR '.join(readable)})))"
+    )
+    return clause, params
 
 
 def _edge_filter_clause(

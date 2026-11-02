@@ -117,6 +117,12 @@ class SearchFilter:
     node_types: tuple[str, ...] = ()
     node_labels: tuple[str, ...] = ()
     project_ids: tuple[str, ...] = ()
+    # A node lane narrowed to project_ids still reads the project-less rows the
+    # read rule could admit, and these name them: the reader whose private rows
+    # those are, when the plan grants private memory, and the project, team and
+    # delegation keys the reader holds.
+    projectless_owner: str | None = None
+    projectless_scope_keys: tuple[str, ...] = ()
     edge_uuids: tuple[str, ...] = ()
     edge_types: tuple[str, ...] = ()
     knn_type_overfetch: int = 0
@@ -431,6 +437,23 @@ def _search_filter_for_plan(
         node_types=_node_types_for_requested_types(requested_types),
         knn_type_overfetch=plan.knn_type_overfetch,
         project_ids=_authorized_project_ids(plan),
+        projectless_owner=next(
+            (
+                scope.principal_id
+                for scope in plan.scopes
+                if scope.memory_scope is MemoryScope.PRIVATE
+            ),
+            None,
+        ),
+        projectless_scope_keys=tuple(
+            sorted(
+                {
+                    *(plan.accessible_projects or ()),
+                    *plan.accessible_teams,
+                    *plan.accessible_delegations,
+                }
+            )
+        ),
     )
 
 
