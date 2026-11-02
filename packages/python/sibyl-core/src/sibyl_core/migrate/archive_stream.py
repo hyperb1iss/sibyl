@@ -443,6 +443,8 @@ class GraphArchiveCapture:
         self._mentions = SpooledCollection(self._spool, (True, False))
         self._episode_uuids: dict[str, str] = {}
         self.created_at = ""
+        # The URL scheme when the graph was read in one statement, not paged.
+        self.unpaged_scheme: str | None = None
         self._standalone_flags: set[tuple[str, str]] = set()
         self._standalone_report: list[dict[str, str]] = []
 

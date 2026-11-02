@@ -340,3 +340,26 @@ async def test_graph_capture_spool_leaves_no_file_behind(
     capture.write(tmp_path / "graph.json", seal_lineage([capture.lineage], capture.quarantined))
     capture.close()
     assert [path.name for path in tmp_path.iterdir()] == ["graph.json"]
+
+
+@pytest.mark.parametrize(
+    ("url", "scheme"), [("memory://", "memory"), ("http://127.0.0.1:9/rpc", "http")]
+)
+async def test_snapshot_reads_off_websocket_have_no_transaction(url, scheme) -> None:
+    client = DedicatedSurrealClient(url=url, namespace="snapshot", database="snapshot")
+    try:
+        async with client.read_snapshot() as execute:
+            assert execute is None
+        assert client.url_scheme == scheme
+    finally:
+        await client.close()
+
+
+async def test_graph_capture_names_the_scheme_it_read_unpaged(
+    runtime, content_store, monkeypatch, tmp_path
+) -> None:
+    del content_store
+    monkeypatch.setattr("sibyl_core.tools.admin.get_graph_runtime", AsyncMock(return_value=runtime))
+    capture = await capture_graph_backup(organization_id=runtime.client.group_id, workdir=tmp_path)
+    capture.close()
+    assert capture.unpaged_scheme == "memory"

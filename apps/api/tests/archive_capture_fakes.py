@@ -26,6 +26,7 @@ class PayloadCapture:
         self.payload = payload
         self.lineage = LineageSection(kind=kind, associations=[])
         self.quarantined: list[dict[str, str]] = []
+        self.unpaged_scheme: str | None = None
         self.entity_count = entity_count
         self.relationship_count = relationship_count
         self.closed = False

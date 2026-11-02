@@ -1839,6 +1839,7 @@ async def test_live_graph_backup_pages_one_read_transaction(monkeypatch, tmp_pat
         payload = json.loads(json.dumps(asdict(result.backup_data), indent=2, default=str))
         expected, _, expected_report = seal_archive_lineage(payload, None)
         capture = await capture_graph_backup(organization_id=client.group_id, workdir=tmp_path)
+        assert capture.unpaged_scheme is None
         try:
             report = seal_lineage([capture.lineage], capture.quarantined)
             capture.write(tmp_path / "graph.json", report)

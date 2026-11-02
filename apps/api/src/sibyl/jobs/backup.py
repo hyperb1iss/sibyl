@@ -389,6 +389,19 @@ async def _build_and_publish(  # noqa: PLR0915
                 entity_count = graph_capture.entity_count
                 relationship_count = graph_capture.relationship_count
 
+            # Off WebSocket there is no transaction to page inside, so a capture
+            # reads whole namespaces in one statement, the memory spike paging
+            # exists to avoid. Say so once per backup.
+            unpaged = sorted({c.unpaged_scheme for c in captures if c.unpaged_scheme})
+            if unpaged:
+                log.warning(
+                    "backup_snapshot_unpaged",
+                    backup_id=backup_id,
+                    organization_id=organization_id,
+                    url_scheme=", ".join(unpaged),
+                    reason="no client-side transaction off WebSocket; namespaces read unpaged",
+                )
+
             # The graph's own seal ran first, inside its capture; the joint seal
             # carries its quarantines forward and checks each kind against the other.
             sealed = [

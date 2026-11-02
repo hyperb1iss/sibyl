@@ -678,6 +678,11 @@ class DedicatedSurrealClient:
         return is_websocket_surreal_url(self._url)
 
     @property
+    def url_scheme(self) -> str:
+        """The scheme of this client's URL, the one part of it safe to log."""
+        return surreal_url_scheme(self._url) or "unknown"
+
+    @property
     def idle_seconds(self) -> float:
         """Seconds since a query last started on this client."""
         return time.monotonic() - self._last_used_at

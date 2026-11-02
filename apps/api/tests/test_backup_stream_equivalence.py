@@ -8,6 +8,7 @@ from dataclasses import asdict
 from uuid import uuid4
 
 import pytest
+from structlog.testing import capture_logs
 
 from sibyl.jobs import backup
 from sibyl.persistence import content_archive
@@ -115,7 +116,8 @@ async def test_streamed_backup_writes_the_in_memory_archive(monkeypatch, tmp_pat
         monkeypatch.setattr(archive_stream, "ARCHIVE_PAGE_SIZE", 2)
     try:
         await _seed(stores, org)
-        result = await backup.run_backup({}, org, backup_id="stream_equivalence")
+        with capture_logs() as entries:
+            result = await backup.run_backup({}, org, backup_id="stream_equivalence")
         assert result["success"], result
         with tarfile.open(tmp_path / "sibyl_stream_equivalence.tar.gz", "r:gz") as tar:
             archive = {
@@ -135,3 +137,11 @@ async def test_streamed_backup_writes_the_in_memory_archive(monkeypatch, tmp_pat
     assert content["row_counts"]["raw_captures"] == 5
     assert content["row_counts"]["eval_consolidations"] == 3
     assert not list(tmp_path.rglob("*.spool"))
+    # The embedded URL has no transaction to page inside, and says so once.
+    unpaged = [entry for entry in entries if entry["event"] == "backup_snapshot_unpaged"]
+    if read_mode == "paged":
+        assert unpaged == []
+    else:
+        assert len(unpaged) == 1
+        assert unpaged[0]["url_scheme"] == "memory"
+        assert unpaged[0]["log_level"] == "warning"

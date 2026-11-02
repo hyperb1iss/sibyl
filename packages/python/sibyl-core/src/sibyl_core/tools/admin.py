@@ -525,6 +525,7 @@ async def capture_graph_backup(*, organization_id: str, workdir: "Path") -> "Gra
     try:
         async with client.read_snapshot() as execute:
             if execute is None:
+                capture.unpaged_scheme = client.url_scheme
                 capture.add_snapshot(
                     await read_source_archive_snapshot(
                         client.execute_query,

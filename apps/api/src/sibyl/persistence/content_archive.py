@@ -688,6 +688,8 @@ class ContentArchiveCapture:
         self._executions: list[dict[str, object]] = []
         self._receipts: dict[str, object] = {}
         self.created_at = ""
+        # The URL scheme when content was read in one statement per table, not paged.
+        self.unpaged_scheme: str | None = None
 
     @property
     def lineage(self) -> LineageSection:
@@ -767,6 +769,8 @@ async def capture_content_archive(*, organization_id: str, workdir: Path) -> Con
     try:
         async with client.read_snapshot() as execute:
             reader = PageReader(execute) if execute is not None else None
+            if reader is None:
+                capture.unpaged_scheme = client.url_scheme
             for spec in _CONTENT_ARCHIVE_TABLE_SPECS:
                 query = _content_archive_export_query(spec, organization_id)
                 if query is None or spec.name in {"raw_captures", "memory_validation_executions"}:
