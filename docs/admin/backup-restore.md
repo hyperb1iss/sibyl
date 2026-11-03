@@ -493,12 +493,13 @@ raw database dumps or archives from other memory systems.
 The content and graph stages each plan before they write, then write in bounded transactions, so no
 request or transaction grows with the organization. An archive the destination refuses from its
 current state (a foreign record at a source's key, a row whose identity another organization holds,
-a row that conflicts with retained operation, validation or dream history, a relationship or mention
-whose endpoint is missing) fails before anything is written. Raw captures land before the auxiliary
-rows that refer to them, and the validation and dream checks that read those captures run as their
-rows are written. The graph stage writes entities with their source history, then episodes,
-relationships and mentions. A clean restore deletes only the rows it planned to delete, so a row
-written in the destination after planning is kept.
+a row that conflicts with retained operation, validation or dream history, a row that would
+duplicate a destination row on any unique index, a relationship or mention whose endpoint is
+missing) fails before anything is written. Raw captures land before the auxiliary rows that refer to
+them, and the validation and dream checks that read those captures run as their rows are written.
+The graph stage writes entities with their source history, then episodes, relationships and
+mentions. A clean restore deletes only the rows it planned to delete, so a row written in the
+destination after planning is kept.
 
 A failure partway leaves whole sources behind, never a row without its history. After a lost
 connection or a concurrent change, running the same import again finishes the restore: sources

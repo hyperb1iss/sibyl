@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Sequence
+import re
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
@@ -351,6 +352,8 @@ class CleanupPage:
 
     records: list[Any]
     digest: str
+    # The same rows as record-key strings, for the uniqueness preflight.
+    keys: list[str] = field(default_factory=list)
 
 
 async def plan_cleanup(
@@ -378,7 +381,8 @@ async def plan_cleanup(
             seek = " AND id > $restore_cursor"
             bound["restore_cursor"] = cursor
         result = await execute_query(
-            f"SELECT id, {organization_field} AS organization, uuid FROM {table} "
+            f"SELECT id, type::string(id) AS key, {organization_field} AS organization, uuid "
+            f"FROM {table} "
             f"WITH NOINDEX WHERE {scope}{seek} ORDER BY id LIMIT $restore_page_size;",
             **bound,
         )
@@ -386,14 +390,19 @@ async def plan_cleanup(
         if not rows:
             return pages
         cursor = rows[-1]["id"]
-        doomed = [row["id"] for row in rows if not keep((row.get("organization"), row.get("uuid")))]
+        doomed_rows = [row for row in rows if not keep((row.get("organization"), row.get("uuid")))]
+        doomed = [row["id"] for row in doomed_rows]
         if doomed:
             digest = await execute_query(
                 f"RETURN crypto::sha256(type::string({_RECORDS_PROJECTION}));", records=doomed
             )
             if not isinstance(digest, str):
                 raise ValueError("archive cleanup read returned an invalid shape")
-            pages.append(CleanupPage(records=doomed, digest=digest))
+            pages.append(
+                CleanupPage(
+                    records=doomed, digest=digest, keys=[str(row["key"]) for row in doomed_rows]
+                )
+            )
         if len(rows) < ARCHIVE_RESTORE_BATCH_SIZE:
             return pages
 
@@ -440,6 +449,107 @@ def interrupted_restore(error: BaseException) -> str:
         "restore refused partway; the whole units already written are kept, and the "
         f"import is refused the same way until the reported conflict is resolved: {error}"
     )
+
+
+@dataclass(frozen=True)
+class UniqueWrite:
+    """A row a restore writes, and how it relates to the destination row it replaces.
+
+    ``target`` is the record key the write lands on. ``identity`` names the
+    fields the write replaces a destination row by: a delete-and-create by
+    uuid, an upsert by uuid, an update found by a natural key. A destination
+    row at ``target`` or sharing ``identity`` is the row being replaced, not
+    a collision.
+    """
+
+    table: str
+    record: Mapping[str, Any]
+    target: str | None = None
+    identity: tuple[str, ...] = ()
+
+
+_INDEX_FIELDS = re.compile(r"\b(?:FIELDS|COLUMNS)\s+(.+?)\s+UNIQUE\b")
+
+
+async def unique_indexes(execute_query: SurrealExecute, table: str) -> list[tuple[str, list[str]]]:
+    """Every UNIQUE index the destination enforces on ``table``, read from the live schema."""
+    info = await execute_query(f"INFO FOR TABLE {table};")
+    indexes = info.get("indexes") if isinstance(info, dict) else None
+    if not isinstance(indexes, dict):
+        return []
+    found = []
+    for name, definition in sorted(indexes.items()):
+        match = _INDEX_FIELDS.search(str(definition))
+        if match:
+            found.append((str(name), [part.strip() for part in match.group(1).split(",")]))
+    return found
+
+
+def _field_value(record: Mapping[str, Any], path: str) -> Any:
+    value: Any = record
+    for part in path.split("."):
+        if not isinstance(value, Mapping):
+            return None
+        value = value.get(part)
+    return value
+
+
+async def check_unique_writes(
+    execute_query: SurrealExecute, writes: Sequence[UniqueWrite], *, vacated: set[str]
+) -> None:
+    """Refuse a restore whose writes would collide on any UNIQUE index of the destination.
+
+    The indexes come from the destination itself, so a restore checks exactly
+    what the database will enforce, including indexes added after this code.
+    Each key is a point lookup a bounded batch at a time; a destination row
+    the restore deletes first or replaces under the same identity is not a
+    collision.
+    """
+    by_table: dict[str, list[UniqueWrite]] = {}
+    for write in writes:
+        by_table.setdefault(write.table, []).append(write)
+    for table, table_writes in by_table.items():
+        for name, fields in await unique_indexes(execute_query, table):
+            keyed = []
+            for write in table_writes:
+                values = [_field_value(write.record, column) for column in fields]
+                # A missing value is never indexed as a duplicate key.
+                if all(value is not None for value in values):
+                    keyed.append((write, values))
+            identity_fields = sorted({column for write, _ in keyed for column in write.identity})
+            projection = ", ".join(["type::string(id) AS key", *identity_fields])
+            # Each probe carries its own values: the embedded engine does not
+            # bind query parameters inside a closure.
+            where = " AND ".join(f"{field} = $probe.v{index}" for index, field in enumerate(fields))
+            for batch in restore_batches(keyed):
+                found = await execute_query(
+                    f"RETURN $probes.map(|$probe| (SELECT {projection} FROM {table} "
+                    f"WHERE {where} LIMIT 4));",
+                    probes=[
+                        native_archive_parameters(
+                            {f"v{index}": value for index, value in enumerate(values)}
+                        )
+                        for _, values in batch
+                    ],
+                )
+                if not isinstance(found, list) or len(found) != len(batch):
+                    raise ValueError("archive uniqueness read returned an invalid shape")
+                for (write, values), rows in zip(batch, found, strict=True):
+                    for row in rows if isinstance(rows, list) else []:
+                        if not isinstance(row, dict):
+                            continue
+                        if row.get("key") in vacated or row.get("key") == write.target:
+                            continue
+                        if write.identity and all(
+                            row.get(column) == _field_value(write.record, column)
+                            for column in write.identity
+                        ):
+                            continue
+                        key = ", ".join(f"{f}={v!r}" for f, v in zip(fields, values, strict=True))
+                        raise ValueError(
+                            f"archive {table} row collides with destination row {row.get('key')} "
+                            f"on unique index {name} ({key})"
+                        )
 
 
 def _unit_state_projection(table: str, org_field: str) -> str:
@@ -496,6 +606,10 @@ class SourceRestorePlan:
     # holds for them now).
     present: set[tuple[str, str]]
     absent: set[tuple[str, str]] = field(default_factory=set)
+    # Every row this restore writes, for the uniqueness preflight, and the
+    # record keys of the destination rows it deletes before writing.
+    unique_writes: list[UniqueWrite] = field(default_factory=list)
+    vacated: set[str] = field(default_factory=set)
 
 
 async def plan_source_restore(
@@ -562,7 +676,10 @@ async def plan_source_restore(
                         units: $fenced,
                         digest: crypto::sha256(type::string($fenced)),
                         occupants: $keys.map(|$key|
-                            (SELECT {org_field} AS organization, uuid FROM type::record($key))[0])
+                            (SELECT {org_field} AS organization, uuid FROM type::record($key))[0]),
+                        state_keys: $units.map(|$unit| type::string(type::record(string::concat(
+                            'source_states:', crypto::sha256(type::string(
+                                [$unit.organization, $unit.kind, $unit.source]))))))
                     }};
                 }};""",
                 units=units,
@@ -572,9 +689,12 @@ async def plan_source_restore(
         found = read[0].get("units") if len(read) == 1 else None
         occupants = read[0].get("occupants") if len(read) == 1 else None
         digest = read[0].get("digest") if len(read) == 1 else None
+        state_keys = read[0].get("state_keys") if len(read) == 1 else None
         if (
             not isinstance(found, list)
             or len(found) != len(batch_keys)
+            or not isinstance(state_keys, list)
+            or len(state_keys) != len(batch_keys)
             or not isinstance(occupants, list)
             or len(occupants) != len(record_keys)
             or not isinstance(digest, str)
@@ -582,7 +702,7 @@ async def plan_source_restore(
             raise ValueError("source archive restore read returned an invalid shape")
         occupant_at = dict(zip(record_keys.values(), occupants, strict=True))
         batch = _UnitBatch(units=units, digest=digest)
-        for key, destination in zip(batch_keys, found, strict=True):
+        for key, destination, state_key in zip(batch_keys, found, state_keys, strict=True):
             current = destination if isinstance(destination, dict) else {}
             previous_row = current.get("row")
             decision = _decide_unit(
@@ -619,6 +739,29 @@ async def plan_source_restore(
                 plan.present.add(key)
             else:
                 plan.absent.add(key)
+            if decision.write is not None:
+                plan.unique_writes.append(
+                    UniqueWrite(table, decision.write["record"], target=decision.write["key"])
+                )
+            if decision.write is not None or decision.ledger is not None:
+                # Writing a source row upserts its ledger state through an event.
+                plan.unique_writes.append(
+                    UniqueWrite(
+                        "source_states",
+                        {"organization_id": key[0], "source_kind": kind.value, "source_id": key[1]},
+                        target=str(state_key),
+                    )
+                )
+            if decision.association is not None:
+                plan.unique_writes.append(
+                    UniqueWrite(
+                        "memory_derivations",
+                        decision.association,
+                        identity=("organization_id", "target_kind", "target_id"),
+                    )
+                )
+            if decision.delete is not None:
+                plan.vacated.add(decision.delete)
         if batch.changes_anything():
             plan.batches.append(batch)
 
@@ -641,6 +784,8 @@ async def plan_source_restore(
             keep=incoming_states.__contains__,
             **({} if global_scope else {"organizations": organizations}),
         )
+    for page in plan.cleanup:
+        plan.vacated.update(page.keys)
     return plan
 
 
@@ -711,5 +856,6 @@ async def restore_source_integrity(
         global_scope=global_scope,
         clean_graph_auxiliary=clean_graph_auxiliary,
     )
+    await check_unique_writes(execute_query, plan.unique_writes, vacated=plan.vacated)
     await apply_source_restore(execute_query, plan)
     return {"restored_source_ids": plan.restored, "conflicts": plan.conflicts}

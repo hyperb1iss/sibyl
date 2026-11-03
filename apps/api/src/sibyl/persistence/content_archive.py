@@ -581,6 +581,7 @@ class _AuxiliaryRow:
     identity: str
     statement: str
     parameters: dict[str, object]
+    record: dict[str, object]
     # Read-only conflict check against retained destination history, if any.
     check: str | None = None
 
@@ -605,6 +606,35 @@ async def _check_auxiliary_ownership(client, rows: list[_AuxiliaryRow], organiza
                 raise TypeError("archive auxiliary ownership read returned an invalid shape")
             if any(owner != organization_id for owner in owners):
                 raise ValueError("archive identity belongs to another organization")
+
+
+def _check_revoked_history_sources(
+    conflicts: list[dict[str, str]], rows: list[_AuxiliaryRow]
+) -> None:
+    """Refuse history whose source the destination keeps as deleted.
+
+    The planner already decided those captures stay tombstoned, so the
+    write-time source check for their dream or validation history would
+    refuse; say so before anything is written.
+    """
+    tombstoned = {
+        (conflict["organization_id"], conflict["source_id"])
+        for conflict in conflicts
+        if conflict.get("reason") == "retained_tombstone"
+    }
+    if not tombstoned:
+        return
+    for row in rows:
+        organization = row.record.get("organization_id")
+        if row.table == "dream_source_checkpoints":
+            if (organization, row.record.get("source_id")) in tombstoned:
+                raise ValueError("Dream archive source was revoked or replaced")
+        elif row.table == "memory_validation_executions" and row.record.get("purged") is False:
+            sources = row.record.get("source_ids")
+            if isinstance(sources, list) and any(
+                (organization, source) in tombstoned for source in sources
+            ):
+                raise ValueError("Validation archive source was revoked")
 
 
 async def _check_auxiliary_history(client, rows: list[_AuxiliaryRow]) -> None:
@@ -1213,6 +1243,7 @@ async def _prepare_auxiliary_content_restore(client, tables, organization_id, *,
                         f"archive_record_{index}": record,
                         f"archive_identity_{index}": identity,
                     },
+                    record=record,
                     check=None if check is None else f"{bind}{check} }};",
                 )
             )
@@ -1238,8 +1269,10 @@ async def _restore_content_sources_and_rows(
     """
     from sibyl_core.memory_pipeline.observations import SourceKind
     from sibyl_core.services.source_archive_store import (
+        UniqueWrite,
         apply_cleanup,
         apply_source_restore,
+        check_unique_writes,
         interrupted_restore,
         plan_source_restore,
         restore_batches,
@@ -1259,7 +1292,22 @@ async def _restore_content_sources_and_rows(
     if organization_id is not None:
         await _check_auxiliary_ownership(client, auxiliary_restores, organization_id)
     await _check_auxiliary_history(client, auxiliary_restores)
+    _check_revoked_history_sources(plan.conflicts, auxiliary_restores)
     cleanup = await _plan_auxiliary_cleanup(client, organization_id) if clean else []
+    # Each auxiliary row deletes and recreates, or creates beside, the rows
+    # sharing its identity; any other row on one of its unique keys collides.
+    vacated = plan.vacated | {key for page in cleanup for key in page.keys}
+    await check_unique_writes(
+        client.execute_query,
+        [
+            *plan.unique_writes,
+            *(
+                UniqueWrite(row.table, row.record, identity=(row.identity_field,))
+                for row in auxiliary_restores
+            ),
+        ],
+        vacated=vacated,
+    )
     await asyncio.to_thread(validation_receipt_archive.publish, pending_receipts)
     # The auxiliary wipe goes first: deleting a raw capture also deletes the
     # relation edges that end at it, which would move a planned wipe page.

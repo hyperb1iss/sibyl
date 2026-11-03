@@ -24,7 +24,7 @@ from sibyl_core.services.graph_relationships import (
     _relationship_bulk_payloads,
     _relationship_record,
 )
-from sibyl_core.services.source_archive_store import restore_batches
+from sibyl_core.services.source_archive_store import UniqueWrite, restore_batches
 
 _COMPANION_CHANGED = "archive companion destination changed before restore"
 
@@ -219,6 +219,7 @@ class CompanionRestoreWrites:
 
     counts: CompanionRestoreResult
     writes: list[_CompanionWrite] = field(default_factory=list)
+    unique_writes: list[UniqueWrite] = field(default_factory=list)
 
 
 def _protected(existing: dict[str, Any]) -> bool:
@@ -370,6 +371,16 @@ async def plan_companions(
             mentions_skipped=len(plan.mentions) - len(mentions),
         ),
         writes=writes,
+        # Every companion write replaces a destination companion by uuid.
+        unique_writes=[
+            UniqueWrite(table, record, identity=("uuid",))
+            for table, records in (
+                ("episode", episodes),
+                ("relates_to", relationships),
+                ("mentions", mentions),
+            )
+            for record in records
+        ],
     )
 
 

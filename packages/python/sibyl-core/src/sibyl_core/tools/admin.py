@@ -627,6 +627,7 @@ async def restore_backup(
         from sibyl_core.services.graph_entity_store import _entity_record
         from sibyl_core.services.source_archive_store import (
             apply_source_restore,
+            check_unique_writes,
             plan_source_restore,
         )
 
@@ -688,6 +689,11 @@ async def restore_backup(
             clean=clean,
             entities={identity for _, identity in plan.present},
             retired={identity for _, identity in plan.absent},
+        )
+        await check_unique_writes(
+            driver.execute_query,
+            [*plan.unique_writes, *companion_writes.unique_writes],
+            vacated=plan.vacated,
         )
         writing = True
         await apply_source_restore(driver.execute_query, plan)
