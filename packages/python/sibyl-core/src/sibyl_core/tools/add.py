@@ -945,8 +945,9 @@ async def add(
         # projection boundary had nothing to re-read. Passing it inside
         # `metadata` cannot work and must not, because that bag is caller
         # input; passing it here is a statement by the server about a raw write
-        # it just completed, and no caller-facing surface forwards this
-        # argument.
+        # it completed or proved. No caller-facing surface forwards a payload
+        # value into this argument: the entity create route fills it only from
+        # the stored raw row its capture claim stamped.
         full_metadata.update(server_provenance_metadata(capture_provenance))
         if project:
             full_metadata["project_id"] = project

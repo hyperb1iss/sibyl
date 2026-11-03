@@ -34,7 +34,9 @@ MEMORY_OWNER_METADATA_KEYS = frozenset(
 # payload that can set them can nominate any row it can currently write to be
 # retired later by a correction on an unrelated capture. The server stamps
 # them from the completed raw write after this strip runs
-# (`memory_pipeline/capture.py`), so no legitimate writer supplies them.
+# (`memory_pipeline/capture.py`). A `raw_memory_id` a client sends is only a
+# claim: the entity create route re-attaches provenance after its capture
+# claim proves the raw row, and builds it from that row, never from the body.
 EVAL_ADMISSION_METADATA_KEY = "eval_admission"
 EVAL_CONSOLIDATION_METADATA_KEY = "eval_consolidation"
 # When a time-boxed capture retires itself. The server stamps it from the

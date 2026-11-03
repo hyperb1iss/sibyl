@@ -197,6 +197,8 @@ async def _correction_graph_entity_ids(
     memory: RawMemory,
     principal_id: str | None,
     accessible_projects: Iterable[str] | None,
+    accessible_teams: Iterable[str] | None,
+    accessible_delegations: Iterable[str] | None,
     writable_projects: Iterable[str] | None = None,
     allowed_memory_scope_keys: Iterable[str] | None = None,
 ) -> _CorrectionGraphTargets:
@@ -204,9 +206,9 @@ async def _correction_graph_entity_ids(
 
     Two sources, because the two write paths record the link in opposite
     directions. Promotion stamps the entity id onto the raw memory, so that
-    one is a metadata read. Direct capture stamps the raw ids onto the graph
-    row's attributes instead (`memory_pipeline/capture.py:137-140`), which
-    leaves a query as the only way back. That query is unindexed, and it is
+    one is a metadata read. Direct capture, over MCP or as the CLI's raw write
+    followed by an entity write, stamps the raw ids onto the graph row's
+    attributes instead, which leaves a query as the only way back. That query is unindexed, and it is
     affordable here only because a correction is a rare, operator-initiated
     write rather than anything on the read path.
 
@@ -220,11 +222,14 @@ async def _correction_graph_entity_ids(
     The two halves are guarded differently, because they differ in who
     authored them.
 
-    The query half is server-authoritative. `raw_memory_id` is assigned from
-    the completed raw write and overwrites anything the caller stamped
-    (`memory_pipeline/capture.py:137-138`), so a row it returns is a
-    projection of the very capture `preview_memory_correction` just
-    authorized this principal to correct. Re-authorizing it would not add
+    The query half is server-authoritative. `raw_memory_id` is stamped by the
+    server on every write path and overwrites anything the caller sent: the
+    capture pipeline takes it from the raw write it just completed
+    (`memory_pipeline/capture.py`), and the entity create route takes it only
+    from the raw row its capture claim proved belongs to the caller, in the
+    row's own audience. So a row this query returns is a projection of the
+    very capture `preview_memory_correction` just authorized this principal
+    to correct. Re-authorizing it would not add
     safety, and it would subtract enormously: `authorize_memory_write` refuses
     SHARED, ORGANIZATION, and PUBLIC outright, refuses TEAM without
     `accessible_teams`, and refuses a row carrying no scope metadata at all.
@@ -288,6 +293,8 @@ async def _correction_graph_entity_ids(
         source_id=memory.id,
         principal_id=principal_id,
         accessible_projects=accessible_projects,
+        accessible_teams=accessible_teams,
+        accessible_delegations=accessible_delegations,
         log_event="memory_correction_graph_provenance_unreadable",
     )
 
@@ -334,6 +341,8 @@ async def _correction_graph_entity_ids(
         parent_ids=projected,
         principal_id=principal_id,
         accessible_projects=accessible_projects,
+        accessible_teams=accessible_teams,
+        accessible_delegations=accessible_delegations,
     )
     known = set(authorized)
     return _CorrectionGraphTargets(
@@ -354,6 +363,8 @@ async def _readable_correction_targets(
     source_id: str,
     principal_id: str | None,
     accessible_projects: Iterable[str] | None,
+    accessible_teams: Iterable[str] | None,
+    accessible_delegations: Iterable[str] | None,
     log_event: str,
     allowed_memory_scope_keys: Iterable[str] | None = None,
     lookup_failures: set[str] | None = None,
@@ -365,6 +376,10 @@ async def _readable_correction_targets(
     belonging to somebody else is refused either way. The correction route has
     already authorized this principal against the capture, so the grant is not
     the thing under test here.
+
+    The team and delegation grants are required rather than defaulted because
+    an absent grant denies: a caller that forgot them refused every team row it
+    found, so a team capture's correction stamped nothing and listed nothing.
     """
 
     readable: list[str] = []
@@ -387,6 +402,8 @@ async def _readable_correction_targets(
                 allowed_memory_scope_keys, principal_id=principal_id
             ),
             accessible_projects=accessible_projects,
+            accessible_teams=accessible_teams,
+            accessible_delegations=accessible_delegations,
             row_project_id=memory_row_project_id(
                 row_metadata,
                 entity_type=str(getattr(row, "entity_type", "") or ""),
@@ -408,6 +425,8 @@ async def _correction_projected_row_ids(
     parent_ids: Sequence[str],
     principal_id: str | None,
     accessible_projects: Iterable[str] | None,
+    accessible_teams: Iterable[str] | None,
+    accessible_delegations: Iterable[str] | None,
 ) -> tuple[list[str], bool]:
     """Follow the correction down into every row projected from the corrected rows.
 
@@ -497,6 +516,8 @@ async def _correction_projected_row_ids(
         source_id=memory.id,
         principal_id=principal_id,
         accessible_projects=accessible_projects,
+        accessible_teams=accessible_teams,
+        accessible_delegations=accessible_delegations,
         log_event="memory_correction_projection_unreadable",
     )
     return readable, truncated
@@ -537,6 +558,8 @@ async def _project_correction_to_graph(
             memory=memory,
             principal_id=principal_id,
             accessible_projects=accessible_projects,
+            accessible_teams=accessible_teams,
+            accessible_delegations=accessible_delegations,
             writable_projects=writable_projects,
             allowed_memory_scope_keys=allowed_memory_scope_keys,
         )
@@ -575,6 +598,8 @@ async def _project_correction_to_graph(
         source_id=memory.id,
         principal_id=principal_id,
         accessible_projects=accessible_projects,
+        accessible_teams=accessible_teams,
+        accessible_delegations=accessible_delegations,
         allowed_memory_scope_keys=allowed_memory_scope_keys,
         log_event="memory_correction_receipt_unreadable",
     )

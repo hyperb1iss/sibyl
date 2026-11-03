@@ -112,6 +112,56 @@ async def test_correction_scope_grants_filter_receipts_without_skipping_writes(
         assert (entity_id in result.affected_entity_ids) is private
 
 
+async def test_a_team_correction_stamps_and_lists_the_team_rows_it_finds(correction_store):
+    """Team rows are readable to the team, so the correction may not refuse them.
+
+    The provenance and receipt reads used to drop the corrector's team grants,
+    so every team row a capture projected was refused as unreadable: the row
+    kept ranking with no blocker and the receipt named nothing.
+    """
+    store = correction_store
+    root = await capture(store, "team-root", memory_scope="team", scope_key="team-a")
+    team_row = {"memory_scope": "team", "scope_key": "team-a", "principal_id": "owner"}
+    for entity_id, lineage in (
+        ("team-direct", {"raw_memory_id": root.id}),
+        ("team-passage", {"parent_entity_id": "team-direct", "projection_kind": "passage"}),
+    ):
+        await store.runtime.entity_manager.create_direct(
+            Entity(
+                id=entity_id,
+                name=entity_id,
+                content="Team advice",
+                entity_type=EntityType.EPISODE,
+                metadata={**team_row, **lineage},
+            ),
+            generate_embedding=False,
+        )
+
+    preview = await preview_memory_correction(
+        organization_id=store.org,
+        source_id=root.id,
+        principal_id="owner",
+        action="stale",
+        accessible_teams={"team-a"},
+    )
+    assert set(preview.affected_derived_ids) >= {"team-direct", "team-passage"}
+
+    result = await apply_memory_correction(
+        organization_id=store.org,
+        source_id=root.id,
+        principal_id="owner",
+        action="stale",
+        accessible_teams={"team-a"},
+    )
+
+    assert result.applied and result.propagation_complete
+    assert set(result.affected_entity_ids) == {"team-direct", "team-passage"}
+    assert result.refused_entity_ids == []
+    for entity_id in ("team-direct", "team-passage"):
+        row = await store.runtime.entity_manager.get(entity_id)
+        assert row.metadata["correction_blockers"][root.id]["blocking"] is True
+
+
 @pytest.mark.parametrize(
     "action,reference_key",
     [

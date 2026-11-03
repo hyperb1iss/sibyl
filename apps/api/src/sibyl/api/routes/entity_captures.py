@@ -1,7 +1,9 @@
 """Canonical captures ownership for entity routes."""
 
+from collections.abc import Mapping
+from dataclasses import dataclass, replace
 from typing import Annotated, Any
-from uuid import UUID
+from uuid import UUID, uuid4, uuid5
 
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -30,6 +32,12 @@ from sibyl.persistence.content_runtime import (
     save_raw_capture_record,
 )
 from sibyl_core.auth import AuthOrganization, ProjectRole
+from sibyl_core.auth.memory_policy import CAPTURE_EXPIRES_AT_METADATA_KEY
+from sibyl_core.memory_pipeline.source_lifecycle import (
+    SOURCE_BINDINGS_KEY,
+    UNKNOWN_SOURCE_REVISION,
+    source_revision_bindings,
+)
 
 log = structlog.get_logger()
 
@@ -38,6 +46,208 @@ router = APIRouter(
     tags=["entities"],
     dependencies=[Depends(require_org_role(*contracts.READ_ROLES))],
 )
+
+
+# Namespace for sidecar ids derived from a request's idempotency key.
+_SIDECAR_ID_NAMESPACE = UUID("10a0ef8c-2972-4676-9eb2-b9748d62d012")
+
+
+def _claim_sidecar_id(
+    *,
+    organization_id: UUID,
+    principal_id: str,
+    raw_capture_id: str,
+    idempotency_key: str | None,
+) -> UUID:
+    """The sidecar id a claim stamps, stable across retries of one request.
+
+    A request interrupted after its claim leaves the raw row naming this id.
+    Its retry carries the same idempotency key, derives the same id, and the
+    claim accepts its own earlier stamp, so the retry binds and re-archives
+    the sidecar in place rather than writing the row unbound. Without a key
+    there is no retry to recognize, and every claim gets a fresh id.
+    """
+    if not idempotency_key:
+        return uuid4()
+    return uuid5(
+        _SIDECAR_ID_NAMESPACE,
+        "\x1f".join((str(organization_id), principal_id, raw_capture_id, idempotency_key)),
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class _ClaimedCapture:
+    id: str
+    revision: int
+    metadata: Mapping[str, object]
+
+
+@dataclass(frozen=True, slots=True)
+class SourceCaptureBinding:
+    """A raw memory this request proved it may project, and the stamps it owes.
+
+    ``provenance`` is what the graph row carries back to the capture, built
+    from the stored raw row rather than from the request. ``sidecar_id`` is the
+    id the archive sidecar must be written under, because the claim already
+    points the raw row at it.
+    """
+
+    raw_capture_id: str
+    principal_id: str
+    sidecar_id: UUID
+    provenance: dict[str, Any]
+
+
+def _claimed_capture_provenance(
+    claimed: Mapping[str, object], *, row_content: str
+) -> dict[str, Any] | None:
+    """The provenance MCP remember stamps, read off the raw row this request claimed.
+
+    A binding says which revision of the capture's text the row was built
+    from, so the claimed revision is bound only when the row carries the text
+    the capture holds now. A buffered graph write that replays after the raw
+    memory was revised carries the old text; bound at the new revision it
+    would read as fresh. Every binding is unknown instead, which a revised
+    capture treats as stale, so the row is born blocked rather than serving
+    text its author already corrected. Both sides are compared stripped, the
+    way the graph writer stores the body (``MemoryCaptureRequest.stored_content``).
+
+    None when the stored row cannot support honest source bindings, where the
+    MCP path would raise.
+    """
+    raw_memory_id = str(claimed.get("uuid") or "")
+    metadata = claimed.get("metadata")
+    stored_metadata: Mapping[str, object] = metadata if isinstance(metadata, Mapping) else {}
+    revision = claimed.get("revision")
+    if not isinstance(revision, int):
+        return None
+    try:
+        bindings = source_revision_bindings(
+            [_ClaimedCapture(id=raw_memory_id, revision=revision, metadata=stored_metadata)]
+        )
+    except ValueError:
+        return None
+    stored_text = claimed.get("raw_content")
+    if not isinstance(stored_text, str) or stored_text.strip() != row_content.strip():
+        bindings = dict.fromkeys(bindings, UNKNOWN_SOURCE_REVISION)
+    provenance: dict[str, Any] = {
+        "raw_memory_id": raw_memory_id,
+        SOURCE_BINDINGS_KEY: bindings,
+    }
+    if source_id := claimed.get("source_id"):
+        provenance["raw_source_id"] = str(source_id)
+    if expires_at := stored_metadata.get(CAPTURE_EXPIRES_AT_METADATA_KEY):
+        provenance[CAPTURE_EXPIRES_AT_METADATA_KEY] = expires_at
+    return provenance
+
+
+async def claim_source_capture(
+    session: Any,
+    *,
+    organization_id: UUID,
+    raw_capture_id: str,
+    principal_id: str | None,
+    graph_metadata: Mapping[str, Any],
+    row_content: str,
+    archives_capture: bool,
+    idempotency_key: str | None = None,
+) -> SourceCaptureBinding | None:
+    """Prove a caller-named raw memory belongs behind this graph write.
+
+    ``raw_memory_id`` in an entity body is a claim, not provenance. Binding it
+    unproven is the attack the provenance strip exists to stop: a caller
+    naming somebody else's capture, or one of its own in another audience,
+    would arrange for a correction on that capture to retire this row. So the
+    claim binds only when ``mark_raw_capture_projected`` stamps the raw row,
+    which happens only for the caller's own raw memory in this organization,
+    in exactly the scope and scope key the graph row is stamped with, and not
+    yet projected anywhere. The stamp names the sidecar this request is about
+    to archive, so a write that archives no sidecar has nothing to bind with.
+
+    Every refusal still lets the row be written, unbound, and is logged. That
+    includes a claim the store could not answer: two writes racing for one
+    capture can lose a transaction conflict, and the loser still writes.
+    """
+
+    def refused(reason: str) -> None:
+        log.warning(
+            "entity_raw_capture_binding_refused",
+            organization_id=str(organization_id),
+            raw_memory_id=raw_capture_id,
+            reason=reason,
+        )
+
+    if not archives_capture:
+        return refused("not_a_capture_write")
+    if not principal_id:
+        return refused("no_authenticated_principal")
+    sidecar_id = _claim_sidecar_id(
+        organization_id=organization_id,
+        principal_id=principal_id,
+        raw_capture_id=raw_capture_id,
+        idempotency_key=idempotency_key,
+    )
+    memory_scope = graph_metadata.get("memory_scope")
+    scope_key = graph_metadata.get("scope_key")
+    try:
+        claimed = await content_runtime.mark_raw_capture_projected(
+            session,
+            organization_id=organization_id,
+            raw_capture_id=raw_capture_id,
+            projected_capture_id=sidecar_id,
+            principal_id=principal_id,
+            memory_scope=str(memory_scope) if memory_scope else "",
+            scope_key=str(scope_key) if scope_key else None,
+        )
+    except Exception as exc:
+        log.warning(
+            "entity_raw_capture_claim_failed",
+            organization_id=str(organization_id),
+            raw_memory_id=raw_capture_id,
+            error_type=type(exc).__name__,
+        )
+        return refused("claim_failed")
+    if claimed is None:
+        return refused("capture_not_claimable")
+    binding = SourceCaptureBinding(
+        raw_capture_id=raw_capture_id,
+        principal_id=principal_id,
+        sidecar_id=sidecar_id,
+        provenance={},
+    )
+    provenance = _claimed_capture_provenance(claimed, row_content=row_content)
+    if provenance is None:
+        await release_source_capture(session, organization_id=organization_id, binding=binding)
+        return refused("capture_bindings_malformed")
+    return replace(binding, provenance=provenance)
+
+
+async def release_source_capture(
+    session: Any,
+    *,
+    organization_id: UUID,
+    binding: SourceCaptureBinding,
+) -> None:
+    """Give a claimed raw memory back when the write it was claimed for failed.
+
+    Best effort: the caller is already on a failure path, and a release that
+    raises would replace the error the caller needs to see.
+    """
+    try:
+        await content_runtime.release_raw_capture_projection(
+            session,
+            organization_id=organization_id,
+            raw_capture_id=binding.raw_capture_id,
+            projected_capture_id=binding.sidecar_id,
+            principal_id=binding.principal_id,
+        )
+    except Exception as exc:
+        log.warning(
+            "entity_raw_capture_release_failed",
+            organization_id=str(organization_id),
+            raw_memory_id=binding.raw_capture_id,
+            error_type=type(exc).__name__,
+        )
 
 
 async def archive_raw_capture(
@@ -52,7 +262,7 @@ async def archive_raw_capture(
     tags: list[str],
     metadata: dict[str, object],
     project_id: str | None,
-    source_capture_id: str | None = None,
+    capture_id: UUID | None = None,
 ) -> None:
     """Persist the write-once capture sidecar.
 
@@ -63,9 +273,9 @@ async def archive_raw_capture(
     the sidecar where its writer will look for it; ``metadata`` has every
     server-owned key stripped and cannot supply it.
 
-    The optional source capture requests queue folding under the writer's
-    identity. The identifier is queue bookkeeping, not evidence provenance,
-    and is never stored in this sidecar's metadata.
+    ``capture_id`` is the id a source capture claim already stamped onto the
+    raw memory (see ``claim_source_capture``), which is what folds the raw
+    row behind this sidecar in the review queue.
     """
     capture_surface_value = metadata.get("capture_surface")
     capture = RawCaptureRecord(
@@ -80,16 +290,9 @@ async def archive_raw_capture(
         metadata=metadata,
         capture_surface=str(capture_surface_value) if capture_surface_value else None,
         created_by_user_id=user_id,
+        **({"id": capture_id} if capture_id is not None else {}),
     )
     await save_raw_capture_record(session, capture=capture)
-    if source_capture_id:
-        await content_runtime.mark_raw_capture_projected(
-            session,
-            organization_id=organization_id,
-            raw_capture_id=source_capture_id,
-            projected_capture_id=capture.id,
-            principal_id=capture.principal_id,
-        )
 
 
 @router.get("/captures", response_model=RawCaptureListResponse)

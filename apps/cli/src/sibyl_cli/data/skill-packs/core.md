@@ -150,7 +150,8 @@ ask with `--project <id>` or `--all`.
 ### Correction loop
 
 Inspect the belief history before changing source truth, then make the smallest correction that
-matches what happened:
+matches what happened. Correct the `Raw:` id that `remember` printed: the correction also retires
+the graph memory written from it, and the receipt names every graph row it reached.
 
 ```bash
 sibyl correct raw_memory:abc123

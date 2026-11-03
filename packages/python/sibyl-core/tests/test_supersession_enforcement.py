@@ -1630,6 +1630,8 @@ async def test_the_lineage_walk_pages_past_a_single_query_limit(
         memory=memory,
         principal_id="user-1",
         accessible_projects=None,
+        accessible_teams=None,
+        accessible_delegations=None,
     )
 
     assert len(cursors) > 1, "one page cannot cover a parent's whole projection"
@@ -1767,6 +1769,8 @@ async def test_a_walk_that_hits_its_ceiling_reports_a_partial_correction(
         memory=_raw_capture(),
         principal_id="user-1",
         accessible_projects=None,
+        accessible_teams=None,
+        accessible_delegations=None,
     )
 
     assert targets.truncated is True
