@@ -164,7 +164,7 @@ async def test_lane_resumes_once_the_cached_state_expires(monkeypatch: pytest.Mo
         reads.append(str(params["key"]))
         return [dict(state)]
 
-    monkeypatch.setattr(readiness_module.time, "monotonic", lambda: clock[0])
+    monkeypatch.setattr(readiness_module, "monotonic", lambda: clock[0])
 
     async def ask() -> bool:
         verdict = await vector_lane_readiness(
@@ -192,7 +192,7 @@ async def test_an_answer_given_before_the_verdict_is_never_cached(
         reads.append(str(params["key"]))
         return [dict(state)]
 
-    monkeypatch.setattr(readiness_module.time, "monotonic", lambda: 1000.0)
+    monkeypatch.setattr(readiness_module, "monotonic", lambda: 1000.0)
 
     async def ask() -> Any:
         return await vector_lane_readiness(
