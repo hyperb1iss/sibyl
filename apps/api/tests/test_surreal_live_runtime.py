@@ -3596,6 +3596,154 @@ async def test_live_expired_capture_retires_through_correction(
             await _drop_surreal_namespace(graph.namespace)
 
 
+async def test_live_correct_on_the_printed_raw_id_retires_the_remembered_row(  # noqa: PLR0915
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`sibyl remember` then `sibyl correct <Raw id>` against a live 3.x server.
+
+    The claim that binds the row to its capture is one conditional UPDATE, and
+    the embedded engine is lenient about statements a server rejects, so the
+    claim, its scope predicates, the release and the correction's team reads
+    all run here against the real thing.
+    """
+    from sibyl.persistence.surreal import content as api_content
+    from sibyl_core.auth import AuthOrganization
+    from sibyl_core.memory_pipeline.capture import MemoryCaptureRequest
+    from sibyl_core.services.graph_read_availability import available_graph_entities
+    from sibyl_core.services.memory_correction import apply_memory_correction
+    from sibyl_core.services.surreal_content import get_raw_memory
+    from tests.harness.auth import stub_auth_context
+    from tests.harness.remember_correct import cli_remember, post_memory_raw, wire_capture_stack
+
+    namespace = f"capture_binding_live_{uuid4().hex}"
+    content = _live_content_client(namespace)
+    organization = AuthOrganization(id=uuid4(), name="Sibyl", slug="sibyl")
+    group_id = str(organization.id)
+    graph = _live_graph_client(group_id)
+    await api_content.close_shared_surreal_content_client()
+    try:
+        await bootstrap_content_schema(content, reset=True)
+        await prepare_graph_schema(graph)
+        stack = wire_capture_stack(
+            monkeypatch,
+            organization=organization,
+            content=content,
+            graph=graph,
+            teams={"team-a"},
+        )
+        author = stub_auth_context(user_id=uuid4(), organization_id=organization.id)
+        stranger = stub_auth_context(user_id=uuid4(), organization_id=organization.id)
+
+        async def servable(entity_id: str) -> bool:
+            rows = await available_graph_entities(
+                group_id, [entity_id], runtime=stack.runtime, include_embeddings=False
+            )
+            return entity_id in rows
+
+        async def correct(ctx: Any, raw_id: str, teams: set[str]) -> Any:
+            return await apply_memory_correction(
+                organization_id=group_id,
+                source_id=raw_id,
+                principal_id=ctx.user_id,
+                action="stale",
+                reason="no longer true",
+                accessible_projects=set(),
+                writable_projects=set(),
+                maintained_projects=set(),
+                accessible_teams=teams,
+            )
+
+        private = await cli_remember(
+            stack, author, title="Deploy target", content="We deploy the API to fly.io."
+        )
+        team = await cli_remember(
+            stack,
+            author,
+            title="Team rollback rule",
+            content="Page the on-call before rolling back.",
+            memory_scope="team",
+            scope_key="team-a",
+        )
+        unprojected = await post_memory_raw(
+            stack,
+            author,
+            MemoryCaptureRequest(
+                title="Raw only",
+                content="Stored verbatim, never projected.",
+                memory_scope="team",
+                scope_key="team-a",
+                capture_surface="cli",
+            ),
+        )
+        forged = await cli_remember(
+            stack,
+            stranger,
+            title="Stranger note",
+            content="Names a capture it never wrote.",
+            memory_scope="team",
+            scope_key="team-a",
+            tamper=lambda body: {**body, "raw_memory_id": unprojected["id"]},
+        )
+
+        for payload in (private, team):
+            row = await stack.runtime.entity_manager.get(payload["id"])
+            assert row is not None
+            assert row.metadata["raw_memory_id"] == payload["raw_memory_id"]
+            assert row.metadata["source_bindings"] == {payload["raw_memory_id"]: 1}
+            assert await servable(payload["id"])
+        forged_row = await stack.runtime.entity_manager.get(forged["id"])
+        assert forged_row is not None
+        assert "raw_memory_id" not in forged_row.metadata
+        untouched = await get_raw_memory(organization_id=group_id, memory_id=unprojected["id"])
+        assert untouched is not None
+        assert "projected_capture_id" not in untouched.metadata
+
+        private_result = await correct(author, private["raw_memory_id"], set())
+        team_result = await correct(author, team["raw_memory_id"], {"team-a"})
+        unprojected_result = await correct(author, unprojected["id"], {"team-a"})
+
+        assert private["id"] in private_result.affected_entity_ids
+        assert team["id"] in team_result.affected_entity_ids
+        assert team_result.refused_entity_ids == []
+        assert forged["id"] not in unprojected_result.affected_entity_ids
+        for payload in (private, team):
+            row = await stack.runtime.entity_manager.get(payload["id"])
+            assert row is not None
+            assert row.metadata["correction_blockers"][payload["raw_memory_id"]]["blocking"]
+            assert not await servable(payload["id"])
+        assert await servable(forged["id"])
+
+        released_claim = uuid4()
+        claimed = await api_content.mark_raw_capture_projected(
+            None,
+            organization_id=organization.id,
+            raw_capture_id=unprojected["id"],
+            projected_capture_id=released_claim,
+            principal_id=str(author.user_id),
+            memory_scope="team",
+            scope_key="team-a",
+        )
+        assert claimed is not None
+        assert claimed["revision"] >= 1
+        assert await api_content.release_raw_capture_projection(
+            None,
+            organization_id=organization.id,
+            raw_capture_id=unprojected["id"],
+            projected_capture_id=released_claim,
+            principal_id=str(author.user_id),
+        )
+        released = await get_raw_memory(organization_id=group_id, memory_id=unprojected["id"])
+        assert released is not None
+        assert "projected_capture_id" not in released.metadata
+    finally:
+        await api_content.close_shared_surreal_content_client()
+        await content.close()
+        await graph.close()
+        await _drop_surreal_namespace(namespace)
+        with suppress(Exception):
+            await _drop_surreal_namespace(graph.namespace)
+
+
 def _async_return(value: Any) -> Callable[..., Awaitable[Any]]:
     async def resolve(*_args: Any, **_kwargs: Any) -> Any:
         return value

@@ -1,7 +1,10 @@
 """Canonical mutations ownership for entity routes."""
 
+from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
+from functools import partial
 from typing import Any
+from uuid import UUID
 
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
@@ -180,6 +183,89 @@ def _resolved_update_structure(
     return resolved
 
 
+def _raise_unless_created(result: Any, entity: EntityCreate) -> None:
+    if result.success and result.id:
+        return
+    message = sanitize_error_text(str(result.message or "Entity creation failed"))
+    if "duplicate" in message.lower() or "already exists" in message.lower():
+        raise constraint_violation(
+            "duplicate entity name in scope",
+            remediation="Use a different title or update the existing entity.",
+            details={
+                "field": "name",
+                "entity_type": entity.entity_type.value,
+            },
+        )
+    raise HTTPException(status_code=400, detail=message)
+
+
+async def _write_capture_backed_entity(
+    content_session: Any,
+    *,
+    organization_id: UUID,
+    user_id: UUID | None,
+    principal_id: str | None,
+    entity: EntityCreate,
+    content: str,
+    request_metadata: dict[str, Any],
+    response_metadata: dict[str, Any],
+    verified_project_id: str | None,
+    write: Callable[..., Awaitable[Any]],
+) -> Any:
+    """Write the graph row, and for a capture its sidecar and its capture link.
+
+    `sibyl remember` writes the raw memory first and names it in this body. The
+    scope stamp already dropped that id with every other server-owned key, so
+    the row would reach the graph naming no capture and a correction on the
+    capture would never find it. The id goes back on only once the claim
+    proves the capture is this caller's, in this row's audience, and not yet
+    projected; ``write`` receives it in the one argument the graph writer does
+    not strip, and ``response_metadata`` reports it once the row is written.
+    """
+    archives_capture = request_metadata.get("capture_mode") in {"quick", "remember"}
+    claimed_raw_memory_id = request_metadata.get("raw_memory_id")
+    binding = (
+        await captures.claim_source_capture(
+            content_session,
+            organization_id=organization_id,
+            raw_capture_id=str(claimed_raw_memory_id),
+            principal_id=principal_id,
+            graph_metadata=response_metadata,
+            archives_capture=archives_capture,
+        )
+        if claimed_raw_memory_id
+        else None
+    )
+    try:
+        result = await write(capture_provenance=binding.provenance if binding else None)
+        _raise_unless_created(result, entity)
+        if archives_capture:
+            await captures.archive_raw_capture(
+                content_session,
+                organization_id=organization_id,
+                user_id=user_id,
+                entity_id=result.id,
+                entity_name=entity.name,
+                entity_content=content,
+                entity_type=entity.entity_type.value,
+                tags=list(entity.tags or []),
+                metadata=serialization.sanitize_raw_capture_metadata(request_metadata),
+                project_id=verified_project_id,
+                capture_id=binding.sidecar_id if binding else None,
+            )
+    except Exception:
+        # The claim already folded the raw memory behind a sidecar this request
+        # never wrote, which would hide it from the review queue for good.
+        if binding is not None:
+            await captures.release_source_capture(
+                content_session, organization_id=organization_id, binding=binding
+            )
+        raise
+    if binding is not None:
+        response_metadata.update(binding.provenance)
+    return result
+
+
 @router.post(
     "",
     response_model=EntityResponse,
@@ -306,70 +392,51 @@ async def create_entity(
         runtime = await policy.get_entity_graph_runtime(group_id)
         await _existing_entity_or_404(runtime.entity_manager, epic)
 
-    result = await _add_with_structure(
-        title=entity.name,
-        content=content,
-        entity_type=entity.entity_type.value,
-        category=entity.category,
-        languages=entity.languages,
-        tags=entity.tags,
-        related_to=entity.related_to,
-        metadata=merged_metadata,
-        # Task-specific fields
-        project=project,
-        epic=epic,
-        priority=priority,
-        assignees=assignees,
-        technologies=technologies,
-        depends_on=depends_on,
-        # Sync for projects, async for everything else
-        sync=is_sync,
-        protect_ownership=protect_ownership is True,
-        skip_conflicts=entity.skip_conflicts,
-        generate_embeddings=not entity.defer_embeddings,
-        memory_scope=str(declared_memory_scope) if declared_memory_scope is not None else None,
-        scope_key=authorized_scope_key,
+    result = await _write_capture_backed_entity(
+        content_session,
+        organization_id=org.id,
+        user_id=ctx.user.id if ctx.user else None,
         principal_id=authorized_principal_id,
-        accessible_projects=reader_scope.accessible_projects if reader_scope else None,
-        allowed_memory_scope_keys=reader_scope.memory_grants if reader_scope else None,
-        retrieval_keys=entity.retrieval_keys,
-        spans=[span.model_dump(exclude_none=True) for span in entity.spans]
-        if entity.spans is not None
-        else None,
-        atomic=entity.atomic,
-        probes=list(entity.probes) if entity.probes is not None else None,
-    )
-
-    if not result.success or not result.id:
-        message = sanitize_error_text(str(result.message or "Entity creation failed"))
-        if "duplicate" in message.lower() or "already exists" in message.lower():
-            raise constraint_violation(
-                "duplicate entity name in scope",
-                remediation="Use a different title or update the existing entity.",
-                details={
-                    "field": "name",
-                    "entity_type": entity.entity_type.value,
-                },
-            )
-        raise HTTPException(status_code=400, detail=message)
-
-    if request_metadata.get("capture_mode") in {"quick", "remember"}:
-        raw_capture_metadata = serialization.sanitize_raw_capture_metadata(request_metadata)
-        await captures.archive_raw_capture(
-            content_session,
-            organization_id=org.id,
-            user_id=ctx.user.id if ctx.user else None,
-            entity_id=result.id,
-            entity_name=entity.name,
-            entity_content=content,
+        entity=entity,
+        content=content,
+        request_metadata=request_metadata,
+        response_metadata=merged_metadata,
+        verified_project_id=verified_project_id,
+        write=partial(
+            _add_with_structure,
+            title=entity.name,
+            content=content,
             entity_type=entity.entity_type.value,
-            tags=list(entity.tags or []),
-            metadata=raw_capture_metadata,
-            project_id=verified_project_id,
-            source_capture_id=str(request_metadata["raw_memory_id"])
-            if request_metadata.get("raw_memory_id")
+            category=entity.category,
+            languages=entity.languages,
+            tags=entity.tags,
+            related_to=entity.related_to,
+            metadata=merged_metadata,
+            # Task-specific fields
+            project=project,
+            epic=epic,
+            priority=priority,
+            assignees=assignees,
+            technologies=technologies,
+            depends_on=depends_on,
+            # Sync for projects, async for everything else
+            sync=is_sync,
+            protect_ownership=protect_ownership is True,
+            skip_conflicts=entity.skip_conflicts,
+            generate_embeddings=not entity.defer_embeddings,
+            memory_scope=str(declared_memory_scope) if declared_memory_scope is not None else None,
+            scope_key=authorized_scope_key,
+            principal_id=authorized_principal_id,
+            accessible_projects=reader_scope.accessible_projects if reader_scope else None,
+            allowed_memory_scope_keys=reader_scope.memory_grants if reader_scope else None,
+            retrieval_keys=entity.retrieval_keys,
+            spans=[span.model_dump(exclude_none=True) for span in entity.spans]
+            if entity.spans is not None
             else None,
-        )
+            atomic=entity.atomic,
+            probes=list(entity.probes) if entity.probes is not None else None,
+        ),
+    )
 
     result_background_jobs = getattr(result, "background_jobs", {})
     if not isinstance(result_background_jobs, dict):

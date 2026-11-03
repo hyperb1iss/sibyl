@@ -480,16 +480,18 @@ async def test_org_admins_hold_maintainer_on_every_project_for_review_state(
 
 
 @pytest.mark.asyncio
-async def test_archive_raw_capture_stamps_the_raw_memory_it_projects() -> None:
+async def test_archive_raw_capture_files_the_sidecar_under_the_claimed_id() -> None:
+    """The claim already pointed the raw memory at this id; the sidecar must take it."""
     org_id = uuid4()
     user_id = uuid4()
+    claimed_id = uuid4()
     saved: list[RawCaptureRecord] = []
 
     async def fake_save(_session, *, capture: RawCaptureRecord) -> RawCaptureRecord:
         saved.append(capture)
         return capture
 
-    mark = AsyncMock(return_value=True)
+    mark = AsyncMock()
     with (
         patch("sibyl.api.routes.entity_captures.save_raw_capture_record", fake_save),
         patch(
@@ -508,28 +510,22 @@ async def test_archive_raw_capture_stamps_the_raw_memory_it_projects() -> None:
             tags=[],
             metadata={"capture_mode": "remember"},
             project_id=None,
-            source_capture_id="raw-1",
+            capture_id=claimed_id,
         )
 
-    assert len(saved) == 1
+    assert [capture.id for capture in saved] == [claimed_id]
     assert "raw_memory_id" not in saved[0].metadata
-    mark.assert_awaited_once_with(
-        None,
-        organization_id=org_id,
-        raw_capture_id="raw-1",
-        projected_capture_id=saved[0].id,
-        principal_id=str(user_id),
-    )
+    # Stamping happens in the claim, before the graph write; archiving the
+    # sidecar never stamps a raw row on its own.
+    mark.assert_not_awaited()
 
 
 @pytest.mark.asyncio
 async def test_archive_raw_capture_leaves_unprojected_quick_captures_alone() -> None:
-    mark = AsyncMock(return_value=True)
+    mark = AsyncMock(return_value=None)
+    save = AsyncMock(side_effect=lambda _session, *, capture: capture)
     with (
-        patch(
-            "sibyl.api.routes.entity_captures.save_raw_capture_record",
-            AsyncMock(side_effect=lambda _session, *, capture: capture),
-        ),
+        patch("sibyl.api.routes.entity_captures.save_raw_capture_record", save),
         patch(
             "sibyl.api.routes.entity_captures.content_runtime.mark_raw_capture_projected",
             mark,
@@ -548,6 +544,7 @@ async def test_archive_raw_capture_leaves_unprojected_quick_captures_alone() -> 
             project_id=None,
         )
 
+    save.assert_awaited_once()
     mark.assert_not_awaited()
 
 

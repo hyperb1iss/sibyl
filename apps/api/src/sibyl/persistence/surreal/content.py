@@ -1989,17 +1989,27 @@ async def mark_raw_capture_projected(
     raw_capture_id: str,
     projected_capture_id: UUID,
     principal_id: str,
-) -> bool:
-    """Record that a raw memory now has a projected capture row.
+    memory_scope: str,
+    scope_key: str | None,
+) -> dict[str, object] | None:
+    """Claim a raw memory for the graph row about to be written from it.
 
-    The raw_memory_id arrives in the entity request body, so the stamp is
-    bound to the principal that wrote the raw row: a writer can only fold
-    their own memories. Returns True when the raw row was stamped, False
-    when it was already stamped, belongs to another organization or
-    principal, or is not a raw memory.
+    The raw_memory_id arrives in the entity request body, so it is a claim,
+    and this one statement is the proof behind it. The raw row has to be in
+    this organization, written by this principal, a raw memory, in the same
+    scope and scope key as the graph row, and not yet projected through
+    either path (a sidecar here, ``projected_entity_id`` over MCP). Because
+    the check and the stamp are a single UPDATE, two writes naming the same
+    capture cannot both win it.
+
+    Returns the claimed row's id, source id, revision and metadata, which is
+    what the graph row's provenance is built from, or None when any check
+    failed. A private row has no audience key, so only its scope is matched.
     """
-    if not principal_id:
-        return False
+    if not principal_id or not memory_scope:
+        return None
+    if memory_scope != "private" and not scope_key:
+        return None
     async with surreal_content_client() as client:
         rows = await _select_many(
             client,
@@ -2009,7 +2019,46 @@ async def mark_raw_capture_projected(
             "SET metadata.projected_capture_id = $projected_capture_id "
             "WHERE organization_id = $organization_id "
             "AND principal_id = $principal_id "
-            "AND entity_type = 'raw_memory' AND metadata.projected_capture_id IS NONE "
+            "AND entity_type = 'raw_memory' "
+            "AND memory_scope = $memory_scope "
+            "AND ($memory_scope = 'private' OR scope_key = $scope_key) "
+            "AND metadata.projected_capture_id IS NONE "
+            "AND metadata.projected_entity_id IS NONE "
+            "RETURN uuid, source_id, revision, metadata;",
+            raw_capture_id=raw_capture_id,
+            organization_id=str(organization_id),
+            principal_id=principal_id,
+            memory_scope=memory_scope,
+            scope_key=scope_key or "",
+            projected_capture_id=str(projected_capture_id),
+        )
+    return dict(rows[0]) if rows else None
+
+
+async def release_raw_capture_projection(
+    _session: object,
+    *,
+    organization_id: UUID,
+    raw_capture_id: str,
+    projected_capture_id: UUID,
+    principal_id: str,
+) -> bool:
+    """Undo a claim whose graph write or sidecar never landed.
+
+    Only the claim this request made is cleared: the stamp has to still name
+    this request's sidecar, so a release can never free a capture somebody
+    else's write projected.
+    """
+    if not principal_id:
+        return False
+    async with surreal_content_client() as client:
+        rows = await _select_many(
+            client,
+            "UPDATE (SELECT VALUE id FROM raw_captures WHERE uuid = $raw_capture_id) "
+            "SET metadata.projected_capture_id = NONE "
+            "WHERE organization_id = $organization_id "
+            "AND principal_id = $principal_id "
+            "AND metadata.projected_capture_id = $projected_capture_id "
             "RETURN uuid;",
             raw_capture_id=raw_capture_id,
             organization_id=str(organization_id),

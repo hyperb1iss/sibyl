@@ -103,6 +103,26 @@ async def _list(
     )
 
 
+async def _claim(
+    org: UUID,
+    raw: RawCaptureRecord,
+    projected_id: UUID,
+    *,
+    principal_id: str = "user-1",
+    memory_scope: str = "private",
+    scope_key: str | None = None,
+) -> dict[str, object] | None:
+    return await surreal_content.mark_raw_capture_projected(
+        None,
+        organization_id=org,
+        raw_capture_id=str(raw.id),
+        projected_capture_id=projected_id,
+        principal_id=principal_id,
+        memory_scope=memory_scope,
+        scope_key=scope_key,
+    )
+
+
 async def _stamp(
     org: UUID,
     raw: RawCaptureRecord,
@@ -110,13 +130,22 @@ async def _stamp(
     *,
     principal_id: str = "user-1",
 ) -> bool:
-    return await surreal_content.mark_raw_capture_projected(
-        None,
-        organization_id=org,
-        raw_capture_id=str(raw.id),
-        projected_capture_id=projected.id,
+    """Claim ``raw`` for a graph row in its own audience, as a matching remember would."""
+    claimed = await _claim(
+        org,
+        raw,
+        projected.id,
         principal_id=principal_id,
+        memory_scope=raw.memory_scope,
+        scope_key=raw.scope_key,
     )
+    return claimed is not None
+
+
+async def _stored(org: UUID, raw: RawCaptureRecord) -> RawCaptureRecord:
+    stored = await surreal_content.get_raw_capture(None, organization_id=org, capture_id=raw.id)
+    assert stored is not None
+    return stored
 
 
 @pytest.mark.asyncio
@@ -179,6 +208,103 @@ async def test_stamp_is_bound_to_the_raw_row_principal(content_client) -> None:
     assert await _stamp(org, raw, projected, principal_id="owner") is True
     listed, _ = await _list(org)
     assert {capture.id for capture in listed} == {projected.id}
+
+
+@pytest.mark.asyncio
+async def test_claim_returns_the_raw_row_provenance_is_built_from(content_client) -> None:
+    org = uuid4()
+    raw = replace(_capture(org), source_id="cli:manual")
+    await _save(raw)
+
+    claimed = await _claim(org, raw, uuid4())
+
+    assert claimed is not None
+    assert claimed["uuid"] == str(raw.id)
+    assert claimed["source_id"] == "cli:manual"
+    assert claimed["revision"] == 1
+    assert isinstance(claimed["metadata"], dict)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("memory_scope", "scope_key", "claimable"),
+    [
+        ("team", "team-a", True),
+        ("team", "team-b", False),
+        ("team", None, False),
+        ("project", "team-a", False),
+        ("private", None, False),
+        ("", None, False),
+    ],
+)
+async def test_claim_requires_the_graph_rows_exact_audience(
+    content_client, memory_scope: str, scope_key: str | None, claimable: bool
+) -> None:
+    """A capture in one audience must never stand behind a row in another."""
+    org = uuid4()
+    raw = replace(_capture(org), memory_scope="team", scope_key="team-a")
+    await _save(raw)
+
+    claimed = await _claim(org, raw, uuid4(), memory_scope=memory_scope, scope_key=scope_key)
+
+    assert (claimed is not None) is claimable
+    assert ("projected_capture_id" in (await _stored(org, raw)).metadata) is claimable
+
+
+@pytest.mark.asyncio
+async def test_private_claim_matches_on_scope_and_owner_alone(content_client) -> None:
+    """A private graph row carries no audience key, so none is compared."""
+    org = uuid4()
+    raw = replace(_capture(org), scope_key="user-1")
+    await _save(raw)
+
+    assert await _claim(org, raw, uuid4(), scope_key=None) is not None
+
+
+@pytest.mark.asyncio
+async def test_claim_refuses_a_raw_memory_mcp_already_projected(content_client) -> None:
+    org = uuid4()
+    raw = _capture(org)
+    await _save(raw)
+    assert await surreal_content.mark_raw_memory_projected_entity(
+        None,
+        organization_id=org,
+        raw_capture_id=str(raw.id),
+        entity_id="decision_abc123",
+        principal_id="user-1",
+    )
+
+    assert await _claim(org, raw, uuid4()) is None
+    assert "projected_capture_id" not in (await _stored(org, raw)).metadata
+
+
+@pytest.mark.asyncio
+async def test_release_undoes_only_the_claim_that_made_it(content_client) -> None:
+    org = uuid4()
+    raw = _capture(org)
+    await _save(raw)
+    sidecar = uuid4()
+    assert await _claim(org, raw, sidecar) is not None
+
+    async def release(projected_id: UUID, principal_id: str = "user-1") -> bool:
+        return await surreal_content.release_raw_capture_projection(
+            None,
+            organization_id=org,
+            raw_capture_id=str(raw.id),
+            projected_capture_id=projected_id,
+            principal_id=principal_id,
+        )
+
+    assert await release(uuid4()) is False
+    assert await release(sidecar, principal_id="someone-else") is False
+    assert (await _stored(org, raw)).metadata["projected_capture_id"] == str(sidecar)
+
+    assert await release(sidecar) is True
+    assert "projected_capture_id" not in (await _stored(org, raw)).metadata
+    listed, _ = await _list(org)
+    assert raw.id in {capture.id for capture in listed}
+    # Released means claimable again, by the next write that names it.
+    assert await _claim(org, raw, uuid4()) is not None
 
 
 @pytest.mark.asyncio
