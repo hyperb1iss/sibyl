@@ -3,8 +3,11 @@
 The SDK decodes every response with a pure-Python copy of cbor2, and on a
 large read that costs more than the query itself. cbor2's C build turns the
 same bytes into the same values through the SDK's own tag decoder, a few
-times faster. Every SDK transport decodes through ``surrealdb.data.cbor``,
-which resolves ``loads`` at call time, so one replacement covers them all.
+times faster. SDK 3 transports import ``surrealdb.data.cbor.decode`` by name,
+so the replacement is installed in each module that holds that name.
+
+The C decoder reads a CBOR null as ``None``, as SDK 2 did; SDK 3's own decoder
+returns its ``Null`` sentinel instead.
 
 Installing is explicit and idempotent. Without cbor2's C build it does
 nothing and the SDK keeps its own decoder.
@@ -12,9 +15,9 @@ nothing and the SDK keeps its own decoder.
 
 from __future__ import annotations
 
+import importlib
 import inspect
-from collections.abc import Callable, Mapping
-from typing import Any, Literal, cast
+from typing import Any
 
 _installed = False
 
@@ -31,7 +34,6 @@ def install_fast_cbor() -> bool:
     # A pure-Python cbor2 is the same code the SDK already ships.
     if not inspect.isbuiltin(cbor2.loads):
         return False
-    from surrealdb.cbor import CBORDecoder, CBORTag
     from surrealdb.data import cbor as sdk_cbor
     from surrealdb.data.types import constants
 
@@ -41,7 +43,7 @@ def install_fast_cbor() -> bool:
     numeric_pairs = {constants.TAG_DATETIME_COMPACT, constants.TAG_DURATION_COMPACT}
     frozen_map = getattr(cbor2, "frozendict", None) or getattr(cbor2, "FrozenDict", dict)
     c_loads = cbor2.loads
-    sdk_loads = sdk_cbor.loads
+    sdk_tag_decoder = sdk_cbor.tag_decoder
 
     def thaw(value: Any) -> Any:
         # The C decoder freezes whatever sits inside a tag (arrays become
@@ -53,32 +55,32 @@ def install_fast_cbor() -> bool:
             return {key: thaw(item) for key, item in value.items()}
         return value
 
-    def loads(
-        s: bytes | bytearray | memoryview,
-        tag_hook: Callable[[CBORDecoder, CBORTag], Any] | None = None,
-        object_hook: Callable[[CBORDecoder, Mapping[Any, Any]], Any] | None = None,
-        str_errors: Literal["strict", "error", "replace"] = "strict",
-    ) -> Any:
-        if object_hook is not None:
-            # The SDK never sets one; keep its own decoder for that contract.
-            return sdk_loads(s, tag_hook=tag_hook, object_hook=object_hook, str_errors=str_errors)
-        if tag_hook is None:
-            return c_loads(s, str_errors=str_errors)
-        # The SDK's decoder reads only .tag and .value, which cbor2's tag carries.
-        sdk_tag_hook = cast(Callable[[Any, Any], Any], tag_hook)
+    def hook(*args: Any) -> Any:
+        # cbor2 releases disagree on the hook's other arguments; the tag is
+        # the only one the SDK's decoder reads.
+        tag = next(arg for arg in args if isinstance(arg, tag_type))
+        if tag.tag not in numeric_pairs and isinstance(tag.value, (tuple, frozen_map)):
+            tag = tag_type(tag.tag, thaw(tag.value))
+        return sdk_tag_decoder(None, tag)
 
-        def hook(*args: Any) -> Any:
-            # cbor2 releases disagree on the hook's other arguments; the tag is
-            # the only one the SDK's decoder reads.
-            tag = next(arg for arg in args if isinstance(arg, tag_type))
-            if tag.tag not in numeric_pairs and isinstance(tag.value, (tuple, frozen_map)):
-                tag = tag_type(tag.tag, thaw(tag.value))
-            return sdk_tag_hook(None, tag)
+    def decode(data: bytes) -> Any:
+        return c_loads(data, tag_hook=hook)
 
-        return c_loads(s, tag_hook=hook, str_errors=str_errors)
-
-    # setattr: this deliberately rebinds the SDK module's own function.
-    setattr(sdk_cbor, "loads", loads)  # noqa: B010
+    for name in (
+        "surrealdb.data.cbor",
+        "surrealdb.connections.async_ws",
+        "surrealdb.connections.async_embedded",
+        "surrealdb.connections.blocking_ws",
+        "surrealdb.connections.blocking_embedded",
+        "surrealdb.connections.utils_mixin",
+    ):
+        try:
+            module = importlib.import_module(name)
+        except ImportError:
+            continue
+        if hasattr(module, "decode"):
+            # setattr: this deliberately rebinds the SDK module's own function.
+            setattr(module, "decode", decode)  # noqa: B010
     _installed = True
     return True
 

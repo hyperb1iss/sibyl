@@ -189,10 +189,7 @@ def _cursor_binding(client: Any) -> tuple[str, str, Callable[[str], object]]:
     """
     from surrealdb.data.types.datetime import Datetime
 
-    from sibyl_core.backends.surreal.url_schemes import is_embedded_surreal_url
 
-    if is_embedded_surreal_url(client._url):
-        return "<datetime>${}", "<string>${}", str
     return "${}", "${}", Datetime
 
 

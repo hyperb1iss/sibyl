@@ -42,7 +42,7 @@ dependencies = [
     # Settings (NoDecode needs 2.7)
     "pydantic-settings>=2.7",
     # Database (server-only)
-    "surrealdb>=2.0.0,<3.0",
+    "surrealdb[embedded]==3.0.0b11",
     # Auth & HTTP (server-specific deps)
     "email-validator>=2.3.0",
     "pyyaml>=6.0",

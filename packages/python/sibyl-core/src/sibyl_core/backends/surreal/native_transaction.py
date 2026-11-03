@@ -450,7 +450,7 @@ async def open_native_transaction(
     transaction = NativeTransaction(binding, cancel_ack_timeout_seconds=grace)
     primary: BaseException | None = None
     try:
-        client = AsyncWsSurrealConnection(binding.endpoint)
+        client = AsyncWsSurrealConnection(binding.endpoint, timeout=None, streaming=False)
         transaction._client = client
         try:
             await client.connect()

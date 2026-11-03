@@ -137,7 +137,7 @@ async def _lease_shared_embedded_engine(
             if engine.client is None:
                 from surrealdb import AsyncSurreal
 
-                client = cast(SurrealClient, AsyncSurreal(url))
+                client = cast(SurrealClient, AsyncSurreal(url, timeout=None, streaming=False))
                 try:
                     # Open the store once, here, instead of lazily inside
                     # whichever scoped query happens to run first.
@@ -469,7 +469,7 @@ class _PooledConnection:
             budget = _connect_timeout_seconds(self._url)
             connect_failure: SurrealConnectError | None = None
             try:
-                client = cast(SurrealClient, AsyncSurreal(self._url))
+                client = cast(SurrealClient, AsyncSurreal(self._url, timeout=None, streaming=False))
             except Exception as exc:
                 connect_failure = self._log_connect_error(exc, attempt, started_at, budget)
             if connect_failure is not None:

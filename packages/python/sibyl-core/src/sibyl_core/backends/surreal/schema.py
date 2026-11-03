@@ -1249,24 +1249,20 @@ async def _first_invalid_graph_enum_value(
 
 
 def render_fulltext_compatible_sql(sql: str, *, url: str) -> str:
-    if is_embedded_surreal_url(url):
-        return sql.replace("FULLTEXT ANALYZER", "SEARCH ANALYZER")
     return sql
 
 
 def render_surreal_compatible_sql(sql: str, *, url: str) -> str:
-    rendered = render_fulltext_compatible_sql(sql, url=url)
-    if not is_embedded_surreal_url(url):
-        rendered = (
-            rendered.replace("type::is::string", "type::is_string")
-            .replace("type::is::object", "type::is_object")
-            .replace("type::is::array", "type::is_array")
-            .replace("type::is::int", "type::is_int")
-            .replace("type::is::number", "type::is_number")
-            .replace("type::is::datetime", "type::is_datetime")
-            .replace("string::is::datetime", "string::is_datetime")
-        )
-    return rendered
+    return (
+        render_fulltext_compatible_sql(sql, url=url)
+        .replace("type::is::string", "type::is_string")
+        .replace("type::is::object", "type::is_object")
+        .replace("type::is::array", "type::is_array")
+        .replace("type::is::int", "type::is_int")
+        .replace("type::is::number", "type::is_number")
+        .replace("type::is::datetime", "type::is_datetime")
+        .replace("string::is::datetime", "string::is_datetime")
+    )
 
 
 async def _renew_schema_ownership(ownership: SchemaOwnership) -> None:

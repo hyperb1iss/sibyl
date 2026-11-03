@@ -14,7 +14,6 @@ import structlog
 from pydantic import ValidationError
 
 from sibyl_core.auth.memory_policy import memory_row_scope_metadata
-from sibyl_core.backends.surreal.url_schemes import is_embedded_surreal_url
 from sibyl_core.memory_pipeline.audit import decode_audit_metadata, encode_audit_metadata
 from sibyl_core.memory_pipeline.quality import (
     expand_memory_quality_storage_metadata,
@@ -62,8 +61,6 @@ AND NOT (
 
 
 def _relationship_read_sql(client: SurrealGraphClient, sql: str) -> str:
-    if is_embedded_surreal_url(client._url):
-        return sql
     return sql.replace("type::is::", "type::is_")
 
 

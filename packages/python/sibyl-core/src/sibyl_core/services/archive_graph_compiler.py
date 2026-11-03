@@ -14,7 +14,6 @@ from uuid import UUID
 
 from sibyl_core.auth.memory_policy import MEMORY_PROVENANCE_METADATA_KEYS
 from sibyl_core.backends.surreal.schema_source_witness import SOURCE_STATE_WRITE_WITNESS
-from sibyl_core.backends.surreal.url_schemes import is_embedded_surreal_url
 from sibyl_core.memory_pipeline.lifecycle import graph_metadata_recallable
 from sibyl_core.memory_pipeline.source_lifecycle import declared_source_ids
 from sibyl_core.migrate.archive_phase_receipts import ArchiveCreatedIdentity, ArchivePhaseKey
@@ -139,8 +138,8 @@ FOR $cut IN $archive_graph_cut {
             THROW 'Archive graph retained row requires capture guards';
         };
         FOR $field IN ['review_capture_id', 'source_entity_id'] {
-            LET $value = $metadata[$field] ?? NULL;
-            IF $value NOT IN [NULL, '', false] {
+            LET $field_value = $metadata[$field] ?? NULL;
+            IF $field_value NOT IN [NULL, '', false] {
                 THROW 'Archive graph retained row requires source guards';
             };
         };
@@ -657,11 +656,7 @@ def prepare_archive_graph_apply(
         + "LET $archive_graph_dates = ["
         + ", ".join(dates)
         + "];\n"
-        + (
-            _CUT
-            if is_embedded_surreal_url(url)
-            else _CUT.replace("type::is::bool", "type::is_bool")
-        )
+        + _CUT.replace("type::is::bool", "type::is_bool")
         + _ORDINARY
         + _FENCES
         + _CREATES,

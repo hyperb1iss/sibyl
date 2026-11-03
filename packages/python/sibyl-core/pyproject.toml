@@ -66,7 +66,7 @@ s3 = [
     "botocore>=1.35.2,<2",
 ]
 graph = [
-    "surrealdb>=2.0.0,<3.0",
+    "surrealdb[embedded]==3.0.0b11",
     # Embedding-similarity dedup in the retrieval stack
     "numpy>=2.5.1",
 ]
@@ -101,7 +101,7 @@ dev = [
     # test env must install them or the graph/eval/ai modules fail collection.
     # The heavy reranking extra (sentence-transformers) is left out on purpose
     # so CI stays fast; its tests mock the cross-encoder instead.
-    "surrealdb>=2.0.0,<3.0",
+    "surrealdb[embedded]==3.0.0b11",
     "numpy>=2.5.1",
     "pydantic-ai-slim[anthropic,google,openai]>=2.60.0,<2.61",
     "ty>=0.0.91",
