@@ -39,6 +39,22 @@ HARNESS_VARIABLES = (
 )
 
 
+def _cwd_independent(command: tuple[str, ...]) -> tuple[str, ...]:
+    """Pin a relative ``--project`` to this process's directory.
+
+    The shared command (``uv run --project ../cli sibyl`` in CI) is written
+    relative to ``apps/e2e``, but a HomeCLI runs in its own home directory.
+    """
+    resolved = list(command)
+    for index, argument in enumerate(resolved[:-1]):
+        if argument == "--project":
+            resolved[index + 1] = str(Path(resolved[index + 1]).resolve())
+    return tuple(resolved)
+
+
+HOME_CLI_COMMAND = _cwd_independent(CLI_COMMAND)
+
+
 class HomeCLI(CLIRunner):
     """A CLI identity with a home of its own, so its saved watch cursor is its own."""
 
@@ -64,7 +80,7 @@ class HomeCLI(CLIRunner):
             env["SIBYL_AUTH_TOKEN"] = str(self.auth_token)
         env["SIBYL_AGENT"] = self.agent
         result = subprocess.run(  # noqa: S603
-            [*CLI_COMMAND, *args],
+            [*HOME_CLI_COMMAND, *args],
             check=False,
             capture_output=True,
             text=True,
