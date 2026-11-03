@@ -1,3 +1,4 @@
+import asyncio
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
@@ -175,16 +176,25 @@ def _remember_entity(raw_memory_id: str, **metadata: object) -> EntityCreate:
 async def _create_remembered(
     entity: EntityCreate,
     *,
-    claimed: dict[str, object] | None,
+    claimed: dict[str, object] | BaseException | None,
     add_result: object,
     release: AsyncMock | None = None,
+    save_capture: AsyncMock | None = None,
 ) -> tuple[object, AsyncMock, AsyncMock, AsyncMock, AsyncMock, list[dict[str, object]]]:
     org = SimpleNamespace(id=uuid4())
     ctx = stub_auth_context(user_id=uuid4(), organization_id=org.id)
-    add = AsyncMock(return_value=add_result)
-    mark = AsyncMock(return_value=claimed)
+    add = (
+        AsyncMock(side_effect=add_result)
+        if isinstance(add_result, BaseException)
+        else AsyncMock(return_value=add_result)
+    )
+    mark = (
+        AsyncMock(side_effect=claimed)
+        if isinstance(claimed, BaseException)
+        else AsyncMock(return_value=claimed)
+    )
     release = release or AsyncMock(return_value=True)
-    save_capture = AsyncMock(side_effect=lambda _session, *, capture: capture)
+    save_capture = save_capture or AsyncMock(side_effect=lambda _session, *, capture: capture)
 
     with (
         capture_logs() as logs,
@@ -209,7 +219,7 @@ async def _create_remembered(
                 content_session=None,
                 sync=False,
             )
-        except Exception as exc:
+        except BaseException as exc:
             outcome = exc
     return outcome, add, mark, release, save_capture, logs
 
@@ -259,6 +269,84 @@ async def test_a_failed_graph_write_gives_the_claimed_capture_back() -> None:
         release.await_args.kwargs["projected_capture_id"]
         == mark.await_args.kwargs["projected_capture_id"]
     )
+
+
+@pytest.mark.asyncio
+async def test_a_cancelled_graph_write_gives_the_claimed_capture_back() -> None:
+    """Cancellation is not an Exception, and it strands a claim all the same."""
+    outcome, _add, _mark, release, save_capture, _logs = await _create_remembered(
+        _remember_entity("raw-1"),
+        claimed=_claimed_row("raw-1"),
+        add_result=asyncio.CancelledError(),
+    )
+
+    assert isinstance(outcome, asyncio.CancelledError)
+    save_capture.assert_not_awaited()
+    release.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_a_written_row_keeps_its_claim_when_only_the_sidecar_fails() -> None:
+    """The row already names the capture, so freeing it would let a second row bind."""
+    outcome, add, _mark, release, save_capture, _logs = await _create_remembered(
+        _remember_entity("raw-1"),
+        claimed=_claimed_row("raw-1"),
+        add_result=SimpleNamespace(success=True, id="episode_new", message="ok"),
+        save_capture=AsyncMock(side_effect=RuntimeError("content store unavailable")),
+    )
+
+    assert isinstance(outcome, HTTPException)
+    assert add.await_args.kwargs["capture_provenance"]["raw_memory_id"] == "raw-1"
+    save_capture.assert_awaited_once()
+    release.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_a_claim_the_store_cannot_answer_still_writes_the_row() -> None:
+    """Two writes racing for one capture can lose a transaction conflict."""
+    outcome, add, _mark, release, _save, logs = await _create_remembered(
+        _remember_entity("raw-1"),
+        claimed=RuntimeError("transaction conflict"),
+        add_result=SimpleNamespace(success=True, id="episode_new", message="ok"),
+    )
+
+    assert isinstance(outcome, EntityResponse)
+    assert add.await_args.kwargs["capture_provenance"] is None
+    release.assert_not_awaited()
+    assert [entry["reason"] for entry in _refusals(logs)] == ["claim_failed"]
+
+
+@pytest.mark.asyncio
+async def test_a_retried_request_claims_under_the_same_sidecar_id() -> None:
+    """One idempotency key, one sidecar id, so a retry re-claims its own stamp."""
+    from sibyl.api.routes.entity_captures import claim_source_capture
+
+    org_id = uuid4()
+    mark = AsyncMock(return_value=_claimed_row("raw-1"))
+
+    async def claim(principal_id: str, key: str | None):
+        return await claim_source_capture(
+            None,
+            organization_id=org_id,
+            raw_capture_id="raw-1",
+            principal_id=principal_id,
+            graph_metadata={"memory_scope": "private"},
+            archives_capture=True,
+            idempotency_key=key,
+        )
+
+    with patch("sibyl.api.routes.entity_captures.content_runtime.mark_raw_capture_projected", mark):
+        first, retry = await claim("user-1", "key-1"), await claim("user-1", "key-1")
+        other_request = await claim("user-1", "key-2")
+        other_principal = await claim("user-2", "key-1")
+        unkeyed = [await claim("user-1", None), await claim("user-1", None)]
+
+    bindings = [first, retry, other_request, other_principal, *unkeyed]
+    assert all(binding is not None for binding in bindings)
+    sidecar_ids = [binding.sidecar_id for binding in bindings if binding is not None]
+    assert sidecar_ids[0] == sidecar_ids[1]
+    assert len(set(sidecar_ids[1:4])) == 3
+    assert sidecar_ids[4] != sidecar_ids[5]
 
 
 @pytest.mark.asyncio

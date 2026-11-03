@@ -3725,6 +3725,22 @@ async def test_live_correct_on_the_printed_raw_id_retires_the_remembered_row(  #
         )
         assert claimed is not None
         assert claimed["revision"] >= 1
+        reclaim = {
+            "organization_id": organization.id,
+            "raw_capture_id": unprojected["id"],
+            "principal_id": str(author.user_id),
+            "memory_scope": "team",
+            "scope_key": "team-a",
+        }
+        assert await api_content.mark_raw_capture_projected(
+            None, projected_capture_id=released_claim, **reclaim
+        )
+        assert (
+            await api_content.mark_raw_capture_projected(
+                None, projected_capture_id=uuid4(), **reclaim
+            )
+            is None
+        )
         assert await api_content.release_raw_capture_projection(
             None,
             organization_id=organization.id,

@@ -2000,7 +2000,9 @@ async def mark_raw_capture_projected(
     scope and scope key as the graph row, and not yet projected through
     either path (a sidecar here, ``projected_entity_id`` over MCP). Because
     the check and the stamp are a single UPDATE, two writes naming the same
-    capture cannot both win it.
+    capture cannot both win it. The one stamp a claim accepts is its own: a
+    retried request derives the same ``projected_capture_id`` and gets the
+    row back instead of losing it to its own first attempt.
 
     Returns the claimed row's id, source id, revision and metadata, which is
     what the graph row's provenance is built from, or None when any check
@@ -2022,7 +2024,8 @@ async def mark_raw_capture_projected(
             "AND entity_type = 'raw_memory' "
             "AND memory_scope = $memory_scope "
             "AND ($memory_scope = 'private' OR scope_key = $scope_key) "
-            "AND metadata.projected_capture_id IS NONE "
+            "AND (metadata.projected_capture_id IS NONE "
+            "OR metadata.projected_capture_id = $projected_capture_id) "
             "AND metadata.projected_entity_id IS NONE "
             "RETURN uuid, source_id, revision, metadata;",
             raw_capture_id=raw_capture_id,

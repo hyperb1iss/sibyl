@@ -3,7 +3,7 @@
 from collections.abc import Mapping
 from dataclasses import dataclass, replace
 from typing import Annotated, Any
-from uuid import UUID, uuid4
+from uuid import UUID, uuid4, uuid5
 
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -45,6 +45,33 @@ router = APIRouter(
     tags=["entities"],
     dependencies=[Depends(require_org_role(*contracts.READ_ROLES))],
 )
+
+
+# Namespace for sidecar ids derived from a request's idempotency key.
+_SIDECAR_ID_NAMESPACE = UUID("10a0ef8c-2972-4676-9eb2-b9748d62d012")
+
+
+def _claim_sidecar_id(
+    *,
+    organization_id: UUID,
+    principal_id: str,
+    raw_capture_id: str,
+    idempotency_key: str | None,
+) -> UUID:
+    """The sidecar id a claim stamps, stable across retries of one request.
+
+    A request interrupted after its claim leaves the raw row naming this id.
+    Its retry carries the same idempotency key, derives the same id, and the
+    claim accepts its own earlier stamp, so the retry binds and re-archives
+    the sidecar in place rather than writing the row unbound. Without a key
+    there is no retry to recognize, and every claim gets a fresh id.
+    """
+    if not idempotency_key:
+        return uuid4()
+    return uuid5(
+        _SIDECAR_ID_NAMESPACE,
+        "\x1f".join((str(organization_id), principal_id, raw_capture_id, idempotency_key)),
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -107,6 +134,7 @@ async def claim_source_capture(
     principal_id: str | None,
     graph_metadata: Mapping[str, Any],
     archives_capture: bool,
+    idempotency_key: str | None = None,
 ) -> SourceCaptureBinding | None:
     """Prove a caller-named raw memory belongs behind this graph write.
 
@@ -120,7 +148,9 @@ async def claim_source_capture(
     yet projected anywhere. The stamp names the sidecar this request is about
     to archive, so a write that archives no sidecar has nothing to bind with.
 
-    Every refusal still lets the row be written, unbound, and is logged.
+    Every refusal still lets the row be written, unbound, and is logged. That
+    includes a claim the store could not answer: two writes racing for one
+    capture can lose a transaction conflict, and the loser still writes.
     """
 
     def refused(reason: str) -> None:
@@ -135,18 +165,32 @@ async def claim_source_capture(
         return refused("not_a_capture_write")
     if not principal_id:
         return refused("no_authenticated_principal")
-    sidecar_id = uuid4()
+    sidecar_id = _claim_sidecar_id(
+        organization_id=organization_id,
+        principal_id=principal_id,
+        raw_capture_id=raw_capture_id,
+        idempotency_key=idempotency_key,
+    )
     memory_scope = graph_metadata.get("memory_scope")
     scope_key = graph_metadata.get("scope_key")
-    claimed = await content_runtime.mark_raw_capture_projected(
-        session,
-        organization_id=organization_id,
-        raw_capture_id=raw_capture_id,
-        projected_capture_id=sidecar_id,
-        principal_id=principal_id,
-        memory_scope=str(memory_scope) if memory_scope else "",
-        scope_key=str(scope_key) if scope_key else None,
-    )
+    try:
+        claimed = await content_runtime.mark_raw_capture_projected(
+            session,
+            organization_id=organization_id,
+            raw_capture_id=raw_capture_id,
+            projected_capture_id=sidecar_id,
+            principal_id=principal_id,
+            memory_scope=str(memory_scope) if memory_scope else "",
+            scope_key=str(scope_key) if scope_key else None,
+        )
+    except Exception as exc:
+        log.warning(
+            "entity_raw_capture_claim_failed",
+            organization_id=str(organization_id),
+            raw_memory_id=raw_capture_id,
+            error_type=type(exc).__name__,
+        )
+        return refused("claim_failed")
     if claimed is None:
         return refused("capture_not_claimable")
     binding = SourceCaptureBinding(

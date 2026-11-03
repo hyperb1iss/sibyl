@@ -20,6 +20,7 @@ from sibyl.api.errors import (
 )
 from sibyl.api.event_types import WSEvent
 from sibyl.api.idempotency import (
+    idempotency_key,
     replay_idempotent_response,
     save_idempotent_response,
     serialize_idempotent_request,
@@ -210,6 +211,7 @@ async def _write_capture_backed_entity(
     request_metadata: dict[str, Any],
     response_metadata: dict[str, Any],
     verified_project_id: str | None,
+    idempotency_key: str | None,
     write: Callable[..., Awaitable[Any]],
 ) -> Any:
     """Write the graph row, and for a capture its sidecar and its capture link.
@@ -232,13 +234,16 @@ async def _write_capture_backed_entity(
             principal_id=principal_id,
             graph_metadata=response_metadata,
             archives_capture=archives_capture,
+            idempotency_key=idempotency_key,
         )
         if claimed_raw_memory_id
         else None
     )
+    written = False
     try:
         result = await write(capture_provenance=binding.provenance if binding else None)
         _raise_unless_created(result, entity)
+        written = True
         if archives_capture:
             await captures.archive_raw_capture(
                 content_session,
@@ -253,10 +258,13 @@ async def _write_capture_backed_entity(
                 project_id=verified_project_id,
                 capture_id=binding.sidecar_id if binding else None,
             )
-    except Exception:
-        # The claim already folded the raw memory behind a sidecar this request
-        # never wrote, which would hide it from the review queue for good.
-        if binding is not None:
+    except BaseException:
+        # A claim whose row never landed folds the raw memory behind a sidecar
+        # that will not exist, hiding it from the review queue, so it is given
+        # back, cancellation included. Once the row is written it names this
+        # capture, and the claim stays to keep that link exclusive; a retry of
+        # the same request re-claims it and archives the sidecar in place.
+        if binding is not None and not written:
             await captures.release_source_capture(
                 content_session, organization_id=organization_id, binding=binding
             )
@@ -402,6 +410,7 @@ async def create_entity(
         request_metadata=request_metadata,
         response_metadata=merged_metadata,
         verified_project_id=verified_project_id,
+        idempotency_key=idempotency_key(request),
         write=partial(
             _add_with_structure,
             title=entity.name,

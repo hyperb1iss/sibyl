@@ -179,7 +179,10 @@ async def test_stamp_is_idempotent_and_organization_scoped(content_client) -> No
     await _save(raw, projected)
 
     assert await _stamp(org, raw, projected) is True
-    assert await _stamp(org, raw, projected) is False
+    # A retry of the same request names the same sidecar and gets its claim
+    # back; any other sidecar finds the capture taken.
+    assert await _stamp(org, raw, projected) is True
+    assert await _claim(org, raw, uuid4()) is None
 
     stranger = _capture(uuid4(), entity_type="decision", entity_id="decision_ffff")
     other_raw = _capture(org, title="untouched")
