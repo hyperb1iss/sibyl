@@ -202,6 +202,24 @@ def test_a_narrowed_key_is_refused_outside_its_projects(
 
 @pytest.mark.parametrize("call", _ALL_CALLS, ids=_call_id)
 @pytest.mark.parametrize("project_id", [OWN, str(OWN_UUID)])
+def test_a_key_bound_to_no_projects_is_refused_everywhere(
+    harness: _Harness, call: _Call, project_id: str
+) -> None:
+    harness.ctx = stub_auth_context(
+        org_role=OrganizationRole.ADMIN,
+        api_key_id=KEY_ID,
+        api_key_project_ids=frozenset(),
+    )
+
+    status_code, body = harness.send(call, project_id)
+
+    assert status_code == 403
+    assert body == {"detail": "project_scope_denied"}
+    harness.assert_no_runtime_call()
+
+
+@pytest.mark.parametrize("call", _ALL_CALLS, ids=_call_id)
+@pytest.mark.parametrize("project_id", [OWN, str(OWN_UUID)])
 def test_a_narrowed_key_works_on_its_own_project(
     harness: _Harness,
     call: _Call,
@@ -260,65 +278,72 @@ def test_a_session_still_reaches_the_runtime_refusal(harness: _Harness) -> None:
 
 # --- Memory-space binding --------------------------------------------------
 
+_MUTATIONS = [call for call in _ALL_CALLS if call[1] != "GET"]
+_READS = [call for call in _ALL_CALLS if call[1] == "GET"]
+_PRIVATE_ONLY = {api_key_memory_scope_key("private", None)}
 
+
+@pytest.mark.parametrize("call", _MUTATIONS, ids=_call_id)
 @pytest.mark.parametrize("project_id", [OWN, str(OWN_UUID)])
-def test_changing_the_default_needs_the_project_memory_space(
-    harness: _Harness, project_id: str
+def test_a_mutation_needs_the_project_memory_space(
+    harness: _Harness, call: _Call, project_id: str
 ) -> None:
-    harness.ctx = _narrowed_key(memory_scope_keys={api_key_memory_scope_key("private", None)})
+    harness.ctx = _narrowed_key(memory_scope_keys=_PRIVATE_ONLY)
 
-    status_code, body = harness.send(_SETTINGS_PATCH, project_id)
+    status_code, body = harness.send(call, project_id)
 
     assert status_code == 403
     assert body == {"detail": "api_key_memory_space_denied"}
     harness.assert_no_runtime_call()
 
 
-def test_another_projects_memory_space_does_not_count(harness: _Harness) -> None:
+@pytest.mark.parametrize("call", _MUTATIONS, ids=_call_id)
+def test_another_projects_memory_space_does_not_count(harness: _Harness, call: _Call) -> None:
     harness.ctx = stub_auth_context(
         org_role=OrganizationRole.ADMIN,
         api_key_id=KEY_ID,
         api_key_memory_scope_keys={_project_memory_grant(OWN)},
     )
 
-    status_code, body = harness.send(_SETTINGS_PATCH, OTHER)
+    status_code, body = harness.send(call, OTHER)
 
     assert status_code == 403
     assert body == {"detail": "api_key_memory_space_denied"}
     harness.assert_no_runtime_call()
 
 
+@pytest.mark.parametrize("call", _MUTATIONS, ids=_call_id)
 @pytest.mark.parametrize("project_id", [OWN, str(OWN_UUID)])
-def test_a_key_holding_the_project_memory_space_changes_the_default(
-    harness: _Harness, project_id: str
+def test_a_key_holding_the_project_memory_space_can_mutate(
+    harness: _Harness, call: _Call, project_id: str
 ) -> None:
     harness.ctx = _narrowed_key(memory_scope_keys={_project_memory_grant(OWN)})
 
-    status_code, body = harness.send(_SETTINGS_PATCH, project_id)
+    status_code, _body = harness.send(call, project_id)
 
     assert status_code == 200
-    assert isinstance(body, dict)
-    assert body["project_id"] == OWN
-    harness.runtime["update_project_memory_settings"].assert_awaited_once()
+    runtime = harness.runtime_for(call)
+    runtime.assert_awaited_once()
+    assert runtime.await_args.kwargs["project_id"] == project_id
 
 
-@pytest.mark.parametrize(
-    "call",
-    [call for call in _ALL_CALLS if call != _SETTINGS_PATCH],
-    ids=_call_id,
-)
-def test_memory_binding_leaves_reads_and_membership_alone(harness: _Harness, call: _Call) -> None:
-    harness.ctx = _narrowed_key(memory_scope_keys={api_key_memory_scope_key("private", None)})
+@pytest.mark.parametrize("call", _READS, ids=_call_id)
+def test_memory_binding_leaves_reads_alone(harness: _Harness, call: _Call) -> None:
+    harness.ctx = _narrowed_key(memory_scope_keys=_PRIVATE_ONLY)
+
     status_code, _body = harness.send(call, OWN)
 
     assert status_code == 200
     harness.runtime_for(call).assert_awaited_once()
 
 
-def test_project_binding_is_checked_before_the_memory_binding(harness: _Harness) -> None:
+@pytest.mark.parametrize("call", _MUTATIONS, ids=_call_id)
+def test_project_binding_is_checked_before_the_memory_binding(
+    harness: _Harness, call: _Call
+) -> None:
     harness.ctx = _narrowed_key(memory_scope_keys={_project_memory_grant(OTHER)})
 
-    status_code, body = harness.send(_SETTINGS_PATCH, OTHER)
+    status_code, body = harness.send(call, OTHER)
 
     assert status_code == 403
     assert body == {"detail": "project_scope_denied"}

@@ -306,8 +306,9 @@ def require_api_key_project_memory_grant(
 ) -> Callable[..., Awaitable[None]]:
     """Require a memory-bound API key to hold the project's memory space.
 
-    For routes that decide where project memory lands. Session callers and
-    keys without a memory-space binding pass untouched.
+    For routes that change who reaches a project's memory or where its
+    captures land. Session callers and keys without a memory-space binding
+    pass untouched.
     """
 
     async def dependency(
