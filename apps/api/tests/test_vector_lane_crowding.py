@@ -394,7 +394,9 @@ def lane_clock(monkeypatch: pytest.MonkeyPatch):
     from sibyl_core.services import embedding_lane_readiness as readiness
 
     clock = [5000.0]
-    monkeypatch.setattr(readiness.time, "monotonic", lambda: clock[0])
+    # Patch the module's own name, never time.monotonic itself: asyncio's loop
+    # clock reads time.monotonic, so freezing it parks every timer in the test.
+    monkeypatch.setattr(readiness, "monotonic", lambda: clock[0])
 
     def advance() -> None:
         clock[0] += 31
