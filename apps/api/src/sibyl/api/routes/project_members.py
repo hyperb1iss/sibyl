@@ -9,11 +9,16 @@ from fastapi import APIRouter, BackgroundTasks, Depends, Request
 from pydantic import BaseModel, Field
 
 from sibyl.api.websocket import broadcast_event
+from sibyl.auth.authorization import require_api_key_project_scope
 from sibyl.auth.dependencies import get_current_org_role, get_current_organization, get_current_user
 from sibyl.persistence import organization_runtime
 from sibyl_core.auth import AuthOrganization, AuthUser, ProjectRole
 
-router = APIRouter(prefix="/projects/{project_id}/members", tags=["project-members"])
+router = APIRouter(
+    prefix="/projects/{project_id}/members",
+    tags=["project-members"],
+    dependencies=[Depends(require_api_key_project_scope())],
+)
 
 
 class MemberAddRequest(BaseModel):

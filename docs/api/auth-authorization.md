@@ -201,6 +201,10 @@ cross tenants.
 
 ## Project Members API
 
+An API key bound to projects can use these routes only on its own projects. Any other project
+returns 403 `project_scope_denied`, whatever role the key's owner holds there. See
+[auth-api-keys.md](./auth-api-keys.md) for key bindings.
+
 ### Add Member
 
 ```http
