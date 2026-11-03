@@ -26,6 +26,15 @@ bindings further restrict which projects and memory scopes the key can read or w
 the access scope. A key with no project or memory-space binding inherits the creating user's full
 access within the organization.
 
+Project administration follows the same binding. A key bound to projects can read and change the
+settings and members of those projects only; any other project returns 403 `project_scope_denied`,
+whether or not it exists, even when the key's owner is an organization admin or the project owner.
+Changing a project's default write scope decides where every writer's unscoped captures land, and
+changing its members decides who reads and writes its memory. A key bound to memory spaces therefore
+also needs that project's memory space to change its settings or members; without it the request
+returns 403 `api_key_memory_space_denied`. Reading settings and listing members need only the
+project binding.
+
 ### Deleted scope targets and upgrades
 
 Deleting a bound project or memory space removes that grant. The key keeps its restriction,

@@ -7,13 +7,21 @@ from typing import Literal
 from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel, Field
 
+from sibyl.auth.authorization import (
+    require_api_key_project_memory_grant,
+    require_api_key_project_scope,
+)
 from sibyl.auth.dependencies import get_current_org_role, get_current_organization, get_current_user
 from sibyl.persistence import organization_runtime
 from sibyl.persistence.organization_common import ProjectMemorySettings
 from sibyl_core.auth import AuthOrganization, AuthUser, OrganizationRole
 from sibyl_core.models.memory_scope import MemoryScope
 
-router = APIRouter(prefix="/projects/{project_id}/settings", tags=["project-settings"])
+router = APIRouter(
+    prefix="/projects/{project_id}/settings",
+    tags=["project-settings"],
+    dependencies=[Depends(require_api_key_project_scope())],
+)
 
 ProjectDefaultMemoryScope = Literal["private", "project"]
 
@@ -58,7 +66,13 @@ async def get_project_settings(
     return _settings_response(settings)
 
 
-@router.patch("", response_model=ProjectSettingsResponse)
+# The default decides where every writer's unscoped captures land, so a key
+# bound to memory spaces must also hold this project's space to change it.
+@router.patch(
+    "",
+    response_model=ProjectSettingsResponse,
+    dependencies=[Depends(require_api_key_project_memory_grant())],
+)
 async def update_project_settings(
     request: Request,
     project_id: str,

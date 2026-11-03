@@ -18,6 +18,7 @@ from uuid import UUID
 import structlog
 from fastapi import Depends, HTTPException, Request, status
 
+from sibyl.auth.api_key_common import api_key_memory_scope_key
 from sibyl.auth.context import AuthContext
 from sibyl.auth.dependencies import get_auth_context
 from sibyl.persistence.auth_runtime import (
@@ -27,6 +28,7 @@ from sibyl.persistence.auth_runtime import (
     verify_entity_project_access as verify_runtime_entity_project_access,
 )
 from sibyl_core.auth import ProjectRole
+from sibyl_core.models.memory_scope import MemoryScope
 
 log = structlog.get_logger()
 
@@ -235,6 +237,99 @@ def require_project_admin(project_id_param: str = "project_id", use_graph_id: bo
         project_id_param=project_id_param,
         use_graph_id=use_graph_id,
     )
+
+
+# =============================================================================
+# API-Key Narrowing for Project Administration Routes
+# =============================================================================
+
+
+async def _path_graph_project_id(ctx: AuthContext, project_id: str | None) -> str | None:
+    """Graph id of a project named in a path by graph id or by record UUID.
+
+    A graph id is returned as given. A UUID resolves through the project record
+    in the caller's organization; a value that names no project resolves to
+    None, so callers refuse an unknown project and an excluded one alike.
+    """
+    if not project_id:
+        return None
+    if project_id.startswith("project_"):
+        return project_id
+    if ctx.organization is None:
+        return None
+    try:
+        project_uuid = UUID(project_id)
+    except ValueError:
+        return None
+    try:
+        project = await get_project_record_by_id(
+            organization_id=ctx.organization.id,
+            project_id=project_uuid,
+        )
+    except HTTPException as exc:
+        if exc.status_code == status.HTTP_404_NOT_FOUND:
+            return None
+        raise
+    return str(project.graph_project_id or "").strip() or None
+
+
+def require_api_key_project_scope(
+    project_id_param: str = "project_id",
+) -> Callable[..., Awaitable[None]]:
+    """Refuse a request whose project falls outside the API key's project binding.
+
+    Session callers and unbound keys pass untouched. A bound key gets the same
+    403 the search and capture routes give for a project outside its grants,
+    whether the project exists or not, before any role lookup runs.
+    """
+
+    async def dependency(
+        request: Request,
+        ctx: AuthContext = Depends(get_auth_context),
+    ) -> None:
+        allowed = ctx.api_key_project_ids
+        if allowed is None:
+            return
+        project_id = _request_project_id(request, project_id_param)
+        graph_project_id = await _path_graph_project_id(ctx, project_id)
+        if graph_project_id is None or graph_project_id not in allowed:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="project_scope_denied",
+            )
+
+    return dependency
+
+
+def require_api_key_project_memory_grant(
+    project_id_param: str = "project_id",
+) -> Callable[..., Awaitable[None]]:
+    """Require a memory-bound API key to hold the project's memory space.
+
+    For routes that change who reaches a project's memory or where its
+    captures land. Session callers and keys without a memory-space binding
+    pass untouched.
+    """
+
+    async def dependency(
+        request: Request,
+        ctx: AuthContext = Depends(get_auth_context),
+    ) -> None:
+        allowed = ctx.api_key_memory_scope_keys
+        if allowed is None:
+            return
+        project_id = _request_project_id(request, project_id_param)
+        graph_project_id = await _path_graph_project_id(ctx, project_id)
+        if (
+            graph_project_id is None
+            or api_key_memory_scope_key(MemoryScope.PROJECT.value, graph_project_id) not in allowed
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="api_key_memory_space_denied",
+            )
+
+    return dependency
 
 
 # =============================================================================

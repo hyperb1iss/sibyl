@@ -195,6 +195,9 @@ unscoped captures with everyone who can read the project, which is the whole org
 project with organization visibility. Writers need contributor access for a capture to land in the
 project; anyone else's capture still lands private. An explicit `--scope` on `remember` always wins.
 
+An API key bound to projects can read or change this setting only for its own projects. A key bound
+to memory spaces also needs the project's memory space to change it.
+
 ### Example
 
 ```bash

@@ -201,6 +201,11 @@ cross tenants.
 
 ## Project Members API
 
+An API key bound to projects can use these routes only on its own projects. Any other project
+returns 403 `project_scope_denied`, whatever role the key's owner holds there. A key bound to memory
+spaces also needs the project's memory space to add, update or remove members (403
+`api_key_memory_space_denied`). See [auth-api-keys.md](./auth-api-keys.md) for key bindings.
+
 ### Add Member
 
 ```http

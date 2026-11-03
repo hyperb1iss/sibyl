@@ -9,11 +9,23 @@ from fastapi import APIRouter, BackgroundTasks, Depends, Request
 from pydantic import BaseModel, Field
 
 from sibyl.api.websocket import broadcast_event
+from sibyl.auth.authorization import (
+    require_api_key_project_memory_grant,
+    require_api_key_project_scope,
+)
 from sibyl.auth.dependencies import get_current_org_role, get_current_organization, get_current_user
 from sibyl.persistence import organization_runtime
 from sibyl_core.auth import AuthOrganization, AuthUser, ProjectRole
 
-router = APIRouter(prefix="/projects/{project_id}/members", tags=["project-members"])
+router = APIRouter(
+    prefix="/projects/{project_id}/members",
+    tags=["project-members"],
+    dependencies=[Depends(require_api_key_project_scope())],
+)
+
+# Membership decides who reads and writes the project's memory, so a key bound
+# to memory spaces must also hold this project's space to change it.
+_MEMORY_GRANT = [Depends(require_api_key_project_memory_grant())]
 
 
 class MemberAddRequest(BaseModel):
@@ -58,7 +70,7 @@ async def list_members(
     return {"members": result.members, "can_manage": result.can_manage}
 
 
-@router.post("")
+@router.post("", dependencies=_MEMORY_GRANT)
 async def add_member(
     request: Request,
     project_id: str,
@@ -92,7 +104,7 @@ async def add_member(
     return {"user_id": str(membership.user_id), "role": membership.role.value}
 
 
-@router.patch("/{user_id}")
+@router.patch("/{user_id}", dependencies=_MEMORY_GRANT)
 async def update_member_role(
     request: Request,
     project_id: str,
@@ -127,7 +139,7 @@ async def update_member_role(
     return {"user_id": str(membership.user_id), "role": membership.role.value}
 
 
-@router.delete("/{user_id}")
+@router.delete("/{user_id}", dependencies=_MEMORY_GRANT)
 async def remove_member(
     request: Request,
     project_id: str,
