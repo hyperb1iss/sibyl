@@ -687,6 +687,7 @@ async def restore_backup(
             skip_existing=skip_existing,
             clean=clean,
             entities={identity for _, identity in plan.present},
+            retired={identity for _, identity in plan.absent},
         )
         writing = True
         await apply_source_restore(driver.execute_query, plan)

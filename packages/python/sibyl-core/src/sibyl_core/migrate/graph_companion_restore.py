@@ -287,12 +287,15 @@ async def plan_companions(
     skip_existing: bool,
     clean: bool,
     entities: set[str],
+    retired: set[str],
 ) -> CompanionRestoreWrites:
     """Decide every companion write and check every endpoint before any write.
 
     ``entities`` are the archive entities that hold a row once the sources
-    land. An endpoint outside them must already be in the destination, and a
-    clean restore deletes every entity the archive does not carry.
+    land and ``retired`` the archive entities that do not, whatever the
+    destination holds for them now. Any other endpoint must already be in the
+    destination, and a clean restore deletes every entity the archive does
+    not carry.
     """
     organization_id = plan.organization_id
     writes: list[_CompanionWrite] = []
@@ -340,7 +343,7 @@ async def plan_companions(
     present_episodes = {row["uuid"] for row in plan.episodes}
     if not clean:
         present |= await _destination_identities(
-            client, "entity", endpoints - present, organization_id
+            client, "entity", endpoints - present - retired, organization_id
         )
         present_episodes |= await _destination_identities(
             client, "episode", sources - present_episodes, organization_id

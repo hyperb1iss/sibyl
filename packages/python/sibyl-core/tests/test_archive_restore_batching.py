@@ -9,7 +9,7 @@ from sibyl_core.backends.surreal.schema import EMBEDDING_DIM
 from sibyl_core.models.entities import Entity, EntityType, Relationship, RelationshipType
 from sibyl_core.services import source_archive_store
 from sibyl_core.tools.admin import create_backup, restore_backup
-from tests.test_graph_archive_atomicity import STAMP, episode
+from tests.test_graph_archive_atomicity import STAMP, episode, fingerprint
 from tests.test_reflection_identity import content_store as content_store
 from tests.test_source_integrity_archive import destination as destination
 from tests.test_source_integrity_archive import runtime as runtime
@@ -229,3 +229,44 @@ async def test_clean_raw_restore_deletes_absent_sources_a_page_at_a_time(runtime
         deletes = [len(params["records"]) for query, params in sent if "DELETE $record" in query]
         assert sum(deletes) == 5
         assert max(deletes) <= BATCH
+
+
+async def test_merge_refuses_an_edge_to_an_entity_the_archive_retires(
+    runtime, destination, monkeypatch
+):
+    for identity in ("keeper", "retired"):
+        await runtime.entity_manager.create_direct(
+            Entity(id=identity, entity_type=EntityType.TOPIC, name=identity)
+        )
+    monkeypatch.setattr("sibyl_core.tools.admin.get_graph_runtime", AsyncMock(return_value=runtime))
+    first = await create_backup(organization_id=runtime.client.group_id)
+    assert first.success, first.message
+    monkeypatch.setattr(
+        "sibyl_core.tools.admin.get_graph_runtime", AsyncMock(return_value=destination)
+    )
+    seeded = await restore_backup(first.backup_data, organization_id=runtime.client.group_id)
+    assert seeded.success, seeded.errors
+    # The source then deletes the entity, so the next archive retires it, while
+    # an edge in that archive still points at it.
+    assert await runtime.entity_manager.delete("retired")
+    monkeypatch.setattr("sibyl_core.tools.admin.get_graph_runtime", AsyncMock(return_value=runtime))
+    archive = (await create_backup(organization_id=runtime.client.group_id)).backup_data
+    archive.relationships.append(
+        Relationship(
+            id="edge-to-retired",
+            source_id="keeper",
+            target_id="retired",
+            relationship_type=RelationshipType.RELATED_TO,
+        ).model_dump(mode="json")
+    )
+    archive.relationship_count = len(archive.relationships)
+    monkeypatch.setattr(
+        "sibyl_core.tools.admin.get_graph_runtime", AsyncMock(return_value=destination)
+    )
+    before = await fingerprint(destination.client)
+
+    result = await restore_backup(archive, organization_id=runtime.client.group_id)
+
+    assert not result.success
+    assert any("relationship endpoint is missing" in error for error in result.errors)
+    assert await fingerprint(destination.client) == before

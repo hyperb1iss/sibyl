@@ -419,10 +419,26 @@ async def apply_cleanup(
 
 
 def interrupted_restore(error: BaseException) -> str:
-    """Describe a restore that failed after its first committed write."""
+    """Describe a restore that failed after its first committed write.
+
+    A lost connection or a concurrent change is worth retrying: the next run
+    replans against the destination as it stands. Any other refusal comes
+    back the same way until its cause is resolved, and the message says so.
+    """
+    from sibyl_core.backends.surreal.connection import _is_transient_connection_error
+
+    if (
+        isinstance(error, ConnectionError | TimeoutError)
+        or _is_transient_connection_error(error)
+        or "destination changed before restore" in str(error)
+    ):
+        return (
+            "restore stopped partway; the whole units already written are kept, and "
+            f"running the same import again finishes it: {error}"
+        )
     return (
-        "restore stopped partway; the whole units already written are kept, and "
-        f"running the same import again finishes it: {error}"
+        "restore refused partway; the whole units already written are kept, and the "
+        f"import is refused the same way until the reported conflict is resolved: {error}"
     )
 
 
@@ -475,8 +491,11 @@ class SourceRestorePlan:
     batches: list[_UnitBatch]
     restored: list[str]
     conflicts: list[dict[str, str]]
-    # Archive identities that have a source row once the restore lands.
+    # Archive identities that have a source row once the restore lands, and
+    # the ones that do not (deleted or refused here, whatever the destination
+    # holds for them now).
     present: set[tuple[str, str]]
+    absent: set[tuple[str, str]] = field(default_factory=set)
 
 
 async def plan_source_restore(
@@ -598,6 +617,8 @@ async def plan_source_restore(
                 batch.association_writes.append(decision.association)
             if decision.write is not None or (previous_row is not None and decision.delete is None):
                 plan.present.add(key)
+            else:
+                plan.absent.add(key)
         if batch.changes_anything():
             plan.batches.append(batch)
 

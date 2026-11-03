@@ -491,14 +491,19 @@ after correcting the cause. The loader accepts only Sibyl archives and API backu
 raw database dumps or archives from other memory systems.
 
 The content and graph stages each plan before they write, then write in bounded transactions, so no
-request or transaction grows with the organization. An archive the destination refuses outright (a
-foreign record at a source's key, a row whose identity another organization holds, a relationship or
-mention whose endpoint is missing) fails before anything is written. Raw captures land first, with
-their source history; the content stage's history checks (retained operation history, revoked
-validation or dream sources) run as those rows are written. The graph stage writes entities with
-their source history, then episodes, relationships and mentions. A failure partway leaves whole
-sources behind, never a row without its history, and running the same import again finishes the
-restore: sources already restored are recognized and skipped.
+request or transaction grows with the organization. An archive the destination refuses from its
+current state (a foreign record at a source's key, a row whose identity another organization holds,
+a row that conflicts with retained operation, validation or dream history, a relationship or mention
+whose endpoint is missing) fails before anything is written. Raw captures land before the auxiliary
+rows that refer to them, and the validation and dream checks that read those captures run as their
+rows are written. The graph stage writes entities with their source history, then episodes,
+relationships and mentions. A clean restore deletes only the rows it planned to delete, so a row
+written in the destination after planning is kept.
+
+A failure partway leaves whole sources behind, never a row without its history. After a lost
+connection or a concurrent change, running the same import again finishes the restore: sources
+already restored are recognized and skipped. A refusal partway, such as a validation record whose
+source the destination revoked, repeats until the reported conflict is resolved.
 
 ### Completed validation receipts
 

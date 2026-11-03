@@ -581,6 +581,8 @@ class _AuxiliaryRow:
     identity: str
     statement: str
     parameters: dict[str, object]
+    # Read-only conflict check against retained destination history, if any.
+    check: str | None = None
 
 
 async def _check_auxiliary_ownership(client, rows: list[_AuxiliaryRow], organization_id: str):
@@ -603,6 +605,17 @@ async def _check_auxiliary_ownership(client, rows: list[_AuxiliaryRow], organiza
                 raise TypeError("archive auxiliary ownership read returned an invalid shape")
             if any(owner != organization_id for owner in owners):
                 raise ValueError("archive identity belongs to another organization")
+
+
+async def _check_auxiliary_history(client, rows: list[_AuxiliaryRow]) -> None:
+    """Refuse, before any write, an archive row that conflicts with retained history."""
+    from sibyl_core.services.source_archive_store import restore_batches
+
+    for batch in restore_batches([row for row in rows if row.check is not None]):
+        parameters: dict[str, object] = {}
+        for row in batch:
+            parameters.update(row.parameters)
+        await client.execute_query("\n".join(str(row.check) for row in batch), **parameters)
 
 
 async def _export_surreal_content_archive_payload(
@@ -995,6 +1008,43 @@ async def _filter_legacy_source_fields(client, integrity, scope):
     ), dropped_fields
 
 
+def _existing_rows_sql(spec: ContentArchiveTableSpec) -> str:
+    return (
+        f"LET $existing = SELECT * OMIT id FROM {spec.name} "  # noqa: S608
+        f"WHERE {spec.target_identity_field} = $identity;\n"
+    )
+
+
+def _retained_comparison(
+    spec: ContentArchiveTableSpec, record: dict[str, object], *, legacy: bool
+) -> tuple[str, str]:
+    """The record conversion and the test that it differs from retained history."""
+    fields = ["created_at"] + (
+        ["admitted_at"] if spec.name == "eval_attempts" and "admitted_at" in record else []
+    )
+    converted = ", ".join(
+        f"IF $record.{field} != NONE AND $record.{field} != NULL "
+        f"{{ type::datetime($record.{field}) }} "
+        f"ELSE {{ NONE }} AS {field}"
+        for field in fields
+    )
+    conversion = f"LET $record = (SELECT *, {converted} FROM ONLY $record);\n"  # noqa: S608
+    comparison = "$existing != [$record]"
+    omitted = []
+    if spec.name == "memory_validation_executions":
+        # Dependency guards advance the destination's conflict witness.
+        omitted.append("promotion_write_witness")
+    if legacy and "created_at" not in record:
+        omitted.append("created_at")
+    if omitted:
+        fields_to_omit = ", ".join(omitted)
+        comparison = (
+            f"(SELECT * OMIT {fields_to_omit} FROM $existing) "  # noqa: S608
+            f"!= (SELECT * OMIT {fields_to_omit} FROM [$record])"
+        )
+    return conversion, comparison
+
+
 def _auxiliary_restore_statement(
     spec: ContentArchiveTableSpec,
     organization_id: str | None,
@@ -1003,10 +1053,7 @@ def _auxiliary_restore_statement(
     legacy: bool = False,
 ) -> str:
     """Preserve operation history and reject foreign identities in the same transaction."""
-    existing = (
-        f"LET $existing = SELECT * OMIT id FROM {spec.name} "  # noqa: S608
-        f"WHERE {spec.target_identity_field} = $identity;\n"
-    )
+    existing = _existing_rows_sql(spec)
     ownership_guard = ""
     if organization_id is not None:
         ownership_guard = (
@@ -1020,29 +1067,7 @@ def _auxiliary_restore_statement(
         return existing + ownership_guard + archive_dream_restore_statement(spec.name, record)
     conversion = ""
     if spec.name in _RETAINED_OPERATION_TABLES:
-        fields = ["created_at"] + (
-            ["admitted_at"] if spec.name == "eval_attempts" and "admitted_at" in record else []
-        )
-        converted = ", ".join(
-            f"IF $record.{field} != NONE AND $record.{field} != NULL "
-            f"{{ type::datetime($record.{field}) }} "
-            f"ELSE {{ NONE }} AS {field}"
-            for field in fields
-        )
-        conversion = f"LET $record = (SELECT *, {converted} FROM ONLY $record);\n"  # noqa: S608
-        comparison = "$existing != [$record]"
-        omitted = []
-        if spec.name == "memory_validation_executions":
-            # Dependency guards advance the destination's conflict witness.
-            omitted.append("promotion_write_witness")
-        if legacy and "created_at" not in record:
-            omitted.append("created_at")
-        if omitted:
-            fields_to_omit = ", ".join(omitted)
-            comparison = (
-                f"(SELECT * OMIT {fields_to_omit} FROM $existing) "  # noqa: S608
-                f"!= (SELECT * OMIT {fields_to_omit} FROM [$record])"
-            )
+        conversion, comparison = _retained_comparison(spec, record, legacy=legacy)
         write = (
             f"IF array::len($existing) = 0 {{ {spec.create_sql} }} ELSE {{ "
             f"IF {comparison} {{ "
@@ -1055,6 +1080,30 @@ def _auxiliary_restore_statement(
 
         conversion += validation_archive_guard(spec.name, record)
     return f"{conversion}{existing}{ownership_guard}{write}"
+
+
+def _auxiliary_history_check(
+    spec: ContentArchiveTableSpec, record: dict[str, object], *, legacy: bool
+) -> str | None:
+    """Read-only form of the write's conflict with history the destination keeps.
+
+    It reads nothing the restore itself writes, so it runs before the first
+    write. The validation and dream source checks read restored captures and
+    stay with the write.
+    """
+    existing = _existing_rows_sql(spec)
+    if spec.name == "dream_source_checkpoints":
+        return (
+            existing + "IF array::len($existing) > 0 AND $existing != [$record] { "
+            "THROW 'Dream archive conflicts with retained stage'; };"
+        )
+    if spec.name not in _RETAINED_OPERATION_TABLES:
+        return None
+    conversion, comparison = _retained_comparison(spec, record, legacy=legacy)
+    return (
+        f"{conversion}{existing}IF array::len($existing) > 0 AND ({comparison}) {{ "
+        "THROW 'archive conflicts with retained operation history'; };"
+    )
 
 
 def _ordered_validation_history(rows):
@@ -1149,19 +1198,22 @@ async def _prepare_auxiliary_content_restore(client, tables, organization_id, *,
                 if len(errors) < 50:
                     errors.append(f"{spec.name} invalid archive row ({type(exc).__name__})")
                 continue
+            bind = (
+                f"FOR $archive_once IN [true] {{ LET $record = $archive_record_{index}; "
+                f"LET $identity = $archive_identity_{index}; "
+            )
+            check = _auxiliary_history_check(spec, record, legacy=legacy)
             restores.append(
                 _AuxiliaryRow(
                     table=spec.name,
                     identity_field=spec.target_identity_field,
                     identity=identity,
-                    statement=(
-                        f"FOR $archive_once IN [true] {{ LET $record = $archive_record_{index}; "
-                        f"LET $identity = $archive_identity_{index}; {statement} }};"
-                    ),
+                    statement=f"{bind}{statement} }};",
                     parameters={
                         f"archive_record_{index}": record,
                         f"archive_identity_{index}": identity,
                     },
+                    check=None if check is None else f"{bind}{check} }};",
                 )
             )
             rows_restored += 1
@@ -1206,6 +1258,7 @@ async def _restore_content_sources_and_rows(
     )
     if organization_id is not None:
         await _check_auxiliary_ownership(client, auxiliary_restores, organization_id)
+    await _check_auxiliary_history(client, auxiliary_restores)
     cleanup = await _plan_auxiliary_cleanup(client, organization_id) if clean else []
     await asyncio.to_thread(validation_receipt_archive.publish, pending_receipts)
     # The auxiliary wipe goes first: deleting a raw capture also deletes the

@@ -305,3 +305,49 @@ async def test_clean_restore_wipes_edges_of_captures_it_also_deletes(archive_sto
     assert result.success, result.errors
     assert await destination.execute_query("SELECT uuid FROM raw_captures;") == [{"uuid": "kept"}]
     assert await destination.execute_query("SELECT uuid FROM supersedes;") == []
+
+
+@pytest.mark.parametrize("clean", [False, True])
+async def test_retained_history_conflict_refuses_before_any_write(
+    archive_stores, monkeypatch, clean
+):
+    source, destination = archive_stores
+    org, attempt = str(uuid4()), str(uuid4())
+    record = {
+        "uuid": attempt,
+        "organization_id": org,
+        "experiment_id": "experiment",
+        "attempt_id": "attempt",
+        "assignment_sha256": "a" * 64,
+        "assignment_json": "{}",
+    }
+    for index in range(3):
+        await raw(source, org, f"incoming-{index}")
+    await source.execute_query("CREATE eval_attempts CONTENT $record;", record=record)
+    # The destination keeps a different history for the same attempt, plus a
+    # capture and a cursor a clean restore would otherwise delete first.
+    await raw(destination, org, "must-survive")
+    await destination.execute_query(
+        "CREATE eval_attempts CONTENT $record;", record={**record, "assignment_json": "[]"}
+    )
+    await destination.execute_query(
+        "CREATE content_changefeed_cursors CONTENT $record;",
+        record={
+            "uuid": str(uuid4()),
+            "organization_id": org,
+            "table_name": "raw_captures",
+            "consumer_name": "fixture",
+            "versionstamp": 7,
+        },
+    )
+    monkeypatch.setattr(content_archive, "build_surreal_content_client", lambda: source)
+    payload = await content_archive.export_content_archive_payload(org)
+    monkeypatch.setattr(content_archive, "build_surreal_content_client", lambda: destination)
+    before = await fingerprint(destination)
+
+    result = await content_archive.restore_content_archive_payload(payload, clean=clean)
+
+    assert not result.success
+    assert any("retained operation history" in error for error in result.errors)
+    assert not any("again finishes" in error for error in result.errors)
+    assert await fingerprint(destination) == before
