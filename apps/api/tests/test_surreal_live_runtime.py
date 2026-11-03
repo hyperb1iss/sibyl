@@ -32,6 +32,7 @@ from sibyl_core.backends.surreal.schema import (
 from sibyl_core.backends.surreal.schema_version import (
     GRAPH_SCHEMA_CURRENT_VERSION,
     GRAPH_SCHEMA_NAME,
+    SCHEMA_COMPATIBILITY_LEVEL,
     get_schema_version,
     record_schema_version,
 )
@@ -906,6 +907,51 @@ async def test_live_graph_bootstrap_logs_no_failed_queries(starting_point: str) 
                 await _drop_surreal_namespace(client.namespace)
         else:
             await _drop_surreal_namespace(client.namespace)
+
+
+@pytest.mark.asyncio
+async def test_live_bootstraps_hold_databases_at_compatibility_level_3() -> None:
+    # SurrealDB 4 starts a new datastore's databases at level 4, which refuses
+    # the widen, backfill and narrow field changes the migrations make once a
+    # table holds rows. A 3.x server reports no level at all.
+    namespace = f"compatibility_level_{uuid4().hex}"
+    graph = SurrealGraphClient(
+        group_id=str(uuid4()),
+        url=_live_surreal_url(),
+        username=_surreal_username(),
+        password=_surreal_password(),
+    )
+    content = SurrealContentClient(
+        url=_live_surreal_url(),
+        username=_surreal_username(),
+        password=_surreal_password(),
+        namespace=namespace,
+        database="content",
+    )
+    auth = SurrealAuthClient(
+        url=_live_surreal_url(),
+        username=_surreal_username(),
+        password=_surreal_password(),
+        namespace=namespace,
+        database="auth",
+    )
+    try:
+        await bootstrap_schema(graph)
+        await bootstrap_content_schema(content)
+        await bootstrap_auth_schema(auth)
+        for client in (graph, content, auth):
+            info = await client.execute_query("INFO FOR DB;")
+            assert isinstance(info, dict)
+            assert (
+                info.get("compatibility", SCHEMA_COMPATIBILITY_LEVEL) == SCHEMA_COMPATIBILITY_LEVEL
+            )
+    finally:
+        for client in (graph, content, auth):
+            await client.close()
+        with suppress(Exception):
+            await _drop_surreal_namespace(graph.namespace)
+        with suppress(Exception):
+            await _drop_surreal_namespace(namespace)
 
 
 @pytest.mark.asyncio
