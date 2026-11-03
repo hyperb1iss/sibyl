@@ -8,6 +8,7 @@ names one; identity comes from signed tokens resolved by the native resolver.
 from __future__ import annotations
 
 import asyncio
+import base64
 import os
 from collections.abc import AsyncIterator, Iterator
 from contextlib import asynccontextmanager
@@ -20,6 +21,8 @@ import pytest
 from fastapi import FastAPI, Request
 from pydantic import SecretStr
 
+from sibyl.api.net_events import net_wakeup_subscriber
+from sibyl.api.pubsub import get_pubsub
 from sibyl.api.routes import net as net_routes
 from sibyl.auth.dependencies import _api_key_claims
 from sibyl.auth.jwt import create_access_token, verify_access_token
@@ -148,6 +151,8 @@ async def org(
         return await call_next(request)
 
     app.include_router(net_routes.router, prefix="/api")
+    # The server subscribes this at startup; posts wake long-polls through it.
+    await get_pubsub().subscribe(net_wakeup_subscriber)
     runtime = SimpleNamespace(
         auth=auth,
         content=content,
@@ -428,9 +433,10 @@ async def test_malformed_posts_are_refused(org: SimpleNamespace, body: dict[str,
     "params",
     [
         {"since": "garbage"},
-        # Calendar-invalid instants used to reach the engine and 500 after retries.
-        {"since": NetCursor(created_at="2026-13-45T00:00:00Z", uuid="").encode()},
-        {"since": NetCursor(created_at="2026-02-30T10:00:00.123456789Z", uuid="").encode()},
+        # Cursors in the older ISO-instant format, off the calendar or on it.
+        {"since": base64.urlsafe_b64encode(b"2026-13-45T00:00:00Z|").decode().rstrip("=")},
+        {"since": base64.urlsafe_b64encode(b"2026-11-02T10:00:00.5Z|").decode().rstrip("=")},
+        {"since": NetCursor(created_ns=2**63, uuid="").encode()},
         {"channel": [f"c{index}" for index in range(33)]},
         {"channel": "not a channel"},
         {"thread": "bell\x07"},
@@ -706,6 +712,67 @@ async def test_a_watcher_starts_from_now_and_long_polls(org: SimpleNamespace) ->
     resumed = await feed(org, org.grace, since=waited.json()["next_since"])
     assert resumed.json()["messages"] == []
     assert resumed.json()["next_since"] == waited.json()["next_since"]
+
+
+@pytest.fixture
+def feed_reads(monkeypatch: pytest.MonkeyPatch) -> list[float]:
+    """When each feed query ran, as the route issued them."""
+    reads: list[float] = []
+    real = net_routes.read_net_feed
+
+    async def counted(**kwargs: object):
+        reads.append(asyncio.get_running_loop().time())
+        return await real(**kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(net_routes, "read_net_feed", counted)
+    return reads
+
+
+async def test_a_post_wakes_a_long_poll_without_polling(
+    org: SimpleNamespace, feed_reads: list[float]
+) -> None:
+    start = await feed(org, org.grace, channel="#reviews", limit=0)
+    since = start.json()["next_since"]
+    feed_reads.clear()
+
+    async def post_later() -> float:
+        await asyncio.sleep(0.5)
+        assert (await post(org, org.ada, channel="#reviews", body="news")).status_code == 201
+        return asyncio.get_running_loop().time()
+
+    begun = asyncio.get_running_loop().time()
+    waited, posted_at = await asyncio.gather(
+        feed(org, org.grace, channel="#reviews", since=since, wait=20), post_later()
+    )
+    finished = asyncio.get_running_loop().time()
+
+    assert [m["body"] for m in waited.json()["messages"]] == ["news"]
+    # One read before the wait, one once the message settled: no
+    # once-a-second polling in between.
+    assert len(feed_reads) == 2
+    assert SETTLE_SECONDS <= finished - posted_at < SETTLE_SECONDS + 2
+    assert finished - begun < SETTLE_SECONDS + 3
+
+
+async def test_a_post_elsewhere_does_not_wake_a_long_poll(
+    org: SimpleNamespace, feed_reads: list[float]
+) -> None:
+    start = await feed(org, org.grace, channel="#quiet", limit=0)
+    since = start.json()["next_since"]
+    feed_reads.clear()
+
+    async def post_elsewhere() -> None:
+        await asyncio.sleep(0.2)
+        assert (await post(org, org.ada, channel="#loud", body="x")).status_code == 201
+
+    waited, _ = await asyncio.gather(
+        feed(org, org.grace, channel="#quiet", since=since, wait=7), post_elsewhere()
+    )
+
+    assert waited.json()["messages"] == []
+    # The first read, one safety recheck at five seconds, and the last read
+    # when the wait runs out: no reads driven by the other channel's post.
+    assert len(feed_reads) == 3
 
 
 async def test_channels_and_threads_list_newest_first(org: SimpleNamespace) -> None:

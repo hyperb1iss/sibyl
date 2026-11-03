@@ -28,8 +28,8 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Iterable, Mapping, Sequence
+from dataclasses import dataclass
 from typing import Annotated
-from uuid import UUID
 
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
@@ -39,9 +39,9 @@ from sibyl.api.idempotency import (
     save_idempotent_response,
     serialize_idempotent_request,
 )
+from sibyl.api.net_events import SAFETY_RECHECK_SECONDS, announce_net_message, net_wakeups
 from sibyl.api.raw_capture_events import publish_raw_capture_changed
 from sibyl.api.routes import entity_contracts as contracts, memory_auth
-from sibyl.api.routes.activity_rollup import Member, members_from_rows
 from sibyl.api.schemas.net import (
     NetAuthor,
     NetChannel,
@@ -56,7 +56,7 @@ from sibyl.api.schemas.net import (
 from sibyl.auth.authorization import verify_entity_project_access
 from sibyl.auth.context import AuthContext
 from sibyl.auth.dependencies import get_auth_context, get_current_organization, require_org_role
-from sibyl.persistence import organization_runtime
+from sibyl.persistence.auth_runtime import get_users_by_ids
 from sibyl_core.auth import AuthOrganization, ProjectRole
 from sibyl_core.auth.memory_policy import MemoryPolicyAction
 from sibyl_core.services.net import (
@@ -84,7 +84,6 @@ log = structlog.get_logger()
 NET_CAPTURE_SURFACE = "sibylnet"
 NET_TAG = "sibylnet"
 DECISION_TITLE_CHARS = 120
-_POLL_SECONDS = 1.0
 
 router = APIRouter(
     prefix="/net",
@@ -100,21 +99,34 @@ def _caller_id(ctx: AuthContext) -> str:
     return principal_id
 
 
-async def member_directory(org_slug: str, actor_id: str) -> dict[str, Member]:
-    """Organization members by user id, or nothing when the lookup fails.
+@dataclass(frozen=True, slots=True)
+class AuthorName:
+    name: str | None
+    email: str | None
 
-    Names are a nicety on a message; a failed lookup leaves authors as bare
-    user ids rather than failing the read.
+
+async def author_directory(user_ids: Iterable[str]) -> dict[str, AuthorName]:
+    """Display names for the given authors, or nothing when the lookup fails.
+
+    Reads only those users, through the uuid index, so the cost follows the
+    authors on the page rather than the size of the organization. Names are
+    a nicety on a message; a failed lookup leaves authors as bare user ids
+    rather than failing the read.
     """
     try:
-        rows = await organization_runtime.list_org_members(slug=org_slug, actor_id=UUID(actor_id))
+        users = await get_users_by_ids(user_ids)
     except Exception as exc:
-        log.warning("net_member_lookup_failed", error=str(exc))
+        log.warning("net_author_lookup_failed", error=str(exc))
         return {}
-    return members_from_rows(rows)
+    directory: dict[str, AuthorName] = {}
+    for user_id, user in users.items():
+        email = str(user.email).strip() if user.email else None
+        name = str(user.name).strip() if user.name else None
+        directory[user_id] = AuthorName(name=name or email, email=email)
+    return directory
 
 
-def net_message(record: NetMessageRecord, members: Mapping[str, Member]) -> NetMessage:
+def net_message(record: NetMessageRecord, members: Mapping[str, AuthorName]) -> NetMessage:
     member = members.get(record.author_user_id)
     return NetMessage(
         id=record.id,
@@ -137,10 +149,8 @@ def net_message(record: NetMessageRecord, members: Mapping[str, Member]) -> NetM
     )
 
 
-async def _net_messages(
-    records: Sequence[NetMessageRecord], *, org: AuthOrganization, ctx: AuthContext
-) -> list[NetMessage]:
-    members = await member_directory(org.slug, _caller_id(ctx)) if records else {}
+async def _net_messages(records: Sequence[NetMessageRecord]) -> list[NetMessage]:
+    members = await author_directory(record.author_user_id for record in records)
     return [net_message(record, members) for record in records]
 
 
@@ -165,7 +175,7 @@ async def _remember_decision(
     message_id: str,
     org: AuthOrganization,
     ctx: AuthContext,
-    members: Mapping[str, Member],
+    members: Mapping[str, AuthorName],
     http_request: Request | None,
 ) -> str:
     """Write the decision as a raw memory the way ``POST /memory/raw`` does.
@@ -330,7 +340,7 @@ async def post_message(
         if pinned is not None and pinned != request.project_id:
             raise _pinned_conflict(request.channel, thread, pinned)
     message_id = new_message_id()
-    members = await member_directory(org.slug, principal_id)
+    members = await author_directory([principal_id])
     decision_memory_id = (
         await _remember_decision(
             request,
@@ -364,6 +374,12 @@ async def post_message(
             organization_id=str(org.id), channel=request.channel, thread=thread
         )
         raise _pinned_conflict(request.channel, thread, pinned) from exc
+    await announce_net_message(
+        organization_id=str(org.id),
+        channel=record.channel,
+        thread=record.thread,
+        message_id=record.id,
+    )
     log.info(
         "net_message_posted",
         organization_id=str(org.id),
@@ -427,7 +443,6 @@ def _feed_thread(thread: str | None) -> str | None:
 async def read_feed(
     http_request: Request,
     org: AuthOrganization = Depends(get_current_organization),
-    ctx: AuthContext = Depends(get_auth_context),
     since: str | None = Query(
         default=None, description="Cursor from an earlier read; omit to start at the tail"
     ),
@@ -453,8 +468,10 @@ async def read_feed(
 
     Rows younger than the settle window are held back, so delivery is
     at-least-once and never skips a write that was still committing;
-    consumers dedupe by message id. With ``wait``, an empty read re-checks
-    about once a second until something qualifies or the wait runs out.
+    consumers dedupe by message id. With ``wait``, an empty read is held
+    open until a matching post settles (announced on the event bus, from any
+    pod) or the wait runs out, re-reading on a slow safety interval in case
+    an announcement was lost.
     """
     cursor = _feed_cursor(since)
     channels = _feed_channels(channel)
@@ -472,15 +489,20 @@ async def read_feed(
             limit=limit,
         )
 
-    page = await read()
-    while not page.messages and limit > 0:
-        remaining = deadline - loop.time()
-        if remaining <= 0 or await http_request.is_disconnected():
-            break
-        await asyncio.sleep(min(_POLL_SECONDS, remaining))
+    # Registered before the first read, so a post landing between that read
+    # and the wait still wakes this request.
+    with net_wakeups.watch(
+        organization_id, frozenset(channels) if channels else None, thread_filter
+    ) as waiter:
         page = await read()
+        while not page.messages and limit > 0:
+            remaining = deadline - loop.time()
+            if remaining <= 0 or await http_request.is_disconnected():
+                break
+            await waiter.wait(min(SAFETY_RECHECK_SECONDS, remaining))
+            page = await read()
     return NetFeedResponse(
-        messages=await _net_messages(page.messages, org=org, ctx=ctx),
+        messages=await _net_messages(page.messages),
         next_since=page.next_since.encode(),
         more=page.more,
     )
@@ -544,7 +566,7 @@ __all__ = [
     "authorize_project_naming",
     "decision_content",
     "decision_title",
-    "member_directory",
+    "author_directory",
     "net_message",
     "router",
 ]

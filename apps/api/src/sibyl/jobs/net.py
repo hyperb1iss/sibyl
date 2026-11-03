@@ -46,7 +46,7 @@ from fastapi import HTTPException
 
 from sibyl.api.context_audit import log_reflection_audit
 from sibyl.api.routes import entity_contracts as contracts, memory_auth
-from sibyl.api.routes.net import member_directory
+from sibyl.api.routes.net import author_directory
 from sibyl.auth.context import AuthContext
 from sibyl.auth.dependencies import _api_key_allows_rest, _api_key_claims
 from sibyl.config import settings
@@ -190,13 +190,7 @@ async def reflect_author_window(thread: NetThreadState, part: NetAuthorWindow) -
         authority, memory_scope=scope.memory_scope.value, scope_key=scope.scope_key
     ):
         raise NetAuthorSkippedError("no_writable_scope")
-    organization = authority.organization
-    members = (
-        await member_directory(organization.slug, part.author_user_id)
-        if organization is not None
-        else {}
-    )
-    member = members.get(part.author_user_id)
+    member = (await author_directory([part.author_user_id])).get(part.author_user_id)
     pack = await reflect_memory(
         render_net_transcript(thread, part, author_name=member.name if member else None),
         source_title=net_source_title(thread.channel, thread.thread),

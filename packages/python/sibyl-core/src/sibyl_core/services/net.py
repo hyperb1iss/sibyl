@@ -9,21 +9,20 @@ read role reads every channel, and posting needs a write role. Channels are
 organization-visible like public chat channels. The routes enforce the roles;
 nothing here filters by reader.
 
-Order and cursors. The feed is ordered by ``(created_at, uuid)``. A cursor
-carries the stored ISO text of ``created_at`` rather than a Python datetime,
-because the SDK keeps only microseconds and a bound truncated that way would
-hand back the row it was cut from forever. On a server the text reaches the
-engine as a native datetime parameter, which the planner seeks the composite
-index on; the embedded engine gets an inline cast (see
-``graph_community_managers._cursor_binding`` for the same split). A page after
-a cursor runs two statements, the cursor's own timestamp drained by an
-equality seek and then the strict range after it, because the 3.x planner
-drops rows sharing the bound's timestamp from a single combined predicate.
+Order and cursors. The feed is ordered by ``(created_ns, uuid)``, where
+``created_ns`` is ``created_at`` as an integer count of nanoseconds, computed
+by the engine on every write. Ordering and paging never touch the datetime:
+SurrealDB 3.2 orders a datetime index by the instant's printed form, which
+drops trailing zeros, so ``...10.277579Z`` sorts after ``...10.277579001Z``
+though it is earlier, and pages built on it skip, reorder and replay. An
+integer has one width and one order on every engine. A cursor is that integer
+and the message's canonical id, so it survives the SDK (which keeps only
+microseconds of a datetime) unchanged.
 
-Settle window. Nothing younger than ``SETTLE_SECONDS`` by the database clock
-is ever returned, so a write that is still committing cannot land behind a
-reader whose cursor already moved past its timestamp. Delivery is
-at-least-once; consumers dedupe by message id.
+Settle window. Nothing younger than ``SETTLE_SECONDS`` by the database clock,
+compared in nanoseconds, is ever returned, so a write that is still
+committing cannot land behind a reader whose cursor already moved past it.
+Delivery is at-least-once; consumers dedupe by message id.
 
 Thread state. Every post upserts one ``net_threads`` row per
 ``(organization, channel, thread)``, addressed by a record id derived from
@@ -38,9 +37,14 @@ statement; a decision never is, because its project only decides where its
 own memory goes, and it leaves an existing pin alone. Threadless messages
 never pin: ``''`` is everyone's inbox, and a project named on one of them
 scopes only that message's decision memory. A new post also resets the
-distillation retry budget, since new material deserves a fresh one. The
-distillation job claims idle rows with a conditional update before it
-reflects them.
+distillation retry budget, since new material deserves a fresh one.
+
+Distillation. Every post marks its thread ``reflection_pending``, and only a
+distillation that reaches the thread's last message clears it, in the same
+statement that moves ``reflected_through``. The idle selection ranges over
+the ``(reflection_pending, last_message_at)`` index, so its cost follows the
+threads waiting to be distilled, not every thread ever written. The job
+claims an idle row with a conditional update before it reflects it.
 """
 
 from __future__ import annotations
@@ -85,20 +89,20 @@ DISTILL_WINDOW_CHARS = 60_000
 CLAIM_LEASE_MINUTES = 15
 
 _CHANNEL_PATTERN = re.compile(r"[@#]?[a-z0-9][a-z0-9._-]{0,63}")
-_CURSOR_TIME_PATTERN = re.compile(
-    r"(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})(?:\.(\d{1,9}))?(Z|[+-]\d{2}:\d{2})"
-)
+# A cursor's instant: nanoseconds since the epoch, written in canonical
+# decimal (no sign, no leading zeros), within a signed 64-bit integer.
+_CURSOR_NANOS_PATTERN = re.compile(r"0|[1-9][0-9]{0,18}", flags=re.ASCII)
+_MAX_NANOS = 2**63 - 1
 # Characters that end a line or steer a terminal. A label carrying one could
 # start a forged attribution line in a transcript.
 _LINE_BREAKING_CATEGORIES = frozenset({"Cc", "Zl", "Zp"})
 _CURSOR_SEPARATOR = "|"
 TRANSCRIPT_CONTINUATION = "    "
 
-_SETTLED = f"created_at <= time::now() - {SETTLE_SECONDS}s"
+_SETTLED = f"created_ns <= time::nano(time::now() - {SETTLE_SECONDS}s)"
 _MESSAGE_FIELDS = (
     "uuid, organization_id, channel, thread, kind, body, project_id, author_user_id, "
-    "api_key_id, author_agent, author_session, decision_memory_id, created_at, "
-    "<string>created_at AS created_at_text"
+    "api_key_id, author_agent, author_session, decision_memory_id, created_at, created_ns"
 )
 _THREAD_FIELDS = (
     "organization_id, channel, thread, project_id, message_count, first_message_at, "
@@ -140,6 +144,7 @@ RETURN {{
         first_message_at = first_message_at ?? $created,
         last_message_at = time::max([last_message_at ?? $created, $created]),
         reflection_attempts = 0,
+        reflection_pending = true,
         updated_at = time::now()
     RETURN NONE;
     RETURN (SELECT {_MESSAGE_FIELDS} FROM net_messages WHERE uuid = $uuid);
@@ -152,19 +157,22 @@ RETURN {{
 }};
 """
 
-_CHANNEL_SUMMARY = (
+CHANNEL_SUMMARY_STATEMENT = (
     "SELECT channel, math::sum(message_count) AS message_count, "
     "count(thread != '') AS thread_count, time::max(last_message_at) AS last_message_at "
     "FROM net_threads WHERE organization_id = $organization_id GROUP BY channel;"
 )
-_CHANNEL_THREADS = (
+CHANNEL_THREADS_STATEMENT = (
     f"SELECT {_THREAD_FIELDS} FROM net_threads "
     "WHERE organization_id = $organization_id AND channel = $channel "
     f"ORDER BY last_message_at DESC LIMIT {LISTING_LIMIT};"
 )
 
+# ``reflection_pending`` is set by every post and cleared only when a
+# distillation reaches the thread's last message, so selection ranges over
+# the threads with undistilled messages instead of all thread history.
 _IDLE_THREAD_CONDITIONS = (
-    "(reflected_through = NONE OR reflected_through < last_message_at) "
+    "reflection_pending = true "
     f"AND reflection_attempts < {MAX_REFLECTION_ATTEMPTS} "
     "AND (reflection_claimed_at = NONE "
     f"OR reflection_claimed_at < time::now() - {CLAIM_LEASE_MINUTES}m)"
@@ -174,30 +182,65 @@ _CLAIM_THREAD = (
     "reflection_claimed_at = time::now(), updated_at = time::now() "
     f"WHERE {_IDLE_THREAD_CONDITIONS} RETURN AFTER;"
 )
-# The window starts after the last distilled message, compared in the engine
-# so the stored nanoseconds never round-trip through Python.
+# Seeks within one thread, on the thread index: the planner would otherwise
+# range the organization index on created_ns and filter the thread out.
+_THREAD_SCOPE = (
+    "FROM net_messages WITH INDEX net_message_org_channel_thread_ns "
+    "WHERE organization_id = $organization_id AND channel = $channel AND thread = $thread"
+)
+# The distillation watermark is the last distilled message's (created_ns,
+# uuid), the feed's own order. Rows after it are the rows sharing its instant
+# with a later id plus the rows after its instant, sought the way
+# feed_statement seeks a page.
+_AT_MARK_AFTER_ID = "created_ns = $mark_ns AND uuid > $mark_uuid"
+_AFTER_MARK_INSTANT = "created_ns > $mark_ns"
 _THREAD_WINDOW = f"""
 RETURN {{
     LET $key = {_THREAD_RECORD};
-    LET $after = (SELECT VALUE reflected_through FROM $key)[0]
-        ?? <datetime>'1970-01-01T00:00:00Z';
+    LET $state = (SELECT reflected_through_ns, reflected_through_uuid FROM $key)[0];
+    LET $mark_ns = $state.reflected_through_ns ?? -1;
+    LET $mark_uuid = $state.reflected_through_uuid ?? '';
+    LET $take = $limit + count((SELECT VALUE uuid {_THREAD_SCOPE} AND created_ns = $mark_ns));
+    LET $rows = array::flatten([
+        (SELECT {_MESSAGE_FIELDS} {_THREAD_SCOPE} AND {_AT_MARK_AFTER_ID}
+            ORDER BY created_ns ASC, uuid ASC LIMIT $limit),
+        (SELECT {_MESSAGE_FIELDS} {_THREAD_SCOPE} AND {_AFTER_MARK_INSTANT}
+            ORDER BY created_ns ASC, uuid ASC LIMIT $take)
+    ]);
     RETURN (
-        SELECT {_MESSAGE_FIELDS} FROM net_messages
-        WHERE organization_id = $organization_id AND channel = $channel
-            AND thread = $thread AND created_at > $after AND {_SETTLED}
-        ORDER BY created_at ASC, uuid ASC LIMIT $limit
+        SELECT * FROM $rows WHERE {_SETTLED}
+        ORDER BY created_ns ASC, uuid ASC LIMIT $limit
     );
 }};
 """
+# Whether any message, settled or not, sits after the watermark: the pending
+# mark clears only when none does, read in the same statement as the move.
+_LATER_THAN_MARK = (
+    f"count((SELECT VALUE uuid {_THREAD_SCOPE} AND {_AT_MARK_AFTER_ID})) "
+    f"+ count((SELECT VALUE uuid {_THREAD_SCOPE} AND {_AFTER_MARK_INSTANT}))"
+)
 _SETTLE_THROUGH_MESSAGE = f"""
 RETURN {{
     LET $through = (
-        SELECT VALUE created_at FROM net_messages
+        SELECT created_at, created_ns, uuid FROM net_messages
         WHERE uuid = $through_uuid AND organization_id = $organization_id
     )[0];
     IF $through = NONE {{ THROW 'the last distilled net message is gone'; }};
-    UPDATE {_THREAD_RECORD} SET
-        reflected_through = time::max([reflected_through ?? $through, $through]),
+    LET $key = {_THREAD_RECORD};
+    LET $state = (SELECT reflected_through, reflected_through_ns, reflected_through_uuid FROM $key)[0];
+    LET $advance = $state.reflected_through_ns = NONE
+        OR $through.created_ns > $state.reflected_through_ns
+        OR ($through.created_ns = $state.reflected_through_ns
+            AND $through.uuid > $state.reflected_through_uuid);
+    LET $mark_ns = IF $advance {{ $through.created_ns }} ELSE {{ $state.reflected_through_ns }};
+    LET $mark_uuid = IF $advance {{ $through.uuid }} ELSE {{ $state.reflected_through_uuid }};
+    LET $mark_at = IF $advance {{ $through.created_at }} ELSE {{ $state.reflected_through }};
+    LET $later = {_LATER_THAN_MARK};
+    UPDATE $key SET
+        reflected_through = $mark_at,
+        reflected_through_ns = $mark_ns,
+        reflected_through_uuid = $mark_uuid,
+        reflection_pending = $later > 0,
         reflection_source_id = $source_id ?? reflection_source_id,
         reflection_attempts = 0,
         reflection_error = NONE,
@@ -207,16 +250,30 @@ RETURN {{
     RETURN NONE;
 }};
 """
-_SETTLE_THROUGH_LAST = (
-    f"UPDATE {_THREAD_RECORD} SET reflected_through = last_message_at, "
-    "reflection_attempts = 0, reflection_error = NONE, reflection_skipped = [], "
-    "reflection_claimed_at = NONE, updated_at = time::now() RETURN NONE;"
-)
+# An empty window moves nothing: the watermark stays, and the thread stays
+# pending only while some message (still settling, say) sits after it.
+_SETTLE_EMPTY_WINDOW = f"""
+RETURN {{
+    LET $key = {_THREAD_RECORD};
+    LET $state = (SELECT reflected_through_ns, reflected_through_uuid FROM $key)[0];
+    LET $mark_ns = $state.reflected_through_ns ?? -1;
+    LET $mark_uuid = $state.reflected_through_uuid ?? '';
+    LET $later = {_LATER_THAN_MARK};
+    UPDATE $key SET
+        reflection_pending = $later > 0,
+        reflection_attempts = 0,
+        reflection_error = NONE,
+        reflection_skipped = [],
+        reflection_claimed_at = NONE,
+        updated_at = time::now()
+    RETURN NONE;
+}};
+"""
 _FAIL_THREAD = (
     f"UPDATE {_THREAD_RECORD} SET reflection_error = $reason, "
     "reflection_claimed_at = NONE, updated_at = time::now() RETURN NONE;"
 )
-_SETTLED_END = f"RETURN {{ settled_end: <string>(time::now() - {SETTLE_SECONDS}s) }};"
+_SETTLED_END = f"RETURN {{ settled_end: time::nano(time::now() - {SETTLE_SECONDS}s) }};"
 
 
 def normalize_channel(value: str) -> str:
@@ -291,58 +348,58 @@ def normalize_body(value: str) -> str:
 
 @dataclass(frozen=True, slots=True)
 class NetCursor:
-    """A position in the feed: the stored ``created_at`` text and a message id.
+    """A position in the feed: an instant in nanoseconds and a message id.
 
-    The empty id sorts before every real one, so a cursor minted at an
-    instant rather than at a message resumes with everything after it.
+    Opaque to clients. The empty id sorts before every real one, so a cursor
+    minted at an instant rather than at a message resumes with everything
+    after it.
     """
 
-    created_at: str
+    created_ns: int
     uuid: str
 
     def encode(self) -> str:
-        raw = f"{self.created_at}{_CURSOR_SEPARATOR}{self.uuid}".encode()
+        raw = f"{self.created_ns}{_CURSOR_SEPARATOR}{self.uuid}".encode()
         return base64.urlsafe_b64encode(raw).decode("ascii").rstrip("=")
 
     @classmethod
     def decode(cls, token: str) -> NetCursor:
-        """Parse a cursor the server issued, or raise ``ValueError``."""
+        """Parse a cursor exactly as the server writes it, or raise ``ValueError``.
+
+        Strict on purpose: the instant must be canonical decimal within a
+        signed 64-bit integer and the id a canonical lowercase UUID (or empty),
+        because the id is compared as text against stored ids, so any other
+        spelling of the same UUID would sort elsewhere and replay or skip
+        messages. Anything else, older cursor formats included, is refused,
+        and the feed answers it with 422.
+        """
         try:
             padded = token + "=" * (-len(token) % 4)
-            raw = base64.urlsafe_b64decode(padded.encode("ascii")).decode("utf-8")
+            raw = base64.urlsafe_b64decode(padded.encode("ascii")).decode("ascii")
         except (UnicodeError, ValueError, binascii.Error) as exc:
-            msg = "since is not a cursor this server issued"
-            raise ValueError(msg) from exc
-        created_at, separator, message_id = raw.rpartition(_CURSOR_SEPARATOR)
-        if not separator or not _calendar_instant(created_at):
-            msg = "since is not a cursor this server issued"
-            raise ValueError(msg)
-        if message_id:
-            try:
-                UUID(message_id)
-            except ValueError as exc:
-                msg = "since is not a cursor this server issued"
-                raise ValueError(msg) from exc
-        return cls(created_at=created_at, uuid=message_id)
+            raise ValueError(_NOT_A_CURSOR) from exc
+        nanos, separator, message_id = raw.partition(_CURSOR_SEPARATOR)
+        if not separator or not _CURSOR_NANOS_PATTERN.fullmatch(nanos):
+            raise ValueError(_NOT_A_CURSOR)
+        created_ns = int(nanos)
+        if created_ns > _MAX_NANOS:
+            raise ValueError(_NOT_A_CURSOR)
+        if message_id and not _canonical_uuid(message_id):
+            raise ValueError(_NOT_A_CURSOR)
+        cursor = cls(created_ns=created_ns, uuid=message_id)
+        if cursor.encode() != token:
+            raise ValueError(_NOT_A_CURSOR)
+        return cursor
 
 
-def _calendar_instant(text: str) -> bool:
-    """Whether ``text`` is an ISO instant on the calendar, nanoseconds allowed.
+_NOT_A_CURSOR = "since is not a cursor this server issued"
 
-    Python holds only microseconds, so the check parses a truncated copy; the
-    cursor keeps the original text for the query.
-    """
-    match = _CURSOR_TIME_PATTERN.fullmatch(text)
-    if match is None:
-        return False
-    seconds, fraction, zone = match.groups()
-    micros = ((fraction or "") + "000000")[:6]
-    offset = "+00:00" if zone == "Z" else zone
+
+def _canonical_uuid(value: str) -> bool:
     try:
-        datetime.fromisoformat(f"{seconds}.{micros}{offset}")
+        return str(UUID(value)) == value
     except ValueError:
         return False
-    return True
 
 
 @dataclass(frozen=True, slots=True)
@@ -451,6 +508,10 @@ async def post_net_message(
     other than the thread's pin. The message keeps the project it named
     either way.
     """
+    # The API validates these on the way in; a direct caller is held to the
+    # same rules, since the labels are printed inside transcript lines.
+    author_agent = normalize_label(author_agent, field="agent", max_chars=MAX_AGENT_CHARS)
+    author_session = normalize_label(author_session, field="session", max_chars=MAX_SESSION_CHARS)
     uuid = message_id or new_message_id()
     record = {
         key: value
@@ -523,37 +584,139 @@ async def read_net_feed(
     returned oldest first, so a new reader starts at the tail instead of
     replaying history; ``limit=0`` returns only the cursor at the settled end.
     """
-    if len(channels) > MAX_FEED_CHANNELS:
-        msg = f"at most {MAX_FEED_CHANNELS} channels per feed read"
-        raise ValueError(msg)
-    filters, params = _feed_filters(channels=channels, thread=thread)
-    params["organization_id"] = organization_id
-    select = (
-        f"SELECT {_MESSAGE_FIELDS} FROM net_messages "
-        f"WHERE organization_id = $organization_id{filters} AND {_SETTLED}"
-    )
+    page_limit = max(int(limit), 0)
     async with content_client.surreal_content_client() as client:
-        if since is not None:
-            return await _page_after(client, select, params, since=since, limit=limit)
-        if limit <= 0:
-            return NetFeedPage(messages=[], next_since=await _settled_end(client), more=False)
-        rows = await content_client.select_many(
-            client,
-            f"{select} ORDER BY created_at DESC, uuid DESC LIMIT $limit;",
-            limit=limit,
-            **params,
+        statement, params = feed_statement(
+            organization_id=organization_id,
+            since=since,
+            channels=channels,
+            thread=thread,
+            limit=page_limit,
         )
+        if statement is None:
+            if since is not None:
+                return NetFeedPage(messages=[], next_since=since, more=False)
+            return NetFeedPage(messages=[], next_since=await _settled_end(client), more=False)
+        rows = await content_client.select_many(client, statement, **params)
+        if since is not None:
+            messages = [_message_from_row(row) for row in rows]
+            more = len(messages) > page_limit
+            messages = messages[:page_limit]
+            next_since = messages[-1].cursor if messages else since
+            return NetFeedPage(messages=messages, next_since=next_since, more=more)
         messages = [_message_from_row(row) for row in reversed(rows)]
         if not messages:
             return NetFeedPage(messages=[], next_since=await _settled_end(client), more=False)
     return NetFeedPage(messages=messages, next_since=messages[-1].cursor, more=False)
 
 
+def feed_statement(
+    *,
+    organization_id: str,
+    since: NetCursor | None,
+    channels: Sequence[str],
+    thread: str | None,
+    limit: int,
+) -> tuple[str | None, dict[str, Any]]:
+    """The one statement a feed read issues, with its parameters; None reads nothing.
+
+    Every source is an index seek on ``created_ns`` bounded by its own
+    ``LIMIT``, so a read costs about ``limit`` rows per channel however long
+    the history is:
+
+    - Each seek names its index with ``WITH INDEX``: the organization index,
+      or with a channel or thread filter the index that leads with them, one
+      seek per channel. Left to itself the planner ranges the organization
+      index on ``created_ns`` and filters every message the organization ever
+      posted. The seeks are merged and cut to ``limit`` in the engine.
+    - A tail ranges below the settle line. A page after a cursor seeks the
+      rows sharing the cursor's instant by equality (ranging only on the id)
+      and the rows after it, and the settle line applies to the merged rows:
+      a settle predicate inside a seek hands the planner a second range,
+      which it prefers, walking history from the start.
+    - The two engines disagree on bounds over a leading index column, so
+      only the forms both get right are used. SurrealDB 3.2 counts the rows
+      equal to an exclusive lower bound against ``LIMIT`` before skipping
+      them (``created_ns > $t LIMIT n`` returns n minus the rows at ``$t``),
+      so that seek's ``LIMIT`` is padded by the count of those rows; the
+      embedded engine treats ``>=`` there as ``>``, so no inclusive bound is
+      relied on.
+    """
+    if len(channels) > MAX_FEED_CHANNELS:
+        msg = f"at most {MAX_FEED_CHANNELS} channels per feed read"
+        raise ValueError(msg)
+    if limit <= 0:
+        return None, {}
+    params: dict[str, Any] = {"organization_id": organization_id}
+    thread_clause = ""
+    if thread is not None:
+        thread_clause = " AND thread = $thread"
+        params["thread"] = thread
+    unique_channels = list(dict.fromkeys(channels))
+    sources: list[str] = []
+    if unique_channels:
+        index = (
+            "net_message_org_channel_thread_ns"
+            if thread is not None
+            else "net_message_org_channel_ns"
+        )
+        for number, channel in enumerate(unique_channels):
+            params[f"channel_{number}"] = channel
+            sources.append(
+                f"FROM net_messages WITH INDEX {index} WHERE organization_id = $organization_id "
+                f"AND channel = $channel_{number}{thread_clause}"
+            )
+    else:
+        index = "net_message_org_thread_ns" if thread is not None else "net_message_org_ns"
+        sources.append(
+            f"FROM net_messages WITH INDEX {index} "
+            f"WHERE organization_id = $organization_id{thread_clause}"
+        )
+    if since is None:
+        params["limit"] = limit
+        newest = "ORDER BY created_ns DESC, uuid DESC LIMIT $limit"
+        seeks = [f"(SELECT {_MESSAGE_FIELDS} {scope} AND {_SETTLED} {newest})" for scope in sources]
+        if len(seeks) == 1:
+            return f"RETURN {seeks[0]};", params
+        return (
+            "RETURN { "
+            f"LET $rows = array::flatten([{', '.join(seeks)}]); "
+            f"RETURN (SELECT * FROM $rows {newest}); "
+            "};",
+            params,
+        )
+    params.update(since_ns=since.created_ns, since_uuid=since.uuid, limit=limit + 1)
+    lets: list[str] = []
+    seeks = []
+    order = "ORDER BY created_ns ASC, uuid ASC"
+    for number, scope in enumerate(sources):
+        lets.append(
+            f"LET $take_{number} = $limit + "
+            f"count((SELECT VALUE uuid {scope} AND created_ns = $since_ns));"
+        )
+        seeks.append(
+            f"(SELECT {_MESSAGE_FIELDS} {scope} AND created_ns = $since_ns "
+            f"AND uuid > $since_uuid {order} LIMIT $limit)"
+        )
+        seeks.append(
+            f"(SELECT {_MESSAGE_FIELDS} {scope} AND created_ns > $since_ns "
+            f"{order} LIMIT $take_{number})"
+        )
+    return (
+        "RETURN { "
+        f"{' '.join(lets)} "
+        f"LET $rows = array::flatten([{', '.join(seeks)}]); "
+        f"RETURN (SELECT * FROM $rows WHERE {_SETTLED} {order} LIMIT $limit); "
+        "};",
+        params,
+    )
+
+
 async def list_net_channels(*, organization_id: str) -> list[NetChannelSummary]:
     """Channels with any message, most recently active first."""
     async with content_client.surreal_content_client() as client:
         rows = await content_client.select_many(
-            client, _CHANNEL_SUMMARY, organization_id=organization_id
+            client, CHANNEL_SUMMARY_STATEMENT, organization_id=organization_id
         )
     summaries = [
         NetChannelSummary(
@@ -573,7 +736,7 @@ async def list_net_threads(*, organization_id: str, channel: str) -> list[NetThr
     """A channel's threads, most recently active first."""
     async with content_client.surreal_content_client() as client:
         rows = await content_client.select_many(
-            client, _CHANNEL_THREADS, organization_id=organization_id, channel=channel
+            client, CHANNEL_THREADS_STATEMENT, organization_id=organization_id, channel=channel
         )
     return [_thread_from_row(row) for row in rows]
 
@@ -584,16 +747,21 @@ async def idle_net_threads(*, idle_minutes: int, limit: int) -> list[NetThreadSt
     Quiet means no message for ``idle_minutes``. A thread past its retry
     budget, or claimed by a run that is still inside its lease, is left out.
     """
-    idle = max(int(idle_minutes), 0)
     async with content_client.surreal_content_client() as client:
         rows = await content_client.select_many(
-            client,
-            f"SELECT {_THREAD_FIELDS} FROM net_threads "
-            f"WHERE last_message_at < time::now() - {idle}m AND {_IDLE_THREAD_CONDITIONS} "
-            "ORDER BY last_message_at ASC LIMIT $limit;",
-            limit=max(int(limit), 1),
+            client, idle_threads_statement(idle_minutes=idle_minutes), limit=max(int(limit), 1)
         )
     return [_thread_from_row(row) for row in rows]
+
+
+def idle_threads_statement(*, idle_minutes: int) -> str:
+    """The distillation selection, bound by ``$limit``; exposed so it can be explained."""
+    idle = max(int(idle_minutes), 0)
+    return (
+        f"SELECT {_THREAD_FIELDS} FROM net_threads "
+        f"WHERE last_message_at < time::now() - {idle}m AND {_IDLE_THREAD_CONDITIONS} "
+        "ORDER BY last_message_at ASC LIMIT $limit;"
+    )
 
 
 async def claim_net_thread(thread: NetThreadState) -> NetThreadState | None:
@@ -643,15 +811,17 @@ async def settle_net_thread(
 ) -> None:
     """Record a finished distillation and release the claim.
 
-    ``reflected_through`` moves to the named message's own stored timestamp,
-    never backwards; with no message (an empty window) it moves to the
-    thread's last message so the row stops qualifying. The retry budget
+    The watermark moves to the named message's own ``(created_ns, uuid)``,
+    never backwards, with ``reflected_through`` its display time; with no
+    message (an empty window) it stays put. The pending mark clears only when
+    no message sits after the watermark, read in the same statement, so a
+    post that lands while the thread is being reflected keeps it pending. The retry budget
     resets, any earlier error clears, and ``skipped`` records the authors
     whose lines this pass could not reflect, and why.
     """
     async with content_client.surreal_content_client() as client:
         if through_message_id is None:
-            await content_client.select_many(client, _SETTLE_THROUGH_LAST, **_thread_key(thread))
+            await content_client.select_many(client, _SETTLE_EMPTY_WINDOW, **_thread_key(thread))
             return
         await content_client.select_many(
             client,
@@ -706,12 +876,13 @@ def render_net_transcript(
     # A display name is free text; one with a line break could open a line
     # of its own, so it renders on one line like every other label here.
     author = _single_line(author_name or window.author_user_id)
-    header = f"# sibylnet channel {thread.channel}"
+    header = f"# sibylnet channel {_single_line(thread.channel)}"
     if thread.thread:
-        header += f", thread {thread.thread}"
+        header += f", thread {_single_line(thread.thread)}"
     lines = [header, f"# messages by {author} ({window.author_user_id})", ""]
     for message in window.messages:
-        label = author + (f" ({message.author_agent})" if message.author_agent else "")
+        agent = _single_line(message.author_agent) if message.author_agent else ""
+        label = author + (f" ({agent})" if agent else "")
         stamp = message.created_at.isoformat().replace("+00:00", "Z")
         first, *rest = message.body.splitlines() or [""]
         lines.append(f"[{stamp}] {label}: {first}")
@@ -727,89 +898,26 @@ def _thread_key(thread: NetThreadState) -> dict[str, str]:
     }
 
 
-def _feed_filters(*, channels: Sequence[str], thread: str | None) -> tuple[str, dict[str, Any]]:
-    clauses: list[str] = []
-    params: dict[str, Any] = {}
-    unique_channels = list(dict.fromkeys(channels))
-    if len(unique_channels) == 1:
-        clauses.append("channel = $channel")
-        params["channel"] = unique_channels[0]
-    elif unique_channels:
-        clauses.append("channel IN $channels")
-        params["channels"] = unique_channels
-    if thread is not None:
-        clauses.append("thread = $thread")
-        params["thread"] = thread
-    return "".join(f" AND {clause}" for clause in clauses), params
-
-
-def _cursor_binding(client: object) -> tuple[str, Any]:
-    """How the cursor's timestamp reaches the engine: a bound template and a value.
-
-    A server seeks the composite index for a native datetime parameter, which
-    the SDK's ``Datetime`` wrapper sends with its nanoseconds intact. The
-    embedded engine gets the text and an inline cast.
-    """
-    from surrealdb.data.types.datetime import Datetime
-
-    if getattr(client, "is_embedded", False):
-        return "<datetime>$since_at", str
-    return "$since_at", Datetime
-
-
-async def _page_after(
-    client: Any,
-    select: str,
-    params: dict[str, Any],
-    *,
-    since: NetCursor,
-    limit: int,
-) -> NetFeedPage:
-    page_limit = max(int(limit), 0)
-    if page_limit == 0:
-        return NetFeedPage(messages=[], next_since=since, more=False)
-    bound, value = _cursor_binding(client)
-    order = "ORDER BY created_at ASC, uuid ASC LIMIT $limit;"
-    statements = (
-        f"{select} AND created_at = {bound} AND uuid > $since_uuid {order}",
-        f"{select} AND created_at > {bound} {order}",
-    )
-    results = await client.execute_query_batch(
-        " ".join(statements),
-        since_at=value(since.created_at),
-        since_uuid=since.uuid,
-        limit=page_limit + 1,
-        **params,
-    )
-    error = content_client.query_error(results)
-    if error is not None:
-        raise RuntimeError(error)
-    if not isinstance(results, list) or len(results) != len(statements):
-        msg = "net feed page returned no statement results"
-        raise RuntimeError(msg)
-    rows = [row for result in results for row in content_client.normalize_records(result)]
-    messages = [_message_from_row(row) for row in rows[: page_limit + 1]]
-    more = len(messages) > page_limit
-    messages = messages[:page_limit]
-    next_since = messages[-1].cursor if messages else since
-    return NetFeedPage(messages=messages, next_since=next_since, more=more)
-
-
 async def _settled_end(client: Any) -> NetCursor:
     """A cursor at the settled end of the feed by the database clock, between messages."""
     rows = await content_client.select_many(client, _SETTLED_END)
-    text = rows[0].get("settled_end") if rows else None
-    if not isinstance(text, str) or not text:
+    nanos = rows[0].get("settled_end") if rows else None
+    if not isinstance(nanos, int) or isinstance(nanos, bool):
         msg = "net feed could not read the settled end"
         raise RuntimeError(msg)
-    return NetCursor(created_at=text, uuid="")
+    return NetCursor(created_ns=nanos, uuid="")
 
 
 def _message_from_row(row: Mapping[str, object]) -> NetMessageRecord:
     message_id = str(row.get("uuid") or "")
-    created_text = str(row.get("created_at_text") or "")
-    created_at = _as_utc(row.get("created_at")) or _as_utc(created_text)
-    if not message_id or created_at is None or not created_text:
+    created_ns = row.get("created_ns")
+    created_at = _as_utc(row.get("created_at"))
+    if (
+        not message_id
+        or created_at is None
+        or not isinstance(created_ns, int)
+        or isinstance(created_ns, bool)
+    ):
         msg = "net message row is missing its id or timestamp"
         raise RuntimeError(msg)
     return NetMessageRecord(
@@ -826,7 +934,7 @@ def _message_from_row(row: Mapping[str, object]) -> NetMessageRecord:
         author_session=_optional_str(row.get("author_session")),
         decision_memory_id=_optional_str(row.get("decision_memory_id")),
         created_at=created_at,
-        cursor=NetCursor(created_at=created_text, uuid=message_id),
+        cursor=NetCursor(created_ns=created_ns, uuid=message_id),
     )
 
 
@@ -880,6 +988,8 @@ def _optional_str(value: object) -> str | None:
 
 
 __all__ = [
+    "CHANNEL_SUMMARY_STATEMENT",
+    "CHANNEL_THREADS_STATEMENT",
     "DEFAULT_FEED_LIMIT",
     "DISTILL_WINDOW_CHARS",
     "DISTILL_WINDOW_MESSAGES",
@@ -906,7 +1016,9 @@ __all__ = [
     "author_windows",
     "claim_net_thread",
     "fail_net_thread",
+    "feed_statement",
     "idle_net_threads",
+    "idle_threads_statement",
     "list_net_channels",
     "list_net_threads",
     "net_source_title",

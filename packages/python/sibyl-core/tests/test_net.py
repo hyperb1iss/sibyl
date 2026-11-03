@@ -9,6 +9,8 @@ the module issues is proven on both.
 from __future__ import annotations
 
 import asyncio
+import base64
+import json
 import os
 from collections.abc import AsyncIterator, Iterator
 from contextlib import asynccontextmanager
@@ -197,10 +199,14 @@ def test_labels_cannot_carry_a_line_break() -> None:
 
 
 def test_cursors_round_trip_with_nanoseconds() -> None:
-    cursor = NetCursor(created_at="2026-11-02T10:00:00.123456789Z", uuid=str(uuid4()))
+    cursor = NetCursor(created_ns=1_762_077_600_123_456_789, uuid=str(uuid4()))
     assert NetCursor.decode(cursor.encode()) == cursor
-    start = NetCursor(created_at="2026-11-02T10:00:00Z", uuid="")
+    start = NetCursor(created_ns=1_762_077_600_000_000_000, uuid="")
     assert NetCursor.decode(start.encode()) == start
+
+
+def _raw_token(text: str) -> str:
+    return base64.urlsafe_b64encode(text.encode()).decode("ascii").rstrip("=")
 
 
 @pytest.mark.parametrize(
@@ -208,14 +214,17 @@ def test_cursors_round_trip_with_nanoseconds() -> None:
     [
         "",
         "not base64 !!",
-        NetCursor(created_at="yesterday", uuid="").encode(),
-        NetCursor(created_at="2026-11-02T10:00:00Z", uuid="not-a-uuid").encode(),
-        "MjAyNi0xMS0wMlQxMDowMDowMFo",  # a timestamp with no separator
-        # Shaped like instants, but not on the calendar.
-        NetCursor(created_at="2026-13-45T00:00:00Z", uuid="").encode(),
-        NetCursor(created_at="2026-02-30T10:00:00.123456789Z", uuid="").encode(),
-        NetCursor(created_at="2026-11-02T25:61:00Z", uuid="").encode(),
-        NetCursor(created_at="2026-11-02T10:00:00+25:00", uuid="").encode(),
+        _raw_token("1762077600000000000"),  # no separator
+        _raw_token("1762077600000000000|not-a-uuid"),
+        _raw_token("1762077600000000000|6F1C2C38-5D2E-4A3B-9A57-0C1D2E3F4A5B"),
+        _raw_token(f"{2**63}|"),
+        _raw_token("-5|"),
+        _raw_token("0001|"),
+        _raw_token("1762077600000000000|") + "==",
+        # The older ISO-instant format, on the calendar or off it.
+        _raw_token("2026-11-02T10:00:00.123456789Z|"),
+        _raw_token("2026-13-45T00:00:00Z|"),
+        _raw_token("2026-11-02T10:00:00+05:60|"),
     ],
 )
 def test_cursors_refuse_garbage(token: str) -> None:
@@ -256,7 +265,7 @@ def _message(author: str, body: str, minute: int, **overrides: object) -> net.Ne
         "author_session": None,
         "decision_memory_id": None,
         "created_at": datetime(2026, 11, 2, 10, minute, tzinfo=UTC),
-        "cursor": NetCursor(created_at="2026-11-02T10:00:00Z", uuid=""),
+        "cursor": NetCursor(created_ns=1_762_077_600_000_000_000 + minute, uuid=""),
     }
     values.update(overrides)
     return net.NetMessageRecord(**values)  # type: ignore[arg-type]
@@ -468,7 +477,7 @@ async def test_feed_cursor_drains_rows_sharing_a_timestamp(store: SurrealContent
     await age(store, 5)
     ordered = (await read_net_feed(organization_id=ORG, since=None, limit=10)).messages
     assert ordered[-1].body == "after"
-    assert len({m.cursor.created_at for m in ordered[:4]}) == 1
+    assert len({m.cursor.created_ns for m in ordered[:4]}) == 1
 
     seen: list[str] = []
     cursor = ordered[0].cursor
@@ -481,6 +490,35 @@ async def test_feed_cursor_drains_rows_sharing_a_timestamp(store: SurrealContent
         cursor = page.next_since
 
     assert seen == [m.id for m in ordered]
+
+
+@pytest.mark.parametrize("channels", [[], ["#reviews"], ["#reviews", "#builds"]])
+async def test_a_page_after_a_run_of_shared_timestamps_reaches_past_it(
+    store: SurrealContentClient, channels: list[str]
+) -> None:
+    """SurrealDB 3.2 counts rows equal to an exclusive lower bound against LIMIT.
+
+    Three rows share the cursor's timestamp, so a plain ``created_at > $t
+    LIMIT 2`` seek comes back empty on a server; the page must still reach
+    the rows after them.
+    """
+    for index in range(3):
+        await post(body=f"tie{index}")
+    await store.execute_query(
+        "LET $tie = time::now() - 30s; UPDATE net_messages SET created_at = $tie;"
+    )
+    for index in range(3):
+        await post(body=f"after{index}")
+    await age(store, 5)
+    ordered = (await read_net_feed(organization_id=ORG, since=None, limit=10)).messages
+    last_tie = ordered[2]
+
+    page = await read_net_feed(
+        organization_id=ORG, since=last_tie.cursor, channels=channels, limit=2
+    )
+
+    assert [m.body for m in page.messages] == ["after0", "after1"]
+    assert page.more is True
 
 
 async def test_feed_filters_by_channel_and_thread(store: SurrealContentClient) -> None:
@@ -562,6 +600,55 @@ async def test_idle_threads_are_claimed_once_and_settled(store: SurrealContentCl
     assert [m.id for m in await net_thread_window(reclaimed)] == [third.id]
 
 
+async def pending_flags(store: SurrealContentClient) -> dict[str, bool]:
+    rows = content_client.normalize_records(
+        await store.execute_query("SELECT thread, reflection_pending FROM net_threads;")
+    )
+    return {str(row["thread"]): bool(row["reflection_pending"]) for row in rows}
+
+
+async def test_only_threads_with_undistilled_messages_stay_pending(
+    store: SurrealContentClient,
+) -> None:
+    await post(thread="done")
+    await post(thread="waiting")
+    await age(store, 120)
+    assert await pending_flags(store) == {"done": True, "waiting": True}
+
+    claimed = await claim_net_thread(await thread_state("#reviews", "done"))
+    assert claimed is not None
+    window = await net_thread_window(claimed)
+    await settle_net_thread(claimed, through_message_id=window[-1].id)
+
+    assert await pending_flags(store) == {"done": False, "waiting": True}
+    # An old thread that is fully distilled is no longer a candidate at all,
+    # however long ago it went quiet.
+    assert [c.thread for c in await idle_net_threads(idle_minutes=1, limit=10)] == ["waiting"]
+
+
+async def test_a_post_during_reflection_keeps_the_thread_pending(
+    store: SurrealContentClient,
+) -> None:
+    await post(thread="busy", body="first")
+    await age(store, 120)
+    claimed = await claim_net_thread((await idle_net_threads(idle_minutes=1, limit=10))[0])
+    assert claimed is not None
+    window = await net_thread_window(claimed)
+
+    # Lands after the window was read and before the pass settles.
+    await post(thread="busy", body="second")
+    await settle_net_thread(claimed, through_message_id=window[-1].id)
+
+    state = await thread_state("#reviews", "busy")
+    assert state.reflected_through == window[-1].created_at
+    assert (await pending_flags(store))["busy"] is True
+    await age(store, 120)
+    again = await idle_net_threads(idle_minutes=1, limit=10)
+    reclaimed = await claim_net_thread(again[0])
+    assert reclaimed is not None
+    assert [m.body for m in await net_thread_window(reclaimed)] == ["second"]
+
+
 async def test_failed_attempts_stop_after_the_retry_budget(store: SurrealContentClient) -> None:
     await post(thread="stuck")
     await age(store, 120)
@@ -633,7 +720,9 @@ async def test_window_keeps_the_oldest_messages_under_the_character_cap(
     assert [m.id for m in window] == [m.id for m in posted[:3]]
 
 
-async def test_an_empty_window_settles_at_the_last_message(store: SurrealContentClient) -> None:
+async def test_an_empty_window_stops_qualifying_once_nothing_follows(
+    store: SurrealContentClient,
+) -> None:
     await post(thread="vanished")
     await age(store, 120)
     await store.execute_query("DELETE net_messages;")
@@ -644,8 +733,38 @@ async def test_an_empty_window_settles_at_the_last_message(store: SurrealContent
     await settle_net_thread(claimed, through_message_id=None)
 
     state = await thread_state("#reviews", "vanished")
-    assert state.reflected_through == state.last_message_at
+    assert state.reflected_through is None
+    assert state.reflection_attempts == 0
+    assert (await pending_flags(store))["vanished"] is False
     assert await idle_net_threads(idle_minutes=1, limit=10) == []
+
+
+async def test_an_empty_window_keeps_a_thread_pending_while_a_message_settles(
+    store: SurrealContentClient,
+) -> None:
+    await post(thread="settling", body="old")
+    await age(store, 120)
+    claimed = await claim_net_thread((await idle_net_threads(idle_minutes=1, limit=10))[0])
+    assert claimed is not None
+    window = await net_thread_window(claimed)
+    await settle_net_thread(claimed, through_message_id=window[-1].id)
+    # A message still inside the settle window is not in the next window,
+    # and the watermark must not jump over it.
+    await post(thread="settling", body="fresh")
+    await store.execute_query(
+        "UPDATE net_threads SET last_message_at = last_message_at - 120s, "
+        "reflection_claimed_at = NONE WHERE thread = 'settling';"
+    )
+    again = await claim_net_thread((await idle_net_threads(idle_minutes=1, limit=10))[0])
+    assert again is not None
+    assert await net_thread_window(again) == []
+    await settle_net_thread(again, through_message_id=None)
+
+    assert (await pending_flags(store))["settling"] is True
+    await age(store, 120)
+    last = await claim_net_thread((await idle_net_threads(idle_minutes=1, limit=10))[0])
+    assert last is not None
+    assert [m.body for m in await net_thread_window(last)] == ["fresh"]
 
 
 # --- concurrency, on a server only ------------------------------------------
@@ -724,3 +843,24 @@ async def test_concurrent_claims_leave_exactly_one_winner(
     winners = [claim for claim in claims if claim is not None]
     assert len(winners) == 1
     assert winners[0].reflection_attempts == 1
+
+
+async def test_selection_reads_only_pending_threads(live_store: SurrealContentClient) -> None:
+    """The selection plan seeks the pending index instead of ranging over thread history."""
+    from sibyl_core.services.net import idle_threads_statement
+
+    await post(thread="historical")
+    await post(thread="waiting")
+    await age(live_store, 600)
+    await live_store.execute_query(
+        "UPDATE net_threads SET reflection_pending = false WHERE thread = 'historical';"
+    )
+    statement = idle_threads_statement(idle_minutes=1).rstrip().rstrip(";")
+
+    plan = json.dumps(
+        await live_store.execute_query(f"{statement} EXPLAIN FULL;", limit=10), default=str
+    )
+
+    assert "net_thread_pending" in plan
+    assert "net_thread_key" not in plan
+    assert [c.thread for c in await idle_net_threads(idle_minutes=1, limit=10)] == ["waiting"]
