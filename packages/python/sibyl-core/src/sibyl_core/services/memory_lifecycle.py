@@ -197,6 +197,8 @@ async def _correction_graph_entity_ids(
     memory: RawMemory,
     principal_id: str | None,
     accessible_projects: Iterable[str] | None,
+    accessible_teams: Iterable[str] | None,
+    accessible_delegations: Iterable[str] | None,
     writable_projects: Iterable[str] | None = None,
     allowed_memory_scope_keys: Iterable[str] | None = None,
 ) -> _CorrectionGraphTargets:
@@ -288,6 +290,8 @@ async def _correction_graph_entity_ids(
         source_id=memory.id,
         principal_id=principal_id,
         accessible_projects=accessible_projects,
+        accessible_teams=accessible_teams,
+        accessible_delegations=accessible_delegations,
         log_event="memory_correction_graph_provenance_unreadable",
     )
 
@@ -334,6 +338,8 @@ async def _correction_graph_entity_ids(
         parent_ids=projected,
         principal_id=principal_id,
         accessible_projects=accessible_projects,
+        accessible_teams=accessible_teams,
+        accessible_delegations=accessible_delegations,
     )
     known = set(authorized)
     return _CorrectionGraphTargets(
@@ -354,6 +360,8 @@ async def _readable_correction_targets(
     source_id: str,
     principal_id: str | None,
     accessible_projects: Iterable[str] | None,
+    accessible_teams: Iterable[str] | None,
+    accessible_delegations: Iterable[str] | None,
     log_event: str,
     allowed_memory_scope_keys: Iterable[str] | None = None,
     lookup_failures: set[str] | None = None,
@@ -365,6 +373,10 @@ async def _readable_correction_targets(
     belonging to somebody else is refused either way. The correction route has
     already authorized this principal against the capture, so the grant is not
     the thing under test here.
+
+    The team and delegation grants are required rather than defaulted because
+    an absent grant denies: a caller that forgot them refused every team row it
+    found, so a team capture's correction stamped nothing and listed nothing.
     """
 
     readable: list[str] = []
@@ -387,6 +399,8 @@ async def _readable_correction_targets(
                 allowed_memory_scope_keys, principal_id=principal_id
             ),
             accessible_projects=accessible_projects,
+            accessible_teams=accessible_teams,
+            accessible_delegations=accessible_delegations,
             row_project_id=memory_row_project_id(
                 row_metadata,
                 entity_type=str(getattr(row, "entity_type", "") or ""),
@@ -408,6 +422,8 @@ async def _correction_projected_row_ids(
     parent_ids: Sequence[str],
     principal_id: str | None,
     accessible_projects: Iterable[str] | None,
+    accessible_teams: Iterable[str] | None,
+    accessible_delegations: Iterable[str] | None,
 ) -> tuple[list[str], bool]:
     """Follow the correction down into every row projected from the corrected rows.
 
@@ -497,6 +513,8 @@ async def _correction_projected_row_ids(
         source_id=memory.id,
         principal_id=principal_id,
         accessible_projects=accessible_projects,
+        accessible_teams=accessible_teams,
+        accessible_delegations=accessible_delegations,
         log_event="memory_correction_projection_unreadable",
     )
     return readable, truncated
@@ -537,6 +555,8 @@ async def _project_correction_to_graph(
             memory=memory,
             principal_id=principal_id,
             accessible_projects=accessible_projects,
+            accessible_teams=accessible_teams,
+            accessible_delegations=accessible_delegations,
             writable_projects=writable_projects,
             allowed_memory_scope_keys=allowed_memory_scope_keys,
         )
@@ -575,6 +595,8 @@ async def _project_correction_to_graph(
         source_id=memory.id,
         principal_id=principal_id,
         accessible_projects=accessible_projects,
+        accessible_teams=accessible_teams,
+        accessible_delegations=accessible_delegations,
         allowed_memory_scope_keys=allowed_memory_scope_keys,
         log_event="memory_correction_receipt_unreadable",
     )

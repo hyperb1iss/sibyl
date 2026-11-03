@@ -210,6 +210,8 @@ async def _visible_correction_derived_ids(
     entity_ids: Sequence[str],
     principal_id: str | None,
     accessible_projects: Iterable[str] | None,
+    accessible_teams: Iterable[str] | None,
+    accessible_delegations: Iterable[str] | None,
     allowed_memory_scope_keys: Iterable[str] | None,
 ) -> list[str]:
     if not entity_ids:
@@ -224,6 +226,8 @@ async def _visible_correction_derived_ids(
         source_id=source_id,
         principal_id=principal_id,
         accessible_projects=accessible_projects,
+        accessible_teams=accessible_teams,
+        accessible_delegations=accessible_delegations,
         allowed_memory_scope_keys=allowed_memory_scope_keys,
         log_event="memory_correction_reference_unreadable",
     )
@@ -464,6 +468,8 @@ async def _preview_loaded_memory_correction(
             entity_ids=declared_ids,
             principal_id=principal_id,
             accessible_projects=accessible_projects,
+            accessible_teams=accessible_teams,
+            accessible_delegations=accessible_delegations,
             allowed_memory_scope_keys=allowed_memory_scope_keys,
             log_event="memory_correction_preview_declared_unreadable",
             lookup_failures=lookup_failures,
@@ -474,6 +480,8 @@ async def _preview_loaded_memory_correction(
             memory=memory,
             principal_id=principal_id,
             accessible_projects=accessible_projects,
+            accessible_teams=accessible_teams,
+            accessible_delegations=accessible_delegations,
             writable_projects=writable_projects,
             allowed_memory_scope_keys=allowed_memory_scope_keys,
         )
@@ -489,6 +497,8 @@ async def _preview_loaded_memory_correction(
             entity_ids=[*descendants.entity_ids, *declared_ids],
             principal_id=principal_id,
             accessible_projects=accessible_projects,
+            accessible_teams=accessible_teams,
+            accessible_delegations=accessible_delegations,
             allowed_memory_scope_keys=allowed_memory_scope_keys,
             log_event="memory_correction_preview_descendant_unreadable",
             lookup_failures=lookup_failures,
@@ -803,6 +813,8 @@ async def apply_memory_correction(
             entity_ids=refused_entity_ids,
             principal_id=principal_id,
             accessible_projects=accessible_projects,
+            accessible_teams=accessible_teams,
+            accessible_delegations=accessible_delegations,
             allowed_memory_scope_keys=allowed_memory_scope_keys,
         ),
         projection_walk_truncated=projection_walk_truncated,

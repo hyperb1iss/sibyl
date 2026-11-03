@@ -67,6 +67,7 @@ async def filter_correction_disclosure(
                         ),
                         principal_id=principal_id,
                         accessible_projects=accessible_projects,
+                        accessible_teams=accessible_teams,
                         private_scope_granted=private_scope_granted_for(
                             allowed_memory_scope_keys, principal_id=principal_id
                         ),

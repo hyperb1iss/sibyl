@@ -240,6 +240,8 @@ async def propagate_source_correction(
                 private_scope_granted=private_scope_granted_for(grants, principal_id=principal_id),
                 allowed_memory_scope_keys=grants,
                 accessible_projects=projects,
+                accessible_teams=teams,
+                accessible_delegations=delegations,
                 row_project_id=memory_row_project_id(
                     row.metadata,
                     entity_type=str(getattr(row, "entity_type", "") or ""),
