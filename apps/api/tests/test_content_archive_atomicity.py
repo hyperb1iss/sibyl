@@ -233,3 +233,121 @@ async def test_legacy_operation_without_generated_date_repeats_without_rewrite(
     assert not conflicting.success
     assert any("retained operation history" in error for error in conflicting.errors)
     assert await fingerprint(destination) == before
+
+
+async def test_content_restore_sends_bounded_batches(archive_stores, monkeypatch):
+    from sibyl_core.services import source_archive_store
+
+    monkeypatch.setattr(source_archive_store, "ARCHIVE_RESTORE_BATCH_SIZE", 2)
+    source, destination = archive_stores
+    org = str(uuid4())
+    for index in range(5):
+        await raw(source, org, f"capture-{index}")
+    for index in range(3):
+        await source.execute_query(
+            "CREATE content_changefeed_cursors CONTENT $record;",
+            record={
+                "uuid": str(uuid4()),
+                "organization_id": org,
+                "table_name": "raw_captures",
+                "consumer_name": f"consumer-{index}",
+                "versionstamp": index,
+            },
+        )
+    monkeypatch.setattr(content_archive, "build_surreal_content_client", lambda: source)
+    payload = await content_archive.export_content_archive_payload(org)
+    monkeypatch.setattr(content_archive, "build_surreal_content_client", lambda: destination)
+    execute = destination.execute_query
+    sent: list[dict] = []
+
+    async def recording(query, **parameters):
+        sent.append(parameters)
+        return await execute(query, **parameters)
+
+    monkeypatch.setattr(destination, "execute_query", recording)
+    result = await content_archive.restore_content_archive_payload(payload, clean=True)
+
+    assert result.success, result.errors
+    assert result.rows_restored == 8
+    rows = [
+        len(parameters[name])
+        for parameters in sent
+        for name in ("units", "keys", "writes", "records")
+        if isinstance(parameters.get(name), list)
+    ] + [sum(name.startswith("archive_record_") for name in parameters) for parameters in sent]
+    assert max(rows) <= 2
+    for table in ("raw_captures", "content_changefeed_cursors"):
+        query = f"SELECT uuid FROM {table} ORDER BY uuid;"  # noqa: S608
+        assert await execute(query) == await source.execute_query(query)
+
+
+async def test_clean_restore_wipes_edges_of_captures_it_also_deletes(archive_stores, monkeypatch):
+    source, destination = archive_stores
+    org = str(uuid4())
+    await raw(source, org, "kept")
+    for identity in ("kept", "stale-new", "stale-old"):
+        await raw(destination, org, identity)
+    # An edge between two captures the archive does not carry: deleting either
+    # capture removes it, so the wipe has to run before the capture deletes.
+    await destination.execute_query(
+        "LET $new = (SELECT VALUE id FROM raw_captures WHERE uuid = 'stale-new')[0];"
+        "LET $old = (SELECT VALUE id FROM raw_captures WHERE uuid = 'stale-old')[0];"
+        "RELATE $new->supersedes->$old SET uuid = 'stale-edge', organization_id = $org,"
+        " raw_memory_id = 'stale-new', superseded_raw_memory_id = 'stale-old';",
+        org=org,
+    )
+    monkeypatch.setattr(content_archive, "build_surreal_content_client", lambda: source)
+    payload = await content_archive.export_content_archive_payload(org)
+    monkeypatch.setattr(content_archive, "build_surreal_content_client", lambda: destination)
+
+    result = await content_archive.restore_content_archive_payload(payload, clean=True)
+
+    assert result.success, result.errors
+    assert await destination.execute_query("SELECT uuid FROM raw_captures;") == [{"uuid": "kept"}]
+    assert await destination.execute_query("SELECT uuid FROM supersedes;") == []
+
+
+@pytest.mark.parametrize("clean", [False, True])
+async def test_retained_history_conflict_refuses_before_any_write(
+    archive_stores, monkeypatch, clean
+):
+    source, destination = archive_stores
+    org, attempt = str(uuid4()), str(uuid4())
+    record = {
+        "uuid": attempt,
+        "organization_id": org,
+        "experiment_id": "experiment",
+        "attempt_id": "attempt",
+        "assignment_sha256": "a" * 64,
+        "assignment_json": "{}",
+    }
+    for index in range(3):
+        await raw(source, org, f"incoming-{index}")
+    await source.execute_query("CREATE eval_attempts CONTENT $record;", record=record)
+    # The destination keeps a different history for the same attempt, plus a
+    # capture and a cursor a clean restore would otherwise delete first.
+    await raw(destination, org, "must-survive")
+    await destination.execute_query(
+        "CREATE eval_attempts CONTENT $record;", record={**record, "assignment_json": "[]"}
+    )
+    await destination.execute_query(
+        "CREATE content_changefeed_cursors CONTENT $record;",
+        record={
+            "uuid": str(uuid4()),
+            "organization_id": org,
+            "table_name": "raw_captures",
+            "consumer_name": "fixture",
+            "versionstamp": 7,
+        },
+    )
+    monkeypatch.setattr(content_archive, "build_surreal_content_client", lambda: source)
+    payload = await content_archive.export_content_archive_payload(org)
+    monkeypatch.setattr(content_archive, "build_surreal_content_client", lambda: destination)
+    before = await fingerprint(destination)
+
+    result = await content_archive.restore_content_archive_payload(payload, clean=clean)
+
+    assert not result.success
+    assert any("retained operation history" in error for error in result.errors)
+    assert not any("again finishes" in error for error in result.errors)
+    assert await fingerprint(destination) == before

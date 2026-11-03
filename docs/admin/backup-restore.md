@@ -490,6 +490,22 @@ rollback. Preserve the failed archive and destination, inspect the reported stag
 after correcting the cause. The loader accepts only Sibyl archives and API backups; it does not read
 raw database dumps or archives from other memory systems.
 
+The content and graph stages each plan before they write, then write in bounded transactions, so no
+request or transaction grows with the organization. An archive the destination refuses from its
+current state (a foreign record at a source's key, a row whose identity another organization holds,
+a row that conflicts with retained operation, validation or dream history, a row that would
+duplicate a destination row on any unique index, a relationship or mention whose endpoint is
+missing) fails before anything is written. Raw captures land before the auxiliary rows that refer to
+them, and the validation and dream checks that read those captures run as their rows are written.
+The graph stage writes entities with their source history, then episodes, relationships and
+mentions. A clean restore deletes only the rows it planned to delete, so a row written in the
+destination after planning is kept.
+
+A failure partway leaves whole sources behind, never a row without its history. After a lost
+connection or a concurrent change, running the same import again finishes the restore: sources
+already restored are recognized and skipped. A refusal partway, such as a validation record whose
+source the destination revoked, repeats until the reported conflict is resolved.
+
 ### Completed validation receipts
 
 Content archive 2.3 includes encrypted completion receipts for the archived validation executions. A
@@ -510,9 +526,9 @@ request and key before any content writes. Existing destination history, source 
 purge rules still apply. Older content archives remain supported but cannot supply omitted journal
 files.
 
-Receipts are published privately and create-only before the content transaction. If that transaction
-fails, ciphertext may remain without an authorized execution row. Preserve the failed archive and
-the receipt directory or bucket, then retry the same import after resolving the reported conflict.
+Receipts are published privately and create-only before the content writes. If those writes fail,
+ciphertext may remain without an authorized execution row. Preserve the failed archive and the
+receipt directory or bucket, then retry the same import after resolving the reported conflict.
 Import never replaces conflicting receipt bytes or restores an erased recovery key over current
 destination history.
 

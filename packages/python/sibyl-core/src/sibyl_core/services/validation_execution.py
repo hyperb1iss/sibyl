@@ -526,9 +526,14 @@ def validation_archive_guard(table: str, record: dict[str, Any]) -> str:
             outcome = TransportAttempt.model_validate_json(record["outcome_json"])
             if outcome.usage_known:
                 raise ValueError("Physical validation usage cannot be inferred from HTTP status")
-        return """LET $parent_execution = (SELECT * FROM memory_validation_executions
-            WHERE uuid = $record.execution_id AND organization_id = $record.organization_id
-                AND principal_id = $record.principal_id LIMIT 1)[0];
+        # Plain variables keep the lookups indexed: SurrealDB 3.2 scans the
+        # whole table for `uuid = $record.execution_id`.
+        return """LET $parent_uuid = $record.execution_id;
+            LET $parent_organization = $record.organization_id;
+            LET $parent_principal = $record.principal_id;
+            LET $parent_execution = (SELECT * FROM memory_validation_executions
+            WHERE uuid = $parent_uuid AND organization_id = $parent_organization
+                AND principal_id = $parent_principal LIMIT 1)[0];
             IF $parent_execution = NONE { THROW 'Validation attempt execution is absent'; };"""
     if table != "memory_validation_executions":
         raise ValueError("Unknown validation history table")
@@ -566,8 +571,11 @@ def validation_archive_guard(table: str, record: dict[str, Any]) -> str:
         ):
             raise ValueError("Invalid validation source incarnation")
         # Validated data is serialized as JSON scalar literals, never raw SQL.
-        clauses.append(f"""LET $state = (SELECT * FROM source_states WHERE organization_id = $record.organization_id
+        clauses.append(f"""LET $state = (SELECT * FROM source_states WHERE organization_id = $record_organization
             AND source_kind = 'raw_capture' AND source_id = {canonical(binding["source_id"])} LIMIT 1)[0];
             IF $state = NONE OR $state.deleted != false OR $state.incarnation != {canonical(binding["incarnation"])}
                 OR $state.generation < {binding["generation"]} {{ THROW 'Validation archive source was revoked'; }};""")
-    return "IF $record.purged = false { " + "".join(clauses) + " };"
+    return (
+        "LET $record_organization = $record.organization_id; "
+        "IF $record.purged = false { " + "".join(clauses) + " };"
+    )

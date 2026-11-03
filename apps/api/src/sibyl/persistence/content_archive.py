@@ -541,7 +541,13 @@ def _content_archive_export_query(
     )
 
 
-def _clean_content_archive_statements(organization_id: str | None) -> str:
+_AUXILIARY_CHANGED = "archive auxiliary destination changed before restore"
+
+
+async def _plan_auxiliary_cleanup(client, organization_id: str | None) -> list:
+    """Page the auxiliary rows a clean restore wipes; relation tables go first."""
+    from sibyl_core.services.source_archive_store import plan_cleanup
+
     wipe_specs = sorted(
         [
             spec
@@ -549,16 +555,97 @@ def _clean_content_archive_statements(organization_id: str | None) -> str:
             if spec.name != "raw_captures"
             and spec.name not in _RETAINED_OPERATION_TABLES
             and spec.name not in _DREAM_ARCHIVE_TABLES
+            and (organization_id is None or spec.name not in _GLOBAL_CONTENT_ARCHIVE_TABLES)
         ],
         key=lambda spec: spec.name not in _CONTENT_RELATION_ARCHIVE_TABLES,
     )
-    if organization_id is None:
-        return "\n".join(spec.delete_all_sql for spec in wipe_specs)
-    return "\n".join(
-        f"DELETE FROM {spec.name} WHERE organization_id = $organization_id;"  # noqa: S608
-        for spec in wipe_specs
-        if spec.name not in _GLOBAL_CONTENT_ARCHIVE_TABLES
-    )
+    pages = []
+    for spec in wipe_specs:
+        pages += await plan_cleanup(
+            client.execute_query,
+            spec.name,
+            organization_field="organization_id",
+            scope="true" if organization_id is None else "organization_id = $organization_id",
+            keep=lambda _identity: False,
+            **({} if organization_id is None else {"organization_id": organization_id}),
+        )
+    return pages
+
+
+@dataclass(frozen=True)
+class _AuxiliaryRow:
+    """One checked auxiliary write and the identity it lands on."""
+
+    table: str
+    identity_field: str
+    identity: str
+    statement: str
+    parameters: dict[str, object]
+    record: dict[str, object]
+    # Read-only conflict check against retained destination history, if any.
+    check: str | None = None
+
+
+async def _check_auxiliary_ownership(client, rows: list[_AuxiliaryRow], organization_id: str):
+    """Refuse, before any write, an archive row whose identity another organization holds."""
+    from sibyl_core.services.source_archive_store import restore_batches
+
+    by_table: dict[tuple[str, str], list[str]] = {}
+    for row in rows:
+        by_table.setdefault((row.table, row.identity_field), []).append(row.identity)
+    for (table, identity_field), identities in by_table.items():
+        for batch in restore_batches(identities):
+            # Each probe carries its own value: the embedded engine does not
+            # bind query parameters inside a closure.
+            owners = await client.execute_query(
+                "RETURN array::flatten($probes.map(|$probe| (SELECT VALUE organization_id "  # noqa: S608
+                f"FROM {table} WHERE {identity_field} = $probe.identity)));",
+                probes=[{"identity": identity} for identity in batch],
+            )
+            if not isinstance(owners, list):
+                raise TypeError("archive auxiliary ownership read returned an invalid shape")
+            if any(owner != organization_id for owner in owners):
+                raise ValueError("archive identity belongs to another organization")
+
+
+def _check_revoked_history_sources(
+    conflicts: list[dict[str, str]], rows: list[_AuxiliaryRow]
+) -> None:
+    """Refuse history whose source the destination keeps as deleted.
+
+    The planner already decided those captures stay tombstoned, so the
+    write-time source check for their dream or validation history would
+    refuse; say so before anything is written.
+    """
+    tombstoned = {
+        (conflict["organization_id"], conflict["source_id"])
+        for conflict in conflicts
+        if conflict.get("reason") == "retained_tombstone"
+    }
+    if not tombstoned:
+        return
+    for row in rows:
+        organization = row.record.get("organization_id")
+        if row.table == "dream_source_checkpoints":
+            if (organization, row.record.get("source_id")) in tombstoned:
+                raise ValueError("Dream archive source was revoked or replaced")
+        elif row.table == "memory_validation_executions" and row.record.get("purged") is False:
+            sources = row.record.get("source_ids")
+            if isinstance(sources, list) and any(
+                (organization, source) in tombstoned for source in sources
+            ):
+                raise ValueError("Validation archive source was revoked")
+
+
+async def _check_auxiliary_history(client, rows: list[_AuxiliaryRow]) -> None:
+    """Refuse, before any write, an archive row that conflicts with retained history."""
+    from sibyl_core.services.source_archive_store import restore_batches
+
+    for batch in restore_batches([row for row in rows if row.check is not None]):
+        parameters: dict[str, object] = {}
+        for row in batch:
+            parameters.update(row.parameters)
+        await client.execute_query("\n".join(str(row.check) for row in batch), **parameters)
 
 
 async def _export_surreal_content_archive_payload(
@@ -951,6 +1038,43 @@ async def _filter_legacy_source_fields(client, integrity, scope):
     ), dropped_fields
 
 
+def _existing_rows_sql(spec: ContentArchiveTableSpec) -> str:
+    return (
+        f"LET $existing = SELECT * OMIT id FROM {spec.name} "  # noqa: S608
+        f"WHERE {spec.target_identity_field} = $identity;\n"
+    )
+
+
+def _retained_comparison(
+    spec: ContentArchiveTableSpec, record: dict[str, object], *, legacy: bool
+) -> tuple[str, str]:
+    """The record conversion and the test that it differs from retained history."""
+    fields = ["created_at"] + (
+        ["admitted_at"] if spec.name == "eval_attempts" and "admitted_at" in record else []
+    )
+    converted = ", ".join(
+        f"IF $record.{field} != NONE AND $record.{field} != NULL "
+        f"{{ type::datetime($record.{field}) }} "
+        f"ELSE {{ NONE }} AS {field}"
+        for field in fields
+    )
+    conversion = f"LET $record = (SELECT *, {converted} FROM ONLY $record);\n"  # noqa: S608
+    comparison = "$existing != [$record]"
+    omitted = []
+    if spec.name == "memory_validation_executions":
+        # Dependency guards advance the destination's conflict witness.
+        omitted.append("promotion_write_witness")
+    if legacy and "created_at" not in record:
+        omitted.append("created_at")
+    if omitted:
+        fields_to_omit = ", ".join(omitted)
+        comparison = (
+            f"(SELECT * OMIT {fields_to_omit} FROM $existing) "  # noqa: S608
+            f"!= (SELECT * OMIT {fields_to_omit} FROM [$record])"
+        )
+    return conversion, comparison
+
+
 def _auxiliary_restore_statement(
     spec: ContentArchiveTableSpec,
     organization_id: str | None,
@@ -959,10 +1083,7 @@ def _auxiliary_restore_statement(
     legacy: bool = False,
 ) -> str:
     """Preserve operation history and reject foreign identities in the same transaction."""
-    existing = (
-        f"LET $existing = SELECT * OMIT id FROM {spec.name} "  # noqa: S608
-        f"WHERE {spec.target_identity_field} = $identity;\n"
-    )
+    existing = _existing_rows_sql(spec)
     ownership_guard = ""
     if organization_id is not None:
         ownership_guard = (
@@ -976,29 +1097,7 @@ def _auxiliary_restore_statement(
         return existing + ownership_guard + archive_dream_restore_statement(spec.name, record)
     conversion = ""
     if spec.name in _RETAINED_OPERATION_TABLES:
-        fields = ["created_at"] + (
-            ["admitted_at"] if spec.name == "eval_attempts" and "admitted_at" in record else []
-        )
-        converted = ", ".join(
-            f"IF $record.{field} != NONE AND $record.{field} != NULL "
-            f"{{ type::datetime($record.{field}) }} "
-            f"ELSE {{ NONE }} AS {field}"
-            for field in fields
-        )
-        conversion = f"LET $record = (SELECT *, {converted} FROM ONLY $record);\n"  # noqa: S608
-        comparison = "$existing != [$record]"
-        omitted = []
-        if spec.name == "memory_validation_executions":
-            # Dependency guards advance the destination's conflict witness.
-            omitted.append("promotion_write_witness")
-        if legacy and "created_at" not in record:
-            omitted.append("created_at")
-        if omitted:
-            fields_to_omit = ", ".join(omitted)
-            comparison = (
-                f"(SELECT * OMIT {fields_to_omit} FROM $existing) "  # noqa: S608
-                f"!= (SELECT * OMIT {fields_to_omit} FROM [$record])"
-            )
+        conversion, comparison = _retained_comparison(spec, record, legacy=legacy)
         write = (
             f"IF array::len($existing) = 0 {{ {spec.create_sql} }} ELSE {{ "
             f"IF {comparison} {{ "
@@ -1011,6 +1110,30 @@ def _auxiliary_restore_statement(
 
         conversion += validation_archive_guard(spec.name, record)
     return f"{conversion}{existing}{ownership_guard}{write}"
+
+
+def _auxiliary_history_check(
+    spec: ContentArchiveTableSpec, record: dict[str, object], *, legacy: bool
+) -> str | None:
+    """Read-only form of the write's conflict with history the destination keeps.
+
+    It reads nothing the restore itself writes, so it runs before the first
+    write. The validation and dream source checks read restored captures and
+    stay with the write.
+    """
+    existing = _existing_rows_sql(spec)
+    if spec.name == "dream_source_checkpoints":
+        return (
+            existing + "IF array::len($existing) > 0 AND $existing != [$record] { "
+            "THROW 'Dream archive conflicts with retained stage'; };"
+        )
+    if spec.name not in _RETAINED_OPERATION_TABLES:
+        return None
+    conversion, comparison = _retained_comparison(spec, record, legacy=legacy)
+    return (
+        f"{conversion}{existing}IF array::len($existing) > 0 AND ({comparison}) {{ "
+        "THROW 'archive conflicts with retained operation history'; };"
+    )
 
 
 def _ordered_validation_history(rows):
@@ -1026,9 +1149,8 @@ def _ordered_validation_history(rows):
 
 
 async def _prepare_auxiliary_content_restore(client, tables, organization_id, *, legacy=False):
-    """Validate and compile non-source writes for the source-local transaction."""
-    statements: list[str] = []
-    parameters: dict[str, object] = {"organization_id": organization_id}
+    """Validate and compile non-source writes, one checked statement per row."""
+    restores: list[_AuxiliaryRow] = []
     tables_restored = rows_restored = 0
     errors: list[str] = []
     dropped_fields: dict[str, set[str]] = {}
@@ -1098,8 +1220,6 @@ async def _prepare_auxiliary_content_restore(client, tables, organization_id, *,
             if spec.name == "eval_attempts" and record.get("admitted_at") is None:
                 record.pop("admitted_at", None)
             index = rows_restored
-            parameters[f"archive_record_{index}"] = record
-            parameters[f"archive_identity_{index}"] = identity
             try:
                 statement = _auxiliary_restore_statement(
                     spec, organization_id, record, legacy=legacy
@@ -1108,13 +1228,105 @@ async def _prepare_auxiliary_content_restore(client, tables, organization_id, *,
                 if len(errors) < 50:
                     errors.append(f"{spec.name} invalid archive row ({type(exc).__name__})")
                 continue
-            statements.append(
+            bind = (
                 f"FOR $archive_once IN [true] {{ LET $record = $archive_record_{index}; "
-                f"LET $identity = $archive_identity_{index}; {statement} }};"
+                f"LET $identity = $archive_identity_{index}; "
+            )
+            check = _auxiliary_history_check(spec, record, legacy=legacy)
+            restores.append(
+                _AuxiliaryRow(
+                    table=spec.name,
+                    identity_field=spec.target_identity_field,
+                    identity=identity,
+                    statement=f"{bind}{statement} }};",
+                    parameters={
+                        f"archive_record_{index}": record,
+                        f"archive_identity_{index}": identity,
+                    },
+                    record=record,
+                    check=None if check is None else f"{bind}{check} }};",
+                )
             )
             rows_restored += 1
 
-    return tables_restored, rows_restored, errors, dropped_fields, "\n".join(statements), parameters
+    return tables_restored, rows_restored, errors, dropped_fields, restores
+
+
+async def _restore_content_sources_and_rows(
+    client,
+    integrity,
+    auxiliary_restores: list[_AuxiliaryRow],
+    pending_receipts,
+    *,
+    scope,
+    organization_id: str | None,
+    clean: bool,
+    global_scope: bool,
+) -> tuple[list[str], list[dict[str, str]]]:
+    """Plan the content restore, then write it in bounded transactions.
+
+    Returns the restored source ids and the integrity conflicts.
+    """
+    from sibyl_core.memory_pipeline.observations import SourceKind
+    from sibyl_core.services.source_archive_store import (
+        UniqueWrite,
+        apply_cleanup,
+        apply_source_restore,
+        check_unique_writes,
+        interrupted_restore,
+        plan_source_restore,
+        restore_batches,
+    )
+
+    # Decide every write, and raise every refusal the destination's state alone
+    # can cause, before receipts publish or any row changes.
+    plan = await plan_source_restore(
+        client.execute_query,
+        integrity,
+        kind=SourceKind.RAW_CAPTURE,
+        organizations=scope,
+        clean=clean,
+        skip_existing=False,
+        global_scope=global_scope,
+    )
+    if organization_id is not None:
+        await _check_auxiliary_ownership(client, auxiliary_restores, organization_id)
+    await _check_auxiliary_history(client, auxiliary_restores)
+    _check_revoked_history_sources(plan.conflicts, auxiliary_restores)
+    cleanup = await _plan_auxiliary_cleanup(client, organization_id) if clean else []
+    # Each auxiliary row deletes and recreates, or creates beside, the rows
+    # sharing its identity; any other row on one of its unique keys collides.
+    vacated = plan.vacated | {key for page in cleanup for key in page.keys}
+    await check_unique_writes(
+        client.execute_query,
+        [
+            *plan.unique_writes,
+            *(
+                UniqueWrite(row.table, row.record, identity=(row.identity_field,))
+                for row in auxiliary_restores
+            ),
+        ],
+        vacated=vacated,
+    )
+    await asyncio.to_thread(validation_receipt_archive.publish, pending_receipts)
+    # The auxiliary wipe goes first: deleting a raw capture also deletes the
+    # relation edges that end at it, which would move a planned wipe page.
+    # Then raw captures with their own clean deletes, then auxiliary rows in
+    # archive order, each statement checking its row inside its batch.
+    try:
+        await apply_cleanup(client.execute_query, cleanup, refusal=_AUXILIARY_CHANGED)
+        await apply_source_restore(client.execute_query, plan)
+        for batch in restore_batches(auxiliary_restores):
+            parameters: dict[str, object] = {"organization_id": organization_id}
+            for row in batch:
+                parameters.update(row.parameters)
+            statements = "\n".join(row.statement for row in batch)
+            await client.execute_query(
+                f"BEGIN TRANSACTION;\n{statements}\nCOMMIT TRANSACTION;", **parameters
+            )
+    except Exception as exc:
+        raise RuntimeError(interrupted_restore(exc)) from exc
+    return plan.restored, plan.conflicts
 
 
 async def restore_content_archive_payload(
@@ -1138,7 +1350,6 @@ async def restore_content_archive_payload(
     if organization_id is not None and global_scope:
         raise ValueError("global content scope cannot be applied to an organization-scoped archive")
 
-    from sibyl_core.memory_pipeline.observations import SourceKind
     from sibyl_core.migrate.archive_lineage import seal_archive_lineage
 
     _, sealed, _ = seal_archive_lineage(None, payload)
@@ -1161,15 +1372,12 @@ async def restore_content_archive_payload(
             integrity, legacy_dropped = await _filter_legacy_source_fields(client, integrity, scope)
             if legacy_dropped:
                 dropped_fields["raw_captures"] = legacy_dropped
-        from sibyl_core.services.source_archive_store import restore_source_integrity
-
         (
             auxiliary_tables,
             auxiliary_rows,
             errors,
             auxiliary_dropped,
-            auxiliary_sql,
-            auxiliary_parameters,
+            auxiliary_restores,
         ) = await _prepare_auxiliary_content_restore(
             client, tables, organization_id, legacy=payload.get("version", "1.0") == "1.0"
         )
@@ -1180,51 +1388,23 @@ async def restore_content_archive_payload(
         pending_receipts = await asyncio.to_thread(
             validation_receipt_archive.prepare_payload, payload
         )
-        specs = [
-            spec
-            for spec in _CONTENT_ARCHIVE_TABLE_SPECS
-            if spec.name != "raw_captures"
-            and (organization_id is None or spec.name not in _GLOBAL_CONTENT_ARCHIVE_TABLES)
-        ]
-        predicate = "" if organization_id is None else " WHERE organization_id = $organization_id"
-        snapshot_fields = ", ".join(
-            f"{spec.name}: (SELECT * FROM {spec.name}{predicate} ORDER BY id)"  # noqa: S608
-            for spec in specs
-        )
-        snapshot = f"crypto::sha256(type::string({{{snapshot_fields}}}))"
-        fingerprints = await client.execute_query(
-            f"RETURN {{ fingerprint: {snapshot} }};", organization_id=organization_id
-        )
-        auxiliary_parameters["archive_auxiliary_fingerprint"] = _normalize_records(fingerprints)[0][
-            "fingerprint"
-        ]
-        auxiliary_sql = (
-            f"IF {snapshot} != $archive_auxiliary_fingerprint {{ "
-            "THROW 'archive auxiliary destination changed before restore'; };\n"
-            + (_clean_content_archive_statements(organization_id) if clean else "")
-            + auxiliary_sql
-        )
         try:
-            await asyncio.to_thread(validation_receipt_archive.publish, pending_receipts)
-            restored = await restore_source_integrity(
-                client.execute_query,
+            restored_ids, integrity_conflicts = await _restore_content_sources_and_rows(
+                client,
                 integrity,
-                kind=SourceKind.RAW_CAPTURE,
-                organizations=scope,
+                auxiliary_restores,
+                pending_receipts,
+                scope=scope,
+                organization_id=organization_id,
                 clean=clean,
-                skip_existing=False,
                 global_scope=global_scope,
-                auxiliary_statements=auxiliary_sql,
-                auxiliary_parameters=auxiliary_parameters,
             )
         except Exception as exc:
             return ContentArchiveRestoreResult(
                 success=False, tables_restored=0, rows_restored=0, errors=[str(exc)]
             )
-        restored_ids = restored["restored_source_ids"]
         rows_restored += len(restored_ids)
         tables_restored += 1
-        integrity_conflicts = restored["conflicts"]
         quarantined = [
             {
                 "source_id": identity,

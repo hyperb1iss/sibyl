@@ -104,7 +104,7 @@ async def test_global_restore_requires_explicit_operator_scope_before_client(mon
     factory.assert_not_called()
 
 
-async def test_explicit_global_clean_retains_omitted_org_highwater_and_fences_new_org(monkeypatch):
+async def test_explicit_global_clean_retains_omitted_org_highwater_and_keeps_a_new_org(monkeypatch):
 
     client = SurrealContentClient(url="memory://")
     await bootstrap_content_schema(client)
@@ -143,6 +143,8 @@ async def test_explicit_global_clean_retains_omitted_org_highwater_and_fences_ne
         assert len(states) == 1
         assert states[0]["deleted"] is True
         highwater = states[0]
+        # Another unarchived source gives the next clean restore a page to delete.
+        await remember("omitted-org", "Added again")
         execute = client.execute_query
         injected = False
         new_source = None
@@ -155,12 +157,12 @@ async def test_explicit_global_clean_retains_omitted_org_highwater_and_fences_ne
             return await execute(statement, **params)
 
         monkeypatch.setattr(client, "execute_query", race)
-        failed = await content_archive.restore_content_archive_payload(
+        raced = await content_archive.restore_content_archive_payload(
             payload, clean=True, global_scope=True
         )
-        assert not failed.success
-        assert failed.rows_restored == 0
-        assert any("destination changed" in error for error in failed.errors)
+        # A clean restore deletes only what it planned to delete. A source
+        # written after planning survives rather than being wiped unseen.
+        assert raced.success, raced.errors
         assert injected
         assert new_source is not None
         rows = await execute("SELECT * FROM raw_captures;")

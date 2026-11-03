@@ -197,11 +197,12 @@ async def test_full_graph_clean_replaces_episode_inventory_without_resetting_sou
     from unittest.mock import patch
 
     with patch.object(runtime.client, "execute_query", race):
-        conflicted = await restore_backup(
+        raced = await restore_backup(
             backup.backup_data, organization_id=org, clean=True, skip_existing=False
         )
     assert injected
-    assert not conflicted.success
-    assert any("destination changed" in error for error in conflicted.errors)
+    # A clean restore deletes only what it planned to delete. An episode
+    # written after planning survives rather than being wiped unseen.
+    assert raced.success, raced.errors
     assert await execute("SELECT * FROM episode WHERE uuid='post-archive-episode';")
     assert await execute("SELECT * FROM relates_to WHERE uuid='original-link';")
