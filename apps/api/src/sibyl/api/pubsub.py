@@ -51,9 +51,12 @@ async def _graph_cache_subscriber(event: str, data: dict[str, Any], org_id: str 
 
 async def init_pubsub(local_broadcast_callback: Any) -> None:
     """Initialize the active event bus on server startup."""
+    from sibyl.api.net_events import net_wakeup_subscriber
+
     bus = get_pubsub()
     await bus.connect()
     await bus.subscribe(_graph_cache_subscriber)
+    await bus.subscribe(net_wakeup_subscriber)
     await bus.subscribe(local_broadcast_callback)
 
 
