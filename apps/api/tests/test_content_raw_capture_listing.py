@@ -225,6 +225,7 @@ async def test_claim_returns_the_raw_row_provenance_is_built_from(content_client
     assert claimed["uuid"] == str(raw.id)
     assert claimed["source_id"] == "cli:manual"
     assert claimed["revision"] == 1
+    assert claimed["raw_content"] == raw.raw_content
     assert isinstance(claimed["metadata"], dict)
 
 

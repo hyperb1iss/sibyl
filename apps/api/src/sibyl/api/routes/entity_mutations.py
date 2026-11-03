@@ -233,6 +233,7 @@ async def _write_capture_backed_entity(
             raw_capture_id=str(claimed_raw_memory_id),
             principal_id=principal_id,
             graph_metadata=response_metadata,
+            row_content=content,
             archives_capture=archives_capture,
             idempotency_key=idempotency_key,
         )

@@ -35,6 +35,7 @@ from sibyl_core.auth import AuthOrganization, ProjectRole
 from sibyl_core.auth.memory_policy import CAPTURE_EXPIRES_AT_METADATA_KEY
 from sibyl_core.memory_pipeline.source_lifecycle import (
     SOURCE_BINDINGS_KEY,
+    UNKNOWN_SOURCE_REVISION,
     source_revision_bindings,
 )
 
@@ -97,8 +98,19 @@ class SourceCaptureBinding:
     provenance: dict[str, Any]
 
 
-def _claimed_capture_provenance(claimed: Mapping[str, object]) -> dict[str, Any] | None:
+def _claimed_capture_provenance(
+    claimed: Mapping[str, object], *, row_content: str
+) -> dict[str, Any] | None:
     """The provenance MCP remember stamps, read off the raw row this request claimed.
+
+    A binding says which revision of the capture's text the row was built
+    from, so the claimed revision is bound only when the row carries the text
+    the capture holds now. A buffered graph write that replays after the raw
+    memory was revised carries the old text; bound at the new revision it
+    would read as fresh. Every binding is unknown instead, which a revised
+    capture treats as stale, so the row is born blocked rather than serving
+    text its author already corrected. Both sides are compared stripped, the
+    way the graph writer stores the body (``MemoryCaptureRequest.stored_content``).
 
     None when the stored row cannot support honest source bindings, where the
     MCP path would raise.
@@ -115,6 +127,9 @@ def _claimed_capture_provenance(claimed: Mapping[str, object]) -> dict[str, Any]
         )
     except ValueError:
         return None
+    stored_text = claimed.get("raw_content")
+    if not isinstance(stored_text, str) or stored_text.strip() != row_content.strip():
+        bindings = dict.fromkeys(bindings, UNKNOWN_SOURCE_REVISION)
     provenance: dict[str, Any] = {
         "raw_memory_id": raw_memory_id,
         SOURCE_BINDINGS_KEY: bindings,
@@ -133,6 +148,7 @@ async def claim_source_capture(
     raw_capture_id: str,
     principal_id: str | None,
     graph_metadata: Mapping[str, Any],
+    row_content: str,
     archives_capture: bool,
     idempotency_key: str | None = None,
 ) -> SourceCaptureBinding | None:
@@ -199,7 +215,7 @@ async def claim_source_capture(
         sidecar_id=sidecar_id,
         provenance={},
     )
-    provenance = _claimed_capture_provenance(claimed)
+    provenance = _claimed_capture_provenance(claimed, row_content=row_content)
     if provenance is None:
         await release_source_capture(session, organization_id=organization_id, binding=binding)
         return refused("capture_bindings_malformed")

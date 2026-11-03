@@ -34,12 +34,22 @@ def _session() -> MagicMock:
     return session
 
 
-def _claimed_row(raw_id: str, *, revision: int = 1, **metadata: object) -> dict[str, object]:
+_REMEMBERED_TEXT = "the exact text the CLI stored raw"
+
+
+def _claimed_row(
+    raw_id: str,
+    *,
+    revision: int = 1,
+    raw_content: str = _REMEMBERED_TEXT,
+    **metadata: object,
+) -> dict[str, object]:
     """What the claim statement returns for the raw row it stamped."""
     return {
         "uuid": raw_id,
         "source_id": "cli:manual",
         "revision": revision,
+        "raw_content": raw_content,
         "metadata": dict(metadata),
     }
 
@@ -83,7 +93,12 @@ async def test_quick_capture_creates_raw_archive_record(
 
     content_session = _session()
     save_capture = AsyncMock(side_effect=lambda _session, *, capture: capture)
-    claimed = _claimed_row("raw-1", revision=2, source_bindings={"upstream": 1})
+    claimed = _claimed_row(
+        "raw-1",
+        revision=2,
+        raw_content="remember this exact text",
+        source_bindings={"upstream": 1},
+    )
     mark_projected = AsyncMock(return_value=claimed)
     add = AsyncMock(return_value=add_result)
 
@@ -160,7 +175,7 @@ async def test_quick_capture_creates_raw_archive_record(
 def _remember_entity(raw_memory_id: str, **metadata: object) -> EntityCreate:
     return EntityCreate(
         name="CLI memory",
-        content="the exact text the CLI stored raw",
+        content=_REMEMBERED_TEXT,
         entity_type=EntityType.EPISODE,
         metadata={
             "capture_mode": "remember",
@@ -253,6 +268,34 @@ async def test_an_unclaimable_raw_memory_id_writes_the_row_unbound() -> None:
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("stored_text", "bound_revision"),
+    [
+        # Whitespace is not a revision: the graph writer stores the body stripped.
+        (f"  {_REMEMBERED_TEXT}\n", 3),
+        # The capture was revised after the CLI queued this write.
+        ("the text the capture was corrected to", 0),
+    ],
+)
+async def test_a_row_binds_the_claimed_revision_only_for_the_text_it_carries(
+    stored_text: str, bound_revision: int
+) -> None:
+    outcome, add, _mark, _release, _save, _logs = await _create_remembered(
+        _remember_entity("raw-1"),
+        claimed=_claimed_row(
+            "raw-1", revision=3, raw_content=stored_text, source_bindings={"upstream": 2}
+        ),
+        add_result=SimpleNamespace(success=True, id="episode_new", message="ok"),
+    )
+
+    assert isinstance(outcome, EntityResponse)
+    bindings = add.await_args.kwargs["capture_provenance"]["source_bindings"]
+    # A row that does not carry the capture's current text cannot vouch for any
+    # source epoch behind it either.
+    assert bindings == {"raw-1": bound_revision, "upstream": 2 if bound_revision else 0}
+
+
+@pytest.mark.asyncio
 async def test_a_failed_graph_write_gives_the_claimed_capture_back() -> None:
     outcome, add, mark, release, save_capture, _logs = await _create_remembered(
         _remember_entity("raw-1"),
@@ -331,6 +374,7 @@ async def test_a_retried_request_claims_under_the_same_sidecar_id() -> None:
             raw_capture_id="raw-1",
             principal_id=principal_id,
             graph_metadata={"memory_scope": "private"},
+            row_content=_REMEMBERED_TEXT,
             archives_capture=True,
             idempotency_key=key,
         )

@@ -2004,9 +2004,10 @@ async def mark_raw_capture_projected(
     retried request derives the same ``projected_capture_id`` and gets the
     row back instead of losing it to its own first attempt.
 
-    Returns the claimed row's id, source id, revision and metadata, which is
-    what the graph row's provenance is built from, or None when any check
-    failed. A private row has no audience key, so only its scope is matched.
+    Returns the claimed row's id, source id, revision, current text and
+    metadata, which is what the graph row's provenance is built from, or None
+    when any check failed. A private row has no audience key, so only its
+    scope is matched.
     """
     if not principal_id or not memory_scope:
         return None
@@ -2027,7 +2028,7 @@ async def mark_raw_capture_projected(
             "AND (metadata.projected_capture_id IS NONE "
             "OR metadata.projected_capture_id = $projected_capture_id) "
             "AND metadata.projected_entity_id IS NONE "
-            "RETURN uuid, source_id, revision, metadata;",
+            "RETURN uuid, source_id, revision, raw_content, metadata;",
             raw_capture_id=raw_capture_id,
             organization_id=str(organization_id),
             principal_id=principal_id,

@@ -29,6 +29,7 @@ from tests.harness.auth import stub_auth_context
 from tests.harness.remember_correct import (
     CaptureStack,
     cli_remember,
+    post_entities,
     post_memory_raw,
     wire_capture_stack,
 )
@@ -208,6 +209,69 @@ async def test_an_already_projected_capture_cannot_take_a_second_row(stack) -> N
         "raw_memory_id"
     ]
     assert "raw_memory_id" not in (await stack.runtime.entity_manager.get(second["id"])).metadata
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("graph_text", "servable"),
+    [
+        ("We deploy the API to fly.io.", False),
+        ("We deploy the API to render.com.", True),
+    ],
+)
+async def test_a_graph_write_replayed_after_a_revise_binds_the_text_it_carries(
+    stack, graph_text: str, servable: bool
+) -> None:
+    """The CLI buffers its graph write, and the capture can be revised first.
+
+    Bound at the capture's new revision, the old text would read as fresh and
+    keep serving words its author already corrected. It binds an unknown
+    revision instead, which a revised capture treats as stale.
+    """
+    ctx = _member(stack)
+    raw = await post_memory_raw(
+        stack,
+        ctx,
+        _capture_request(
+            "Deploy target", "We deploy the API to fly.io.", memory_scope="private", scope_key=None
+        ),
+    )
+    revised = await apply_memory_correction(
+        organization_id=stack.group_id,
+        source_id=raw["id"],
+        principal_id=ctx.user_id,
+        action="revise",
+        reason="moved hosts",
+        revised_content="We deploy the API to render.com.",
+        accessible_projects=set(),
+        writable_projects=set(),
+        maintained_projects=set(),
+        accessible_teams=set(),
+    )
+    assert revised.applied
+
+    # The body `sibyl remember` queued before the revise, replayed now.
+    payload = await post_entities(
+        stack,
+        ctx,
+        title="Deploy target",
+        content=graph_text,
+        kind="episode",
+        metadata={
+            "capture_mode": "remember",
+            "capture_surface": "cli",
+            "remember_kind": "episode",
+            "memory_scope": "private",
+            "raw_memory_id": raw["id"],
+        },
+    )
+
+    row = await stack.runtime.entity_manager.get(payload["id"])
+    assert row.metadata["raw_memory_id"] == raw["id"]
+    current = await get_raw_memory(organization_id=stack.group_id, memory_id=raw["id"])
+    expected_revision = current.revision if servable else 0
+    assert row.metadata["source_bindings"] == {raw["id"]: expected_revision}
+    assert await _servable(stack, payload["id"]) is servable
 
 
 @pytest.mark.asyncio

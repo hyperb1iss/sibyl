@@ -206,9 +206,9 @@ async def _correction_graph_entity_ids(
 
     Two sources, because the two write paths record the link in opposite
     directions. Promotion stamps the entity id onto the raw memory, so that
-    one is a metadata read. Direct capture stamps the raw ids onto the graph
-    row's attributes instead (`memory_pipeline/capture.py:137-140`), which
-    leaves a query as the only way back. That query is unindexed, and it is
+    one is a metadata read. Direct capture, over MCP or as the CLI's raw write
+    followed by an entity write, stamps the raw ids onto the graph row's
+    attributes instead, which leaves a query as the only way back. That query is unindexed, and it is
     affordable here only because a correction is a rare, operator-initiated
     write rather than anything on the read path.
 
@@ -222,11 +222,14 @@ async def _correction_graph_entity_ids(
     The two halves are guarded differently, because they differ in who
     authored them.
 
-    The query half is server-authoritative. `raw_memory_id` is assigned from
-    the completed raw write and overwrites anything the caller stamped
-    (`memory_pipeline/capture.py:137-138`), so a row it returns is a
-    projection of the very capture `preview_memory_correction` just
-    authorized this principal to correct. Re-authorizing it would not add
+    The query half is server-authoritative. `raw_memory_id` is stamped by the
+    server on every write path and overwrites anything the caller sent: the
+    capture pipeline takes it from the raw write it just completed
+    (`memory_pipeline/capture.py`), and the entity create route takes it only
+    from the raw row its capture claim proved belongs to the caller, in the
+    row's own audience. So a row this query returns is a projection of the
+    very capture `preview_memory_correction` just authorized this principal
+    to correct. Re-authorizing it would not add
     safety, and it would subtract enormously: `authorize_memory_write` refuses
     SHARED, ORGANIZATION, and PUBLIC outright, refuses TEAM without
     `accessible_teams`, and refuses a row carrying no scope metadata at all.
