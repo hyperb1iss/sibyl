@@ -44,6 +44,16 @@ PUBLIC_METHOD_OWNERS = {
         "unlink_team_project",
         "get_project_settings",
         "update_project_settings",
+        "list_bots",
+        "create_bot",
+        "get_bot",
+        "delete_bot",
+        "transfer_bot",
+        "grant_bot_project",
+        "revoke_bot_project",
+        "list_bot_api_keys",
+        "create_bot_api_key",
+        "revoke_bot_api_key",
     },
     ClientGraphMixin: {
         "list_entities",
@@ -129,7 +139,7 @@ def test_public_methods_resolve_directly_to_one_canonical_owner() -> None:
         if not name.startswith("_")
     }
 
-    assert len(expected) == 89
+    assert len(expected) == 99
     assert actual == expected
     assert {
         name
@@ -169,6 +179,15 @@ async def test_owner_mixins_preserve_representative_wire_contracts() -> None:
             "memory_space_ids": ["space:1"],
             "expires_days": 2,
         },
+    )
+    request.reset_mock()
+
+    result = await client.grant_bot_project("bot/1", "project:1", "project_viewer")
+    assert result is response
+    request.assert_awaited_once_with(
+        "POST",
+        "/bots/bot%2F1/projects",
+        json={"project_id": "project:1", "role": "project_viewer"},
     )
     request.reset_mock()
 
