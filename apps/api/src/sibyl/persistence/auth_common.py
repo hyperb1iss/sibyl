@@ -21,6 +21,14 @@ class UserNotFoundError(LookupError):
     """Claims referenced a user that no longer exists."""
 
 
+class SuspendedPrincipalError(UserNotFoundError):
+    """Claims named a bot whose sponsor is no longer an active member.
+
+    It narrows ``UserNotFoundError`` so every caller that already refuses a
+    missing user refuses a suspended bot too; the REST surface names it.
+    """
+
+
 class RepositoryAuthContextResolver:
     """Build AuthContext from backend-agnostic auth repositories."""
 

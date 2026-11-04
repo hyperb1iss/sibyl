@@ -20,6 +20,7 @@ from sibyl.auth.primitives import slugify
 from sibyl.persistence.auth_common import (
     InvalidAuthClaimsError,
     RepositoryAuthContextResolver,
+    SuspendedPrincipalError,
     UserNotFoundError,
 )
 from sibyl.persistence.surreal.pool import warm_shared_pool
@@ -31,7 +32,9 @@ from sibyl_core.auth import (
     GitHubUserIdentity,
     OrganizationRole,
     PasswordChange,
+    PrincipalKind,
 )
+from sibyl_core.auth.models import coerce_principal_kind
 from sibyl_core.backends.surreal import SurrealAuthClient
 from sibyl_core.backends.surreal.records import (
     coerce_datetime as _coerce_datetime,
@@ -125,6 +128,12 @@ def _claim_string_set(value: object | None) -> frozenset[str] | None:
     return frozenset({str(value)})
 
 
+def _coerce_optional_uuid(value: object | None) -> UUID | None:
+    if value is None or value == "":
+        return None
+    return _coerce_uuid(value, field_name="uuid")
+
+
 def _coerce_optional_int(value: object | None) -> int | None:
     if isinstance(value, bool):
         return None
@@ -164,6 +173,8 @@ def _user_from_record(record: Mapping[str, object]) -> AuthUser:
         last_login_at=_coerce_datetime(record.get("last_login_at")),
         created_at=_coerce_datetime(record.get("created_at")) or _utcnow(),
         updated_at=_coerce_datetime(record.get("updated_at")),
+        kind=coerce_principal_kind(record.get("kind")),
+        sponsor_user_id=_coerce_optional_uuid(record.get("sponsor_user_id")),
     )
 
 
@@ -342,7 +353,7 @@ class SurrealUserRepository(_SurrealAuthRepository):
             "SELECT * FROM users WHERE email = $email AND deleted_at = NONE LIMIT 1;",
             email=email.strip().lower(),
         )
-        if record is None:
+        if record is None or coerce_principal_kind(record.get("kind")) is PrincipalKind.SERVICE:
             verify_password_timing_floor(
                 password,
                 iterations=config_module.settings.password_iterations,
@@ -773,6 +784,25 @@ class SurrealAuthContextResolver(RepositoryAuthContextResolver):
         api_key_memory_space_ids = _claim_string_set(claims.get("api_key_memory_space_ids"))
         api_key_memory_scope_keys = _claim_string_set(claims.get("api_key_memory_scope_keys"))
 
+        user = _user_from_record(user_record)
+        org_role = (
+            _membership_from_record(membership_record).role
+            if membership_record is not None
+            else None
+        )
+        sponsor_org_role: OrganizationRole | None = None
+        if user.is_service and organization_id is not None and org_role is not None:
+            # A bot never holds more than member, whatever its row says.
+            if org_role in {OrganizationRole.OWNER, OrganizationRole.ADMIN}:
+                org_role = OrganizationRole.MEMBER
+            sponsor_org_role = await self._sponsor_org_role(
+                sponsor_user_id=user.sponsor_user_id,
+                organization_id=organization_id,
+            )
+            if sponsor_org_role is None:
+                msg = f"Bot {user.id} is suspended: its sponsor is not an active member"
+                raise SuspendedPrincipalError(msg)
+
         teams = frozenset(
             str(record["uuid"]) for record in _normalize_records(payload.get("teams"))
         )
@@ -793,13 +823,11 @@ class SurrealAuthContextResolver(RepositoryAuthContextResolver):
             else frozenset()
         )
         return AuthContext(
-            user=_user_from_record(user_record),
+            user=user,
             organization=_organization_from_record(organization_record)
             if organization_record is not None
             else None,
-            org_role=_membership_from_record(membership_record).role
-            if membership_record is not None
-            else None,
+            org_role=org_role,
             scopes=scopes,
             api_key_id=_claim_optional_str(claims.get("api_key_id")),
             api_key_project_ids=api_key_project_ids,
@@ -807,4 +835,41 @@ class SurrealAuthContextResolver(RepositoryAuthContextResolver):
             api_key_memory_scope_keys=api_key_memory_scope_keys,
             accessible_teams=teams,
             accessible_delegations=delegations,
+            sponsor_org_role=sponsor_org_role,
         )
+
+    async def _sponsor_org_role(
+        self, *, sponsor_user_id: UUID | None, organization_id: UUID
+    ) -> OrganizationRole | None:
+        """The sponsor's live role here, or None when the sponsor is gone.
+
+        Gone means deleted, no longer a member of this organization, or not a
+        person: a bot never sponsors another bot.
+        """
+        if sponsor_user_id is None:
+            return None
+        payload = _object_mapping(
+            await self._client.execute_query(
+                """
+                    RETURN {
+                        sponsor: (
+                            SELECT uuid FROM users
+                            WHERE uuid = $sponsor_id AND deleted_at = NONE AND kind != 'service'
+                            LIMIT 1
+                        )[0],
+                        membership: (
+                            SELECT role FROM organization_members
+                            WHERE organization_id = $organization_id AND user_id = $sponsor_id
+                            LIMIT 1
+                        )[0],
+                    };
+                """,
+                sponsor_id=str(sponsor_user_id),
+                organization_id=str(organization_id),
+            )
+        )
+        sponsor = _normalize_record(payload.get("sponsor"))
+        membership = _normalize_record(payload.get("membership"))
+        if sponsor is None or membership is None:
+            return None
+        return OrganizationRole(str(membership.get("role") or OrganizationRole.MEMBER.value))

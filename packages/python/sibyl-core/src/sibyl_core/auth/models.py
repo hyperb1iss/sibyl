@@ -31,6 +31,17 @@ class ProjectRole(StrEnum):
     VIEWER = "project_viewer"
 
 
+class PrincipalKind(StrEnum):
+    """What kind of principal a user record is.
+
+    A service principal is a bot: a member a human sponsors, that signs in only
+    with API keys and whose project access its sponsor caps on every request.
+    """
+
+    USER = "user"
+    SERVICE = "service"
+
+
 class ProjectVisibility(StrEnum):
     """Visibility level for a project."""
 
@@ -57,6 +68,13 @@ class AuthUser(BaseModel):
     last_login_at: datetime | None = None
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     updated_at: datetime | None = None
+    kind: PrincipalKind = PrincipalKind.USER
+    sponsor_user_id: UUID | None = None
+
+    @property
+    def is_service(self) -> bool:
+        """True for a bot, which a human sponsors and never signs in."""
+        return self.kind is PrincipalKind.SERVICE
 
 
 class UserIdentity(BaseModel):
@@ -208,7 +226,26 @@ def coerce_auth_user(value: object) -> AuthUser:
         last_login_at=_optional_datetime(_attr(value, "last_login_at")),
         created_at=_optional_datetime(_attr(value, "created_at")) or datetime.now(UTC),
         updated_at=_optional_datetime(_attr(value, "updated_at")),
+        kind=coerce_principal_kind(_attr(value, "kind")),
+        sponsor_user_id=_optional_uuid_value(_attr(value, "sponsor_user_id")),
     )
+
+
+def coerce_principal_kind(value: object | None) -> PrincipalKind:
+    """Read a stored kind; a record that predates the field is a user."""
+    if isinstance(value, PrincipalKind):
+        return value
+    if isinstance(value, str) and value:
+        return PrincipalKind(value)
+    return PrincipalKind.USER
+
+
+def _optional_uuid_value(value: object) -> UUID | None:
+    if isinstance(value, UUID):
+        return value
+    if isinstance(value, str) and value:
+        return UUID(value)
+    return None
 
 
 def coerce_auth_organization(value: object | None) -> AuthOrganization | None:

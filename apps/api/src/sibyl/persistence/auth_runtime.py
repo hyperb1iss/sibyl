@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
-from sibyl.persistence.auth_common import InvalidAuthClaimsError, UserNotFoundError
+from sibyl.persistence.auth_common import (
+    InvalidAuthClaimsError,
+    SuspendedPrincipalError,
+    UserNotFoundError,
+)
 from sibyl.persistence.surreal.auth_runtime import (
     AuthContextResolver,
     OAuthAuthorizationRecord,
@@ -96,6 +100,7 @@ __all__ = [
     "OrganizationMembershipRepository",
     "OrganizationRepository",
     "SessionRepository",
+    "SuspendedPrincipalError",
     "UserNotFoundError",
     "UserRepository",
     "add_memory_space_member",
