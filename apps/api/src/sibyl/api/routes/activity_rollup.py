@@ -21,6 +21,7 @@ from sibyl.api.schemas.activity import (
     ActivityKind,
     ActivityWindow,
     ActivityWindowLabel,
+    PrincipalKindLabel,
     TeamActivityItem,
     TeamActivityPerson,
     TeamActivityResponse,
@@ -98,6 +99,8 @@ class Member:
     email: str | None
     avatar_url: str | None
     role: TeamMemberRole
+    kind: PrincipalKindLabel = "user"
+    sponsor_user_id: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -171,6 +174,8 @@ def members_from_rows(rows: Iterable[Mapping[str, Any]]) -> dict[str, Member]:
             email=email,
             avatar_url=_text(user.get("avatar_url")),
             role=cast("TeamMemberRole", role if role in _ROLES else "member"),
+            kind="service" if user.get("kind") == "service" else "user",
+            sponsor_user_id=member_key(user.get("sponsor_user_id")),
         )
     return members
 
@@ -417,6 +422,8 @@ def summarize(
             email=member.email,
             avatar_url=member.avatar_url,
             role=member.role,
+            kind=member.kind,
+            sponsor_user_id=member.sponsor_user_id,
             counts=ActivityCounts(**counts[member.user_id]),
             last_active_at=last_active.get(member.user_id),
         )
@@ -451,6 +458,7 @@ def summarize(
                 actor_id=item.actor_id,
                 actor_name=members[item.actor_id].name,
                 actor_avatar_url=members[item.actor_id].avatar_url,
+                actor_kind=members[item.actor_id].kind,
                 project_name=names.get(item.project_id) if item.project_id else None,
                 at=item.at,
                 href=item.href,

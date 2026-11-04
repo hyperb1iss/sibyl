@@ -188,6 +188,8 @@ def _member_user_payload(
         "email": record.get("email"),
         "name": record.get("name"),
         "avatar_url": record.get("avatar_url"),
+        "kind": "service" if is_service_record(record) else "user",
+        "sponsor_user_id": record.get("sponsor_user_id"),
     }
     if include_github_id:
         payload["github_id"] = record.get("github_id")

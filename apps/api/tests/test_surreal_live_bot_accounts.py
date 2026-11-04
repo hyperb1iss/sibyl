@@ -26,6 +26,7 @@ from sibyl.persistence.surreal import auth as surreal_auth, organization_runtime
 from sibyl.persistence.surreal.auth_runtime import (
     _common as auth_common,
     api_keys as key_runtime,
+    audit as audit_runtime,
     bots as bot_runtime,
     projects as project_runtime,
     sessions as session_runtime,
@@ -610,3 +611,36 @@ async def test_live_a_bot_cannot_climb_through_any_role_route() -> None:
         raw = await _issue_key(sponsor, bot_id)
         bot_ctx = await _bot_ctx(raw)
         assert bot_ctx.org_role is OrganizationRole.MEMBER
+
+
+@pytest.mark.asyncio
+async def test_live_the_team_listing_and_audit_log_mark_bots() -> None:
+    async with _live_auth_store() as client:
+        world = await _seed(client)
+        sponsor = await _ctx(world, world.sponsor)
+        bot = await bot_runtime.create_bot(ctx=sponsor, name="oncall", request=None)
+        bot_id = UUID(str(bot["id"]))
+        await audit_runtime.log_audit_event(
+            action="memory.capture",
+            user_id=bot_id,
+            organization_id=world.org_id,
+            request=None,
+            details={},
+        )
+
+        rows = await organization_runtime.list_org_members(slug=world.slug, actor_id=world.owner)
+        kinds = {row["user"]["id"]: row["user"]["kind"] for row in rows}
+        assert kinds[str(bot_id)] == "service"
+        assert kinds[str(world.sponsor)] == "user"
+        [bot_row] = [row for row in rows if row["user"]["id"] == str(bot_id)]
+        assert bot_row["user"]["sponsor_user_id"] == str(world.sponsor)
+
+        events, total = await audit_runtime.list_audit_events(organization_id=world.org_id)
+        assert total == 2
+        by_action = {event["action"]: event for event in events}
+        assert by_action["memory.capture"]["actor_kind"] == "service"
+        assert by_action["bot.create"]["actor_kind"] == "user"
+        resource_events, _ = await audit_runtime.list_audit_events(
+            organization_id=world.org_id, resource=str(bot_id)
+        )
+        assert all(event.get("actor_kind") for event in resource_events)

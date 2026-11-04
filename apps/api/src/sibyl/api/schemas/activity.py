@@ -16,6 +16,8 @@ ActivityKind = Literal[
     "entity",
 ]
 TeamMemberRole = Literal["owner", "admin", "member", "viewer"]
+# A person, or a bot (a service principal a person sponsors).
+PrincipalKindLabel = Literal["user", "service"]
 
 
 class ActivityWindow(BaseModel):
@@ -52,6 +54,10 @@ class TeamActivityPerson(BaseModel):
     email: str | None = None
     avatar_url: str | None = None
     role: TeamMemberRole
+    kind: PrincipalKindLabel = Field(
+        default="user", description="`service` for a bot, which a person sponsors"
+    )
+    sponsor_user_id: str | None = Field(default=None, description="Set for a bot: its sponsor")
     counts: ActivityCounts = Field(default_factory=ActivityCounts)
     last_active_at: datetime | None = None
 
@@ -69,6 +75,9 @@ class TeamActivityItem(BaseModel):
         default=None, description="The member's display name, as the member list shows it"
     )
     actor_avatar_url: str | None = None
+    actor_kind: PrincipalKindLabel = Field(
+        default="user", description="`service` when a bot did this"
+    )
     project_name: str | None = Field(
         default=None, description="Set when project_id names a project the caller can read"
     )

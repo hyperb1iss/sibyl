@@ -417,3 +417,48 @@ def test_a_credential_naming_no_user_is_refused_not_crashed(user) -> None:
     with pytest.raises(HTTPException) as refused:
         _caller_uuid(SimpleNamespace(user=user))
     assert refused.value.status_code == 401
+
+
+def test_the_team_page_marks_a_bot_and_its_events() -> None:
+    # A bot is listed beside people, its writes credited to it, not its sponsor.
+    sponsor_id = "00000000-0000-0000-0000-00000000a5a5"
+    bot_id = "00000000-0000-0000-0000-00000000b07b"
+    now = datetime(2026, 11, 4, 12, tzinfo=UTC)
+    members = rollup.members_from_rows(
+        [
+            {
+                "user": {"id": sponsor_id, "name": "Bliss", "kind": "user"},
+                "role": "member",
+            },
+            {
+                "user": {
+                    "id": bot_id,
+                    "name": "oncall",
+                    "kind": "service",
+                    "sponsor_user_id": sponsor_id,
+                },
+                "role": "member",
+            },
+        ]
+    )
+    event = rollup.ActivityEvent(
+        kind="capture",
+        id="raw_1",
+        title="paged at 3am",
+        entity_type=None,
+        project_id="project_alpha",
+        actor_id=bot_id,
+        at=now - timedelta(hours=1),
+        href="/memory/raw_1",
+    )
+    response = rollup.summarize(
+        [event], members=members, window=rollup.resolve_window("24h", now=now)
+    )
+    people = {person.user_id: person for person in response.people}
+    assert people[bot_id].kind == "service"
+    assert people[bot_id].sponsor_user_id == sponsor_id
+    assert people[bot_id].counts.captures == 1
+    assert people[sponsor_id].kind == "user"
+    assert people[sponsor_id].counts.captures == 0
+    assert response.recent[0].actor_id == bot_id
+    assert response.recent[0].actor_kind == "service"

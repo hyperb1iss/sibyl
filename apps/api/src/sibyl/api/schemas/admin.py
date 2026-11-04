@@ -12,6 +12,9 @@ class AdminAuditEventResponse(BaseModel):
     id: str = Field(..., description="Audit event UUID")
     organization_id: str | None = Field(default=None, description="Organization ID")
     user_id: str | None = Field(default=None, description="Actor user ID")
+    actor_kind: str | None = Field(
+        default=None, description="`user` for a person, `service` for a bot"
+    )
     action: str = Field(..., description="Audit action")
     resource: str | None = Field(default=None, description="Best-effort resource label")
     ip_address: str | None = Field(default=None, description="Client IP address")

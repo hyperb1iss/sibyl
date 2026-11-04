@@ -14,6 +14,8 @@ from sibyl.persistence.surreal.auth_runtime._common import (
     _SurrealRepository,
 )
 from sibyl_core.audit import audit_event_matches_resource
+from sibyl_core.backends.surreal.in_clumps import clumped
+from sibyl_core.backends.surreal.records import normalize_records as _normalize_records
 
 
 async def log_audit_event(
@@ -106,8 +108,9 @@ async def list_audit_events(
         async with _auth_client_scope() as client:
             repo = _SurrealRepository(client)
             rows = await repo.select_many(query, **params, scan_limit=scan_limit)
-        filtered = [row for row in rows if audit_event_matches_resource(row, resource)]
-        return filtered[bounded_offset : bounded_offset + bounded_limit], len(filtered)
+            filtered = [row for row in rows if audit_event_matches_resource(row, resource)]
+            page = filtered[bounded_offset : bounded_offset + bounded_limit]
+            return await _with_actor_kinds(client, page), len(filtered)
 
     scan_limit = bounded_offset + bounded_limit
     query = (
@@ -119,7 +122,33 @@ async def list_audit_events(
         repo = _SurrealRepository(client)
         rows = await repo.select_many(query, **params, scan_limit=scan_limit)
         count_row = await repo.select_one(count_query, **params)
-    return rows[bounded_offset:], _audit_total(count_row)
+        page = await _with_actor_kinds(client, rows[bounded_offset:])
+    return page, _audit_total(count_row)
+
+
+async def _with_actor_kinds(client, rows: list[SurrealRecord]) -> list[SurrealRecord]:
+    """Mark each row's actor as a person or a bot, read from the users table now."""
+    actor_ids = sorted({str(row["user_id"]) for row in rows if row.get("user_id")})
+    if not actor_ids:
+        return rows
+    query, params = clumped(
+        "SELECT uuid FROM users WHERE uuid IN $ids AND kind = 'service'", "ids", actor_ids
+    )
+    bots = {
+        str(record.get("uuid"))
+        for record in _normalize_records(await client.execute_query(f"RETURN {query};", **params))
+    }
+    return [
+        {
+            **row,
+            "actor_kind": (
+                ("service" if str(row["user_id"]) in bots else "user")
+                if row.get("user_id")
+                else None
+            ),
+        }
+        for row in rows
+    ]
 
 
 def _bounded_audit_value(value: object, *, depth: int = 0) -> object:
