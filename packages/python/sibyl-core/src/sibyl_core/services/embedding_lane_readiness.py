@@ -34,9 +34,9 @@ optimization, never a guess.
 
 from __future__ import annotations
 
-import time
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
+from time import monotonic
 from typing import Any
 
 import structlog
@@ -165,7 +165,7 @@ async def vector_lane_readiness(
     """The cached readiness of one organization's plane for queries in one model."""
     space = str(sorted((vector_space(query_stamp) or {}).items()))
     key = (plane, organization_id, space)
-    now = time.monotonic()
+    now = monotonic()
     cached = _cache.get(key)
     if cached is not None and cached[0] > now:
         return cached[1]
