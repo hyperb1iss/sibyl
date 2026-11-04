@@ -139,8 +139,8 @@ FOR $cut IN $archive_graph_cut {
             THROW 'Archive graph retained row requires capture guards';
         };
         FOR $field IN ['review_capture_id', 'source_entity_id'] {
-            LET $value = $metadata[$field] ?? NULL;
-            IF $value NOT IN [NULL, '', false] {
+            LET $field_value = $metadata[$field] ?? NULL;
+            IF $field_value NOT IN [NULL, '', false] {
                 THROW 'Archive graph retained row requires source guards';
             };
         };

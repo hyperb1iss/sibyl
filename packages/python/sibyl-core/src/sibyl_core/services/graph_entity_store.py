@@ -1477,10 +1477,10 @@ async def _replace_projected_entities(client, records, *, group_id, projection_s
     )
     query = (
         """RETURN {
-        LET $parent = (SELECT * FROM entity WHERE group_id=$org AND uuid=$parent_id LIMIT 1)[0];
+        LET $parent_row = (SELECT * FROM entity WHERE group_id=$org AND uuid=$parent_id LIMIT 1)[0];
         LET $state = (SELECT * FROM source_states WHERE organization_id=$org AND source_kind='graph_entity' AND source_id=$parent_id LIMIT 1)[0];
         LET $parent_derivation = (SELECT * FROM memory_derivations WHERE organization_id=$org AND target_kind='graph_entity' AND target_id=$parent_id LIMIT 1)[0];
-        IF $parent = NONE OR $state = NONE OR $parent.revision != $revision
+        IF $parent_row = NONE OR $state = NONE OR $parent_row.revision != $revision
             OR $state.revision != $revision OR $state.generation != $generation OR $state.deleted
             OR $state.incarnation != $incarnation
             OR $parent_derivation.active != true
