@@ -450,6 +450,11 @@ class EntityManager(_EntityWorkItemManager):
                 group_id=self._group_id,
             )
         mirror_content = "description" in updates and "content" not in updates
+        # An `$expected_revision = NONE OR ...` disjunct makes 3.2.4 plan this
+        # write as a table scan; the guard is spelled only when it applies.
+        revision_guard = (
+            "AND revision = $expected_revision" if expected_revision is not None else ""
+        )
         rows = await _execute_graph_transaction(
             self._client,
             """
@@ -461,7 +466,7 @@ class EntityManager(_EntityWorkItemManager):
                     UPDATE entity MERGE $patch
                     WHERE group_id = $group_id
                         AND uuid = $uuid
-                        AND ($expected_revision = NONE OR revision = $expected_revision)
+                        __REVISION_GUARD__
                     RETURN AFTER
                 );
                 UPDATE $updated SET
@@ -496,7 +501,7 @@ class EntityManager(_EntityWorkItemManager):
                 SELECT * FROM entity WHERE group_id = $group_id AND uuid = $uuid
                     AND array::len($updated) > 0 LIMIT 1;
                 COMMIT TRANSACTION;
-            """,
+            """.replace("__REVISION_GUARD__", revision_guard),
             group_id=self._group_id,
             uuid=entity_id,
             patch=patch,

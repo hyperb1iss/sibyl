@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 from dataclasses import dataclass
 
+from sibyl_core.backends.surreal.in_clumps import clumped
 from sibyl_core.backends.surreal.records import raise_on_error
 from sibyl_core.backends.surreal.schema_source_witness import SOURCE_STATE_WRITE_WITNESS
 from sibyl_core.models.entities import Entity, Relationship
@@ -18,26 +19,28 @@ from sibyl_core.services.graph_relationships import (
     _relationship_record,
 )
 
-_LINK_CUT = """
-LET $rows = SELECT * FROM entity WHERE uuid = $approved.uuid;
-LET $states = SELECT * OMIT validation_write_witness FROM source_states
-    WHERE organization_id = $approved.group_id AND source_kind = 'graph_entity'
-        AND source_id = $approved.uuid ORDER BY id;
-LET $associations = SELECT * OMIT validation_write_witness FROM memory_derivations
-    WHERE target_kind = 'graph_entity' AND target_id = $approved.uuid ORDER BY id;
-LET $valid = array::len($rows) = 1 AND $rows[0].group_id = $approved.group_id
-    AND array::len($states) = 1 AND $states[0].deleted = false
-    AND array::len($associations.filter(|$a|
-        $a.organization_id != $approved.group_id)) = 0;
-"""
-
-_LOAD_LINK_SNAPSHOT = (
-    """
+# Every read names its operand as a client parameter. A field of a block LET
+# (`$approved.uuid`) or a closure argument is unknown when SurrealDB plans the
+# statement, so the entity and source_states reads scanned those tables: on
+# 3.2.4 and 4.0 for the snapshot, on 4.0 for the per-endpoint closure the
+# write used to check through. The write now reads every endpoint's cut at
+# once (entities in index-served clumps, ledger rows by the record ids the
+# snapshot approved, which source_state_identity keeps unique) and matches
+# rows to endpoints in memory; the cut and its fingerprint are the ones the
+# snapshot computes. An IN on the last column of source_state_identity would
+# walk the organization's whole prefix instead.
+_LOAD_LINK_SNAPSHOT = """
 RETURN {
-    LET $approved = {uuid: $uuid, group_id: $group_id};
-"""
-    + _LINK_CUT
-    + """
+    LET $rows = SELECT * FROM entity WHERE uuid = $uuid;
+    LET $states = SELECT * OMIT validation_write_witness FROM source_states
+        WHERE organization_id = $group_id AND source_kind = 'graph_entity'
+            AND source_id = $uuid ORDER BY id;
+    LET $associations = SELECT * OMIT validation_write_witness FROM memory_derivations
+        WHERE target_kind = 'graph_entity' AND target_id = $uuid ORDER BY id;
+    LET $valid = array::len($rows) = 1 AND $rows[0].group_id = $group_id
+        AND array::len($states) = 1 AND $states[0].deleted = false
+        AND array::len((SELECT VALUE id FROM $associations
+            WHERE organization_id != $group_id)) = 0;
     IF $valid = false { RETURN NONE; };
     RETURN {
         row: $rows[0], physical_id: $rows[0].id, state_id: $states[0].id,
@@ -45,35 +48,46 @@ RETURN {
     };
 };
 """
+
+_LINK_ROWS = "SELECT * FROM entity WHERE uuid IN $approved"
+_LINK_ASSOCIATIONS = (
+    "SELECT * OMIT validation_write_witness FROM memory_derivations"
+    " WHERE target_kind = 'graph_entity' AND target_id IN $approved"
 )
+_LINK_EDGES = "SELECT * FROM relates_to WHERE uuid IN $relationship"
 
 _ADD_LINKS = (
     """
 BEGIN TRANSACTION;
 LET $result = {
-    LET $checks = $approved_entities.map(|$approved| {
-"""
-    + _LINK_CUT
-    + """
-        RETURN {
-            valid: $valid AND $rows[0].id = $approved.physical_id
-                AND $states[0].id = $approved.state_id
-                AND crypto::sha256(type::string([$rows, $states, $associations]))
-                    = $approved.sha256
-        };
-    });
-    IF array::len($checks.filter(|$check| $check.valid = false)) > 0 {
+    LET $link_rows = __LINK_ROWS__;
+    LET $link_states = SELECT * OMIT validation_write_witness FROM $approved_state_ids ORDER BY id;
+    LET $link_associations = SELECT * FROM __LINK_ASSOCIATIONS__ ORDER BY id;
+    LET $cuts = SELECT uuid, group_id, physical_id, state_id, sha256,
+            (SELECT * FROM $link_rows WHERE uuid = $parent.uuid) AS rows,
+            (SELECT * FROM $link_states WHERE organization_id = $parent.group_id
+                AND source_kind = 'graph_entity' AND source_id = $parent.uuid) AS states,
+            (SELECT * FROM $link_associations WHERE target_id = $parent.uuid) AS associations,
+            (SELECT VALUE id FROM $link_associations
+                WHERE target_id = $parent.uuid AND organization_id != $parent.group_id) AS foreign
+        FROM $approved_entities;
+    LET $checks = SELECT VALUE (array::len(rows) = 1 AND rows[0].group_id = group_id
+            AND array::len(states) = 1 AND states[0].deleted = false
+            AND array::len(foreign) = 0
+            AND rows[0].id = physical_id AND states[0].id = state_id
+            AND crypto::sha256(type::string([rows, states, associations])) = sha256)
+        FROM $cuts;
+    IF $checks CONTAINS false {
         RETURN {error: 'changed'};
     };
     LET $source = (SELECT * FROM $approved_entities[0].physical_id)[0];
-    LET $edge_rows = SELECT * FROM relates_to WHERE uuid IN $relationship_ids;
+    LET $edge_rows = __LINK_EDGES__;
     IF array::len($edge_rows) != array::len(array::distinct($edge_rows.uuid)) {
         RETURN {error: 'identity'};
     };
-    LET $existing = $edges.map(|$edge| {
-        edge: $edge,
-        stored: (SELECT * FROM relates_to WHERE uuid = $edge.uuid)[0]
-    });
+    LET $existing = SELECT $this AS edge,
+            (SELECT * FROM $edge_rows WHERE uuid = $parent.uuid)[0] AS stored
+        FROM $edges;
     IF array::len($existing.filter(|$entry| $entry.stored != NONE AND (
         $entry.stored.group_id != $entry.edge.group_id
         OR $entry.stored.in != $entry.edge.src OR $entry.stored.out != $entry.edge.tgt
@@ -166,6 +180,20 @@ class EntityLinksResult:
     parent_task_id: str | None
     depends_on: list[str]
     replayed: bool
+
+
+def _add_links_query(
+    approved: Sequence[str], relationships: Sequence[str]
+) -> tuple[str, dict[str, list]]:
+    rows, approved_params = clumped(_LINK_ROWS, "approved", approved)
+    associations, _ = clumped(_LINK_ASSOCIATIONS, "approved", approved)
+    edges, edge_params = clumped(_LINK_EDGES, "relationship", relationships)
+    query = (
+        _ADD_LINKS.replace("__LINK_ROWS__", rows)
+        .replace("__LINK_ASSOCIATIONS__", associations)
+        .replace("__LINK_EDGES__", edges)
+    )
+    return query, {**approved_params, **edge_params}
 
 
 async def _execute_link_query(
@@ -274,10 +302,14 @@ async def add_entity_links_if_revision(
                 "target_id": relationship.target_id,
             }
         )
+    query, clumps = _add_links_query(list(snapshots), list(unique))
     rows = await _execute_link_query(
         client,
-        _ADD_LINKS,
+        query,
         **parameters,
+        **clumps,
+        approved_state_ids=[snapshot.state_id for snapshot in snapshots.values()],
+        group_id=group_id,
         relationship_ids=list(unique),
         approved_entities=[snapshot.parameters(group_id) for snapshot in snapshots.values()],
         expected_revision=expected_revision,
