@@ -847,6 +847,19 @@ sibyl remember "Descriptive title" "What you learned and why it matters" --kind 
 sibyl task complete task_a1b2c3d4e5f6 --hours 4.5 --learnings "Key insight: The OAuth flow requires..."
 ```
 
+### Run an Agent Under Its Own Bot
+
+A long-running agent (on-call, CI) gets its own identity instead of a person's key. Its writes are
+credited to the bot, its private memories are its own, and it never holds more on a project than its
+sponsor:
+
+```bash
+sibyl bot create oncall
+sibyl bot grant oncall project_a1b2c3d4e5f6 --role contributor
+sibyl bot key create oncall --name pager      # prints the key once
+# then run the agent with SIBYL_AUTH_TOKEN=<that key> and SIBYL_API_URL set
+```
+
 ---
 
 ## Consolidating Personal Instances

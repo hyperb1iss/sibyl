@@ -115,6 +115,7 @@ Auth, organizations, configuration, and operations.
 | `sibyl whoami`                  | Check auth status for the active context             |
 | [`sibyl org`](./org.md)         | Organizations and member management                  |
 | [`sibyl team`](./team.md)       | Teams, membership, and team project access           |
+| [`sibyl bot`](./bot.md)         | Bot accounts: agent identities you sponsor           |
 | `sibyl config context`          | Server/org/project context bundles (see above)       |
 | [`sibyl setup`](./setup.md)     | Connect this machine to a server in one command      |
 | [`sibyl init`](./init.md)       | Create a local or remote context for first-run setup |
