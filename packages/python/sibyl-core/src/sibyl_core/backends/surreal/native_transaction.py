@@ -20,6 +20,7 @@ from uuid import UUID
 from surrealdb.connections.async_ws import AsyncWsSurrealConnection
 from surrealdb.errors import ServerError
 
+from sibyl_core.backends.surreal.compact_cbor import install_compact_cbor
 from sibyl_core.backends.surreal.dedicated_client import _checked_query_result
 from sibyl_core.backends.surreal.native_cleanup import (
     NativeOwnedSocket,
@@ -450,6 +451,7 @@ async def open_native_transaction(
     transaction = NativeTransaction(binding, cancel_ack_timeout_seconds=grace)
     primary: BaseException | None = None
     try:
+        install_compact_cbor()
         client = AsyncWsSurrealConnection(binding.endpoint)
         transaction._client = client
         try:
