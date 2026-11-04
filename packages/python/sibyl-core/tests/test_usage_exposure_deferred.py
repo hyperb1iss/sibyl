@@ -34,24 +34,16 @@ class _RecordingContentClient:
         if kind == "aggregate":
             return [
                 {
-                    "item_kind": target["item_kind"],
-                    "item_id": target["item_id"],
-                    "retrieval_count": 1,
-                    "citation_count": 0,
-                    "misled_count": 0,
-                    "last_recalled_at": None,
-                    "last_used_at": None,
+                    "item_kind": params[f"kind_{index}"],
+                    "item_id": params[f"item_{index}"],
+                    "signals": [{"signal_type": "exposure", "total": 1, "latest": None}],
                 }
-                for target in params["targets"]
+                for index in range(sum(name.startswith("item_") for name in params))
             ]
         if kind == "stamp":
             return [
-                {
-                    "uuid": stamp["item_id"],
-                    "organization_id": params["organization_id"],
-                    **stamp,
-                }
-                for stamp in params["stamps"]
+                {"uuid": item_id, "organization_id": params["organization_id"], **stamp}
+                for item_id, stamp in params["stamps"].items()
             ]
         raise AssertionError(f"unexpected content query: {query}")
 
@@ -69,9 +61,9 @@ def _statement_kind(query: str) -> str:
     stripped = query.lstrip()
     if stripped.startswith("INSERT INTO memory_usage_events"):
         return "insert"
-    if stripped.startswith("RETURN $targets.map"):
+    if stripped.startswith("RETURN [") and "FROM memory_usage_events" in stripped:
         return "aggregate"
-    if "FOR $stamp IN $stamps" in stripped:
+    if "UPDATE $stamped SET" in stripped:
         return "stamp"
     raise AssertionError(f"unexpected usage statement: {query[:60]}")
 
@@ -116,10 +108,10 @@ async def test_recall_pays_one_write_and_the_stamp_runs_after_the_response() -> 
         assert await drain_pending_exposure_stamps() == 1
 
     assert content_client.statements == ["insert", "aggregate", "stamp"]
-    aggregate_targets = content_client.calls[1][1]["targets"]
-    assert [target["item_id"] for target in aggregate_targets] == [f"raw-{i}" for i in range(5)]
+    aggregate_params = content_client.calls[1][1]
+    assert [aggregate_params[f"item_{i}"] for i in range(5)] == [f"raw-{i}" for i in range(5)]
     stamp_query, stamp_params = content_client.calls[2]
-    assert [stamp["item_id"] for stamp in stamp_params["stamps"]] == [f"raw-{i}" for i in range(5)]
+    assert list(stamp_params["stamps"]) == [f"raw-{i}" for i in range(5)]
     assert "revision" not in stamp_query
     assert "raw_captures" in stamp_query
 
@@ -197,8 +189,8 @@ async def test_graph_targets_share_the_single_event_insert() -> None:
     graph_client = AsyncMock()
     graph_client.execute_query = AsyncMock(
         side_effect=lambda query, **params: [
-            {"uuid": stamp["item_id"], "group_id": params["organization_id"], **stamp}
-            for stamp in params["stamps"]
+            {"uuid": item_id, "group_id": params["organization_id"], **stamp}
+            for item_id, stamp in params["stamps"].items()
         ]
     )
     results = [
@@ -244,7 +236,8 @@ async def test_graph_targets_share_the_single_event_insert() -> None:
     assert content_client.statements == ["insert", "aggregate", "stamp"]
     graph_client.execute_query.assert_awaited_once()
     graph_query = graph_client.execute_query.await_args.args[0]
-    assert "UPDATE entity SET" in graph_query
+    assert "UPDATE $stamped SET" in graph_query
+    assert "FROM entity WHERE uuid IN $stamp_ids_0" in graph_query
     assert "revision" not in graph_query
 
 
@@ -290,8 +283,8 @@ async def test_the_deferred_stamp_resolves_the_graph_client_when_it_runs() -> No
         client.is_embedded = False
         client.execute_query = AsyncMock(
             side_effect=lambda query, **params: [
-                {"uuid": stamp["item_id"], "group_id": params["organization_id"], **stamp}
-                for stamp in params["stamps"]
+                {"uuid": item_id, "group_id": params["organization_id"], **stamp}
+                for item_id, stamp in params["stamps"].items()
             ]
         )
         return client
