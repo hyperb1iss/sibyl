@@ -143,4 +143,7 @@ async def test_raw_memory_bulk_upsert_is_replayed_after_a_transaction_conflict(
 
     assert [row["uuid"] for row in saved] == ["raw-conflict"]
     assert len(upsert_attempts) == 2, "the conflicted commit must be sent again"
-    assert upsert_attempts[0] == upsert_attempts[1] == _RAW_MEMORY_BULK_UPSERT_QUERY
+    assert upsert_attempts[0] == upsert_attempts[1], "the replay resends the same statement"
+    assert "uuid IN $ids_0" in upsert_attempts[0]
+    assert _is_one_block_statement(upsert_attempts[0])
+    assert _can_replay_query(upsert_attempts[0]) is True, "replayable by text"

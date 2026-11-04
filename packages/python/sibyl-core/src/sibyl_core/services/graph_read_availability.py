@@ -310,22 +310,29 @@ async def _load_available_graph_relationships(
     memo: GraphReadMemo | None = None,
     proven_endpoints: Mapping[str, Entity] | None = None,
 ) -> dict[str, Relationship]:
+    from sibyl_core.backends.surreal.in_clumps import clumped
     from sibyl_core.backends.surreal.records import normalize_records
     from sibyl_core.services.graph_compute import compute_rows
     from sibyl_core.services.operational_relationships import (
         _snapshot,
         operational_relationship_binding_current,
-        org_lookup_clumps,
     )
 
     graph = runtime or await get_surreal_graph_runtime(organization_id, ensure_schema=False)
-    endpoints_query = f"""RETURN array::flatten({org_lookup_clumps("ids")}.map(|$lookup|
-        (SELECT in.uuid AS source_uuid, out.uuid AS target_uuid FROM relates_to
-            WHERE group_id=$lookup[0] AND uuid IN $lookup[1])));"""
 
+    # Clumped in Python: a closure's `$lookup` is unknown when 4.0 plans the
+    # statement, so every clump read scanned relates_to.
     async def capture(batch: list[str]) -> tuple[list[str], set[str], dict[str, Any]]:
+        endpoints, id_clumps = clumped(
+            "SELECT in.uuid AS source_uuid, out.uuid AS target_uuid FROM relates_to"
+            " WHERE group_id=$org AND uuid IN $ids",
+            "ids",
+            batch,
+        )
         initial = normalize_records(
-            await graph.client.execute_query(endpoints_query, org=organization_id, ids=batch)
+            await graph.client.execute_query(
+                f"RETURN {endpoints};", org=organization_id, **id_clumps
+            )
         )
         endpoints = {
             value

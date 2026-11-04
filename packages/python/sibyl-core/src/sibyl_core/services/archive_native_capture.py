@@ -70,28 +70,28 @@ RETURN {
     + _CUT
     + """
     LET $descriptors = array::combine($requests, [{ rows: $rows }]).map(|$pair| {
-        LET $value = array::fold($pair[0], $pair[1].rows, |$current, $step| {
+        LET $folded = array::fold($pair[0], $pair[1].rows, |$current, $step| {
             RETURN IF $step.kind = 'record' THEN record::id($current)
                 ELSE $current[$step.value] END;
         });
-        RETURN IF $value = NONE THEN {kind: 'none'}
-        ELSE IF $value = NULL THEN {kind: 'null'}
-        ELSE IF type::is::bool($value) THEN {kind: 'bool', value: $value}
-        ELSE IF type::is::int($value) THEN {kind: 'int', value: $value}
-        ELSE IF type::is::float($value) THEN {kind: 'float', value: $value}
-        ELSE IF type::is::string($value) THEN {
-            kind: 'string', text_base64: encoding::base64::encode(<bytes>$value)
+        RETURN IF $folded = NONE THEN {kind: 'none'}
+        ELSE IF $folded = NULL THEN {kind: 'null'}
+        ELSE IF type::is::bool($folded) THEN {kind: 'bool', value: $folded}
+        ELSE IF type::is::int($folded) THEN {kind: 'int', value: $folded}
+        ELSE IF type::is::float($folded) THEN {kind: 'float', value: $folded}
+        ELSE IF type::is::string($folded) THEN {
+            kind: 'string', text_base64: encoding::base64::encode(<bytes>$folded)
         }
-        ELSE IF type::is::datetime($value) THEN {kind: 'datetime', text: type::string($value)}
-        ELSE IF type::is::uuid($value) THEN {kind: 'uuid', text: type::string($value)}
-        ELSE IF type::is::record($value) THEN {
-            kind: 'record', table_base64: encoding::base64::encode(<bytes>record::tb($value))
+        ELSE IF type::is::datetime($folded) THEN {kind: 'datetime', text: type::string($folded)}
+        ELSE IF type::is::uuid($folded) THEN {kind: 'uuid', text: type::string($folded)}
+        ELSE IF type::is::record($folded) THEN {
+            kind: 'record', table_base64: encoding::base64::encode(<bytes>record::tb($folded))
         }
-        ELSE IF type::is::object($value) THEN {
-            kind: 'object', keys_base64: object::keys($value).map(|$key|
+        ELSE IF type::is::object($folded) THEN {
+            kind: 'object', keys_base64: object::keys($folded).map(|$key|
                 encoding::base64::encode(<bytes>$key))
         }
-        ELSE IF type::is::array($value) THEN {kind: 'array', length: array::len($value)}
+        ELSE IF type::is::array($folded) THEN {kind: 'array', length: array::len($folded)}
         ELSE { THROW 'Unsupported native value in operator archive'; } END;
     });
     RETURN {fingerprint: $fingerprint, descriptors: $descriptors};

@@ -784,7 +784,9 @@ async def test_the_edge_lookup_is_not_fed_ids_that_cannot_be_edge_endpoints() ->
                 assert params["relationship_ids"] == ["rel-1"]
                 return [{"targets": [], "states": [], "associations": [], "relationships": []}]
             else:
-                assert params["ids"] == ["rel-1"]
+                # The edge lookup binds `ids`; the endpoint read binds clumps `ids_0`, ...
+                assert params.get("ids", params.get("ids_0")) == ["rel-1"]
+                assert "ids_1" not in params
             return []
 
     def candidate(

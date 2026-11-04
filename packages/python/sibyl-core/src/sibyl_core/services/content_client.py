@@ -12,7 +12,7 @@ from weakref import WeakKeyDictionary
 from sibyl_core.backends.surreal import SurrealContentClient
 from sibyl_core.backends.surreal import records as _surreal_records
 from sibyl_core.backends.surreal.schema_embedding_states import CONTENT_SCHEMA_RECORD_NAME
-from sibyl_core.backends.surreal.schema_version import schema_version_record_id
+from sibyl_core.backends.surreal.schema_version import schema_version_record_query
 from sibyl_core.config import settings
 from sibyl_core.runtime_ports import RuntimePortUnavailable, get_content_port
 from sibyl_core.services import content_models as models
@@ -137,7 +137,7 @@ async def content_schema_version_at_least(client: SurrealContentClient, required
     if known is not None and known >= required:
         return True
     rows = await select_many(
-        client, f"SELECT version FROM [{schema_version_record_id(CONTENT_SCHEMA_RECORD_NAME)}];"
+        client, schema_version_record_query(CONTENT_SCHEMA_RECORD_NAME, "version")
     )
     version = rows[0].get("version") if rows else None
     if not isinstance(version, int | float):

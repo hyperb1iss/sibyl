@@ -85,9 +85,13 @@ class _MemoryGraphClient(SurrealGraphClient):
         if "array::clump($uuids, 32)" in query:
             return entities(params["uuids"])
         if "in.uuid AS source_uuid, out.uuid AS target_uuid FROM relates_to" in query:
+            # The endpoint read binds its ids as clumps `ids_0`, `ids_1`, ...
+            clumped = [
+                value for key, clump in params.items() if key.startswith("ids_") for value in clump
+            ]
             return [
                 {"source_uuid": row["source_uuid"], "target_uuid": row["target_uuid"]}
-                for row in edges(params["ids"])
+                for row in edges(clumped)
             ]
         if "LET $relationship_lookups" in query:
             return [

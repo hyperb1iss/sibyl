@@ -389,16 +389,21 @@ async def _exact_key_candidates(
     # WHERE clause happens to carry a second predicate. Verified live on 3.2.3
     # (UnionIndexScan across one branch per probe), so the `.*` in the index
     # definition is what this read depends on, not a stylistic choice.
+    # The CONTAINSANY sits alone in an inner select and the sort outside it:
+    # beside an ORDER BY with a LIMIT, 4.0 does not expand it into lookups on
+    # the element index and scans the table instead.
     rows = await _execute_query_records(
         client,
         f"""
-        SELECT {NODE_LANE_PROJECTION}
-        {NODE_LANE_OMIT}
-        FROM entity
+        SELECT * FROM (
+            SELECT {NODE_LANE_PROJECTION}
+            {NODE_LANE_OMIT}
+            FROM entity
+            WHERE retrieval_keys_normalized CONTAINSANY $probe_keys
+        )
         WHERE """
         + _where_clause(["group_id = $group_id", *filter_clauses])
         + """
-          AND retrieval_keys_normalized CONTAINSANY $probe_keys
         ORDER BY created_at DESC, uuid DESC
         LIMIT $limit;
         """,

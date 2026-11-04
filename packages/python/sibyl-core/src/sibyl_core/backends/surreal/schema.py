@@ -65,8 +65,9 @@ from sibyl_core.backends.surreal.schema_version import (
     get_schema_embedding_dimension,
     get_schema_embedding_rebuild_dimension,
     get_schema_version,
+    pin_schema_compatibility_level,
     record_schema_version,
-    schema_version_record_id,
+    schema_version_record_query,
 )
 from sibyl_core.backends.surreal.schema_work_item_columns import (
     canonicalize_entity_work_item_columns,
@@ -1329,11 +1330,11 @@ async def _graph_schema_ownership(driver: SchemaDriver) -> AsyncGenerator[Schema
 
 
 async def _recorded_graph_schema_version(driver: SchemaDriver) -> int:
-    # A new namespace has no schema_version table. Selecting from a list of
-    # record ids returns no rows there, while a table scan fails with NotFound
-    # on 3.x servers and the client logs every failed query as a warning.
-    record_id = schema_version_record_id(GRAPH_SCHEMA_NAME)
-    result = await driver.execute_query(f"SELECT VALUE version FROM [{record_id}];")
+    # A new namespace has no schema_version table, and the client logs every
+    # failed query as a warning, so this read must answer no rows there.
+    result = await driver.execute_query(
+        schema_version_record_query(GRAPH_SCHEMA_NAME, "VALUE version")
+    )
     version = result[0] if isinstance(result, list) and result else None
     return int(version) if isinstance(version, int | float | str) else 0
 
@@ -1379,6 +1380,7 @@ async def _bootstrap_owned_schema(
     reset: bool,
     force: bool,
 ) -> None:
+    await pin_schema_compatibility_level(ownership.read, ownership.mutate)
     await prepare_source_integrity_upgrade(ownership.read, ownership=ownership)
     current_version = 0
     if reset:

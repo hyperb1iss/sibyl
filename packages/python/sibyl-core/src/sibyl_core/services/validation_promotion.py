@@ -243,10 +243,12 @@ class ValidatedPromotion:
             raise ValidationExecutionUnavailable("Validated source evidence changed")
         return (
             execution.dispatch_guard
-            + "LET $org=$organization_id; LET $parent=$uuid;"
+            + "LET $org=$organization_id;"
             + _SNAPSHOT
             + "IF $snapshot_digest!=$validation_snapshot { THROW 'publication_source_observation_changed'; };",
-            {"validation_snapshot": current.snapshot_sha256},
+            # Callers embed this guard in a block, where SurrealDB 4 refuses
+            # LET $parent, so the snapshot reads it as a query variable.
+            {"parent": self.candidate_id, "validation_snapshot": current.snapshot_sha256},
         )
 
 
