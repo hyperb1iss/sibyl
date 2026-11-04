@@ -134,7 +134,7 @@ class _RecordingSchemaClient:
             return []
         if stripped.startswith("SELECT embedding_dimension FROM schema_version"):
             return [{"embedding_dimension": EMBEDDING_DIM}]
-        if stripped.startswith("INFO FOR TABLE entity"):
+        if stripped.startswith(("INFO FOR TABLE entity", "INFO FOR TABLE memory_derivations")):
             return {"indexes": {}}
         if stripped.startswith("INFO FOR DB"):
             graph_tables = ("entity", "episode", "relates_to", "mentions")
@@ -166,7 +166,12 @@ class _RecordingSchemaClient:
             ("SELECT id, uuid FROM entity", "SELECT id, uuid FROM raw_captures")
         ):
             return []
-        if statement.startswith("INFO FOR INDEX idx_entity_lifecycle_repair_key"):
+        if statement.startswith(
+            (
+                "INFO FOR INDEX idx_entity_lifecycle_repair_key",
+                "INFO FOR INDEX memory_derivation_target_id",
+            )
+        ):
             return [{"building": {"status": "ready"}}]
         if (
             self.duplicate_index_name

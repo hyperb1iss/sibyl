@@ -8,6 +8,7 @@ from typing import Any
 
 from sibyl_core.backends.surreal.in_clumps import clumped
 from sibyl_core.backends.surreal.records import normalize_records
+from sibyl_core.backends.surreal.schema_derivations import DERIVATION_TARGET_ID_INDEX
 from sibyl_core.backends.surreal.schema_source_witness import SOURCE_STATE_WRITE_WITNESS
 from sibyl_core.embeddings.provenance import same_vector_identity
 from sibyl_core.embeddings.providers import EmbeddingProvider
@@ -29,16 +30,18 @@ from sibyl_core.services.source_observations import (
 from sibyl_core.services.source_state_store import source_snapshot_from_records
 
 # Every index operand is a client parameter: 4.0 table-scans an operand bound
-# by a block LET or a closure argument. Entities and edges are looked up on
-# their unique uuid indexes in clumps of at most 32 values (in_clumps), past
-# which neither planner serves `IN`. An `IN` on the last column of a
-# compound index (the two ledgers) is served from the organization and kind
-# prefix and filtered on both planners, however it is clumped, so the
-# derivation ledger takes one `IN` over every id: one prefix walk. Ledger
-# states are read by the record key every writer gives them
-# (`source_states:` + sha256 of [organization, kind, id], as source_state_store
-# loads one), with no planner in the way. One statement holding a subquery per
-# id costs 4.0 time quadratic in their number, so no lookup is split per id.
+# by a block LET or a closure argument. Entities, associations and edges are
+# looked up in clumps of at most 32 values (in_clumps), past which neither
+# planner serves `IN` from an index. An `IN` on the last column of a compound
+# index is served by walking the organization and kind prefix on both
+# planners, so associations go through the single-column target id index
+# (DERIVATION_TARGET_ID_INDEX), hinted because both planners would otherwise
+# pick the compound prefix; a namespace whose migration has not run yet
+# ignores the hint and reads the same rows by that prefix. Ledger states are
+# read by the record key every writer gives them (`source_states:` + sha256
+# of [organization, kind, id], as source_state_store loads one), with no
+# planner in the way. One statement holding a subquery per id costs 4.0 time
+# quadratic in their number, so no lookup is split per id.
 #
 # Rows are sorted in an outer select, because an ORDER BY beside the IN walks
 # the whole index. Each lookup returns rows of a unique identity (entity and
@@ -47,8 +50,8 @@ from sibyl_core.services.source_state_store import source_snapshot_from_records
 # single IN over each table gives.
 _TARGET_LOOKUP = "SELECT {fields} FROM entity WHERE group_id=$org AND uuid IN $snapshot_ids"
 _ASSOCIATION_LOOKUP = (
-    "SELECT * FROM memory_derivations WHERE organization_id=$org"
-    " AND target_kind='graph_entity' AND target_id IN $snapshot_ids"
+    f"SELECT * FROM memory_derivations WITH INDEX {DERIVATION_TARGET_ID_INDEX}"
+    " WHERE organization_id=$org AND target_kind='graph_entity' AND target_id IN $snapshot_ids"
 )
 _STATE_LOOKUP = (
     "SELECT * FROM $snapshot_state_identities.map(|$identity|"
@@ -85,6 +88,7 @@ def snapshot_statement(
         "snapshot_ids",
         ordered_ids,
     )
+    associations, _ = clumped(_ASSOCIATION_LOOKUP, "snapshot_ids", ordered_ids)
     relationships, relationship_params = clumped(
         _RELATIONSHIP_LOOKUP.format(omit="" if vectors else " OMIT fact_embedding"),
         "snapshot_relationship_ids",
@@ -92,7 +96,7 @@ def snapshot_statement(
     )
     statement = f"""
 LET $targets = SELECT * FROM {targets} ORDER BY uuid;
-LET $associations = SELECT * OMIT validation_write_witness FROM ({_ASSOCIATION_LOOKUP}) ORDER BY target_id;
+LET $associations = SELECT * OMIT validation_write_witness FROM {associations} ORDER BY target_id;
 LET $states = SELECT * OMIT validation_write_witness FROM ({_STATE_LOOKUP}) ORDER BY source_id;
 LET $relationships = SELECT * FROM {relationships} ORDER BY uuid;
 """
@@ -101,7 +105,6 @@ LET $relationships = SELECT * FROM {relationships} ORDER BY uuid;
     return statement, {
         **id_params,
         **relationship_params,
-        "snapshot_ids": ordered_ids,
         "snapshot_state_identities": [
             [organization_id, "graph_entity", identity] for identity in ordered_ids
         ],

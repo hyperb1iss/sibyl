@@ -107,6 +107,47 @@ async def test_epic_progress_without_epics_issues_no_query() -> None:
     manager._client.execute_query_batch.assert_not_awaited()  # type: ignore[union-attr]
 
 
+def test_migration_38_builds_the_derivation_target_index() -> None:
+    from sibyl_core.backends.surreal.schema_derivations import migrate_derivation_target_index
+
+    assert GRAPH_SCHEMA_CURRENT_VERSION >= 38
+    migration = next(item for item in GRAPH_SCHEMA_MIGRATIONS if item.version == 38)
+    assert migration.name == "graph_derivation_target_index"
+    assert migration.action is migrate_derivation_target_index
+
+
+async def test_a_namespace_at_37_gains_the_derivation_target_index() -> None:
+    from sibyl_core.services.graph_client import (
+        SurrealGraphClient,
+        mark_graph_schema_dirty,
+        prepare_graph_schema,
+    )
+
+    client = SurrealGraphClient(group_id="derivation-index-upgrade", url="memory://")
+    try:
+        await prepare_graph_schema(client)
+        info = await client.execute_query("INFO FOR TABLE memory_derivations;")
+        assert (
+            "memory_derivation_target_id"
+            in (info[0] if isinstance(info, list) else info)["indexes"]
+        )
+        await client.execute_query(
+            "REMOVE INDEX memory_derivation_target_id ON memory_derivations;"
+            " UPDATE schema_version:graph SET version = 37;"
+        )
+        mark_graph_schema_dirty(client.group_id)
+        await prepare_graph_schema(client)
+        info = await client.execute_query("INFO FOR TABLE memory_derivations;")
+        assert (
+            "memory_derivation_target_id"
+            in (info[0] if isinstance(info, list) else info)["indexes"]
+        )
+        version = await client.execute_query("SELECT VALUE version FROM schema_version:graph;")
+        assert version == [GRAPH_SCHEMA_CURRENT_VERSION]
+    finally:
+        await client.close()
+
+
 def test_migration_37_defines_the_entity_name_index() -> None:
     assert GRAPH_SCHEMA_CURRENT_VERSION >= 37
     migration = next(item for item in GRAPH_SCHEMA_MIGRATIONS if item.version == 37)

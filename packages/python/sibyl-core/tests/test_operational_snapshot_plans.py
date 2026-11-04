@@ -92,7 +92,6 @@ def test_operational_snapshot_looks_rows_up_in_index_served_clumps(vectors: bool
         "org-a", [*ids, ids[5]], edges, vectors=vectors
     )
     assert sorted(params) == [
-        "snapshot_ids",
         "snapshot_ids_0",
         "snapshot_ids_1",
         "snapshot_ids_2",
@@ -105,15 +104,15 @@ def test_operational_snapshot_looks_rows_up_in_index_served_clumps(vectors: bool
     assert sum(len(params[f"snapshot_ids_{index}"]) for index in range(3)) == 70
     assert [len(params[f"snapshot_relationship_ids_{index}"]) for index in range(2)] == [32, 8]
     lookups = _CLUMP_LOOKUP.findall(statement)
-    # Three entity clumps, the one derivation walk, two edge clumps.
-    assert len(lookups) == 3 + 1 + 2
+    # Three entity clumps, three association clumps, two edge clumps.
+    assert len(lookups) == 3 + 3 + 2
     for lookup in lookups:
         # An ORDER BY beside the IN would walk the whole index.
         assert "ORDER BY" not in lookup
         assert "$org" in lookup
-    # The derivation ledger: one IN over every id, one walk of its prefix.
-    assert params["snapshot_ids"] == sorted(ids)
-    assert statement.count("target_id IN $snapshot_ids)") == 1
+    # Associations by target id, never by the organization prefix of the
+    # compound identity index.
+    assert statement.count("FROM memory_derivations WITH INDEX memory_derivation_target_id") == 3
     # Ledger states by their record keys; the closure reads only its argument.
     assert params["snapshot_state_identities"] == [
         ["org-a", "graph_entity", identity] for identity in sorted(ids)
@@ -386,8 +385,12 @@ async def test_clumped_lookups_are_index_served_on_a_server(
         ),
         (
             "memory_derivations",
-            f"[({operational_relationships._ASSOCIATION_LOOKUP} EXPLAIN)]",
-            "memory_derivation_target",
+            clumped(
+                operational_relationships._ASSOCIATION_LOOKUP + " EXPLAIN",
+                "snapshot_ids",
+                ids,
+            )[0],
+            "memory_derivation_target_id",
         ),
         ("source_states", f"[({operational_relationships._STATE_LOOKUP} EXPLAIN)]", None),
     ):
@@ -396,7 +399,9 @@ async def test_clumped_lookups_are_index_served_on_a_server(
         )
         text = json.dumps(plans, default=str)
         if index is not None:
-            assert index in text, (name, text[:400])
+            assert f'"index": "{index}"' in text, (name, text[:400])
+        # Not a walk of the organization's prefix of the compound identity.
+        assert '"index": "memory_derivation_target"' not in text, (name, text[:400])
         assert "TableScan" not in text, (name, text[:400])
         assert "Iterate Table" not in text, (name, text[:400])
 
@@ -476,3 +481,80 @@ async def test_member_hop_limit_keeps_the_lowest_community_first(
 
     assert {hop.uuid for hop in hops} == {"mem_a0", "mem_a1", "mem_a2"}
     assert {hop.community_id for hop in hops} == {"aa_comm2"}
+
+
+async def _without_derivation_events(client: SurrealGraphClient) -> None:
+    """Drop the derivation write events in a scratch namespace so a large ledger seeds fast."""
+    info = await client.execute_query("INFO FOR TABLE memory_derivations;")
+    events = (info[0] if isinstance(info, list) else info)["events"]
+    for name in events:
+        await client.execute_query(f"REMOVE EVENT {name} ON memory_derivations;")
+
+
+async def test_snapshot_matches_the_old_sql_over_a_large_derivation_ledger(
+    snapshot_client: tuple[SurrealGraphClient, bool],
+) -> None:
+    """20,000 associations in the organization and 3,000 in another one under the same
+    target ids: the association reads stay per target, and the snapshot is still the
+    one the pre-rewrite SQL and a single IN give, fingerprint included."""
+    graph_client, live = snapshot_client
+    group_id = graph_client.group_id
+    manager = EntityManager(graph_client, group_id=group_id)
+    entities = [f"e{index:03d}" for index in range(40)]
+    for entity_id in entities:
+        await manager.create_direct(
+            Entity(id=entity_id, entity_type=EntityType.NOTE, name=entity_id),
+            generate_embedding=False,
+        )
+    await _without_derivation_events(graph_client)
+    derived = [f"derived-{index:05d}" for index in range(20_000)]
+    for org, targets in ((group_id, [*derived, *entities[::2]]), ("other-group", derived[:3_000])):
+        for start in range(0, len(targets), 2_000):
+            await graph_client.execute_query(
+                "INSERT INTO memory_derivations $rows RETURN NONE;",
+                rows=[
+                    {
+                        "organization_id": org,
+                        "target_kind": "graph_entity",
+                        "target_id": target,
+                        "body_sha256": f"{org}:{target}",
+                        "principal_id": "p",
+                        "authority_ceiling": {},
+                        "observations": [],
+                        "active": True,
+                    }
+                    for target in targets[start : start + 2_000]
+                ],
+            )
+    requested = sorted({*derived[::67], *derived[:40], *entities, "missing", derived[5]})
+    assert len(requested) > 32 * 10
+
+    statement, params = _single_in({"org": group_id, "ids": requested, "relationship_ids": []})
+    oracle = await graph_client.execute_query(statement, **params)
+    expected = oracle[0] if isinstance(oracle, list) else oracle
+    before = await graph_client.execute_query(
+        "RETURN {" + _CLOSURE_SNAPSHOT + _RETURNED, org=group_id, ids=requested, relationship_ids=[]
+    )
+    before_rows = before[0] if isinstance(before, list) else before
+    snapshot = await operational_relationships._snapshot(
+        graph_client, organization_id=group_id, ids=requested, relationship_ids=[]
+    )
+
+    for key in ("targets", "associations", "states", "relationships", "fingerprint"):
+        assert snapshot[key] == expected[key], key
+        assert snapshot[key] == before_rows[key], key
+    assert [row["target_id"] for row in snapshot["associations"]] == sorted(
+        target for target in requested if target in {*derived, *entities[::2]}
+    )
+    assert {row["organization_id"] for row in snapshot["associations"]} == {group_id}
+    if live:
+        _, lookup_params = operational_relationships.snapshot_statement(group_id, requested, [])
+        lookup, _ = clumped(
+            operational_relationships._ASSOCIATION_LOOKUP + " EXPLAIN", "snapshot_ids", requested
+        )
+        plans = await graph_client.execute_query(
+            f"RETURN {{ LET $plans = {lookup}; RETURN $plans; }};", org=group_id, **lookup_params
+        )
+        text = json.dumps(plans, default=str)
+        assert '"index": "memory_derivation_target_id"' in text, text[:400]
+        assert '"index": "memory_derivation_target"' not in text, text[:400]
