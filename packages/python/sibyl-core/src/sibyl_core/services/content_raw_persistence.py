@@ -17,6 +17,7 @@ from sibyl_core.auth.memory_policy import (
     MEMORY_PROVENANCE_METADATA_KEYS,
 )
 from sibyl_core.backends.surreal import SurrealContentClient
+from sibyl_core.backends.surreal.in_clumps import clumped
 from sibyl_core.backends.surreal.schema_source_witness import SOURCE_STATE_WRITE_WITNESS
 from sibyl_core.config import settings
 from sibyl_core.embeddings.provenance import EMBEDDING_STAMP_KEY
@@ -58,18 +59,26 @@ log = structlog.get_logger()
 
 _RAW_MEMORY_EMBEDDING_AUTO = object()
 
+# The guards read `$ids` and `$organizations` as client parameters, the ids in
+# index-served clumps (see backends/surreal/in_clumps.py). Derived in the block
+# from `$rows`, they are unknown when 4.0 plans the statement, and both guards
+# scanned raw_captures on every remember.
+_RAW_FOREIGN_GUARD = (
+    "SELECT VALUE uuid FROM raw_captures WHERE uuid IN $ids"
+    " AND organization_id != $organizations[uuid]"
+)
+_RAW_LEGACY_SHARED_GUARD = (
+    "SELECT VALUE uuid FROM raw_captures WHERE uuid IN $ids"
+    " AND organization_id = $organizations[uuid] AND memory_scope = 'shared'"
+)
+
 _RAW_MEMORY_BULK_UPSERT_QUERY = """
 RETURN {
-LET $ids = $rows.map(|$row| $row.uuid);
-LET $organizations = object::from_entries($rows.map(|$row| [$row.uuid, $row.organization_id]));
-LET $foreign = (SELECT VALUE uuid FROM raw_captures WHERE uuid IN $ids
-    AND organization_id != $organizations[uuid]);
+LET $foreign = __RAW_FOREIGN__;
 IF array::len($foreign) > 0 {
     THROW 'raw capture organization cannot change';
 };
-LET $legacy_shared = (SELECT VALUE uuid FROM raw_captures
-    WHERE uuid IN $ids AND organization_id = $organizations[uuid]
-        AND memory_scope = 'shared');
+LET $legacy_shared = __RAW_LEGACY_SHARED__;
 LET $new_shared = $rows.filter(|$row| $row.memory_scope = 'shared'
     AND $row.uuid NOT IN $legacy_shared);
 IF array::len($new_shared) > 0 {
@@ -150,7 +159,11 @@ async def replace_raw_memory_records_bulk(
         if record.get("organization_id") is None:
             uuid = record.get("uuid") or "<unknown>"
             raise RuntimeError(f"raw_captures record {uuid} requires organization_id")
-    query = _RAW_MEMORY_BULK_UPSERT_QUERY
+    foreign, id_clumps = clumped(_RAW_FOREIGN_GUARD, "ids", identities)
+    legacy_shared, _ = clumped(_RAW_LEGACY_SHARED_GUARD, "ids", identities)
+    query = _RAW_MEMORY_BULK_UPSERT_QUERY.replace("__RAW_FOREIGN__", foreign).replace(
+        "__RAW_LEGACY_SHARED__", legacy_shared
+    )
     if derivations:
         from sibyl_core.backends.surreal.schema_derivations import STORE_RAW_DERIVATIONS
 
@@ -170,6 +183,8 @@ async def replace_raw_memory_records_bulk(
             for record in records
         ],
         derivations=list(derivations),
+        organizations={record["uuid"]: record["organization_id"] for record in records},
+        **id_clumps,
     )
     if len(rows) != len(records):
         raise RuntimeError(

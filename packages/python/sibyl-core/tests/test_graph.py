@@ -1033,7 +1033,9 @@ async def test_native_entity_manager_update_uses_server_side_merge() -> None:
     query, params = client.calls[0]
     assert "BEGIN TRANSACTION" in query
     assert "UPDATE entity MERGE $patch" in query
-    assert "revision = $expected_revision" in query
+    # Without an expected revision the write carries no revision guard: an
+    # `$expected_revision = NONE OR ...` disjunct makes 3.2.4 scan the table.
+    assert "$expected_revision" not in query
     assert "revision += 1" in query
     assert len(client.calls) == 1
     assert params["expected_revision"] is None
