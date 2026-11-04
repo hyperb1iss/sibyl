@@ -429,7 +429,13 @@ async def create_api_key_for_user(
     memory_space_ids: list[UUID] | None = None,
     expires_at,
     request,
+    actor_user_id: UUID | None = None,
 ):
+    """Mint a key for ``user_id``.
+
+    ``actor_user_id`` names the person issuing it when that is not the key's
+    owner, as when a sponsor issues their bot a key; the audit row is theirs.
+    """
     # An empty scope array is how keys that predate the scopes column read, and
     # the MCP surface resolves that shape to full legacy access. Minting a new
     # key into it would hand out that access silently, so the invariant belongs
@@ -491,19 +497,22 @@ async def create_api_key_for_user(
         key.memory_space_ids = [
             str(memory_space_id) for memory_space_id in resolved_memory_space_ids
         ]
+        details: dict[str, object] = {
+            "api_key_id": str(key.id),
+            "memory_space_scope_count": len(resolved_memory_space_ids),
+            "name": key.name,
+            "prefix": key.key_prefix,
+            "project_scope_count": len(project_record_ids),
+        }
+        if actor_user_id is not None and actor_user_id != user_id:
+            details["owner_user_id"] = str(user_id)
         await _log_audit_event(
             client,
             action="auth.api_key.create",
-            user_id=user_id,
+            user_id=actor_user_id or user_id,
             organization_id=organization_id,
             request=request,
-            details={
-                "api_key_id": str(key.id),
-                "memory_space_scope_count": len(resolved_memory_space_ids),
-                "name": key.name,
-                "prefix": key.key_prefix,
-                "project_scope_count": len(project_record_ids),
-            },
+            details=details,
         )
         return key, raw
 
@@ -532,14 +541,38 @@ async def revoke_api_key_for_user(
             and _role_value(actor_org_role) not in _ORG_ADMIN_ROLE_VALUES
         ):
             raise HTTPException(status_code=403, detail="Forbidden")
-        updated = {**record, "revoked_at": _utcnow(), "updated_at": _utcnow()}
-        await repo.replace_record("api_keys", uuid=api_key_id, record=updated)
-        verified_api_key_cache.invalidate_key(api_key_id)
-        await _log_audit_event(
+        await _revoke_api_key_record(
             client,
-            action="auth.api_key.revoke",
-            user_id=actor_user_id,
+            record=record,
+            actor_user_id=actor_user_id,
             organization_id=organization_id,
             request=request,
-            details={"api_key_id": str(api_key_id)},
         )
+
+
+async def _revoke_api_key_record(
+    client: QueryClient,
+    *,
+    record: SurrealRecord,
+    actor_user_id: UUID,
+    organization_id: UUID,
+    request,
+) -> None:
+    """Revoke one authorized key row and audit it under the person who did."""
+    api_key_id = _coerce_uuid(record.get("uuid"), field_name="api_key.uuid")
+    repo = _SurrealRepository(client)
+    updated = {**record, "revoked_at": _utcnow(), "updated_at": _utcnow()}
+    await repo.replace_record("api_keys", uuid=api_key_id, record=updated)
+    verified_api_key_cache.invalidate_key(api_key_id)
+    details: dict[str, object] = {"api_key_id": str(api_key_id)}
+    owner_user_id = _coerce_optional_uuid(record.get("user_id"))
+    if owner_user_id is not None and owner_user_id != actor_user_id:
+        details["owner_user_id"] = str(owner_user_id)
+    await _log_audit_event(
+        client,
+        action="auth.api_key.revoke",
+        user_id=actor_user_id,
+        organization_id=organization_id,
+        request=request,
+        details=details,
+    )

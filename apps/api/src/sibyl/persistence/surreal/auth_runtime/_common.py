@@ -20,6 +20,7 @@ from types import SimpleNamespace
 from typing import Protocol, Self, cast
 from uuid import UUID, uuid4
 
+from fastapi import HTTPException, status
 from starlette.requests import Request
 
 from sibyl import config as config_module
@@ -40,8 +41,10 @@ from sibyl_core.auth import (
     AuthSession,
     AuthUser,
     OrganizationRole,
+    PrincipalKind,
     ProjectRole,
 )
+from sibyl_core.auth.models import coerce_principal_kind
 from sibyl_core.backends.surreal import SurrealAuthClient
 from sibyl_core.backends.surreal.connection import _is_transient_connection_error
 from sibyl_core.backends.surreal.records import (
@@ -312,17 +315,21 @@ def _require_namespace(value: SimpleNamespace | None, *, label: str) -> SimpleNa
 def _auth_user_namespace(record: SurrealRecord | None) -> SimpleNamespace | None:
     user = _ns(
         record,
-        uuid_fields={"uuid"},
+        uuid_fields={"uuid", "sponsor_user_id"},
         datetime_fields=_USER_DATETIME_FIELDS,
     )
     if user is None:
         return None
+    user.kind = coerce_principal_kind(getattr(user, "kind", None))
 
     user.email = getattr(user, "email", None)
     user.name = str(getattr(user, "name", None) or "")
     user.avatar_url = getattr(user, "avatar_url", None)
     user.github_id = getattr(user, "github_id", None)
-    user.is_admin = bool(getattr(user, "is_admin", False))
+    # A bot is never a deployment admin, whatever its row says.
+    user.is_admin = (
+        bool(getattr(user, "is_admin", False)) and user.kind is not PrincipalKind.SERVICE
+    )
     user.bio = getattr(user, "bio", None)
     user.timezone = str(getattr(user, "timezone", None) or "UTC")
     user.preferences = dict(getattr(user, "preferences", None) or {})
@@ -351,6 +358,44 @@ def _auth_user_model(record: SurrealRecord | None) -> AuthUser | None:
         last_login_at=getattr(user, "last_login_at", None),
         created_at=getattr(user, "created_at", None) or _utcnow(),
         updated_at=getattr(user, "updated_at", None),
+        kind=user.kind,
+        sponsor_user_id=getattr(user, "sponsor_user_id", None),
+    )
+
+
+def is_service_record(record: Mapping[str, object] | None) -> bool:
+    """True when a users row is a bot."""
+    return record is not None and coerce_principal_kind(record.get("kind")) is PrincipalKind.SERVICE
+
+
+def refuse_bot_sign_in() -> HTTPException:
+    """The refusal every session path gives a bot, which signs in only with API keys."""
+    return HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail={
+            "error": "bot_cannot_sign_in",
+            "message": "Bots authenticate only with API keys.",
+            "remediation": "Ask the bot's sponsor or an organization admin to issue it a key.",
+        },
+    )
+
+
+# Roles a bot never holds: it does work in an organization and on a project,
+# it never administers or owns either.
+BOT_FORBIDDEN_ORG_ROLES = frozenset({OrganizationRole.OWNER, OrganizationRole.ADMIN})
+BOT_FORBIDDEN_PROJECT_ROLES = frozenset({ProjectRole.OWNER, ProjectRole.MAINTAINER})
+
+
+def bot_role_ceiling_error(requested: str) -> HTTPException:
+    """The refusal for any role above what a bot may hold."""
+    return HTTPException(
+        status_code=status.HTTP_400_BAD_REQUEST,
+        detail={
+            "error": "bot_role_ceiling",
+            "message": f"A bot cannot hold the {requested} role.",
+            "remediation": "Bots hold at most member in an organization and contributor "
+            "on a project.",
+        },
     )
 
 
@@ -586,6 +631,14 @@ class SurrealSessionRepository(_SurrealRepository):
         user_agent: str | None = None,
         location: str | None = None,
     ) -> AuthSession:
+        # Every session in the system is minted here, so a bot that reached a
+        # sign-in path by any route stops here rather than holding a session.
+        principal = await self.select_one(
+            "SELECT kind FROM users WHERE uuid = $user_id LIMIT 1;",
+            user_id=str(user_id),
+        )
+        if is_service_record(principal):
+            raise refuse_bot_sign_in()
         now = _utcnow()
         record: SurrealRecord = {
             "uuid": str(session_id or uuid4()),
@@ -1138,12 +1191,17 @@ async def _ensure_personal_org_membership_record(
                         AND user_id = $user_id
                     LIMIT 1
                 )[0],
+                principal: (SELECT kind FROM users WHERE uuid = $user_id LIMIT 1)[0],
             };
         """,
         slug=slug,
         user_id=str(user.id),
     )
     payload = _record_payload(payload)
+    if is_service_record(_normalize_record(payload.get("principal"))):
+        # Every personal organization is minted here with its user as owner,
+        # and a bot owns no organization.
+        raise refuse_bot_sign_in()
     organization = _normalize_record(payload.get("organization"))
     membership = _normalize_record(payload.get("membership"))
 

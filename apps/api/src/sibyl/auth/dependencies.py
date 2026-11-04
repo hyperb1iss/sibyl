@@ -16,6 +16,7 @@ from sibyl.auth.middleware import JWT_CHECKED_STATE_ATTR
 from sibyl.config import settings
 from sibyl.persistence.auth_runtime import (
     InvalidAuthClaimsError,
+    SuspendedPrincipalError,
     UserNotFoundError,
     authenticate_api_key,
     get_server_instance_id,
@@ -281,6 +282,15 @@ async def build_auth_context(
         raise _auth_storage_unavailable(e) from e
     except InvalidAuthClaimsError as e:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token") from e
+    except SuspendedPrincipalError as e:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={
+                "error": "bot_suspended",
+                "message": "This bot's sponsor is no longer an active member of the organization.",
+                "remediation": "An organization admin can transfer the bot to a new sponsor.",
+            },
+        ) from e
     except UserNotFoundError as e:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found"
@@ -317,3 +327,22 @@ def require_org_admin():
     if settings.disable_auth:
         return _noop
     return _check_admin
+
+
+def bot_forbidden() -> HTTPException:
+    """The refusal for an action only a person may take."""
+    return HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail={
+            "error": "bot_forbidden",
+            "message": "Bots cannot do this; only a person can.",
+            "remediation": "Ask the bot's sponsor or an organization admin.",
+        },
+    )
+
+
+async def require_person(user: AuthUser = Depends(get_current_user)) -> AuthUser:
+    """Refuse a bot. For actions that mint credentials, organizations or projects."""
+    if user.is_service:
+        raise bot_forbidden()
+    return user

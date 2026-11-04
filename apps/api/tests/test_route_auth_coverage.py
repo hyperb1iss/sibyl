@@ -42,6 +42,7 @@ from sibyl.auth.dependencies import (
     get_current_user,
     require_org_admin,
     require_org_role,
+    require_person,
 )
 from sibyl.persistence import graph_runtime
 from sibyl.persistence.operations_runtime import (
@@ -62,8 +63,9 @@ ORG_BEARING_DEPENDENCIES = (
 )
 
 # Values that name the caller, whether or not they carry an organization.
+# require_person returns the current user after refusing a bot.
 CALLER_IDENTITY_DEPENDENCIES = ORG_BEARING_DEPENDENCIES | frozenset(
-    {get_current_org_role, get_current_user}
+    {get_current_org_role, get_current_user, require_person}
 )
 
 # Gates that raise by themselves, so a route may discard what they return.

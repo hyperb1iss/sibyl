@@ -9,7 +9,7 @@ from pydantic import BaseModel, Field
 
 from sibyl import config as config_module
 from sibyl.auth.context import AuthContext
-from sibyl.auth.dependencies import get_auth_context, get_current_user
+from sibyl.auth.dependencies import get_auth_context, get_current_user, require_person
 from sibyl.persistence import organization_runtime
 from sibyl_core.auth import AuthUser
 
@@ -95,7 +95,7 @@ async def create_org(
     request: Request,
     body: OrganizationCreateRequest,
     response: Response,
-    user: AuthUser = Depends(get_current_user),
+    user: AuthUser = Depends(require_person),
 ):
     created = await organization_runtime.create_org(
         request=request,
@@ -163,7 +163,7 @@ async def switch_org(
     request: Request,
     slug: str,
     response: Response,
-    user: AuthUser = Depends(get_current_user),
+    user: AuthUser = Depends(require_person),
 ):
     switched = await organization_runtime.switch_org(request=request, slug=slug, user_id=user.id)
     _set_auth_cookies(

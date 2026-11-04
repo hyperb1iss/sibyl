@@ -20,6 +20,7 @@ from sibyl.auth.jwt import create_access_token, create_refresh_token
 from sibyl.auth.primitives import generate_invite_token, slugify
 from sibyl.auth.session_cache import access_session_cache
 from sibyl.cache_invalidation import announce_sessions_invalidated
+from sibyl.persistence.auth_common import UserNotFoundError
 from sibyl.persistence.auth_runtime import log_audit_event
 from sibyl.persistence.organization_common import (
     InvitationAcceptance,
@@ -36,6 +37,14 @@ from sibyl.persistence.organization_common import (
 )
 from sibyl.persistence.surreal.auth import surreal_auth_client_scope
 from sibyl.persistence.surreal.auth_runtime import SurrealSessionRepository
+from sibyl.persistence.surreal.auth_runtime._common import (
+    BOT_FORBIDDEN_ORG_ROLES,
+    BOT_FORBIDDEN_PROJECT_ROLES,
+    bot_role_ceiling_error,
+    is_service_record,
+)
+from sibyl.persistence.surreal.auth_runtime.projects import verify_entity_project_access
+from sibyl.persistence.surreal.auth_runtime.sessions import resolve_auth_context
 from sibyl_core.auth import AuthUser, OrganizationRole, ProjectRole, ProjectVisibility
 from sibyl_core.backends.surreal.records import (
     coerce_datetime as _coerce_datetime,
@@ -182,6 +191,8 @@ def _member_user_payload(
         "email": record.get("email"),
         "name": record.get("name"),
         "avatar_url": record.get("avatar_url"),
+        "kind": "service" if is_service_record(record) else "user",
+        "sponsor_user_id": record.get("sponsor_user_id"),
     }
     if include_github_id:
         payload["github_id"] = record.get("github_id")
@@ -351,6 +362,7 @@ async def _load_org_member_add_records(
                         AND user_id = $actor_id
                     LIMIT 1
                 )[0],
+                actor: (SELECT kind FROM users WHERE uuid = $actor_id LIMIT 1)[0],
                 target_user: (SELECT * FROM users WHERE uuid = $target_user_id LIMIT 1)[0],
                 target_membership: (
                     SELECT * FROM organization_members
@@ -377,7 +389,7 @@ async def _load_org_member_add_records(
     payload = _record_payload(payload)
     return (
         _normalize_record(payload.get("organization")),
-        _normalize_record(payload.get("actor_membership")),
+        _actor_membership(payload, "actor_membership"),
         _normalize_record(payload.get("target_user")),
         _normalize_record(payload.get("target_membership")),
         _normalize_records(payload.get("owner_memberships")),
@@ -408,6 +420,7 @@ async def _load_org_member_mutation_records(
                         AND user_id = $actor_id
                     LIMIT 1
                 )[0],
+                actor: (SELECT kind FROM users WHERE uuid = $actor_id LIMIT 1)[0],
                 target_membership: (
                     SELECT * FROM organization_members
                     WHERE organization_id IN (
@@ -433,10 +446,24 @@ async def _load_org_member_mutation_records(
     payload = _record_payload(payload)
     return (
         _normalize_record(payload.get("organization")),
-        _normalize_record(payload.get("actor_membership")),
+        _actor_membership(payload, "actor_membership"),
         _normalize_record(payload.get("target_membership")),
         _normalize_records(payload.get("owner_memberships")),
     )
+
+
+def _actor_membership(payload: SurrealRecord, key: str) -> SurrealRecord | None:
+    """The caller's membership here; a bot's reads as member at most.
+
+    Organization gates read this row's role directly, so the bot clamp the
+    request resolver applies has to hold here too.
+    """
+    membership = _normalize_record(payload.get(key))
+    if membership is None or not is_service_record(_normalize_record(payload.get("actor"))):
+        return membership
+    if OrganizationRole(str(membership.get("role") or "member")) in BOT_FORBIDDEN_ORG_ROLES:
+        return {**membership, "role": OrganizationRole.MEMBER.value}
+    return membership
 
 
 async def _load_org_role_records(
@@ -457,15 +484,14 @@ async def _load_org_role_records(
                         AND user_id = $user_id
                     LIMIT 1
                 )[0],
+                actor: (SELECT kind FROM users WHERE uuid = $user_id LIMIT 1)[0],
             };
         """,
         slug=slug,
         user_id=str(user_id),
     )
     payload = _record_payload(payload)
-    return _normalize_record(payload.get("organization")), _normalize_record(
-        payload.get("membership")
-    )
+    return _normalize_record(payload.get("organization")), _actor_membership(payload, "membership")
 
 
 async def _load_org_member_list_records(
@@ -491,6 +517,7 @@ async def _load_org_member_list_records(
                         AND user_id = $actor_id
                     LIMIT 1
                 )[0],
+                actor: (SELECT kind FROM users WHERE uuid = $actor_id LIMIT 1)[0],
                 memberships: (
                     SELECT * FROM organization_members
                     WHERE organization_id IN (
@@ -515,7 +542,7 @@ async def _load_org_member_list_records(
     payload = _record_payload(payload)
     return (
         _normalize_record(payload.get("organization")),
-        _normalize_record(payload.get("actor_membership")),
+        _actor_membership(payload, "actor_membership"),
         _normalize_records(payload.get("memberships")),
         _normalize_records(payload.get("users")),
     )
@@ -1116,6 +1143,18 @@ async def add_org_member(
         _enforce_owner_role_boundary(actor_role=actor_role, requested_role=role)
         if target_user is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+        if is_service_record(target_user):
+            if target_membership is None:
+                # A bot belongs to the organization it was made in, and nowhere else.
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail={
+                        "error": "bot_single_organization",
+                        "message": "A bot is a member only of the organization it was created in.",
+                    },
+                )
+            if role in BOT_FORBIDDEN_ORG_ROLES:
+                raise bot_role_ceiling_error(role.value)
 
         organization_id = _coerce_uuid(organization.get("uuid"), field_name="organization.uuid")
         now = _utcnow()
@@ -1232,6 +1271,8 @@ async def update_org_member_role(
                     status_code=status.HTTP_409_CONFLICT,
                     detail="Cannot demote the last organization owner",
                 )
+        if role in BOT_FORBIDDEN_ORG_ROLES and await _is_bot(client, user_id=target_user_id):
+            raise bot_role_ceiling_error(role.value)
 
         update_result = await client.execute_query(
             """
@@ -1645,6 +1686,7 @@ async def _get_project_and_user_role(
                     WHERE organization_id = $organization_id AND user_id = $user_id
                     LIMIT 1
                 )[0],
+                actor: (SELECT kind FROM users WHERE uuid = $user_id LIMIT 1)[0],
             };
         """
     else:
@@ -1678,6 +1720,7 @@ async def _get_project_and_user_role(
                     WHERE organization_id = $organization_id AND user_id = $user_id
                     LIMIT 1
                 )[0],
+                actor: (SELECT kind FROM users WHERE uuid = $user_id LIMIT 1)[0],
             };
         """
     payload = await client.execute_query(query, **params)
@@ -1696,6 +1739,14 @@ async def _get_project_and_user_role(
         project_record.get("owner_user_id"),
         field_name="project.owner_user_id",
     )
+    if is_service_record(_normalize_record(payload.get("actor"))):
+        # A bot's stored grant is not its role: the sponsor caps it, so the
+        # role comes from the one capped computation.
+        return project, await _capped_bot_project_role(
+            bot_id=user_id,
+            org_id=org_id,
+            graph_project_id=str(project_record.get("graph_project_id") or ""),
+        )
     if project.owner_user_id == user_id:
         return project, ProjectRole.OWNER
 
@@ -1703,6 +1754,23 @@ async def _get_project_and_user_role(
     if membership is not None:
         return project, ProjectRole(membership["role"])
     return project, None
+
+
+async def _capped_bot_project_role(
+    *, bot_id: UUID, org_id: UUID, graph_project_id: str
+) -> ProjectRole | None:
+    from sibyl.auth.authorization import ProjectAuthorizationError
+
+    try:
+        ctx = await resolve_auth_context(claims={"sub": str(bot_id), "org": str(org_id)})
+        return await verify_entity_project_access(
+            ctx=ctx,
+            entity_project_id=graph_project_id,
+            required_role=ProjectRole.VIEWER,
+            require_existing_project=True,
+        )
+    except (ProjectAuthorizationError, UserNotFoundError):
+        return None
 
 
 async def _list_project_member_records(
@@ -1753,6 +1821,15 @@ async def _load_project_member_target(
         _normalize_record(payload.get("org_membership")),
         _normalize_record(payload.get("membership")),
     )
+
+
+async def _is_bot(client: QueryClient, *, user_id: UUID) -> bool:
+    records = _normalize_records(
+        await client.execute_query(
+            "SELECT kind FROM users WHERE uuid = $user_id LIMIT 1;", user_id=str(user_id)
+        )
+    )
+    return bool(records) and is_service_record(records[0])
 
 
 async def _target_is_org_member(
@@ -1913,6 +1990,8 @@ async def add_project_member(
         )
         if target_user is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+        if is_service_record(target_user) and role in BOT_FORBIDDEN_PROJECT_ROLES:
+            raise bot_role_ceiling_error(role.value)
         if target_org_membership is None:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -1994,6 +2073,8 @@ async def update_project_member_role(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="User is not an organization member",
             )
+        if role in BOT_FORBIDDEN_PROJECT_ROLES and await _is_bot(client, user_id=target_user_id):
+            raise bot_role_ceiling_error(role.value)
 
         membership_records = await _list_project_member_records(
             client,

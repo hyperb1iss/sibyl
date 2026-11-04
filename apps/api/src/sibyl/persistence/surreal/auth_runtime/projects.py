@@ -25,9 +25,11 @@ from sibyl.persistence.surreal.auth_runtime._common import (
     _resolve_auth_context_from_claims,
     _role_value,
     _SurrealRepository,
+    is_service_record,
 )
 from sibyl_core.auth import (
     AuthContext,
+    PrincipalKind,
     ProjectRole,
     ProjectVisibility,
 )
@@ -675,6 +677,21 @@ async def add_memory_space_member(
         raise HTTPException(status_code=409, detail=space.disabled_reason or "scope_not_enabled")
     async with _auth_client_scope() as client:
         repo = _SurrealRepository(client)
+        if principal_type == "user" and is_service_record(
+            await repo.select_one(
+                "SELECT kind FROM users WHERE uuid = $user_id LIMIT 1;", user_id=principal_id
+            )
+        ):
+            # A memory space grants recall no sponsor caps, so bots stay out,
+            # as they stay off teams.
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "error": "bot_memory_space_membership",
+                    "message": "Bots cannot be members of memory spaces.",
+                    "remediation": "Grant the bot project access with `sibyl bot grant`.",
+                },
+            )
         existing = await repo.select_one(
             "SELECT * FROM memory_space_members "
             "WHERE organization_id = $organization_id "
@@ -1042,6 +1059,20 @@ async def add_team_member_record(
         repo = _SurrealRepository(client)
         team = await _get_team_record(repo, organization_id=organization_id, team_ref=team_ref)
         team_id = _coerce_uuid(team.get("uuid"), field_name="teams.uuid")
+        if is_service_record(
+            await repo.select_one(
+                "SELECT kind FROM users WHERE uuid = $user_id LIMIT 1;", user_id=str(user_id)
+            )
+        ):
+            # A team reaches team memory, which no sponsor caps, and bots stay off teams.
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "error": "bot_team_membership",
+                    "message": "Bots cannot join teams.",
+                    "remediation": "Grant the bot project access with `sibyl bot grant`.",
+                },
+            )
         existing = await repo.select_one(
             "SELECT * FROM team_members WHERE team_id = $team_id AND user_id = $user_id LIMIT 1;",
             team_id=str(team_id),
@@ -1218,6 +1249,71 @@ async def resolve_org_role(*, org_id: str, user_id: str | None) -> str | None:
         return _role_value(records[0].get("role")) if records else None
 
 
+_PRINCIPAL_GRANT_QUERIES = """
+        projects: (
+            SELECT * FROM projects
+            WHERE organization_id = $organization_id
+            ORDER BY created_at ASC
+        ),
+        direct_memberships: (
+            SELECT * FROM project_members
+            WHERE organization_id = $organization_id AND user_id = $user_id
+            ORDER BY created_at ASC
+        ),
+        team_members: (
+            SELECT * FROM team_members
+            WHERE user_id = $user_id
+            ORDER BY created_at ASC
+        ),
+        team_projects: (
+            SELECT * FROM team_projects
+            WHERE team_id IN (
+                SELECT VALUE team_id FROM team_members WHERE user_id = $user_id
+            )
+            ORDER BY created_at ASC
+        ),"""
+
+# A bot reads its sponsor's grants beside its own, in the same round trip, so
+# the cap compares two snapshots taken at one moment.
+_SPONSOR_GRANT_QUERIES = """
+        sponsor_direct_memberships: (
+            SELECT * FROM project_members
+            WHERE organization_id = $organization_id AND user_id = $sponsor_id
+            ORDER BY created_at ASC
+        ),
+        sponsor_team_projects: (
+            SELECT * FROM team_projects
+            WHERE team_id IN (
+                SELECT VALUE team_id FROM team_members WHERE user_id = $sponsor_id
+            )
+            ORDER BY created_at ASC
+        ),"""
+
+_PROJECT_ACCESS_QUERY = "RETURN {" + _PRINCIPAL_GRANT_QUERIES + "\n};"
+_BOT_PROJECT_ACCESS_QUERY = "RETURN {" + _PRINCIPAL_GRANT_QUERIES + _SPONSOR_GRANT_QUERIES + "\n};"
+
+
+# A bot does work on a project; it never manages one.
+BOT_PROJECT_ROLE_CEILING = ProjectRole.CONTRIBUTOR
+
+
+def _is_service_principal(ctx) -> bool:
+    return getattr(getattr(ctx, "user", None), "kind", None) == PrincipalKind.SERVICE
+
+
+def _sponsor_reads_grants(ctx) -> bool:
+    """Whether a bot's cap needs its sponsor's project grants read.
+
+    A sponsor who is an org owner or admin already holds owner on every
+    project, so only a bot whose sponsor is a member or viewer needs them.
+    """
+    return (
+        _is_service_principal(ctx)
+        and _role_value(getattr(ctx, "sponsor_org_role", None)) not in _ORG_ADMIN_ROLE_VALUES
+        and getattr(ctx.user, "sponsor_user_id", None) is not None
+    )
+
+
 async def _load_project_access_records(ctx) -> tuple[list[SurrealRecord], SurrealRecord]:
     async with _auth_client_scope() as client:
         org_id = str(ctx.organization.id)
@@ -1235,40 +1331,37 @@ async def _load_project_access_records(ctx) -> tuple[list[SurrealRecord], Surrea
                     organization_id=org_id,
                 )
             )
-        else:
-            raw_payload = await client.execute_query(
-                """
-                    RETURN {
-                        projects: (
-                            SELECT * FROM projects
-                            WHERE organization_id = $organization_id
-                            ORDER BY created_at ASC
-                        ),
-                        direct_memberships: (
-                            SELECT * FROM project_members
-                            WHERE organization_id = $organization_id AND user_id = $user_id
-                            ORDER BY created_at ASC
-                        ),
-                        team_members: (
-                            SELECT * FROM team_members
-                            WHERE user_id = $user_id
-                            ORDER BY created_at ASC
-                        ),
-                        team_projects: (
-                            SELECT * FROM team_projects
-                            WHERE team_id IN (
-                                SELECT VALUE team_id FROM team_members WHERE user_id = $user_id
-                            )
-                            ORDER BY created_at ASC
-                        ),
-                    };
-                """,
-                organization_id=org_id,
-                user_id=user_id,
+        elif _sponsor_reads_grants(ctx):
+            payload = _record_payload(
+                await client.execute_query(
+                    _BOT_PROJECT_ACCESS_QUERY,
+                    organization_id=org_id,
+                    user_id=user_id,
+                    sponsor_id=str(ctx.user.sponsor_user_id),
+                )
             )
-            payload = _record_payload(raw_payload)
+            project_records = _normalize_records(payload.get("projects"))
+        else:
+            payload = _record_payload(
+                await client.execute_query(
+                    _PROJECT_ACCESS_QUERY,
+                    organization_id=org_id,
+                    user_id=user_id,
+                )
+            )
             project_records = _normalize_records(payload.get("projects"))
         return project_records, payload
+
+
+def _records_by_project(value: object) -> dict[str, SurrealRecord]:
+    return {str(record.get("project_id")): record for record in _normalize_records(value)}
+
+
+def _record_lists_by_project(value: object) -> dict[str, list[SurrealRecord]]:
+    grouped: dict[str, list[SurrealRecord]] = {}
+    for record in _normalize_records(value):
+        grouped.setdefault(str(record.get("project_id")), []).append(record)
+    return grouped
 
 
 def _project_ids_for_role(
@@ -1290,13 +1383,10 @@ def _project_ids_for_role(
         if api_key_allowed is not None:
             return accessible & {str(project_id) for project_id in api_key_allowed}
         return accessible
-    direct_by_project = {
-        str(record.get("project_id")): record
-        for record in _normalize_records(payload.get("direct_memberships"))
-    }
-    teams_by_project: dict[str, list[SurrealRecord]] = {}
-    for record in _normalize_records(payload.get("team_projects")):
-        teams_by_project.setdefault(str(record.get("project_id")), []).append(record)
+    direct_by_project = _records_by_project(payload.get("direct_memberships"))
+    teams_by_project = _record_lists_by_project(payload.get("team_projects"))
+    sponsor_direct_by_project = _records_by_project(payload.get("sponsor_direct_memberships"))
+    sponsor_teams_by_project = _record_lists_by_project(payload.get("sponsor_team_projects"))
     accessible: set[str] = set()
     for project in project_records:
         project_id = str(project.get("uuid"))
@@ -1306,6 +1396,8 @@ def _project_ids_for_role(
             project=project,
             direct_record=direct_by_project.get(project_id),
             team_project_records=teams_by_project.get(project_id, []),
+            sponsor_direct_record=sponsor_direct_by_project.get(project_id),
+            sponsor_team_project_records=sponsor_teams_by_project.get(project_id, []),
         )
         if (
             graph_id
@@ -1493,6 +1585,70 @@ async def resolve_accessible_project_graph_ids(
     return user_accessible
 
 
+_ENTITY_PROJECT_GRANT_QUERIES = """
+        project: (
+            SELECT * FROM projects
+            WHERE organization_id = $organization_id
+                AND graph_project_id = $graph_project_id
+            LIMIT 1
+        )[0],
+        direct_membership: (
+            SELECT * FROM project_members
+            WHERE user_id = $user_id
+                AND project_id IN (
+                    SELECT VALUE uuid FROM projects
+                    WHERE organization_id = $organization_id
+                        AND graph_project_id = $graph_project_id
+                    LIMIT 1
+                )
+            LIMIT 1
+        )[0],
+        team_projects: (
+            SELECT * FROM team_projects
+            WHERE project_id IN (
+                    SELECT VALUE uuid FROM projects
+                    WHERE organization_id = $organization_id
+                        AND graph_project_id = $graph_project_id
+                    LIMIT 1
+                )
+                AND team_id IN (
+                    SELECT VALUE team_id FROM team_members WHERE user_id = $user_id
+                )
+            LIMIT 10
+        ),"""
+
+_SPONSOR_ENTITY_PROJECT_GRANT_QUERIES = """
+        sponsor_direct_membership: (
+            SELECT * FROM project_members
+            WHERE user_id = $sponsor_id
+                AND project_id IN (
+                    SELECT VALUE uuid FROM projects
+                    WHERE organization_id = $organization_id
+                        AND graph_project_id = $graph_project_id
+                    LIMIT 1
+                )
+            LIMIT 1
+        )[0],
+        sponsor_team_projects: (
+            SELECT * FROM team_projects
+            WHERE project_id IN (
+                    SELECT VALUE uuid FROM projects
+                    WHERE organization_id = $organization_id
+                        AND graph_project_id = $graph_project_id
+                    LIMIT 1
+                )
+                AND team_id IN (
+                    SELECT VALUE team_id FROM team_members WHERE user_id = $sponsor_id
+                )
+            LIMIT 10
+        ),"""
+
+_ENTITY_PROJECT_ACCESS_QUERY = "RETURN {" + _ENTITY_PROJECT_GRANT_QUERIES + "\n};"
+_BOT_ENTITY_PROJECT_ACCESS_QUERY = (
+    "RETURN {" + _ENTITY_PROJECT_GRANT_QUERIES + _SPONSOR_ENTITY_PROJECT_GRANT_QUERIES + "\n};"
+)
+
+
 async def verify_entity_project_access(
     *,
     ctx,
@@ -1505,6 +1661,15 @@ async def verify_entity_project_access(
 
         raise ProjectAuthorizationError(
             project_id=entity_project_id or "unknown",
+            required_role=required_role,
+            actual_role=None,
+        )
+    if _is_service_principal(ctx) and getattr(ctx, "sponsor_org_role", None) is None:
+        # A bot whose sponsor left holds nothing until an admin transfers it.
+        from sibyl.auth.authorization import ProjectAuthorizationError
+
+        raise ProjectAuthorizationError(
+            project_id=entity_project_id or "unassigned",
             required_role=required_role,
             actual_role=None,
         )
@@ -1522,45 +1687,14 @@ async def verify_entity_project_access(
         )
     if _role_value(ctx.org_role) in _ORG_ADMIN_ROLE_VALUES and not require_existing_project:
         return ProjectRole.OWNER
+    sponsor_grants = _sponsor_reads_grants(ctx)
     async with _auth_client_scope() as client:
         payload = await client.execute_query(
-            """
-                RETURN {
-                    project: (
-                        SELECT * FROM projects
-                        WHERE organization_id = $organization_id
-                            AND graph_project_id = $graph_project_id
-                        LIMIT 1
-                    )[0],
-                    direct_membership: (
-                        SELECT * FROM project_members
-                        WHERE user_id = $user_id
-                            AND project_id IN (
-                                SELECT VALUE uuid FROM projects
-                                WHERE organization_id = $organization_id
-                                    AND graph_project_id = $graph_project_id
-                                LIMIT 1
-                            )
-                        LIMIT 1
-                    )[0],
-                    team_projects: (
-                        SELECT * FROM team_projects
-                        WHERE project_id IN (
-                                SELECT VALUE uuid FROM projects
-                                WHERE organization_id = $organization_id
-                                    AND graph_project_id = $graph_project_id
-                                LIMIT 1
-                            )
-                            AND team_id IN (
-                                SELECT VALUE team_id FROM team_members WHERE user_id = $user_id
-                            )
-                        LIMIT 10
-                    ),
-                };
-            """,
+            _BOT_ENTITY_PROJECT_ACCESS_QUERY if sponsor_grants else _ENTITY_PROJECT_ACCESS_QUERY,
             organization_id=str(ctx.organization.id),
             graph_project_id=entity_project_id,
             user_id=str(ctx.user.id),
+            **({"sponsor_id": str(ctx.user.sponsor_user_id)} if sponsor_grants else {}),
         )
         payload = _record_payload(payload)
         record = _normalize_record(payload.get("project"))
@@ -1586,6 +1720,8 @@ async def verify_entity_project_access(
             project=record,
             direct_record=_normalize_record(payload.get("direct_membership")),
             team_project_records=_normalize_records(payload.get("team_projects")),
+            sponsor_direct_record=_normalize_record(payload.get("sponsor_direct_membership")),
+            sponsor_team_project_records=_normalize_records(payload.get("sponsor_team_projects")),
         )
         if effective_role is None:
             from sibyl.auth.authorization import ProjectAuthorizationError
@@ -1612,10 +1748,58 @@ def _effective_project_role_from_records(
     project: SurrealRecord,
     direct_record: SurrealRecord | None,
     team_project_records: list[SurrealRecord],
+    sponsor_direct_record: SurrealRecord | None = None,
+    sponsor_team_project_records: list[SurrealRecord] | None = None,
 ) -> ProjectRole | None:
-    if _role_value(ctx.org_role) in _ORG_ADMIN_ROLE_VALUES:
+    """The one place a principal's role on a project is decided.
+
+    A bot's role is capped on every call: never above contributor (viewer
+    when it or its sponsor is an org viewer), and never above what its
+    sponsor holds on the project right now. A bot whose sponsor is no longer
+    an active member holds nothing.
+    """
+    role = _principal_project_role(
+        org_role=ctx.org_role,
+        user_id=ctx.user.id,
+        project=project,
+        direct_record=direct_record,
+        team_project_records=team_project_records,
+    )
+    if not _is_service_principal(ctx):
+        return role
+    sponsor_org_role = getattr(ctx, "sponsor_org_role", None)
+    if role is None or sponsor_org_role is None:
+        return None
+    sponsor_role = _principal_project_role(
+        org_role=sponsor_org_role,
+        user_id=ctx.user.sponsor_user_id,
+        project=project,
+        direct_record=sponsor_direct_record,
+        team_project_records=sponsor_team_project_records or [],
+    )
+    if sponsor_role is None:
+        return None
+    # An org viewer writes nowhere, so neither does a bot that is one, or
+    # whose sponsor is one.
+    ceiling = (
+        ProjectRole.VIEWER
+        if "viewer" in {_role_value(ctx.org_role), _role_value(sponsor_org_role)}
+        else BOT_PROJECT_ROLE_CEILING
+    )
+    return min(role, sponsor_role, ceiling, key=_PROJECT_ROLE_LEVELS.__getitem__)
+
+
+def _principal_project_role(
+    *,
+    org_role,
+    user_id,
+    project: SurrealRecord,
+    direct_record: SurrealRecord | None,
+    team_project_records: list[SurrealRecord],
+) -> ProjectRole | None:
+    if _role_value(org_role) in _ORG_ADMIN_ROLE_VALUES:
         return ProjectRole.OWNER
-    if _coerce_optional_uuid(project.get("owner_user_id")) == ctx.user.id:
+    if user_id is not None and _coerce_optional_uuid(project.get("owner_user_id")) == user_id:
         return ProjectRole.OWNER
     roles: list[ProjectRole] = []
     # A legacy grant without a role confers read access, never write access.

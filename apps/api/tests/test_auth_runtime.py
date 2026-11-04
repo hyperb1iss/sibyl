@@ -35,7 +35,7 @@ def test_auth_runtime_exports_neutral_runtime_surface() -> None:
 
 
 def test_auth_runtime_surreal_backend_covers_public_exports() -> None:
-    skipped = {"InvalidAuthClaimsError", "UserNotFoundError"}
+    skipped = {"InvalidAuthClaimsError", "SuspendedPrincipalError", "UserNotFoundError"}
 
     for name in auth_runtime.__all__:
         if name in skipped:

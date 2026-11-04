@@ -37,6 +37,7 @@ from sibyl.persistence.surreal.auth_runtime._common import (
     _log_audit_event,
     _record_payload,
     _SurrealRepository,
+    is_service_record,
 )
 from sibyl.persistence.surreal.auth_runtime.audit import log_memory_audit_event
 from sibyl_core.backends.surreal.records import (
@@ -94,6 +95,19 @@ def _apply_password_change(
     return updated
 
 
+def _bot_credentials_refused() -> HTTPException:
+    # An email or a password is a way to sign in, and a bot signs in only
+    # with API keys.
+    return HTTPException(
+        status_code=403,
+        detail={
+            "error": "bot_credentials_forbidden",
+            "message": "A bot has no email or password.",
+            "remediation": "Bots authenticate only with API keys their sponsor issues.",
+        },
+    )
+
+
 async def _load_user_update_records(
     client: QueryClient, *, user_id: UUID, email: str | None
 ) -> tuple[SurrealRecord | None, SurrealRecord | None]:
@@ -139,7 +153,7 @@ async def authenticate_local_user(*, email: str, password: str):
             "SELECT * FROM users WHERE email = $email AND deleted_at = NONE LIMIT 1;",
             email=email.strip().lower(),
         )
-        if record is None:
+        if record is None or is_service_record(record):
             verify_password_timing_floor(
                 password,
                 iterations=config_module.settings.password_iterations,
@@ -312,6 +326,8 @@ async def update_auth_user(
         )
         if user is None:
             raise HTTPException(status_code=404, detail="User not found")
+        if is_service_record(user) and (email is not None or new_password is not None):
+            raise _bot_credentials_refused()
         changes: list[str] = []
         updated = dict(user)
         if email is not None:
@@ -389,6 +405,8 @@ async def patch_auth_user(
         )
         if user is None:
             raise HTTPException(status_code=404, detail="User not found")
+        if is_service_record(user) and "email" in updates:
+            raise _bot_credentials_refused()
 
         updated = dict(user)
         changes: list[str] = []

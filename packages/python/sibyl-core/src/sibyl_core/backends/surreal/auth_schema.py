@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 from uuid import UUID
 
-from sibyl_core.auth import OrganizationRole, ProjectRole, ProjectVisibility
+from sibyl_core.auth import OrganizationRole, PrincipalKind, ProjectRole, ProjectVisibility
 from sibyl_core.backends.surreal.schema import render_surreal_compatible_sql
 from sibyl_core.backends.surreal.schema_helpers import is_missing_table_error, split_statements
 from sibyl_core.backends.surreal.schema_invariants import (
@@ -53,11 +53,12 @@ EXTENDED_AUTH_TABLES = (
     "oauth_authorization_requests",
 )
 AUTH_TABLES = (*CORE_AUTH_TABLES, *EXTENDED_AUTH_TABLES)
-AUTH_SCHEMA_CURRENT_VERSION = 11
+AUTH_SCHEMA_CURRENT_VERSION = 12
 AUTH_SCHEMA_NAME = "auth"
 _AUTH_ORGANIZATION_ROLE_VALUES = tuple(role.value for role in OrganizationRole)
 _AUTH_PROJECT_ROLE_VALUES = tuple(role.value for role in ProjectRole)
 _AUTH_PROJECT_VISIBILITY_VALUES = tuple(visibility.value for visibility in ProjectVisibility)
+_AUTH_PRINCIPAL_KIND_VALUES = tuple(kind.value for kind in PrincipalKind)
 _AUTH_MEMORY_SCOPE_VALUES = tuple(scope.value for scope in MemoryScope)
 _AUTH_PROJECT_DEFAULT_MEMORY_SCOPE_VALUES = tuple(
     scope.value for scope in PROJECT_DEFAULT_MEMORY_SCOPES
@@ -742,6 +743,17 @@ DEFINE FIELD IF NOT EXISTS default_memory_scope ON projects TYPE string DEFAULT 
 UPDATE projects SET default_memory_scope = 'private' WHERE default_memory_scope = NONE;
 """
 
+# A bot is a user record whose kind is service. Its sponsor is the human whose
+# current project roles cap the bot's, read at request time; it never holds a
+# password or an identity, so it signs in only with API keys.
+AUTH_SERVICE_ACCOUNT_DEFINITIONS = f"""
+DEFINE FIELD IF NOT EXISTS kind ON users TYPE string DEFAULT 'user'
+    ASSERT $value IN {_surql_string_array(_AUTH_PRINCIPAL_KIND_VALUES)};
+UPDATE users SET kind = 'user' WHERE kind = NONE;
+DEFINE FIELD IF NOT EXISTS sponsor_user_id ON users TYPE option<string>;
+DEFINE INDEX IF NOT EXISTS idx_users_sponsor ON users FIELDS sponsor_user_id;
+"""
+
 AUTH_SCHEMA_MIGRATIONS = (
     SchemaMigration(
         version=1,
@@ -801,6 +813,11 @@ AUTH_SCHEMA_MIGRATIONS = (
         version=11,
         name="auth_project_default_memory_scope",
         statements=tuple(split_statements(AUTH_PROJECT_DEFAULT_MEMORY_SCOPE_DEFINITIONS)),
+    ),
+    SchemaMigration(
+        version=12,
+        name="auth_service_accounts",
+        statements=tuple(split_statements(AUTH_SERVICE_ACCOUNT_DEFINITIONS)),
     ),
 )
 
@@ -996,6 +1013,7 @@ __all__ = [
     "AUTH_SCHEMA_DEFINITIONS",
     "AUTH_SCHEMA_MIGRATIONS",
     "AUTH_SCHEMA_NAME",
+    "AUTH_SERVICE_ACCOUNT_DEFINITIONS",
     "AUTH_SESSION_REVOCATION_ANNOUNCED_DEFINITIONS",
     "AUTH_TABLES",
     "CORE_AUTH_TABLES",

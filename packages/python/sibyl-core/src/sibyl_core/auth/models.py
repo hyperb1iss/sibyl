@@ -8,7 +8,7 @@ from enum import StrEnum
 from typing import cast
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 JSONObject = dict[str, object]
 
@@ -29,6 +29,17 @@ class ProjectRole(StrEnum):
     MAINTAINER = "project_maintainer"
     CONTRIBUTOR = "project_contributor"
     VIEWER = "project_viewer"
+
+
+class PrincipalKind(StrEnum):
+    """What kind of principal a user record is.
+
+    A service principal is a bot: a member a human sponsors, that signs in only
+    with API keys and whose project access its sponsor caps on every request.
+    """
+
+    USER = "user"
+    SERVICE = "service"
 
 
 class ProjectVisibility(StrEnum):
@@ -57,6 +68,19 @@ class AuthUser(BaseModel):
     last_login_at: datetime | None = None
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     updated_at: datetime | None = None
+    kind: PrincipalKind = PrincipalKind.USER
+    sponsor_user_id: UUID | None = None
+
+    @model_validator(mode="after")
+    def _bot_is_never_a_deployment_admin(self) -> AuthUser:
+        if self.kind is PrincipalKind.SERVICE:
+            self.is_admin = False
+        return self
+
+    @property
+    def is_service(self) -> bool:
+        """True for a bot, which a human sponsors and never signs in."""
+        return self.kind is PrincipalKind.SERVICE
 
 
 class UserIdentity(BaseModel):
@@ -208,7 +232,26 @@ def coerce_auth_user(value: object) -> AuthUser:
         last_login_at=_optional_datetime(_attr(value, "last_login_at")),
         created_at=_optional_datetime(_attr(value, "created_at")) or datetime.now(UTC),
         updated_at=_optional_datetime(_attr(value, "updated_at")),
+        kind=coerce_principal_kind(_attr(value, "kind")),
+        sponsor_user_id=_optional_uuid_value(_attr(value, "sponsor_user_id")),
     )
+
+
+def coerce_principal_kind(value: object | None) -> PrincipalKind:
+    """Read a stored kind; a record that predates the field is a user."""
+    if isinstance(value, PrincipalKind):
+        return value
+    if isinstance(value, str) and value:
+        return PrincipalKind(value)
+    return PrincipalKind.USER
+
+
+def _optional_uuid_value(value: object) -> UUID | None:
+    if isinstance(value, UUID):
+        return value
+    if isinstance(value, str) and value:
+        return UUID(value)
+    return None
 
 
 def coerce_auth_organization(value: object | None) -> AuthOrganization | None:

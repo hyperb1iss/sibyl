@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from uuid import UUID
 
-from sibyl_core.auth import OrganizationRole, ProjectRole
+from sibyl_core.auth import OrganizationRole, PrincipalKind, ProjectRole
 from sibyl_core.models.memory_scope import MemoryScope
 
 
@@ -112,6 +112,8 @@ def can_manage_project_settings(
     The member-management authority, plus org owners and admins, who already
     hold owner rights on every project for reads and writes.
     """
+    if getattr(user, "kind", None) == PrincipalKind.SERVICE:
+        return False
     if org_role in {OrganizationRole.OWNER, OrganizationRole.ADMIN}:
         return True
     return can_manage_project_members(role, project, user)
@@ -122,7 +124,9 @@ def can_manage_project_members(
     project: object,
     user: object,
 ) -> bool:
-    """Return whether the actor can manage project members."""
+    """Return whether the actor can manage project members. A bot never can."""
+    if getattr(user, "kind", None) == PrincipalKind.SERVICE:
+        return False
     owner_user_id = getattr(project, "owner_user_id", None)
     user_id = getattr(user, "id", None)
     if user_id is not None and owner_user_id == user_id:

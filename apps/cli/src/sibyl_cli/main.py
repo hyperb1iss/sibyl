@@ -21,6 +21,7 @@ from sibyl_cli.auth import app as auth_app
 from sibyl_cli.auth import clear_token_cmd as logout_cmd
 from sibyl_cli.auth import login_cmd
 from sibyl_cli.auth import status_cmd as whoami_cmd
+from sibyl_cli.bot import app as bot_app
 from sibyl_cli.client import SibylClientError, get_client
 from sibyl_cli.common import (
     NEON_CYAN,
@@ -173,6 +174,7 @@ app.add_typer(admin_app, name="admin")
 memory_admin.register_root_commands(app)
 app.add_typer(synthesis_app, name="synthesis")
 app.add_typer(team_app, name="team")
+app.add_typer(bot_app, name="bot")
 app.command("setup")(setup_cmd)
 app.command("doctor")(doctor_cmd)
 app.command("login")(login_cmd)

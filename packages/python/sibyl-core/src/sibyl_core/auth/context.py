@@ -89,11 +89,18 @@ class AuthContext:
     api_key_memory_scope_keys: frozenset[str] | None = None
     accessible_teams: frozenset[str] = frozenset()
     accessible_delegations: frozenset[str] = frozenset()
+    # A bot's sponsor's current role in this organization, read with the bot
+    # on every request. Project access for a bot is capped by what the sponsor
+    # holds now, so this is None for people and for a bot whose sponsor left.
+    sponsor_org_role: OrganizationRole | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "user", coerce_auth_user(self.user))
         object.__setattr__(self, "organization", coerce_auth_organization(self.organization))
         object.__setattr__(self, "org_role", coerce_organization_role(self.org_role))
+        object.__setattr__(
+            self, "sponsor_org_role", coerce_organization_role(self.sponsor_org_role)
+        )
         object.__setattr__(self, "scopes", frozenset(str(scope) for scope in self.scopes))
         object.__setattr__(self, "api_key_id", _optional_string(self.api_key_id))
         object.__setattr__(
@@ -128,6 +135,11 @@ class AuthContext:
     @property
     def is_org_scoped(self) -> bool:
         return self.organization is not None
+
+    @property
+    def is_service(self) -> bool:
+        """True when the caller is a bot."""
+        return self.user.is_service
 
     @property
     def user_id(self) -> str | None:

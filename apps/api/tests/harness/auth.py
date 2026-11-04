@@ -19,10 +19,11 @@ from uuid import UUID, uuid4
 
 from sibyl.auth.context import AuthContext
 from sibyl.mcp_tools.context import McpContext
-from sibyl_core.auth import AuthOrganization, AuthUser, OrganizationRole
+from sibyl_core.auth import AuthOrganization, AuthUser, OrganizationRole, PrincipalKind
 
 DEFAULT_ORG_ID = UUID("00000000-0000-0000-0000-000000000111")
 DEFAULT_USER_ID = UUID("00000000-0000-0000-0000-000000000222")
+DEFAULT_BOT_ID = UUID("00000000-0000-0000-0000-00000000b07b")
 
 
 def stub_auth_context(
@@ -60,6 +61,35 @@ def stub_auth_context(
     )
 
 
+def stub_bot_context(
+    *,
+    bot_id: UUID | str = DEFAULT_BOT_ID,
+    sponsor_id: UUID | str = DEFAULT_USER_ID,
+    sponsor_org_role: OrganizationRole | None = OrganizationRole.MEMBER,
+    organization_id: UUID | str = DEFAULT_ORG_ID,
+    api_key_project_ids: frozenset[str] | None = None,
+) -> AuthContext:
+    """A bot calling with its API key: a member whose sponsor's role rides along.
+
+    ``sponsor_org_role=None`` is a bot whose sponsor left; the resolver refuses
+    that bot outright, so this shape exists only to prove the cap fails closed.
+    """
+    return AuthContext(
+        user=AuthUser(
+            id=_as_uuid(bot_id),
+            name="oncall",
+            kind=PrincipalKind.SERVICE,
+            sponsor_user_id=_as_uuid(sponsor_id),
+        ),
+        organization=AuthOrganization(id=_as_uuid(organization_id), name="Sibyl", slug="sibyl"),
+        org_role=OrganizationRole.MEMBER,
+        scopes=frozenset({"api:read", "api:write", "mcp"}),
+        api_key_id="00000000-0000-0000-0000-00000000d00d",
+        api_key_project_ids=api_key_project_ids,
+        sponsor_org_role=sponsor_org_role,
+    )
+
+
 def stub_mcp_context(
     *,
     org_id: str | None = None,
@@ -87,8 +117,10 @@ def _as_uuid(value: UUID | str) -> UUID:
 
 
 __all__ = [
+    "DEFAULT_BOT_ID",
     "DEFAULT_ORG_ID",
     "DEFAULT_USER_ID",
     "stub_auth_context",
+    "stub_bot_context",
     "stub_mcp_context",
 ]

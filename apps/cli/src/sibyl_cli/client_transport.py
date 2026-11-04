@@ -278,7 +278,9 @@ def _is_refresh_revoked(message: str | None) -> bool:
 def _should_buffer_request(method: str, path: str) -> bool:
     if method.upper() not in BUFFERED_WRITE_METHODS:
         return False
-    if path.startswith("/auth/"):
+    # Credentials and principals are never replayed later: a replayed key
+    # mint would create a key whose secret nobody ever sees.
+    if path.startswith(("/auth/", "/bots")):
         return False
     return not is_read_like_post(path)
 

@@ -30,7 +30,13 @@ The audit surface records security and data-governance events such as:
 | API keys       | `auth.api_key.create`, `auth.api_key.revoke`, and scoped access decisions                     |
 | Memory         | `memory.remember`, `memory.recall`, context receipts, reflection, promotion, deletion         |
 | Access control | `org.member.update_role`, `project.member.update_role`, invitations, session revocation       |
+| Bots           | `bot.create`, `bot.project.grant`, `bot.project.revoke`, `bot.transfer`, `bot.delete`         |
 | Operations     | Backup actions, restore drills, settings updates                                              |
+
+Each event names its actor and marks whether that actor is a person (`user`) or a bot (`service`),
+in the `actor_kind` field of the JSON and a column of the CSV. Changes a person makes to a bot are
+recorded under that person, with the bot in `details.bot_user_id`; a key issued to a bot names the
+bot in `details.owner_user_id`. See [Bot Accounts](/users/bot-accounts).
 
 Event details should be useful for investigation without exposing secrets. Exported rows should be
 treated as sensitive operational data.

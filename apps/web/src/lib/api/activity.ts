@@ -5,6 +5,9 @@ export type TeamActivityWindow = '24h' | '7d' | '30d';
 
 export type TeamActivityRole = 'owner' | 'admin' | 'member' | 'viewer';
 
+/** `service` is a bot: an agent identity a person sponsors. */
+export type TeamActivityPrincipalKind = 'user' | 'service';
+
 export type TeamActivityKind =
   | 'capture'
   | 'task_created'
@@ -31,6 +34,9 @@ export interface TeamActivityPerson {
   email: string | null;
   avatar_url: string | null;
   role: TeamActivityRole;
+  kind: TeamActivityPrincipalKind;
+  /** Set for a bot: the person who sponsors it. */
+  sponsor_user_id: string | null;
   counts: TeamActivityCounts;
   last_active_at: string | null;
 }
@@ -47,6 +53,7 @@ export interface TeamActivityItem {
   /** The member's display name, as the people list shows it. */
   actor_name: string | null;
   actor_avatar_url: string | null;
+  actor_kind: TeamActivityPrincipalKind;
   at: string;
   /** App path the item opens at. */
   href: string;

@@ -362,6 +362,81 @@ class ClientAuthMixin:
             f"/teams/{quote(team_id, safe='')}/projects/{quote(project_id, safe='')}",
         )
 
+    async def list_bots(self) -> dict[str, Any]:
+        """List bots: every bot for an org admin, your own otherwise."""
+        return await self._request("GET", "/bots")
+
+    async def create_bot(self, name: str) -> dict[str, Any]:
+        """Create a bot you sponsor."""
+        return await self._request("POST", "/bots", json={"name": name})
+
+    async def get_bot(self, bot_id: str) -> dict[str, Any]:
+        """Show a bot and its project grants."""
+        return await self._request("GET", f"/bots/{quote(bot_id, safe='')}")
+
+    async def delete_bot(self, bot_id: str) -> dict[str, Any]:
+        """Delete a bot and revoke its keys."""
+        return await self._request("DELETE", f"/bots/{quote(bot_id, safe='')}")
+
+    async def transfer_bot(self, bot_id: str, sponsor_user_id: str) -> dict[str, Any]:
+        """Give a bot a new sponsor (org admins only)."""
+        return await self._request(
+            "POST",
+            f"/bots/{quote(bot_id, safe='')}/transfer",
+            json={"sponsor_user_id": sponsor_user_id},
+        )
+
+    async def grant_bot_project(
+        self, bot_id: str, project_id: str, role: str = "project_contributor"
+    ) -> dict[str, Any]:
+        """Grant your bot a project role, up to min(your role there, contributor)."""
+        return await self._request(
+            "POST",
+            f"/bots/{quote(bot_id, safe='')}/projects",
+            json={"project_id": project_id, "role": role},
+        )
+
+    async def revoke_bot_project(self, bot_id: str, project_id: str) -> dict[str, Any]:
+        """Remove a bot's grant on a project."""
+        return await self._request(
+            "DELETE",
+            f"/bots/{quote(bot_id, safe='')}/projects/{quote(project_id, safe='')}",
+        )
+
+    async def list_bot_api_keys(self, bot_id: str) -> dict[str, Any]:
+        """List a bot's API keys."""
+        return await self._request("GET", f"/bots/{quote(bot_id, safe='')}/keys")
+
+    async def create_bot_api_key(
+        self,
+        bot_id: str,
+        *,
+        name: str,
+        live: bool = True,
+        scopes: list[str] | None = None,
+        project_ids: list[str] | None = None,
+        memory_space_ids: list[str] | None = None,
+        expires_days: int | None = None,
+    ) -> dict[str, Any]:
+        """Issue a key that authenticates as the bot."""
+        payload: dict[str, Any] = {"name": name, "live": live}
+        if scopes is not None:
+            payload["scopes"] = scopes
+        if project_ids is not None:
+            payload["project_ids"] = project_ids
+        if memory_space_ids is not None:
+            payload["memory_space_ids"] = memory_space_ids
+        if expires_days is not None:
+            payload["expires_days"] = expires_days
+        return await self._request("POST", f"/bots/{quote(bot_id, safe='')}/keys", json=payload)
+
+    async def revoke_bot_api_key(self, bot_id: str, api_key_id: str) -> dict[str, Any]:
+        """Revoke one of a bot's API keys."""
+        return await self._request(
+            "POST",
+            f"/bots/{quote(bot_id, safe='')}/keys/{quote(api_key_id, safe='')}/revoke",
+        )
+
     async def get_project_settings(self, project_id: str) -> dict[str, Any]:
         """Read a project's settings, including its default write scope."""
         return await self._request("GET", f"/projects/{quote(project_id, safe='')}/settings")

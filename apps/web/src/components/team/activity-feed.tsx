@@ -10,6 +10,7 @@ import {
   formatActivityDay,
   formatActivityTime,
   TEAM_ACTIVITY_RECENT_LIMIT,
+  TEAM_BOT_BADGE,
   teamActivityKindConfig,
 } from '@/lib/constants/activity';
 import { formatDateTime } from '@/lib/constants/formatting';
@@ -103,6 +104,14 @@ function FeedRow({
           <span className="inline-flex min-w-0 items-center gap-1.5">
             <PersonAvatar size="xs" name={actorName} seed={item.actor_id} avatarUrl={actorAvatar} />
             <span className="truncate">{actorName}</span>
+            {item.actor_kind === 'service' && (
+              <span
+                title={TEAM_BOT_BADGE.title}
+                className={`shrink-0 rounded border px-1 text-[10px] font-medium ${TEAM_BOT_BADGE.badge}`}
+              >
+                {TEAM_BOT_BADGE.label}
+              </span>
+            )}
           </span>
           {projectName && (
             <span className="inline-flex max-w-[12rem] items-center gap-1 rounded border border-sc-fg-subtle/20 bg-sc-bg-highlight px-1.5 py-0.5 text-[10px] text-sc-fg-secondary">
