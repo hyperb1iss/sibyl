@@ -151,8 +151,12 @@ def test_a_bot_works_under_its_own_identity(
     assert not as_bot.run("bot", "create", "spawn", "--json").success
     assert not as_bot.run("auth", "api-key", "create", "--name", "self").success
 
-    # Deleting the bot revokes its key at once.
+    # Deleting the bot revokes its key at once. A read probes it, so the
+    # refused call leaves nothing in the CLI's replay buffer.
+    as_bot_http = {"Authorization": f"Bearer {raw_key}"}
+    whoami = sync_auth_client.get("/auth/me", headers=as_bot_http)
+    assert whoami.status_code == 200, whoami.text
+    assert whoami.json()["user"]["kind"] == "service"
     deleted = _ok(cli.run("bot", "delete", bot_id, "--yes", "--json"), "bot delete")
     assert deleted["api_keys_revoked"] == 1
-    refused = as_bot.run("remember", "after delete", "nope", "--project", project_id, "--json")
-    assert not refused.success
+    assert sync_auth_client.get("/auth/me", headers=as_bot_http).status_code == 401
