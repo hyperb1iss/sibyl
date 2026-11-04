@@ -5,6 +5,7 @@ import {
   formatActivityTime,
   TEAM_ACTIVITY_COUNT_CONFIG,
   TEAM_ACTIVITY_COUNT_KEYS,
+  TEAM_BOT_BADGE,
   teamActivityTotal,
   teamRoleConfig,
 } from '@/lib/constants/activity';
@@ -115,6 +116,15 @@ export function PersonCard({
               <RoleIcon width={10} height={10} aria-hidden="true" />
               {role.label}
             </span>
+            {person.kind === 'service' && (
+              <span
+                title={TEAM_BOT_BADGE.title}
+                className={`inline-flex items-center gap-1 rounded border px-1.5 py-0.5 text-[10px] font-medium ${TEAM_BOT_BADGE.badge}`}
+              >
+                <TEAM_BOT_BADGE.icon width={10} height={10} aria-hidden="true" />
+                {TEAM_BOT_BADGE.label}
+              </span>
+            )}
             <span>{lastActive}</span>
           </div>
         </div>

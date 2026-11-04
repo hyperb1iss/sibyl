@@ -5,6 +5,7 @@
 import {
   CheckCircle2,
   ClipboardCheck,
+  Cpu,
   Cube,
   Database,
   EditPencil,
@@ -163,6 +164,14 @@ export const TEAM_ROLE_CONFIG: Record<
     badge: 'bg-sc-bg-highlight text-sc-fg-muted border-sc-fg-subtle/25',
   },
 };
+
+/** The label a bot carries beside its role, wherever people are listed. */
+export const TEAM_BOT_BADGE = {
+  label: 'Bot',
+  icon: Cpu,
+  title: 'A bot: an agent identity a person sponsors',
+  badge: 'bg-sc-coral/10 text-sc-coral border-sc-coral/25',
+} as const;
 
 export function teamRoleConfig(role: string) {
   return TEAM_ROLE_CONFIG[role] ?? { ...TEAM_ROLE_CONFIG.member, label: role || 'Member' };

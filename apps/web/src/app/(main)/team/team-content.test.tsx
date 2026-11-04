@@ -420,6 +420,41 @@ describe('TeamContent', () => {
     expect(within(dennis as HTMLElement).getByText('Viewer')).toBeVisible();
   });
 
+  it('labels a bot in the people grid and on its own updates', async () => {
+    const base = fixtureTeamActivity(NOW);
+    const [first, second] = base.recent;
+    serve({
+      ...base,
+      people: [
+        ...base.people,
+        {
+          ...base.people[2],
+          user_id: 'bot_oncall',
+          name: 'oncall',
+          email: null,
+          role: 'member',
+          kind: 'service',
+          sponsor_user_id: base.people[2].user_id,
+        },
+      ],
+      recent: [
+        { ...first, actor_id: 'bot_oncall', actor_name: 'oncall', actor_kind: 'service' },
+        second,
+      ],
+    });
+    renderTeam();
+    const people = await screen.findByRole('region', { name: /^People/ });
+
+    const bot = within(people).getByRole('button', { name: 'oncall' }).closest('article');
+    expect(within(bot as HTMLElement).getByText('Bot')).toBeVisible();
+    const alan = within(people).getByRole('button', { name: 'Alan Turing' }).closest('article');
+    expect(within(alan as HTMLElement).queryByText('Bot')).not.toBeInTheDocument();
+
+    const rows = within(feed()).getAllByRole('listitem');
+    expect(within(rows[0]).getByText('Bot')).toBeVisible();
+    expect(within(rows[1]).queryByText('Bot')).not.toBeInTheDocument();
+  });
+
   it('asks for several selected projects in one request', async () => {
     renderTeam('projects=project_web,project_core');
 
