@@ -491,12 +491,15 @@ async def _without_derivation_events(client: SurrealGraphClient) -> None:
         await client.execute_query(f"REMOVE EVENT {name} ON memory_derivations;")
 
 
+@pytest.mark.parametrize("migrated", [True, False], ids=["target_index", "before_migration_38"])
 async def test_snapshot_matches_the_old_sql_over_a_large_derivation_ledger(
-    snapshot_client: tuple[SurrealGraphClient, bool],
+    snapshot_client: tuple[SurrealGraphClient, bool], migrated: bool
 ) -> None:
-    """20,000 associations in the organization and 3,000 in another one under the same
-    target ids: the association reads stay per target, and the snapshot is still the
-    one the pre-rewrite SQL and a single IN give, fingerprint included."""
+    """20,000 associations in the organization, 3,000 in another one and 2,000 of
+    another kind in this one, all under the same target ids: the association reads stay
+    per target, and the snapshot is the one the pre-rewrite SQL and a single IN give,
+    fingerprint included. Without the target index (a namespace migration 38 has not
+    reached) the hint names a missing index, and the rows are still the same."""
     graph_client, live = snapshot_client
     group_id = graph_client.group_id
     manager = EntityManager(graph_client, group_id=group_id)
@@ -508,14 +511,18 @@ async def test_snapshot_matches_the_old_sql_over_a_large_derivation_ledger(
         )
     await _without_derivation_events(graph_client)
     derived = [f"derived-{index:05d}" for index in range(20_000)]
-    for org, targets in ((group_id, [*derived, *entities[::2]]), ("other-group", derived[:3_000])):
+    for org, kind, targets in (
+        (group_id, "graph_entity", [*derived, *entities[::2]]),
+        ("other-group", "graph_entity", derived[:3_000]),
+        (group_id, "raw_capture", [*derived[:2_000], *entities[1::2]]),
+    ):
         for start in range(0, len(targets), 2_000):
             await graph_client.execute_query(
                 "INSERT INTO memory_derivations $rows RETURN NONE;",
                 rows=[
                     {
                         "organization_id": org,
-                        "target_kind": "graph_entity",
+                        "target_kind": kind,
                         "target_id": target,
                         "body_sha256": f"{org}:{target}",
                         "principal_id": "p",
@@ -528,6 +535,13 @@ async def test_snapshot_matches_the_old_sql_over_a_large_derivation_ledger(
             )
     requested = sorted({*derived[::67], *derived[:40], *entities, "missing", derived[5]})
     assert len(requested) > 32 * 10
+    if not migrated:
+        await graph_client.execute_query(
+            "REMOVE INDEX memory_derivation_target_id ON memory_derivations;"
+        )
+    info = await graph_client.execute_query("INFO FOR TABLE memory_derivations;")
+    indexes = (info[0] if isinstance(info, list) else info)["indexes"]
+    assert ("memory_derivation_target_id" in indexes) is migrated
 
     statement, params = _single_in({"org": group_id, "ids": requested, "relationship_ids": []})
     oracle = await graph_client.execute_query(statement, **params)
@@ -547,7 +561,8 @@ async def test_snapshot_matches_the_old_sql_over_a_large_derivation_ledger(
         target for target in requested if target in {*derived, *entities[::2]}
     )
     assert {row["organization_id"] for row in snapshot["associations"]} == {group_id}
-    if live:
+    assert {row["target_kind"] for row in snapshot["associations"]} == {"graph_entity"}
+    if live and migrated:
         _, lookup_params = operational_relationships.snapshot_statement(group_id, requested, [])
         lookup, _ = clumped(
             operational_relationships._ASSOCIATION_LOOKUP + " EXPLAIN", "snapshot_ids", requested

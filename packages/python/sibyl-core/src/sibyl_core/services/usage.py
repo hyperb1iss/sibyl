@@ -459,7 +459,12 @@ def _later(current: datetime | None, candidate: datetime | None) -> datetime | N
 
 
 def _instant(moment: datetime) -> datetime:
-    return moment if moment.tzinfo is not None else moment.replace(tzinfo=UTC)
+    # Compared in UTC: two values sharing a zone compare by wall time in Python,
+    # which orders a repeated hour (a DST fold) by its clock reading instead of
+    # its instant. A naive value is UTC, as coerce_datetime and the SDK read it.
+    if moment.tzinfo is not None:
+        return moment.astimezone(UTC)
+    return moment.replace(tzinfo=UTC)
 
 
 def _dedupe_event_records(rows: Iterable[Mapping[str, object]]) -> tuple[Mapping[str, object], ...]:

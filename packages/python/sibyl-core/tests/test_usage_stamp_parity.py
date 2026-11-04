@@ -15,6 +15,7 @@ from collections.abc import AsyncIterator, Sequence
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from uuid import uuid4
+from zoneinfo import ZoneInfo
 
 import pytest
 
@@ -28,6 +29,7 @@ from sibyl_core.services.usage import (
     MemoryUsageItemKind,
     MemoryUsageStamp,
     MemoryUsageTarget,
+    _merged_stamps,
     _stamp_from_row,
     _stamp_graph_entities,
     _stamp_raw_captures,
@@ -454,3 +456,58 @@ async def test_usage_aggregates_match_the_closure_read(
     assert any(stamp.retrieval_count for stamp in after.values())
     assert any(stamp.misled_count for stamp in after.values())
     assert any(stamp.last_used_at is not None for stamp in after.values())
+
+
+# 2026-11-01 01:45 then 01:15 in Los Angeles: the repeated hour of the DST fall
+# back. The first is 08:45Z (fold=0), the second 09:15Z (fold=1), so the later
+# instant has the earlier wall clock.
+_LOS_ANGELES = ZoneInfo("America/Los_Angeles")
+_BEFORE_FALL_BACK = datetime(2026, 11, 1, 1, 45, tzinfo=_LOS_ANGELES, fold=0)
+_AFTER_FALL_BACK = datetime(2026, 11, 1, 1, 15, tzinfo=_LOS_ANGELES, fold=1)
+
+
+def test_stamp_merge_keeps_the_later_instant_across_a_dst_fold() -> None:
+    assert _BEFORE_FALL_BACK.astimezone(UTC) < _AFTER_FALL_BACK.astimezone(UTC)
+    stamps = [
+        MemoryUsageStamp(
+            MemoryUsageItemKind.GRAPH_ENTITY, "item", 1, 0, moment, moment, misled_count=0
+        )
+        for moment in (_BEFORE_FALL_BACK, _AFTER_FALL_BACK, _BEFORE_FALL_BACK)
+    ]
+    merged = _merged_stamps(stamps)["item"]
+    assert merged["last_recalled_at"] is _AFTER_FALL_BACK
+    assert merged["last_used_at"] is _AFTER_FALL_BACK
+    # A naive value is UTC: 09:00 naive sits between the two instants.
+    naive = datetime(2026, 11, 1, 9, 0)
+    for order in ((naive, _AFTER_FALL_BACK), (_AFTER_FALL_BACK, naive)):
+        stamps = [
+            MemoryUsageStamp(MemoryUsageItemKind.GRAPH_ENTITY, "item", 1, 0, moment, None)
+            for moment in order
+        ]
+        assert _merged_stamps(stamps)["item"]["last_recalled_at"] is _AFTER_FALL_BACK
+
+
+async def test_graph_stamps_across_a_dst_fold_match_the_per_stamp_loop(
+    graph_twins: tuple[SurrealGraphClient, SurrealGraphClient],
+) -> None:
+    loop_client, set_client = graph_twins
+    stamps = [
+        MemoryUsageStamp(
+            MemoryUsageItemKind.GRAPH_ENTITY, "item-003", 1, 0, moment, moment, misled_count=0
+        )
+        for moment in (_BEFORE_FALL_BACK, _AFTER_FALL_BACK, _BEFORE_FALL_BACK)
+    ]
+    await loop_client.execute_query(
+        _LOOP_GRAPH, organization_id=loop_client.group_id, stamps=_loop_parameters(stamps)
+    )
+    await _stamp_graph_entities(set_client, organization_id=set_client.group_id, stamps=stamps)
+
+    read = "SELECT * FROM entity WHERE uuid = 'item-003';"
+    loop_stored = _comparable(
+        normalize_records(await loop_client.execute_query(read)), "attributes"
+    )
+    set_stored = _comparable(normalize_records(await set_client.execute_query(read)), "attributes")
+    assert set_stored == loop_stored
+    after = _AFTER_FALL_BACK.astimezone(UTC).replace(tzinfo=None)
+    assert loop_stored[0]["last_recalled_at"] == after
+    assert loop_stored[0]["attributes.last_used_at"] == after
