@@ -126,12 +126,15 @@ class OrdinaryValidatedPromotion(ValidatedPromotion):
             raise ValidationExecutionUnavailable("Ordinary validated source identity changed")
         return (
             execution.dispatch_guard
-            + "LET $org=$organization_id; LET $parent=$uuid; LET $source_ids=$ordinary_source_ids;"
+            + "LET $org=$organization_id; LET $source_ids=$ordinary_source_ids;"
             + ORDINARY_SNAPSHOT
             + "IF $snapshot_digest!=$ordinary_snapshot { THROW 'publication_source_observation_changed'; };"
             + "LET $source_states_to_fence=$snapshot.states;"
             + SOURCE_STATE_WRITE_WITNESS,
             {
+                # Callers embed this guard in a block, where SurrealDB 4 refuses
+                # LET $parent, so the snapshot reads it as a query variable.
+                "parent": self.candidate_id,
                 "ordinary_snapshot": current.snapshot_sha256,
                 "ordinary_source_ids": current.source_ids,
             },

@@ -33,7 +33,7 @@ from typing import Any, Protocol
 from sibyl_core.backends.surreal.records import normalize_records
 from sibyl_core.backends.surreal.schema_version import (
     GRAPH_SCHEMA_NAME,
-    schema_version_record_id,
+    schema_version_record_query,
 )
 from sibyl_core.embeddings.provenance import UNVERIFIED_EMBEDDING_PROVIDER
 
@@ -160,9 +160,7 @@ async def embedding_sweep_schema_ready(execute_query: _Execute, *, graph: bool) 
     """
     name = GRAPH_SCHEMA_NAME if graph else CONTENT_SCHEMA_RECORD_NAME
     required = GRAPH_SWEEP_SCHEMA_VERSION if graph else CONTENT_SWEEP_SCHEMA_VERSION
-    rows = normalize_records(
-        await execute_query(f"SELECT version FROM [{schema_version_record_id(name)}];")
-    )
+    rows = normalize_records(await execute_query(schema_version_record_query(name, "version")))
     version = rows[0].get("version") if rows else None
     return isinstance(version, int | float) and version >= required
 

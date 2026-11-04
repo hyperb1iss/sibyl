@@ -20,6 +20,7 @@ from sibyl_core.backends.surreal import (
     bootstrap_content_schema,
 )
 from sibyl_core.backends.surreal.records import normalize_records
+from sibyl_core.backends.surreal.schema_version import pin_schema_compatibility_level
 from sibyl_core.backends.surreal.url_schemes import is_embedded_surreal_url
 
 
@@ -74,7 +75,13 @@ async def test_schemafull_conversion_blocks_writes_to_rows_carrying_a_drifted_fi
         }
     )
     await connection.use("drifted", "content")
+
+    async def execute(statement: str, **params: object) -> object:
+        return await connection.query(statement, params or None)
+
     try:
+        # Sibyl's bootstrap holds its databases at compatibility level 3.
+        await pin_schema_compatibility_level(execute, execute)
         await connection.query("REMOVE TABLE IF EXISTS raw_captures;")
         await connection.query(
             "CREATE raw_captures CONTENT { uuid: 'cap-1', legacy_extra: 'from-an-older-build' };"

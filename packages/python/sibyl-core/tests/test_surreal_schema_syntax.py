@@ -142,7 +142,9 @@ class _RecordingSchemaClient:
             return {"tables": {table: f"DEFINE TABLE {table}" for table in present}}
         if stripped.startswith("SELECT version FROM schema_version"):
             return [{"version": self.schema_version}]
-        if stripped.startswith("SELECT VALUE version FROM [schema_version:graph]"):
+        if stripped.startswith(
+            "SELECT VALUE version FROM (IF record::exists(schema_version:graph)"
+        ):
             return [self.schema_version]
         if stripped.startswith("UPSERT schema_version:"):
             version = params.get("version")

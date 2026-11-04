@@ -61,7 +61,9 @@ class _FakeSchemaDriver:
             }
         if stripped.startswith("SELECT version FROM schema_version"):
             return [] if self.version is None else [{"version": self.version}]
-        if stripped.startswith("SELECT VALUE version FROM [schema_version:graph]"):
+        if stripped.startswith(
+            "SELECT VALUE version FROM (IF record::exists(schema_version:graph)"
+        ):
             return [] if self.version is None else [self.version]
         if stripped.startswith("SELECT embedding_dimension FROM schema_version"):
             if self.embedding_dimension is None:

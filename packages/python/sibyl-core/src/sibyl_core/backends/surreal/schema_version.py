@@ -341,9 +341,41 @@ def schema_version_record_id(name: str) -> str:
     return f"{SCHEMA_VERSION_TABLE}:{name}"
 
 
+def schema_version_record_query(name: str, projection: str) -> str:
+    """Select ``projection`` from one version record, as no rows when its table is absent.
+
+    A new namespace has no schema_version table. SurrealDB 4 fails any read of a
+    record id on an undefined table where 3.x answered no rows, so the existence
+    check, which neither fails, gates the read.
+    """
+    record_id = schema_version_record_id(name)
+    return (
+        f"SELECT {projection} FROM (IF record::exists({record_id}) THEN [{record_id}] ELSE [] END);"
+    )
+
+
+# SurrealDB 4 starts every database of a new datastore at compatibility level
+# 4, where a SCHEMAFULL table holding rows refuses a field change its rows
+# might not satisfy unless the statement adds MIGRATE EXISTING ROWS, a clause
+# 3.x cannot parse. The migrations here widen a field, backfill it and narrow
+# it again, which level 3 accepts, and level 3 is what every 3.x server and
+# every database upgraded from 3.x runs. Holding Sibyl's databases at level 3
+# gives every install one behaviour. Only a 4.x server reports a level, so a
+# 3.x server never receives the ALTER.
+SCHEMA_COMPATIBILITY_LEVEL = 3
+
+
+async def pin_schema_compatibility_level(read: SurrealExecute, mutate: SurrealExecute) -> None:
+    info = _first_record(await read("INFO FOR DB;"))
+    level = info.get("compatibility") if info is not None else None
+    if isinstance(level, int) and level != SCHEMA_COMPATIBILITY_LEVEL:
+        await mutate(f"ALTER DATABASE COMPATIBILITY {SCHEMA_COMPATIBILITY_LEVEL};")
+
+
 __all__ = [
     "GRAPH_SCHEMA_CURRENT_VERSION",
     "GRAPH_SCHEMA_NAME",
+    "SCHEMA_COMPATIBILITY_LEVEL",
     "SCHEMA_VERSION_DEFINITIONS",
     "SCHEMA_VERSION_TABLE",
     "ConcurrentIndexDefinition",
@@ -354,9 +386,11 @@ __all__ = [
     "get_index_build_status",
     "get_schema_embedding_dimension",
     "get_schema_version",
+    "pin_schema_compatibility_level",
     "rebuild_index_concurrently",
     "record_schema_version",
     "schema_version_record_id",
+    "schema_version_record_query",
     "validate_identifier",
     "wait_for_index_ready",
 ]

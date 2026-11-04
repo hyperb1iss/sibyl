@@ -19,6 +19,7 @@ from sibyl_core.backends.surreal.schema_version import (
     apply_schema_migrations,
     ensure_schema_version_table,
     get_schema_version,
+    pin_schema_compatibility_level,
 )
 from sibyl_core.models.memory_scope import PROJECT_DEFAULT_MEMORY_SCOPES, MemoryScope
 
@@ -850,6 +851,7 @@ async def backfill_api_key_scope_restrictions(
 
 
 async def bootstrap_auth_schema(client: SurrealAuthClient, *, reset: bool = False) -> None:
+    await pin_schema_compatibility_level(client.execute_query, client.execute_query)
     if reset:
         for table in (*AUTH_TABLES, SCHEMA_VERSION_TABLE):
             await client.execute_query(f"REMOVE TABLE IF EXISTS {table};")

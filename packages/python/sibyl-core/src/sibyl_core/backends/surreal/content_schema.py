@@ -80,6 +80,7 @@ from sibyl_core.backends.surreal.schema_version import (
     apply_schema_migrations,
     ensure_schema_version_table,
     get_schema_version,
+    pin_schema_compatibility_level,
 )
 from sibyl_core.config import core_config
 from sibyl_core.memory_pipeline.observations import SourceKind
@@ -1356,6 +1357,7 @@ async def bootstrap_content_schema(client: SurrealContentClient, *, reset: bool 
     async def execute_definition_batch(statement: str) -> object:
         return await client.execute_query(f"BEGIN TRANSACTION;\n{statement}\nCOMMIT TRANSACTION;")
 
+    await pin_schema_compatibility_level(client.execute_query, client.execute_query)
     await prepare_source_integrity_upgrade(client.execute_query)
     if reset:
         await retire_source_states(client.execute_query, kind=SourceKind.RAW_CAPTURE)
