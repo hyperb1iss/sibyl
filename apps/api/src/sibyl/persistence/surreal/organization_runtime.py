@@ -36,6 +36,12 @@ from sibyl.persistence.organization_common import (
 )
 from sibyl.persistence.surreal.auth import surreal_auth_client_scope
 from sibyl.persistence.surreal.auth_runtime import SurrealSessionRepository
+from sibyl.persistence.surreal.auth_runtime._common import (
+    BOT_FORBIDDEN_ORG_ROLES,
+    BOT_FORBIDDEN_PROJECT_ROLES,
+    bot_role_ceiling_error,
+    is_service_record,
+)
 from sibyl_core.auth import AuthUser, OrganizationRole, ProjectRole, ProjectVisibility
 from sibyl_core.backends.surreal.records import (
     coerce_datetime as _coerce_datetime,
@@ -1116,6 +1122,18 @@ async def add_org_member(
         _enforce_owner_role_boundary(actor_role=actor_role, requested_role=role)
         if target_user is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+        if is_service_record(target_user):
+            if target_membership is None:
+                # A bot belongs to the organization it was made in, and nowhere else.
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail={
+                        "error": "bot_single_organization",
+                        "message": "A bot is a member only of the organization it was created in.",
+                    },
+                )
+            if role in BOT_FORBIDDEN_ORG_ROLES:
+                raise bot_role_ceiling_error(role.value)
 
         organization_id = _coerce_uuid(organization.get("uuid"), field_name="organization.uuid")
         now = _utcnow()
@@ -1232,6 +1250,8 @@ async def update_org_member_role(
                     status_code=status.HTTP_409_CONFLICT,
                     detail="Cannot demote the last organization owner",
                 )
+        if role in BOT_FORBIDDEN_ORG_ROLES and await _is_bot(client, user_id=target_user_id):
+            raise bot_role_ceiling_error(role.value)
 
         update_result = await client.execute_query(
             """
@@ -1755,6 +1775,15 @@ async def _load_project_member_target(
     )
 
 
+async def _is_bot(client: QueryClient, *, user_id: UUID) -> bool:
+    records = _normalize_records(
+        await client.execute_query(
+            "SELECT kind FROM users WHERE uuid = $user_id LIMIT 1;", user_id=str(user_id)
+        )
+    )
+    return bool(records) and is_service_record(records[0])
+
+
 async def _target_is_org_member(
     client: QueryClient,
     *,
@@ -1913,6 +1942,8 @@ async def add_project_member(
         )
         if target_user is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+        if is_service_record(target_user) and role in BOT_FORBIDDEN_PROJECT_ROLES:
+            raise bot_role_ceiling_error(role.value)
         if target_org_membership is None:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -1994,6 +2025,8 @@ async def update_project_member_role(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="User is not an organization member",
             )
+        if role in BOT_FORBIDDEN_PROJECT_ROLES and await _is_bot(client, user_id=target_user_id):
+            raise bot_role_ceiling_error(role.value)
 
         membership_records = await _list_project_member_records(
             client,

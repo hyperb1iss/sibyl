@@ -25,6 +25,7 @@ from sibyl.persistence.surreal.auth_runtime._common import (
     _resolve_auth_context_from_claims,
     _role_value,
     _SurrealRepository,
+    is_service_record,
 )
 from sibyl_core.auth import (
     AuthContext,
@@ -1043,6 +1044,20 @@ async def add_team_member_record(
         repo = _SurrealRepository(client)
         team = await _get_team_record(repo, organization_id=organization_id, team_ref=team_ref)
         team_id = _coerce_uuid(team.get("uuid"), field_name="teams.uuid")
+        if is_service_record(
+            await repo.select_one(
+                "SELECT kind FROM users WHERE uuid = $user_id LIMIT 1;", user_id=str(user_id)
+            )
+        ):
+            # A team reaches team memory, which no sponsor caps, and bots stay off teams.
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "error": "bot_team_membership",
+                    "message": "Bots cannot join teams.",
+                    "remediation": "Grant the bot project access with `sibyl bot grant`.",
+                },
+            )
         existing = await repo.select_one(
             "SELECT * FROM team_members WHERE team_id = $team_id AND user_id = $user_id LIMIT 1;",
             team_id=str(team_id),

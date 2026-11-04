@@ -40,6 +40,7 @@ from sibyl.api.websocket import broadcast_event, entity_change_payload
 from sibyl.auth.authorization import verify_entity_project_access
 from sibyl.auth.context import AuthContext
 from sibyl.auth.dependencies import (
+    bot_forbidden,
     get_auth_context,
     get_current_organization,
     require_org_role,
@@ -308,6 +309,9 @@ async def create_entity(
     """
 
     group_id = str(org.id)
+    if entity.entity_type == EntityType.PROJECT and ctx.is_service:
+        # A project's creator owns it, and a bot never owns a project.
+        raise bot_forbidden()
     if protect_ownership is True and (sync is not True or ctx.user is None):
         raise HTTPException(
             status_code=422, detail="Protected writes require authenticated sync=true"

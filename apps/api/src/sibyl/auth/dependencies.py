@@ -327,3 +327,22 @@ def require_org_admin():
     if settings.disable_auth:
         return _noop
     return _check_admin
+
+
+def bot_forbidden() -> HTTPException:
+    """The refusal for an action only a person may take."""
+    return HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail={
+            "error": "bot_forbidden",
+            "message": "Bots cannot do this; only a person can.",
+            "remediation": "Ask the bot's sponsor or an organization admin.",
+        },
+    )
+
+
+async def require_person(user: AuthUser = Depends(get_current_user)) -> AuthUser:
+    """Refuse a bot. For actions that mint credentials, organizations or projects."""
+    if user.is_service:
+        raise bot_forbidden()
+    return user

@@ -478,6 +478,13 @@ async def _add_mcp_entity(
 
     ctx = await mcp_context.require_context(write=True)
     normalized_entity_type = entity_type.strip().lower()
+    if (
+        normalized_entity_type == "project"
+        and ctx.authority is not None
+        and ctx.authority.is_service
+    ):
+        # A project's creator owns it, and a bot never owns a project.
+        raise ValueError("bot_forbidden: bots cannot create projects")
     accessible_projects = await mcp_context.resolve_project_scope(
         ctx,
         project,

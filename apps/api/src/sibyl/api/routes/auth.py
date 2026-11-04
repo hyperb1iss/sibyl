@@ -22,6 +22,7 @@ from sibyl.auth.context import AuthContext
 from sibyl.auth.dependencies import (
     get_auth_context,
     require_org_admin,
+    require_person,
     resolve_claims,
 )
 from sibyl.auth.http import select_access_token
@@ -1720,7 +1721,7 @@ async def list_api_keys(
     }
 
 
-@router.post("/api-keys")
+@router.post("/api-keys", dependencies=[Depends(require_person)])
 async def create_api_key(
     request: Request,
     body: ApiKeyCreateRequest,
@@ -1819,6 +1820,8 @@ async def me(
             "name": ctx.user.name,
             "avatar_url": ctx.user.avatar_url,
             "is_admin": ctx.user.is_admin,
+            "kind": ctx.user.kind.value,
+            "sponsor_user_id": str(ctx.user.sponsor_user_id) if ctx.user.sponsor_user_id else None,
         },
         "organization": (
             {

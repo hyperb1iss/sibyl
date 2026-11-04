@@ -377,6 +377,25 @@ def refuse_bot_sign_in() -> HTTPException:
     )
 
 
+# Roles a bot never holds: it does work in an organization and on a project,
+# it never administers or owns either.
+BOT_FORBIDDEN_ORG_ROLES = frozenset({OrganizationRole.OWNER, OrganizationRole.ADMIN})
+BOT_FORBIDDEN_PROJECT_ROLES = frozenset({ProjectRole.OWNER, ProjectRole.MAINTAINER})
+
+
+def bot_role_ceiling_error(requested: str) -> HTTPException:
+    """The refusal for any role above what a bot may hold."""
+    return HTTPException(
+        status_code=status.HTTP_400_BAD_REQUEST,
+        detail={
+            "error": "bot_role_ceiling",
+            "message": f"A bot cannot hold the {requested} role.",
+            "remediation": "Bots hold at most member in an organization and contributor "
+            "on a project.",
+        },
+    )
+
+
 def _auth_org_namespace(record: SurrealRecord | None) -> SimpleNamespace | None:
     return _ns(
         record,
