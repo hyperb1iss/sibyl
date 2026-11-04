@@ -51,7 +51,8 @@ def _epoch_parts(moment: datetime) -> list[int]:
 def _text_parts(text: str) -> list[int]:
     try:
         moment, fraction = _parse_text(text)
-    except ValueError:
+    except (ValueError, OverflowError):
+        # datetime() raises OverflowError for a year past a C int.
         raise ValueError(f"SurrealDB cannot read {text!r} as a datetime") from None
     seconds, _ = _epoch_parts(moment)
     return [seconds, int(fraction[:9].ljust(9, "0"))]

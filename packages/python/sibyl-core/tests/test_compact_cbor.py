@@ -122,6 +122,7 @@ def test_sdk_datetime_text_keeps_its_nanoseconds(text: str, seconds: int, nanos:
         "2026-12-31T23:59:60Z",
         "2026-02-30T00:00:00Z",
         "+12026-09-30T01:02:03Z",  # past what Python's datetime can decode back
+        "12147483647-01-01T00:00:00Z",  # a year past a C int: OverflowError
         "2026-09-30T01:02:03,5Z",
         "٢026-09-30T01:02:03Z",
         "not a date",
