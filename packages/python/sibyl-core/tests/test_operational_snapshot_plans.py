@@ -19,6 +19,7 @@ from uuid import uuid4
 
 import pytest
 
+from sibyl_core.backends.surreal.in_clumps import clumped
 from sibyl_core.backends.surreal.schema import EMBEDDING_DIM
 from sibyl_core.backends.surreal.url_schemes import is_embedded_surreal_url
 from sibyl_core.models.entities import Entity, EntityType, Relationship, RelationshipType
@@ -30,7 +31,7 @@ from sibyl_core.services.graph_relationships import RelationshipManager
 
 _DIRECT_ORDERED_UUID_LIST = re.compile(r"uuid IN \$\w+ ORDER BY uuid")
 _SORTED_UNION_LOOKUP = re.compile(r"SELECT \* FROM \(SELECT \*.*? uuid IN \$\w+\) ORDER BY uuid")
-_CLUMP_LOOKUP = re.compile(r"\(SELECT (?:(?!\(SELECT).)*?IN \$lookup\[1\]\)", re.S)
+_CLUMP_LOOKUP = re.compile(r"\(SELECT (?:(?!\(SELECT).)*?IN \$snapshot_\w+\)", re.S)
 
 # The single-IN shape the clumped lookups replaced: the oracle for their rows,
 # row order and fingerprint.
@@ -46,6 +47,36 @@ LET $relationship_evidence = SELECT * OMIT attributes.operational_write_witness 
 LET $operational_snapshot_fingerprint = crypto::sha256(type::string([$targets,$associations,$states,$relationship_evidence]));
 """
 
+# The clumps-in-SQL shape the client-param clumps replaced, verbatim: on 4.0
+# its `$lookup` operands are unknown at plan time and every clump scanned.
+# A second oracle, for snapshots taken before and after the rewrite.
+_CLOSURE_CLUMPS = (
+    "array::transpose([array::repeat($org, array::len(array::clump(array::distinct(${param}), 32))),"
+    " array::clump(array::distinct(${param}), 32)])"
+)
+_CLOSURE_SNAPSHOT = f"""
+LET $id_lookups = {_CLOSURE_CLUMPS.format(param="ids")};
+LET $relationship_lookups = {_CLOSURE_CLUMPS.format(param="relationship_ids")};
+LET $targets = SELECT * FROM array::flatten($id_lookups.map(|$lookup|
+    (SELECT * FROM entity WHERE group_id=$lookup[0] AND uuid IN $lookup[1])))
+    ORDER BY uuid;
+LET $associations = SELECT * OMIT validation_write_witness FROM array::flatten($id_lookups.map(|$lookup|
+    (SELECT * FROM memory_derivations WHERE organization_id=$lookup[0] AND target_kind='graph_entity'
+        AND target_id IN $lookup[1]))) ORDER BY target_id;
+LET $states = SELECT * OMIT validation_write_witness FROM array::flatten($id_lookups.map(|$lookup|
+    (SELECT * FROM source_states WHERE organization_id=$lookup[0] AND source_kind='graph_entity'
+        AND source_id IN $lookup[1]))) ORDER BY source_id;
+LET $relationships = SELECT * FROM array::flatten($relationship_lookups.map(|$lookup|
+    (SELECT *, in.uuid AS source_uuid, out.uuid AS target_uuid FROM relates_to
+        WHERE group_id=$lookup[0] AND uuid IN $lookup[1]))) ORDER BY uuid;
+LET $relationship_evidence = SELECT * OMIT attributes.operational_write_witness FROM $relationships;
+LET $operational_snapshot_fingerprint = crypto::sha256(type::string([$targets,$associations,$states,$relationship_evidence]));
+"""
+_RETURNED = (
+    " RETURN {targets:$targets, associations:$associations, states:$states,"
+    " relationships:$relationships, fingerprint:$operational_snapshot_fingerprint}; };"
+)
+
 
 def test_entity_target_snapshot_sorts_the_union_lookup_outside_the_where() -> None:
     statement = graph_entity_store._OPERATIONAL_TARGET_SNAPSHOT
@@ -53,24 +84,47 @@ def test_entity_target_snapshot_sorts_the_union_lookup_outside_the_where() -> No
     assert _SORTED_UNION_LOOKUP.search(statement)
 
 
-@pytest.mark.parametrize(
-    "statement",
-    [operational_relationships._SNAPSHOT, operational_relationships._SNAPSHOT_WITHOUT_VECTORS],
-    ids=["with_vectors", "without_vectors"],
-)
-def test_operational_snapshot_looks_rows_up_in_index_served_clumps(statement: str) -> None:
-    assert operational_relationships._LOOKUP_CLUMP <= 32
-    assert re.findall(r"\bIN \$[\w\[\]]+", statement) == ["IN $lookup[1]"] * 4
-    assert "array::clump(array::distinct($ids), 32)" in statement
-    assert "array::clump(array::distinct($relationship_ids), 32)" in statement
+@pytest.mark.parametrize("vectors", [True, False], ids=["with_vectors", "without_vectors"])
+def test_operational_snapshot_looks_rows_up_in_index_served_clumps(vectors: bool) -> None:
+    ids = [f"e{index:03d}" for index in reversed(range(70))]
+    edges = [f"r{index:03d}" for index in range(40)]
+    statement, params = operational_relationships.snapshot_statement(
+        "org-a", [*ids, ids[5]], edges, vectors=vectors
+    )
+    assert sorted(params) == [
+        "snapshot_ids",
+        "snapshot_ids_0",
+        "snapshot_ids_1",
+        "snapshot_ids_2",
+        "snapshot_relationship_ids_0",
+        "snapshot_relationship_ids_1",
+        "snapshot_state_identities",
+    ]
+    # Entities and edges: unique-index clumps of at most 32 client values.
+    assert params["snapshot_ids_0"] == sorted(ids)[:32]
+    assert sum(len(params[f"snapshot_ids_{index}"]) for index in range(3)) == 70
+    assert [len(params[f"snapshot_relationship_ids_{index}"]) for index in range(2)] == [32, 8]
     lookups = _CLUMP_LOOKUP.findall(statement)
-    assert len(lookups) == 4
+    # Three entity clumps, the one derivation walk, two edge clumps.
+    assert len(lookups) == 3 + 1 + 2
     for lookup in lookups:
-        # The closure names only its argument; an ORDER BY there would walk
-        # the whole index.
-        assert "$org" not in lookup
+        # An ORDER BY beside the IN would walk the whole index.
         assert "ORDER BY" not in lookup
+        assert "$org" in lookup
+    # The derivation ledger: one IN over every id, one walk of its prefix.
+    assert params["snapshot_ids"] == sorted(ids)
+    assert statement.count("target_id IN $snapshot_ids)") == 1
+    # Ledger states by their record keys; the closure reads only its argument.
+    assert params["snapshot_state_identities"] == [
+        ["org-a", "graph_entity", identity] for identity in sorted(ids)
+    ]
+    closures = re.findall(r"\.map\(\|\$(\w+)\|([^|]*?)\)\)\)", statement)
+    assert [name for name, _ in closures] == ["identity"]
+    assert re.findall(r"\$\w+", closures[0][1]) == ["$identity"]
+    assert "source_id IN" not in statement
     assert not _DIRECT_ORDERED_UUID_LIST.search(statement)
+    assert ("$operational_snapshot_fingerprint" in statement) is vectors
+    assert ("OMIT embedding, name_embedding" in statement) is not vectors
 
 
 @pytest.fixture
@@ -212,11 +266,15 @@ async def test_clumped_snapshot_matches_the_single_in_rows_and_fingerprint(
             ("other-group", "graph_entity"),
             (group_id, "raw_capture"),
         ):
+            # Keyed as every ledger writer keys them (the maintain event,
+            # the migration, the archive store).
             await graph_client.execute_query(
-                "IF (SELECT * FROM source_states WHERE organization_id=$org AND source_kind=$kind"
-                " AND source_id=$id) = [] { CREATE source_states CONTENT {organization_id:$org,"
+                "RETURN { LET $key = type::record(string::concat('source_states:',"
+                " crypto::sha256(type::string([$org, $kind, $id]))));"
+                " IF (SELECT * FROM source_states WHERE organization_id=$org AND source_kind=$kind"
+                " AND source_id=$id) = [] { CREATE $key CONTENT {organization_id:$org,"
                 " source_kind:$kind, source_id:$id, generation:1, revision:$revision,"
-                " deleted:false, incarnation:'i'}; };",
+                " deleted:false, incarnation:'i'}; }; };",
                 org=org,
                 kind=kind,
                 id=entity_id,
@@ -259,17 +317,28 @@ async def test_clumped_snapshot_matches_the_single_in_rows_and_fingerprint(
     straddling = sorted([*requested, sorted(requested)[31]])
     straddling_edges = sorted([*requested_edges, sorted(requested_edges)[31]])
     assert straddling[31] == straddling[32]
+    fence, lookups = operational_relationships.snapshot_statement(
+        group_id, straddling, straddling_edges
+    )
     fenced = await graph_client.execute_query(
-        "RETURN {" + operational_relationships._SNAPSHOT + " RETURN {targets:$targets,"
-        " associations:$associations, states:$states, relationships:$relationships,"
-        " fingerprint:$operational_snapshot_fingerprint}; };",
-        org=group_id,
-        ids=straddling,
-        relationship_ids=straddling_edges,
+        "RETURN {" + fence + _RETURNED, org=group_id, **lookups
     )
     fenced_rows = fenced[0] if isinstance(fenced, list) else fenced
     for key in ("targets", "associations", "states", "relationships", "fingerprint"):
         assert fenced_rows[key] == expected[key], key
+
+    # A snapshot taken by the statement this one replaced, over the same rows
+    # with the same duplicates, gives the same rows and fingerprint bytes.
+    for order in (straddling, list(reversed(straddling))):
+        before = await graph_client.execute_query(
+            "RETURN {" + _CLOSURE_SNAPSHOT + _RETURNED,
+            org=group_id,
+            ids=order,
+            relationship_ids=straddling_edges,
+        )
+        before_rows = before[0] if isinstance(before, list) else before
+        for key in ("targets", "associations", "states", "relationships", "fingerprint"):
+            assert fenced_rows[key] == before_rows[key], key
 
     rows = await operational_relationships._snapshot(
         graph_client,
@@ -290,33 +359,46 @@ async def test_clumped_snapshot_matches_the_single_in_rows_and_fingerprint(
 async def test_clumped_lookups_are_index_served_on_a_server(
     snapshot_client: tuple[SurrealGraphClient, bool],
 ) -> None:
+    """Each clump, inside the block it runs in, is an index lookup on 3.x and 4.0."""
     client, live = snapshot_client
     if not live:
         pytest.skip("the embedded engine plans IN lists its own way")
     ids = [f"id{index:03d}" for index in range(40)]
-    for table, predicate, index in (
-        ("entity", "group_id=$lookup[0] AND uuid IN $lookup[1]", "idx_entity_uuid"),
+    _, params = operational_relationships.snapshot_statement(client.group_id, ids, ids)
+    for name, lookup, index in (
+        (
+            "entity",
+            clumped(
+                operational_relationships._TARGET_LOOKUP.format(fields="*") + " EXPLAIN",
+                "snapshot_ids",
+                ids,
+            )[0],
+            "idx_entity_uuid",
+        ),
+        (
+            "relates_to",
+            clumped(
+                operational_relationships._RELATIONSHIP_LOOKUP.format(omit="") + " EXPLAIN",
+                "snapshot_relationship_ids",
+                ids,
+            )[0],
+            "idx_relates_uuid",
+        ),
         (
             "memory_derivations",
-            "organization_id=$lookup[0] AND target_kind='graph_entity' AND target_id IN $lookup[1]",
+            f"[({operational_relationships._ASSOCIATION_LOOKUP} EXPLAIN)]",
             "memory_derivation_target",
         ),
-        (
-            "source_states",
-            "organization_id=$lookup[0] AND source_kind='graph_entity' AND source_id IN $lookup[1]",
-            "source_state_identity",
-        ),
-        ("relates_to", "group_id=$lookup[0] AND uuid IN $lookup[1]", "idx_relates_uuid"),
+        ("source_states", f"[({operational_relationships._STATE_LOOKUP} EXPLAIN)]", None),
     ):
         plans = await client.execute_query(
-            f"RETURN {operational_relationships.org_lookup_clumps('ids')}.map(|$lookup|"
-            f" (SELECT * FROM {table} WHERE {predicate} EXPLAIN));",
-            org=client.group_id,
-            ids=ids,
+            f"RETURN {{ LET $plans = {lookup}; RETURN $plans; }};", org=client.group_id, **params
         )
         text = json.dumps(plans, default=str)
-        assert index in text, (table, text[:400])
-        assert "TableScan" not in text, (table, text[:400])
+        if index is not None:
+            assert index in text, (name, text[:400])
+        assert "TableScan" not in text, (name, text[:400])
+        assert "Iterate Table" not in text, (name, text[:400])
 
 
 class _RecordingClient:

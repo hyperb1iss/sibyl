@@ -13,6 +13,7 @@ from __future__ import annotations
 import asyncio
 import copy
 import gc
+import re
 import time
 from collections.abc import AsyncIterator
 from concurrent.futures import ThreadPoolExecutor
@@ -81,9 +82,26 @@ class _MemoryGraphClient(SurrealGraphClient):
         def edges(ids) -> list[dict]:
             return [self.edge_rows[key] for key in sorted(set(ids)) if key in self.edge_rows]
 
+        def clumps(prefix: str) -> list[str]:
+            return [
+                value
+                for key, clump in params.items()
+                if re.fullmatch(rf"{prefix}_\d+", key)
+                for value in clump
+            ]
+
         await asyncio.sleep(0)
-        if "array::clump($uuids, 32)" in query:
-            return entities(params["uuids"])
+        if "LET $relationships" in query:
+            return [
+                {
+                    "targets": entities(clumps("snapshot_ids")),
+                    "associations": [],
+                    "states": [],
+                    "relationships": edges(clumps("snapshot_relationship_ids")),
+                }
+            ]
+        if "FROM entity WHERE uuid IN $uuids_0" in query:
+            return entities(clumps("uuids"))
         if "in.uuid AS source_uuid, out.uuid AS target_uuid FROM relates_to" in query:
             # The endpoint read binds its ids as clumps `ids_0`, `ids_1`, ...
             clumped = [
@@ -92,15 +110,6 @@ class _MemoryGraphClient(SurrealGraphClient):
             return [
                 {"source_uuid": row["source_uuid"], "target_uuid": row["target_uuid"]}
                 for row in edges(clumped)
-            ]
-        if "LET $relationship_lookups" in query:
-            return [
-                {
-                    "targets": entities(params["ids"]),
-                    "associations": [],
-                    "states": [],
-                    "relationships": edges(params["relationship_ids"]),
-                }
             ]
         if query == _VERDICT_SNAPSHOT_QUERY:
             return [{"associations": [], "targets": entities(params["ids"])}]

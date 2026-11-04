@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import asdict
 from typing import Any
 
+from sibyl_core.backends.surreal.in_clumps import clumped
 from sibyl_core.backends.surreal.records import normalize_records
 from sibyl_core.backends.surreal.schema_source_witness import SOURCE_STATE_WRITE_WITNESS
 from sibyl_core.embeddings.provenance import same_vector_identity
@@ -26,56 +28,85 @@ from sibyl_core.services.source_observations import (
 )
 from sibyl_core.services.source_state_store import source_snapshot_from_records
 
-# Past 32 values the 3.x planner stops serving `IN $list` from an index: it
-# scans the table and tests each row against the whole list, so a whole-graph
-# snapshot costs rows times ids. Every lookup therefore runs in clumps the
-# index still serves. Rows are sorted in an outer select, because an ORDER BY
-# beside the IN walks the whole index instead. A closure body may use only its
-# own argument (other bindings evaluate to nothing on at least one engine), so
-# each clump carries the organization with it. The rows, their order and so
-# the fingerprint are the same as a single IN would give.
-_LOOKUP_CLUMP = 32
-
-
-def org_lookup_clumps(param: str) -> str:
-    """SurrealQL for `[$org, ids]` pairs covering `$param` in index-served clumps.
-
-    Duplicates go first: an id split across two clumps would return its row
-    twice, where a single IN returns it once.
-    """
-    clumps = f"array::clump(array::distinct(${param}), {_LOOKUP_CLUMP})"
-    return f"array::transpose([array::repeat($org, array::len({clumps})), {clumps}])"
-
-
-def _snapshot_lookups(*, vectors: bool) -> str:
-    entity_fields = "*" if vectors else "* OMIT embedding, name_embedding"
-    relationship_omit = "" if vectors else " OMIT fact_embedding"
-    return f"""
-LET $id_lookups = {org_lookup_clumps("ids")};
-LET $relationship_lookups = {org_lookup_clumps("relationship_ids")};
-LET $targets = SELECT * FROM array::flatten($id_lookups.map(|$lookup|
-    (SELECT {entity_fields} FROM entity WHERE group_id=$lookup[0] AND uuid IN $lookup[1])))
-    ORDER BY uuid;
-LET $associations = SELECT * OMIT validation_write_witness FROM array::flatten($id_lookups.map(|$lookup|
-    (SELECT * FROM memory_derivations WHERE organization_id=$lookup[0] AND target_kind='graph_entity'
-        AND target_id IN $lookup[1]))) ORDER BY target_id;
-LET $states = SELECT * OMIT validation_write_witness FROM array::flatten($id_lookups.map(|$lookup|
-    (SELECT * FROM source_states WHERE organization_id=$lookup[0] AND source_kind='graph_entity'
-        AND source_id IN $lookup[1]))) ORDER BY source_id;
-LET $relationships = SELECT * FROM array::flatten($relationship_lookups.map(|$lookup|
-    (SELECT *, in.uuid AS source_uuid, out.uuid AS target_uuid{relationship_omit} FROM relates_to
-        WHERE group_id=$lookup[0] AND uuid IN $lookup[1]))) ORDER BY uuid;
-"""
-
-
-_SNAPSHOT = (
-    _snapshot_lookups(vectors=True)
-    + """
+# Every index operand is a client parameter: 4.0 table-scans an operand bound
+# by a block LET or a closure argument. Entities and edges are looked up on
+# their unique uuid indexes in clumps of at most 32 values (in_clumps), past
+# which neither planner serves `IN`. An `IN` on the last column of a
+# compound index (the two ledgers) is served from the organization and kind
+# prefix and filtered on both planners, however it is clumped, so the
+# derivation ledger takes one `IN` over every id: one prefix walk. Ledger
+# states are read by the record key every writer gives them
+# (`source_states:` + sha256 of [organization, kind, id], as source_state_store
+# loads one), with no planner in the way. One statement holding a subquery per
+# id costs 4.0 time quadratic in their number, so no lookup is split per id.
+#
+# Rows are sorted in an outer select, because an ORDER BY beside the IN walks
+# the whole index. Each lookup returns rows of a unique identity (entity and
+# relates_to uuid, the organization/kind/id of the two ledgers), so the sort
+# is total: the rows, their order and so the fingerprint are the ones a
+# single IN over each table gives.
+_TARGET_LOOKUP = "SELECT {fields} FROM entity WHERE group_id=$org AND uuid IN $snapshot_ids"
+_ASSOCIATION_LOOKUP = (
+    "SELECT * FROM memory_derivations WHERE organization_id=$org"
+    " AND target_kind='graph_entity' AND target_id IN $snapshot_ids"
+)
+_STATE_LOOKUP = (
+    "SELECT * FROM $snapshot_state_identities.map(|$identity|"
+    " type::record(string::concat('source_states:', crypto::sha256(type::string($identity)))))"
+    " WHERE organization_id=$org AND source_kind='graph_entity'"
+)
+_RELATIONSHIP_LOOKUP = (
+    "SELECT *, in.uuid AS source_uuid, out.uuid AS target_uuid{omit} FROM relates_to"
+    " WHERE group_id=$org AND uuid IN $snapshot_relationship_ids"
+)
+_SNAPSHOT_FINGERPRINT = """
 LET $relationship_evidence = SELECT * OMIT attributes.operational_write_witness FROM $relationships;
 LET $operational_snapshot_fingerprint = crypto::sha256(type::string([$targets,$associations,$states,$relationship_evidence]));
 """
-)
-_SNAPSHOT_WITHOUT_VECTORS = _snapshot_lookups(vectors=False)
+
+
+def snapshot_statement(
+    organization_id: str,
+    ids: Iterable[str],
+    relationship_ids: Iterable[str],
+    *,
+    vectors: bool = True,
+) -> tuple[str, dict[str, Any]]:
+    """The snapshot LETs over `ids` and `relationship_ids`, and the params they name.
+
+    The statement reads `$org` (the caller binds it to `organization_id`)
+    and binds `$targets`, `$associations`, `$states` and `$relationships`;
+    with vectors it also binds `$operational_snapshot_fingerprint`, which
+    covers stored vectors.
+    """
+    ordered_ids = list(dict.fromkeys(sorted(ids)))
+    targets, id_params = clumped(
+        _TARGET_LOOKUP.format(fields="*" if vectors else "* OMIT embedding, name_embedding"),
+        "snapshot_ids",
+        ordered_ids,
+    )
+    relationships, relationship_params = clumped(
+        _RELATIONSHIP_LOOKUP.format(omit="" if vectors else " OMIT fact_embedding"),
+        "snapshot_relationship_ids",
+        sorted(relationship_ids),
+    )
+    statement = f"""
+LET $targets = SELECT * FROM {targets} ORDER BY uuid;
+LET $associations = SELECT * OMIT validation_write_witness FROM ({_ASSOCIATION_LOOKUP}) ORDER BY target_id;
+LET $states = SELECT * OMIT validation_write_witness FROM ({_STATE_LOOKUP}) ORDER BY source_id;
+LET $relationships = SELECT * FROM {relationships} ORDER BY uuid;
+"""
+    if vectors:
+        statement += _SNAPSHOT_FINGERPRINT
+    return statement, {
+        **id_params,
+        **relationship_params,
+        "snapshot_ids": ordered_ids,
+        "snapshot_state_identities": [
+            [organization_id, "graph_entity", identity] for identity in ordered_ids
+        ],
+    }
+
 
 _ENDPOINT_WRITE_WITNESS = (
     "LET $source_states_to_fence = $states;"
@@ -152,12 +183,12 @@ async def _snapshot(
     come back without vectors and without the write fingerprint, which
     covers stored vectors and so cannot be computed from them.
     """
+    statement, lookups = snapshot_statement(
+        organization_id, ids, relationship_ids, vectors=include_embeddings
+    )
+    returned = "relationships:$relationships"
     if include_embeddings:
-        statement = _SNAPSHOT
-        returned = "relationships:$relationships, fingerprint:$operational_snapshot_fingerprint"
-    else:
-        statement = _SNAPSHOT_WITHOUT_VECTORS
-        returned = "relationships:$relationships"
+        returned += ", fingerprint:$operational_snapshot_fingerprint"
     rows = normalize_records(
         await client.execute_query(
             "RETURN {"
@@ -166,8 +197,7 @@ async def _snapshot(
             + returned
             + "}; };",
             org=organization_id,
-            ids=sorted(ids),
-            relationship_ids=sorted(relationship_ids),
+            **lookups,
         )
     )
     if len(rows) != 1:
@@ -335,9 +365,10 @@ async def publish_operational_relationships(
         row["fact_embedding"] = embedded["fact_embedding"]
         row["attributes"] = embedded["attributes"]
     await source.current()
+    fence, lookups = snapshot_statement(group_id, ids, captured_relationship_ids)
     await client.execute_query(
         "RETURN {"
-        + _SNAPSHOT
+        + fence
         + """
         IF $operational_snapshot_fingerprint != $fingerprint {
             THROW 'operational relationship source changed before publication';
@@ -347,8 +378,7 @@ async def publish_operational_relationships(
         + _RELATIONSHIP_BULK_UPSERT_STATEMENTS
         + "UPDATE relates_to SET invalid_at=time::now(),expired_at=time::now() WHERE group_id=$org AND uuid IN $retirements; RETURN true; };",
         org=group_id,
-        ids=sorted(ids),
-        relationship_ids=captured_relationship_ids,
+        **lookups,
         retirements=retirements,
         fingerprint=snapshot["fingerprint"],
         **_relationship_bulk_parameters(rows),

@@ -997,14 +997,15 @@ async def test_native_entity_manager_get_many_preserves_requested_order_and_scop
 
     assert [entity.id for entity in entities] == ["second", "first"]
     query, params = client.calls[0]
-    # Clumps of 32 keep `uuid IN` on the unique index; one IN over the whole
-    # list would scan the table. The closure sees only its own argument, so
-    # scope enforcement happens app-side.
-    assert "array::clump($uuids, 32).map(|$clump|" in query
-    assert "WHERE uuid IN $clump" in query
+    # Clumps of 32, each a client param, keep `uuid IN` on the unique index;
+    # one IN over the whole list would scan the table. Scope enforcement
+    # happens app-side.
+    assert query.startswith("RETURN array::flatten([")
+    assert "WHERE uuid IN $uuids_0" in query
+    assert "|$" not in query
     assert "$org" not in query
     assert params == {
-        "uuids": ["second", "first", "missing"],
+        "uuids_0": ["second", "first", "missing"],
     }
 
 
@@ -5482,11 +5483,14 @@ async def test_native_embedding_backfill_hydrates_thousands_in_one_scoped_rpc() 
     embed.assert_not_awaited()
     client.execute_query.assert_awaited_once()
     query = client.execute_query.call_args.args[0]
-    assert "array::clump($uuids, 32).map(|$clump|" in query
-    assert "WHERE uuid IN $clump" in query
-    assert client.execute_query.call_args.kwargs == {
-        "uuids": list(dict.fromkeys(entity.id for entity in requested))
-    }
+    clumps = client.execute_query.call_args.kwargs
+    assert "|$" not in query
+    assert query.count("WHERE uuid IN $uuids_") == len(clumps)
+    assert list(clumps) == [f"uuids_{index}" for index in range(len(clumps))]
+    assert all(len(clump) <= 32 for clump in clumps.values())
+    assert [uuid for clump in clumps.values() for uuid in clump] == list(
+        dict.fromkeys(entity.id for entity in requested)
+    )
 
 
 @pytest.mark.asyncio

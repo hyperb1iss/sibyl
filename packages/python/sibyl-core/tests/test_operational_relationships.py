@@ -310,10 +310,10 @@ async def test_operational_relationship_completion_witness_fences_edges(
     import os
 
     from sibyl_core.services.operational_relationships import (
-        _SNAPSHOT,
         OPERATIONAL_SNAPSHOT_WRITE_WITNESS,
         _snapshot,
         operational_relationship_inventory_current,
+        snapshot_statement,
     )
 
     if not os.environ.get("SIBYL_COHORT_NATIVE_URL"):
@@ -328,10 +328,11 @@ async def test_operational_relationship_completion_witness_fences_edges(
     )
     assert await operational_relationship_inventory_current(source, snapshot)
     execute = runtime.client.execute_query
+    fence, lookups = snapshot_statement(runtime.client.group_id, ids, edge_ids)
     pending = asyncio.create_task(
         execute(
             "RETURN {"
-            + _SNAPSHOT
+            + fence
             + """
         IF $operational_snapshot_fingerprint != $fingerprint {
             THROW 'completion support changed';
@@ -344,8 +345,7 @@ async def test_operational_relationship_completion_witness_fences_edges(
         RETURN true; };
         """,
             org=runtime.client.group_id,
-            ids=ids,
-            relationship_ids=edge_ids,
+            **lookups,
             fingerprint=snapshot["fingerprint"],
             manifest=projection.manifest.manifest_entity_id,
         )

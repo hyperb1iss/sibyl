@@ -14,6 +14,7 @@ from sibyl_core.backends.surreal.fulltext import (
     build_fulltext_terms,
     build_match_disjunction,
 )
+from sibyl_core.backends.surreal.in_clumps import clumped
 from sibyl_core.backends.surreal.knn import knn_overfetch_pool, knn_search_effort
 from sibyl_core.config import core_config
 from sibyl_core.embeddings.provenance import vector_space_predicate
@@ -537,15 +538,22 @@ async def _edge_fulltext_candidates(
         edge_types=search_filter.edge_types,
     )
     filter_clauses, filter_params = _edge_filter_clause(hydrate_filter)
-    rows = await _execute_query_records(
-        client,
+    # The match list runs past 32 uuids, where neither planner serves `IN`
+    # from the index; clumps of 32, each its own client param, stay on
+    # idx_relates_uuid. uuid is unique, so no clump returns more rows than
+    # it names and the union needs no LIMIT.
+    hydrate, match_clumps = clumped(
         _edge_select()
         + " WHERE "
-        + _where_clause(["uuid IN $match_uuids", "group_id = $group_id", *filter_clauses])
-        + " LIMIT $limit;",
-        match_uuids=match_uuids,
+        + _where_clause(["uuid IN $match_uuids", "group_id = $group_id", *filter_clauses]),
+        "match_uuids",
+        match_uuids,
+    )
+    rows = await _execute_query_records(
+        client,
+        f"RETURN {hydrate};",
         group_id=plan.organization_id,
-        limit=len(match_uuids),
+        **match_clumps,
         **filter_params,
     )
     rows_by_uuid = {str(row["uuid"]): row for row in rows if row.get("uuid")}

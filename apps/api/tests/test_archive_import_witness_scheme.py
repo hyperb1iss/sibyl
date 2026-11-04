@@ -20,7 +20,10 @@ from sibyl_core.migrate.personal_archive_plan import (
     checked_plan_digest,
 )
 from sibyl_core.migrate.personal_archive_prepared import prepare_archive_records
-from sibyl_core.services.operational_relationships import _ENDPOINT_WRITE_WITNESS, _SNAPSHOT
+from sibyl_core.services.operational_relationships import (
+    _ENDPOINT_WRITE_WITNESS,
+    snapshot_statement,
+)
 from tests import (
     test_archive_import_artifacts as artifact_fixtures,
     test_archive_import_preview as preview_fixtures,
@@ -111,11 +114,11 @@ async def test_witness_scheme_graph_canonical_validation_changes_only_legacy_has
     context, _, graph, _ = owned_destination
     identity, _ = await _source(owned_destination, "graph_entity")
     before = await _witnesses(owned_destination, identity)
+    snapshot, lookups = snapshot_statement(context.organization_id, [identity], [])
     await graph.execute_query(
-        "RETURN {" + _SNAPSHOT + _ENDPOINT_WRITE_WITNESS + "RETURN true;};",
+        "RETURN {" + snapshot + _ENDPOINT_WRITE_WITNESS + "RETURN true;};",
         org=context.organization_id,
-        ids=[identity],
-        relationship_ids=[],
+        **lookups,
     )
     after = await _witnesses(owned_destination, identity)
     assert before[0].associations_sha256 != after[0].associations_sha256

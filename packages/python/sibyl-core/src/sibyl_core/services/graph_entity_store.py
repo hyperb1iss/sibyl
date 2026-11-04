@@ -625,10 +625,10 @@ async def _complete_embedding_manifest(
         raise ValueError("pending completion requires a retained operational source")
     if operational_source is not None:
         from sibyl_core.services.operational_relationships import (
-            _SNAPSHOT,
             OPERATIONAL_SNAPSHOT_WRITE_WITNESS,
             _snapshot,
             operational_relationship_inventory_current,
+            snapshot_statement,
         )
         from sibyl_core.services.source_observations import SourceUnavailableError
 
@@ -684,8 +684,11 @@ async def _complete_embedding_manifest(
                 )
             ):
                 raise SourceUnavailableError()
+        fence, lookups = snapshot_statement(
+            group_id, supporting_ids, expected.metadata["expected_relationship_ids"]
+        )
         source_prefix = (
-            _SNAPSHOT
+            fence
             + """
             IF $operational_snapshot_fingerprint != $operational_fingerprint {
                 THROW 'operational inventory changed before completion';
@@ -695,8 +698,7 @@ async def _complete_embedding_manifest(
         )
         source_parameters = {
             "org": group_id,
-            "ids": supporting_ids,
-            "relationship_ids": sorted(expected.metadata["expected_relationship_ids"]),
+            **lookups,
             "operational_fingerprint": snapshot["fingerprint"],
         }
         await operational_source.current()
@@ -811,12 +813,15 @@ async def _update_entity_embeddings_if_current(
     if derivation_snapshot is not None:
         from sibyl_core.services.operational_relationships import (
             _ENDPOINT_WRITE_WITNESS,
-            _SNAPSHOT,
+            snapshot_statement,
         )
 
+        fence, lookups = snapshot_statement(
+            group_id, [row["uuid"] for row in derivation_snapshot["targets"]], []
+        )
         query = (
             "RETURN {"
-            + _SNAPSHOT
+            + fence
             + "IF $operational_snapshot_fingerprint != $expected_fingerprint { RETURN []; };"
             + _ENDPOINT_WRITE_WITNESS
             + "RETURN ("
@@ -825,8 +830,7 @@ async def _update_entity_embeddings_if_current(
         )
         parameters = {
             "org": group_id,
-            "ids": [row["uuid"] for row in derivation_snapshot["targets"]],
-            "relationship_ids": [],
+            **lookups,
             "expected_fingerprint": derivation_snapshot["fingerprint"],
         }
     rows = normalize_records(
