@@ -1759,7 +1759,7 @@ async def create_api_key(
     }
 
 
-@router.post("/api-keys/{api_key_id}/revoke")
+@router.post("/api-keys/{api_key_id}/revoke", dependencies=[Depends(require_person)])
 async def revoke_api_key(
     request: Request,
     api_key_id: UUID,

@@ -641,6 +641,9 @@ async def test_live_a_bot_cannot_climb_through_any_role_route() -> None:
         raw = await _issue_key(sponsor, bot_id)
         bot_ctx = await _bot_ctx(raw)
         assert bot_ctx.org_role is OrganizationRole.MEMBER
+        # Nor does it reach every team's memory, as an admin would.
+        assert team.id is not None
+        assert bot_ctx.accessible_teams == frozenset()
 
 
 @pytest.mark.asyncio

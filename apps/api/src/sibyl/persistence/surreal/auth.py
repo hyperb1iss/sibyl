@@ -808,7 +808,7 @@ class SurrealAuthContextResolver(RepositoryAuthContextResolver):
         )
         if membership_record is None:
             teams = frozenset()
-        elif membership_record.get("role") not in {"owner", "admin"}:
+        elif org_role not in {OrganizationRole.OWNER, OrganizationRole.ADMIN}:
             teams &= frozenset(
                 str(record["team_id"])
                 for record in _normalize_records(payload.get("team_memberships"))

@@ -235,6 +235,17 @@ async def test_a_bot_cannot_create_a_project_over_rest() -> None:
     assert caught.value.detail["error"] == "bot_forbidden"
 
 
+def test_a_bot_cannot_revoke_keys_itself(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Its sponsor or an org admin revokes a bot's keys.
+    revoke = AsyncMock()
+    monkeypatch.setattr(auth_routes, "revoke_api_key_for_user", revoke)
+    app = _App(auth_routes.router)
+    app.ctx = _bot_ctx()
+    response = app.client.post(f"/auth/api-keys/{KEY_ID}/revoke")
+    assert response.status_code == 403
+    assert revoke.await_count == 0
+
+
 def test_a_bot_cannot_create_an_api_key_for_itself(monkeypatch: pytest.MonkeyPatch) -> None:
     create = AsyncMock()
     monkeypatch.setattr(auth_routes, "create_api_key_for_user", create)
