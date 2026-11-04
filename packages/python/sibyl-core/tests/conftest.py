@@ -7,7 +7,11 @@ from typing import Any
 
 import pytest
 
+from sibyl_core.backends.surreal.compact_cbor import install_compact_cbor
 from sibyl_core.models.entities import Entity, EntityType
+
+# Raw SDK connections opened by tests speak the wire format Sibyl's own do.
+install_compact_cbor()
 
 
 @pytest.fixture(autouse=True)

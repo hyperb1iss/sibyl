@@ -137,6 +137,9 @@ async def _lease_shared_embedded_engine(
             if engine.client is None:
                 from surrealdb import AsyncSurreal
 
+                from sibyl_core.backends.surreal.compact_cbor import install_compact_cbor
+
+                install_compact_cbor()
                 client = cast(SurrealClient, AsyncSurreal(url))
                 try:
                     # Open the store once, here, instead of lazily inside
@@ -465,6 +468,9 @@ class _PooledConnection:
 
             from surrealdb import AsyncSurreal
 
+            from sibyl_core.backends.surreal.compact_cbor import install_compact_cbor
+
+            install_compact_cbor()
             started_at = query_start()
             budget = _connect_timeout_seconds(self._url)
             connect_failure: SurrealConnectError | None = None

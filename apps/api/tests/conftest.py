@@ -6,6 +6,11 @@ from pathlib import Path
 
 import pytest
 
+from sibyl_core.backends.surreal.compact_cbor import install_compact_cbor
+
+# Raw SDK connections opened by tests speak the wire format Sibyl's own do.
+install_compact_cbor()
+
 
 @pytest.fixture(autouse=True)
 def keep_test_process_gc_defaults(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -20,6 +20,7 @@ from surrealdb import AsyncSurreal
 from surrealdb.connections.async_ws import AsyncWsSurrealConnection
 
 from sibyl_core.backends.surreal.auth_schema import AUTH_SCHEMA_CURRENT_VERSION, AUTH_TABLES
+from sibyl_core.backends.surreal.compact_cbor import install_compact_cbor
 from sibyl_core.backends.surreal.content_schema import (
     CONTENT_SCHEMA_CURRENT_VERSION,
     CONTENT_TABLES,
@@ -230,6 +231,7 @@ async def capture_archive_operator_native_root(
         raise PermissionError("operator capture requires fresh server-owned authorization")
     if version("surrealdb") != "2.0.0":
         raise ValueError("operator capture requires the proven native SDK 2.0.0")
+    install_compact_cbor()
     connection = cast(AsyncWsSurrealConnection, AsyncSurreal(authorization.endpoint))
     original_socket: NativeOwnedSocket | None = None
     txn_id: UUID | None = None

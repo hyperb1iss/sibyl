@@ -21,6 +21,7 @@ from typing import Any, cast
 
 from surrealdb import AsyncSurreal
 
+from sibyl_core.backends.surreal.compact_cbor import install_compact_cbor
 from sibyl_core.backends.surreal.url_schemes import redact_surreal_url
 
 JsonObject = dict[str, Any]
@@ -611,6 +612,7 @@ async def _benchmark_index(
 
 
 async def _connect(*, url: str, namespace: str, database: str) -> Any:
+    install_compact_cbor()
     db = AsyncSurreal(url)
     await db.use(namespace, database)
     return db
