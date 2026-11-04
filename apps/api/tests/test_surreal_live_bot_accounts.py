@@ -34,7 +34,14 @@ from sibyl.persistence.surreal.auth_runtime import (
 )
 from sibyl_core.auth import AuthContext, OrganizationRole, PrincipalKind, ProjectRole
 from sibyl_core.backends.surreal import SurrealAuthClient, bootstrap_auth_schema
+from sibyl_core.backends.surreal.auth_schema import AUTH_SCHEMA_MIGRATIONS, AUTH_SCHEMA_NAME
 from sibyl_core.backends.surreal.records import normalize_records, utcnow
+from sibyl_core.backends.surreal.schema import render_surreal_compatible_sql
+from sibyl_core.backends.surreal.schema_version import (
+    apply_schema_migrations,
+    get_schema_version,
+    pin_schema_compatibility_level,
+)
 from sibyl_core.backends.surreal.url_schemes import is_embedded_surreal_url
 
 pytestmark = pytest.mark.skipif(
@@ -379,6 +386,29 @@ async def test_live_a_bot_lives_inside_its_sponsor_s_access(  # noqa: PLR0915
         )
         assert writable == frozenset()
         assert world.p1 in readable
+        settings = await organization_runtime.get_project_memory_settings(
+            project_id=world.p1, actor=bot_ctx.user, org_id=world.org_id, org_role=bot_ctx.org_role
+        )
+        assert settings.graph_project_id == world.p1
+        assert settings.can_manage is False
+
+        # The sponsor loses P1 outright: the bot's stored grant reads as nothing,
+        # on the project routes as everywhere else.
+        await client.execute_query(
+            "DELETE FROM project_members WHERE project_id = $project_id AND user_id = $user_id;",
+            project_id=str(world.p1_uuid),
+            user_id=str(world.sponsor),
+        )
+        bot_ctx = await _bot_ctx(raw)
+        assert world.p1 not in await project_runtime.list_accessible_project_graph_ids(bot_ctx)
+        with pytest.raises(HTTPException) as refused:
+            await organization_runtime.get_project_memory_settings(
+                project_id=world.p1,
+                actor=bot_ctx.user,
+                org_id=world.org_id,
+                org_role=bot_ctx.org_role,
+            )
+        assert refused.value.status_code == 404
 
         # The sponsor leaves the organization: every bot key is refused.
         await client.execute_query(
@@ -644,3 +674,49 @@ async def test_live_the_team_listing_and_audit_log_mark_bots() -> None:
             organization_id=world.org_id, resource=str(bot_id)
         )
         assert all(event.get("actor_kind") for event in resource_events)
+
+
+@pytest.mark.asyncio
+async def test_live_migration_12_marks_every_existing_user_a_person() -> None:
+    namespace = f"bot_accounts_migration_{uuid4().hex}"
+    client = SurrealAuthClient(
+        url=_live_surreal_url(), namespace=namespace, database="auth", **_credentials()
+    )
+
+    async def execute(statement: str, **params: object) -> object:
+        return await client.execute_query(
+            render_surreal_compatible_sql(statement, url=_live_surreal_url()), **params
+        )
+
+    try:
+        await pin_schema_compatibility_level(client.execute_query, client.execute_query)
+        version_11 = tuple(m for m in AUTH_SCHEMA_MIGRATIONS if m.version <= 11)
+        await apply_schema_migrations(
+            execute, version_11, name=AUTH_SCHEMA_NAME, scope="auth_schema_migration"
+        )
+        assert await get_schema_version(client.execute_query, name=AUTH_SCHEMA_NAME) == 11
+        people = [uuid4() for _ in range(3)]
+        for index, user_id in enumerate(people):
+            await _create(
+                client,
+                "users",
+                {"uuid": str(user_id), "email": f"legacy-{index}@example.test", "name": "Legacy"},
+            )
+
+        await bootstrap_auth_schema(client)
+
+        assert await get_schema_version(client.execute_query, name=AUTH_SCHEMA_NAME) == 12
+        rows = normalize_records(
+            await client.execute_query("SELECT uuid, kind, sponsor_user_id FROM users;")
+        )
+        assert {row["uuid"] for row in rows} == {str(user_id) for user_id in people}
+        assert {row["kind"] for row in rows} == {"user"}
+        assert all(row.get("sponsor_user_id") is None for row in rows)
+        with pytest.raises(Exception, match="kind"):
+            await client.execute_query(
+                "CREATE users CONTENT $record;",
+                record={"uuid": str(uuid4()), "name": "Odd", "kind": "robot"},
+            )
+    finally:
+        await client.close()
+        await _drop_namespace(namespace)

@@ -20,6 +20,7 @@ from sibyl.auth.jwt import create_access_token, create_refresh_token
 from sibyl.auth.primitives import generate_invite_token, slugify
 from sibyl.auth.session_cache import access_session_cache
 from sibyl.cache_invalidation import announce_sessions_invalidated
+from sibyl.persistence.auth_common import UserNotFoundError
 from sibyl.persistence.auth_runtime import log_audit_event
 from sibyl.persistence.organization_common import (
     InvitationAcceptance,
@@ -42,6 +43,8 @@ from sibyl.persistence.surreal.auth_runtime._common import (
     bot_role_ceiling_error,
     is_service_record,
 )
+from sibyl.persistence.surreal.auth_runtime.projects import verify_entity_project_access
+from sibyl.persistence.surreal.auth_runtime.sessions import resolve_auth_context
 from sibyl_core.auth import AuthUser, OrganizationRole, ProjectRole, ProjectVisibility
 from sibyl_core.backends.surreal.records import (
     coerce_datetime as _coerce_datetime,
@@ -1667,6 +1670,7 @@ async def _get_project_and_user_role(
                     WHERE organization_id = $organization_id AND user_id = $user_id
                     LIMIT 1
                 )[0],
+                actor: (SELECT kind FROM users WHERE uuid = $user_id LIMIT 1)[0],
             };
         """
     else:
@@ -1700,6 +1704,7 @@ async def _get_project_and_user_role(
                     WHERE organization_id = $organization_id AND user_id = $user_id
                     LIMIT 1
                 )[0],
+                actor: (SELECT kind FROM users WHERE uuid = $user_id LIMIT 1)[0],
             };
         """
     payload = await client.execute_query(query, **params)
@@ -1718,6 +1723,14 @@ async def _get_project_and_user_role(
         project_record.get("owner_user_id"),
         field_name="project.owner_user_id",
     )
+    if is_service_record(_normalize_record(payload.get("actor"))):
+        # A bot's stored grant is not its role: the sponsor caps it, so the
+        # role comes from the one capped computation.
+        return project, await _capped_bot_project_role(
+            bot_id=user_id,
+            org_id=org_id,
+            graph_project_id=str(project_record.get("graph_project_id") or ""),
+        )
     if project.owner_user_id == user_id:
         return project, ProjectRole.OWNER
 
@@ -1725,6 +1738,23 @@ async def _get_project_and_user_role(
     if membership is not None:
         return project, ProjectRole(membership["role"])
     return project, None
+
+
+async def _capped_bot_project_role(
+    *, bot_id: UUID, org_id: UUID, graph_project_id: str
+) -> ProjectRole | None:
+    from sibyl.auth.authorization import ProjectAuthorizationError
+
+    try:
+        ctx = await resolve_auth_context(claims={"sub": str(bot_id), "org": str(org_id)})
+        return await verify_entity_project_access(
+            ctx=ctx,
+            entity_project_id=graph_project_id,
+            required_role=ProjectRole.VIEWER,
+            require_existing_project=True,
+        )
+    except (ProjectAuthorizationError, UserNotFoundError):
+        return None
 
 
 async def _list_project_member_records(
