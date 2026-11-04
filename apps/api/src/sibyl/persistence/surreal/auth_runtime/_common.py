@@ -326,7 +326,10 @@ def _auth_user_namespace(record: SurrealRecord | None) -> SimpleNamespace | None
     user.name = str(getattr(user, "name", None) or "")
     user.avatar_url = getattr(user, "avatar_url", None)
     user.github_id = getattr(user, "github_id", None)
-    user.is_admin = bool(getattr(user, "is_admin", False))
+    # A bot is never a deployment admin, whatever its row says.
+    user.is_admin = (
+        bool(getattr(user, "is_admin", False)) and user.kind is not PrincipalKind.SERVICE
+    )
     user.bio = getattr(user, "bio", None)
     user.timezone = str(getattr(user, "timezone", None) or "UTC")
     user.preferences = dict(getattr(user, "preferences", None) or {})
@@ -1188,12 +1191,17 @@ async def _ensure_personal_org_membership_record(
                         AND user_id = $user_id
                     LIMIT 1
                 )[0],
+                principal: (SELECT kind FROM users WHERE uuid = $user_id LIMIT 1)[0],
             };
         """,
         slug=slug,
         user_id=str(user.id),
     )
     payload = _record_payload(payload)
+    if is_service_record(_normalize_record(payload.get("principal"))):
+        # Every personal organization is minted here with its user as owner,
+        # and a bot owns no organization.
+        raise refuse_bot_sign_in()
     organization = _normalize_record(payload.get("organization"))
     membership = _normalize_record(payload.get("membership"))
 

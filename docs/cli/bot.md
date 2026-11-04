@@ -15,7 +15,7 @@ Every command that takes `<bot>` accepts a bot ID or the exact name of a bot you
 - `sibyl bot revoke` - Remove a bot's grant on a project
 - `sibyl bot transfer` - Give a bot a new sponsor (org admins)
 - `sibyl bot delete` - Delete a bot and revoke its keys
-- `sibyl bot key create` - Issue a key that authenticates as the bot
+- `sibyl bot key create` - Issue a key that authenticates as the bot (its sponsor)
 - `sibyl bot key list` - List a bot's keys
 - `sibyl bot key revoke` - Revoke one of a bot's keys
 
@@ -59,7 +59,7 @@ sibyl bot show <bot> [--json]
 ## bot grant
 
 Grant your bot a role on a project, up to min(your own role on that project, contributor). Only the
-bot's sponsor grants it access.
+bot's sponsor grants it access, and not while an org viewer.
 
 ```bash
 sibyl bot grant <bot> <project> [--role contributor|viewer] [--json]
@@ -113,8 +113,8 @@ sibyl bot delete <bot> [--yes] [--json]
 
 ## bot key create
 
-Issue a key that authenticates as the bot. The sponsor or an org admin can. The secret prints once,
-as JSON.
+Issue a key that authenticates as the bot. Only its sponsor can, and not while an org viewer. The
+secret prints once, as JSON.
 
 ```bash
 sibyl bot key create <bot> --name <name> [options]

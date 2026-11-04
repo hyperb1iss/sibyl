@@ -20,6 +20,7 @@ from sibyl import config as config_module
 from sibyl.api.rate_limit import limiter
 from sibyl.auth.context import AuthContext
 from sibyl.auth.dependencies import (
+    bot_forbidden,
     get_auth_context,
     require_org_admin,
     require_person,
@@ -61,7 +62,7 @@ from sibyl.persistence.auth_runtime import (
     update_auth_user,
 )
 from sibyl.persistence.operations_runtime import is_setup_mode
-from sibyl_core.auth import AuthUser, GitHubUserIdentity
+from sibyl_core.auth import AuthUser, GitHubUserIdentity, PrincipalKind
 
 log = structlog.get_logger()
 
@@ -1526,6 +1527,9 @@ async def device_verify_post(request: Request) -> Response:
     user = await get_user_by_id(user_id)
     if user is None:
         return RedirectResponse(url=verify_url + "&error=user_not_found", status_code=302)
+    if getattr(user, "kind", None) == PrincipalKind.SERVICE:
+        # Approving a device code signs its holder in, and a bot never signs in.
+        raise bot_forbidden()
 
     if action == "deny":
         denied = await deny_device_authorization(

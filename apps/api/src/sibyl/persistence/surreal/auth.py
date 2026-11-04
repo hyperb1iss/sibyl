@@ -53,6 +53,13 @@ class _SharedAuthClientState:
     client: SurrealAuthClient | None = None
 
 
+_ORG_ROLE_RANK = {
+    OrganizationRole.VIEWER: 0,
+    OrganizationRole.MEMBER: 1,
+    OrganizationRole.ADMIN: 2,
+    OrganizationRole.OWNER: 3,
+}
+
 _shared_auth_client_state = _SharedAuthClientState()
 _shared_auth_client_lock = asyncio.Lock()
 _UPSERT_RECORD = {
@@ -791,10 +798,11 @@ class SurrealAuthContextResolver(RepositoryAuthContextResolver):
             else None
         )
         sponsor_org_role: OrganizationRole | None = None
-        if user.is_service and organization_id is not None and org_role is not None:
-            # A bot never holds more than member, whatever its row says.
-            if org_role in {OrganizationRole.OWNER, OrganizationRole.ADMIN}:
-                org_role = OrganizationRole.MEMBER
+        if user.is_service and organization_id is not None:
+            if org_role is None:
+                # A bot lives in one organization; out of it, it holds nothing.
+                msg = f"Bot {user.id} is suspended: it is not a member of this organization"
+                raise SuspendedPrincipalError(msg)
             sponsor_org_role = await self._sponsor_org_role(
                 sponsor_user_id=user.sponsor_user_id,
                 organization_id=organization_id,
@@ -802,6 +810,14 @@ class SurrealAuthContextResolver(RepositoryAuthContextResolver):
             if sponsor_org_role is None:
                 msg = f"Bot {user.id} is suspended: its sponsor is not an active member"
                 raise SuspendedPrincipalError(msg)
+            # Every org-level gate reads this role, so it carries the cap: never
+            # above member, and never above what the sponsor holds here now.
+            org_role = min(
+                org_role,
+                OrganizationRole.MEMBER,
+                sponsor_org_role,
+                key=_ORG_ROLE_RANK.__getitem__,
+            )
 
         teams = frozenset(
             str(record["uuid"]) for record in _normalize_records(payload.get("teams"))

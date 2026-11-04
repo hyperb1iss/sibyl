@@ -143,16 +143,29 @@ def _require_manager(ctx: AuthContext, bot: SurrealRecord) -> None:
 
 
 def _require_sponsor(ctx: AuthContext, bot: SurrealRecord) -> None:
-    """Only the sponsor grants a bot project access; an admin transfers it first."""
+    """Only the bot's sponsor, while an owner, admin or member, extends what it holds.
+
+    Grants and new keys both widen a bot's reach. An admin who needs to do
+    either transfers the bot to themselves first, which is audited, rather
+    than acting as a bot whose private memory is not theirs.
+    """
     _require_manager(ctx, bot)
     if not _is_sponsor(ctx, bot):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail={
                 "error": "bot_sponsor_required",
-                "message": "Only a bot's sponsor grants it project access.",
-                "remediation": "Transfer the bot to yourself first, or add it through the "
-                "project's members.",
+                "message": "Only a bot's sponsor grants it project access or issues its keys.",
+                "remediation": "An organization admin can transfer the bot to you first.",
+            },
+        )
+    if _role_value(ctx.org_role) not in _SPONSOR_ORG_ROLES:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={
+                "error": "bot_sponsor_viewer",
+                "message": "A viewer cannot grant a bot access or issue its keys.",
+                "remediation": "An organization admin can restore your role or transfer the bot.",
             },
         )
 
@@ -634,22 +647,13 @@ async def delete_bot(*, ctx: AuthContext, bot_id: UUID, request) -> dict[str, ob
     }
 
 
-async def _require_active_bot(ctx: AuthContext, bot_id: UUID) -> UUID:
+async def _require_key_issuer(ctx: AuthContext, bot_id: UUID) -> UUID:
     organization_id = _require_org(ctx)
     async with _auth_client_scope() as client:
-        bot, _membership, sponsor = await _load_bot(
+        bot, _membership, _sponsor = await _load_bot(
             client, organization_id=organization_id, bot_id=bot_id
         )
-        _require_manager(ctx, bot)
-    if sponsor is None or sponsor.get("org_role") is None:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail={
-                "error": "bot_suspended",
-                "message": "This bot's sponsor is no longer an active member.",
-                "remediation": "An organization admin can transfer the bot to a new sponsor.",
-            },
-        )
+    _require_sponsor(ctx, bot)
     return organization_id
 
 
@@ -665,8 +669,8 @@ async def create_bot_api_key(
     expires_at,
     request,
 ):
-    """Issue a key that authenticates as the bot, audited under the issuer."""
-    organization_id = await _require_active_bot(ctx, bot_id)
+    """Issue a key that authenticates as the bot. Its sponsor only; audited under them."""
+    organization_id = await _require_key_issuer(ctx, bot_id)
     return await create_api_key_for_user(
         organization_id=organization_id,
         user_id=bot_id,

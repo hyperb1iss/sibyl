@@ -8,7 +8,7 @@ from enum import StrEnum
 from typing import cast
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 JSONObject = dict[str, object]
 
@@ -70,6 +70,12 @@ class AuthUser(BaseModel):
     updated_at: datetime | None = None
     kind: PrincipalKind = PrincipalKind.USER
     sponsor_user_id: UUID | None = None
+
+    @model_validator(mode="after")
+    def _bot_is_never_a_deployment_admin(self) -> AuthUser:
+        if self.kind is PrincipalKind.SERVICE:
+            self.is_admin = False
+        return self
 
     @property
     def is_service(self) -> bool:

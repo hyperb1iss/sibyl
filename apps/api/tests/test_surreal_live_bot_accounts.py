@@ -11,6 +11,7 @@ from __future__ import annotations
 import os
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from datetime import timedelta
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 from uuid import UUID, uuid4
@@ -28,6 +29,7 @@ from sibyl.persistence.surreal.auth_runtime import (
     api_keys as key_runtime,
     audit as audit_runtime,
     bots as bot_runtime,
+    device_authorization as device_runtime,
     projects as project_runtime,
     sessions as session_runtime,
     users as user_runtime,
@@ -423,9 +425,10 @@ async def test_live_a_bot_lives_inside_its_sponsor_s_access(  # noqa: PLR0915
         ) == (frozenset(), frozenset())
         [suspended] = await bot_runtime.list_bots(ctx=owner)
         assert suspended["status"] == "suspended"
+        # Only the sponsor issues keys; an admin transfers the bot first.
         with pytest.raises(HTTPException) as refused:
             await _issue_key(owner, bot_id)
-        assert refused.value.status_code == 409
+        assert refused.value.detail["error"] == "bot_sponsor_required"
 
         # Transfer: admins only, to a person who is a member here, audited.
         with pytest.raises(HTTPException) as refused:
@@ -723,3 +726,194 @@ async def test_live_migration_12_marks_every_existing_user_a_person() -> None:
     finally:
         await client.close()
         await _drop_namespace(namespace)
+
+
+async def _set_org_role(client: SurrealAuthClient, world: SimpleNamespace, user_id, role) -> None:
+    await client.execute_query(
+        "UPDATE organization_members SET role = $role "
+        "WHERE organization_id = $org AND user_id = $user;",
+        role=role,
+        org=str(world.org_id),
+        user=str(user_id),
+    )
+
+
+@pytest.mark.asyncio
+async def test_live_a_sponsor_demoted_to_org_viewer_takes_the_bot_down_with_them() -> None:
+    async with _live_auth_store() as client:
+        world = await _seed(client)
+        # P2 is org-visible and hands every member contributor.
+        await client.execute_query(
+            "UPDATE projects SET default_role = 'project_contributor' WHERE uuid = $uuid;",
+            uuid=str(world.p2_uuid),
+        )
+        sponsor = await _ctx(world, world.sponsor)
+        bot = await bot_runtime.create_bot(ctx=sponsor, name="oncall", request=None)
+        bot_id = UUID(str(bot["id"]))
+        await bot_runtime.grant_bot_project(
+            ctx=sponsor,
+            bot_id=bot_id,
+            project_ref=world.p1,
+            role=ProjectRole.CONTRIBUTOR,
+            request=None,
+        )
+        raw = await _issue_key(sponsor, bot_id)
+
+        bot_ctx = await _bot_ctx(raw)
+        assert bot_ctx.org_role is OrganizationRole.MEMBER
+        assert await _writable(bot_ctx) == {world.p1, world.p2}
+        assert (
+            await project_runtime.verify_entity_project_access(
+                ctx=bot_ctx, entity_project_id=world.p2, required_role=ProjectRole.CONTRIBUTOR
+            )
+            is ProjectRole.CONTRIBUTOR
+        )
+
+        # The sponsor becomes an org viewer: on its next request the bot is one
+        # too, so every org write gate refuses it, and it writes on no project,
+        # whether by its own grant (P1) or the org-visible default (P2).
+        await _set_org_role(client, world, world.sponsor, "viewer")
+        bot_ctx = await _bot_ctx(raw)
+        assert bot_ctx.sponsor_org_role is OrganizationRole.VIEWER
+        assert bot_ctx.org_role is OrganizationRole.VIEWER
+        assert await _writable(bot_ctx) == set()
+        # It still reads what it read: P1 by grant, P2 by visibility.
+        assert await project_runtime.list_accessible_project_graph_ids(bot_ctx) == {
+            world.p1,
+            world.p2,
+        }
+        for project in (world.p1, world.p2):
+            with pytest.raises(ProjectAuthorizationError):
+                await project_runtime.verify_entity_project_access(
+                    ctx=bot_ctx, entity_project_id=project, required_role=ProjectRole.CONTRIBUTOR
+                )
+        _readable, writable = await project_runtime.resolve_project_graph_grants(
+            user_id=str(bot_id), org_id=str(world.org_id)
+        )
+        assert writable == frozenset()
+
+        # A viewer sponsor extends nothing: no grant, no new key.
+        sponsor = await _ctx(world, world.sponsor)
+        with pytest.raises(HTTPException) as refused:
+            await bot_runtime.grant_bot_project(
+                ctx=sponsor,
+                bot_id=bot_id,
+                project_ref=world.p3,
+                role=ProjectRole.VIEWER,
+                request=None,
+            )
+        assert refused.value.detail["error"] == "bot_sponsor_viewer"
+        with pytest.raises(HTTPException) as refused:
+            await _issue_key(sponsor, bot_id)
+        assert refused.value.detail["error"] == "bot_sponsor_viewer"
+
+        # Restored to member, the sponsor's bot writes again.
+        await _set_org_role(client, world, world.sponsor, "member")
+        assert await _writable(await _bot_ctx(raw)) == {world.p1, world.p2}
+
+
+@pytest.mark.asyncio
+async def test_live_a_bot_never_owns_an_organization_or_acts_above_member() -> None:
+    async with _live_auth_store() as client:
+        world = await _seed(client)
+        sponsor = await _ctx(world, world.sponsor)
+        bot = await bot_runtime.create_bot(ctx=sponsor, name="oncall", request=None)
+        bot_id = UUID(str(bot["id"]))
+        raw = await _issue_key(sponsor, bot_id)
+
+        async def personal_orgs() -> list[dict[str, object]]:
+            return normalize_records(
+                await client.execute_query(
+                    "SELECT uuid FROM organizations WHERE slug = $slug;", slug=f"u-{bot_id}"
+                )
+            )
+
+        # Approving a device code would mint the bot a personal org it owns.
+        device_request, _device_code = await device_runtime.start_device_authorization(
+            client_name="probe",
+            scope="mcp",
+            expires_in=timedelta(minutes=5),
+            poll_interval_seconds=5,
+        )
+        with pytest.raises(HTTPException) as refused:
+            await device_runtime.approve_device_authorization(
+                user_id=bot_id, user_code=device_request.user_code, request=None
+            )
+        assert refused.value.detail["error"] == "bot_cannot_sign_in"
+        with pytest.raises(HTTPException) as refused:
+            await user_runtime.ensure_personal_organization(user_id=bot_id)
+        assert refused.value.detail["error"] == "bot_cannot_sign_in"
+        assert await personal_orgs() == []
+        pending = await device_runtime.get_device_request_by_user_code(device_request.user_code)
+        assert pending.status == "pending"
+
+        # A bot row forced to admin still acts as a member on every org gate.
+        await _set_org_role(client, world, bot_id, "admin")
+        with pytest.raises(HTTPException) as refused:
+            await organization_runtime.add_org_member(
+                slug=world.slug,
+                actor_id=bot_id,
+                target_user_id=world.member,
+                role=OrganizationRole.ADMIN,
+                request=None,
+            )
+        assert refused.value.status_code == 403
+        with pytest.raises(HTTPException) as refused:
+            await organization_runtime.update_org_member_role(
+                slug=world.slug,
+                actor_id=bot_id,
+                target_user_id=world.member,
+                role=OrganizationRole.ADMIN,
+                request=None,
+            )
+        assert refused.value.status_code == 403
+        with pytest.raises(HTTPException) as refused:
+            await organization_runtime.update_org(
+                request=None, slug=world.slug, user_id=bot_id, name="Bot Org", new_slug=None
+            )
+        assert refused.value.status_code == 403
+        with pytest.raises(HTTPException) as refused:
+            await organization_runtime.list_org_invitations(slug=world.slug, actor_id=bot_id)
+        assert refused.value.status_code == 403
+        assert (await organization_runtime.get_org(slug=world.slug, user_id=bot_id)).role is (
+            OrganizationRole.MEMBER
+        )
+        await _set_org_role(client, world, bot_id, "member")
+
+        # A bot joins no memory space.
+        space = await project_runtime.create_memory_space(
+            organization_id=world.org_id,
+            created_by_user_id=world.owner,
+            memory_scope="delegated",
+            scope_key="delegated-oncall",
+            name="On-call delegation",
+        )
+        with pytest.raises(HTTPException) as refused:
+            await project_runtime.add_memory_space_member(
+                organization_id=world.org_id,
+                space_id=space.id,
+                created_by_user_id=world.owner,
+                principal_type="user",
+                principal_id=str(bot_id),
+            )
+        assert refused.value.detail["error"] == "bot_memory_space_membership"
+        added = await project_runtime.add_memory_space_member(
+            organization_id=world.org_id,
+            space_id=space.id,
+            created_by_user_id=world.owner,
+            principal_type="user",
+            principal_id=str(world.member),
+        )
+        assert added.principal_id == str(world.member)
+
+        # Removed from its organization by the member routes, not deleted, the
+        # bot is suspended: its key no longer resolves anywhere.
+        assert (await _bot_ctx(raw)).user.id == bot_id
+        await organization_runtime.remove_org_member(
+            slug=world.slug, actor_id=world.owner, target_user_id=bot_id, request=None
+        )
+        with pytest.raises(SuspendedPrincipalError):
+            await _bot_ctx(raw)
+        assert await project_runtime.resolve_project_graph_grants(
+            user_id=str(bot_id), org_id=str(world.org_id)
+        ) == (frozenset(), frozenset())

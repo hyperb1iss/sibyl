@@ -8,6 +8,7 @@ SurrealDB proof is tests/test_surreal_live_bot_accounts.py.
 
 from __future__ import annotations
 
+from dataclasses import replace
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 from uuid import UUID, uuid4
@@ -26,7 +27,7 @@ from sibyl.persistence.organization_common import (
 )
 from sibyl.persistence.surreal import auth as surreal_auth
 from sibyl.persistence.surreal.auth_runtime import projects as project_runtime
-from sibyl_core.auth import OrganizationRole, PrincipalKind, ProjectRole
+from sibyl_core.auth import AuthUser, OrganizationRole, PrincipalKind, ProjectRole
 from tests.harness.auth import (
     DEFAULT_BOT_ID as BOT_ID,
     DEFAULT_ORG_ID,
@@ -109,6 +110,25 @@ def test_a_bot_holds_the_lower_of_its_grant_its_sponsor_and_contributor(
     )
 
 
+@pytest.mark.parametrize("viewer", ["sponsor", "bot"])
+def test_an_org_viewer_on_either_side_caps_the_bot_at_viewer(viewer: str) -> None:
+    ctx = _bot_ctx(
+        sponsor_org_role=OrganizationRole.VIEWER if viewer == "sponsor" else OrganizationRole.MEMBER
+    )
+    if viewer == "bot":
+        ctx = replace(ctx, org_role=OrganizationRole.VIEWER)
+    for project in (_project(), _project(visibility="org", default_role="project_contributor")):
+        assert (
+            _role(
+                ctx=ctx,
+                project=project,
+                bot_grant=ProjectRole.CONTRIBUTOR,
+                sponsor_grant=ProjectRole.CONTRIBUTOR,
+            )
+            is ProjectRole.VIEWER
+        )
+
+
 def test_a_sponsor_s_team_grant_counts_toward_the_cap() -> None:
     role = _role(
         ctx=_bot_ctx(),
@@ -187,9 +207,16 @@ def test_a_bot_never_manages_project_members_or_settings() -> None:
 
 
 class _ResolverClient:
-    def __init__(self, *, bot_role: str = "member", sponsor_active: bool = True) -> None:
+    def __init__(
+        self,
+        *,
+        bot_role: str | None = "member",
+        sponsor_active: bool = True,
+        sponsor_role: str = "member",
+    ) -> None:
         self.bot_role = bot_role
         self.sponsor_active = sponsor_active
+        self.sponsor_role = sponsor_role
         self.calls: list[tuple[str, dict[str, object]]] = []
 
     async def execute_query(self, query: str, **params: object) -> object:
@@ -197,7 +224,7 @@ class _ResolverClient:
         if "sponsor_id" in params:
             return {
                 "sponsor": {"uuid": str(SPONSOR_ID)} if self.sponsor_active else None,
-                "membership": {"role": "member"} if self.sponsor_active else None,
+                "membership": {"role": self.sponsor_role} if self.sponsor_active else None,
             }
         return {
             "user": {
@@ -212,7 +239,9 @@ class _ResolverClient:
                 "organization_id": str(DEFAULT_ORG_ID),
                 "user_id": str(BOT_ID),
                 "role": self.bot_role,
-            },
+            }
+            if self.bot_role is not None
+            else None,
             "teams": [],
             "team_memberships": [],
             "delegations": [],
@@ -242,6 +271,29 @@ async def test_the_resolver_never_hands_a_bot_more_than_member() -> None:
     client = _ResolverClient(bot_role="admin")
     ctx = await surreal_auth.SurrealAuthContextResolver.from_client(client).resolve(_claims())
     assert ctx.org_role is OrganizationRole.MEMBER
+
+
+async def test_the_resolver_holds_a_bot_to_its_sponsor_s_org_role() -> None:
+    # Every org write gate reads org_role, so a viewer sponsor's bot is a viewer.
+    client = _ResolverClient(sponsor_role="viewer")
+    ctx = await surreal_auth.SurrealAuthContextResolver.from_client(client).resolve(_claims())
+    assert ctx.sponsor_org_role is OrganizationRole.VIEWER
+    assert ctx.org_role is OrganizationRole.VIEWER
+
+
+async def test_the_resolver_refuses_a_bot_outside_its_organization() -> None:
+    client = _ResolverClient(bot_role=None)
+    with pytest.raises(SuspendedPrincipalError):
+        await surreal_auth.SurrealAuthContextResolver.from_client(client).resolve(_claims())
+
+
+def test_a_bot_is_never_a_deployment_admin() -> None:
+    user = AuthUser(id=BOT_ID, kind=PrincipalKind.SERVICE, is_admin=True)
+    assert user.is_admin is False
+    ctx = AuthContext(user=user, organization=None, org_role=None)
+    assert ctx.user.is_admin is False
+    assert ctx.to_memory_policy_context().is_global_admin is False
+    assert AuthUser(id=SPONSOR_ID, is_admin=True).is_admin is True
 
 
 async def test_a_suspended_bot_s_request_is_refused_by_name(

@@ -32,9 +32,13 @@ On every request, a bot's role on a project is the lowest of:
 
 An org-visible project's default role counts as a grant, so a bot reads org-visible projects like
 any member does, capped the same way. The cap is read on each request, not when the bot was granted,
-so if your role on a project drops, your bot's drops on its next call. If you leave the
-organization, every key your bot holds is refused until an org admin transfers the bot to someone
-else.
+so if your role on a project drops, your bot's drops on its next call.
+
+The same holds in the organization. A bot is never more than a member, and never more than you are
+there right now: if you become an org viewer, your bot becomes one on its next request, writes
+nowhere, and you can neither grant it access nor issue it keys until your role comes back. If you
+leave the organization, every key your bot holds is refused until an org admin transfers the bot to
+someone else.
 
 ## Who Can Do What
 
@@ -42,23 +46,31 @@ else.
 | --------------------------------------- | --------------------------------------------------------------------- |
 | Create a bot                            | Any owner, admin or member, sponsoring it themselves (not a viewer)   |
 | Grant a bot project access              | Its sponsor, up to min(their own role on the project, contributor)    |
+| Issue a bot's keys                      | Its sponsor only                                                      |
 | Remove a bot's project access           | Its sponsor or an org admin                                           |
-| Issue or revoke a bot's keys            | Its sponsor or an org admin                                           |
+| Revoke a bot's keys                     | Its sponsor or an org admin                                           |
 | List bots                               | An org admin sees every bot; anyone else sees the bots they sponsor   |
 | Transfer a bot to a new sponsor         | Org admins only                                                       |
 | Delete a bot                            | Its sponsor or an org admin; its keys stop working at once            |
 | Add a bot through project member routes | A project owner or maintainer, at contributor or viewer, still capped |
 
 Granting your own bot access is the one way to add a project member without being that project's
-owner or maintainer, and it reaches only bots you sponsor.
+owner or maintainer, and it reaches only bots you sponsor. A sponsor who is an org viewer can do
+neither.
+
+Granting access and issuing keys both widen what a bot can do, so only its sponsor does them. An org
+admin who needs to transfers the bot to themselves first, which is recorded in the audit log. A key
+is the bot's whole identity, private memory included, so it belongs with the person who answers for
+the bot.
 
 ## What A Bot Cannot Do
 
 - Sign in. It has no password and no single sign-on identity; it authenticates only with API keys.
 - Hold admin or owner in the organization, or maintainer or owner on a project. Every role route
   refuses those roles for a bot.
-- Join a team, or any organization other than the one it was made in.
-- Create projects, organizations, API keys or other bots.
+- Join a team or a memory space, or any organization other than the one it was made in.
+- Own an organization, including a personal one, or act above member in one.
+- Create projects, organizations, API keys or other bots, or approve a device sign-in.
 
 ## Set One Up
 
@@ -102,6 +114,9 @@ work again, capped by the new sponsor's roles:
 sibyl bot list
 sibyl bot transfer oncall --to <user-id>
 ```
+
+A bot removed from the organization through the member list, rather than deleted, is suspended the
+same way: none of its keys resolve anywhere.
 
 ## Deleting A Bot
 

@@ -362,6 +362,7 @@ async def _load_org_member_add_records(
                         AND user_id = $actor_id
                     LIMIT 1
                 )[0],
+                actor: (SELECT kind FROM users WHERE uuid = $actor_id LIMIT 1)[0],
                 target_user: (SELECT * FROM users WHERE uuid = $target_user_id LIMIT 1)[0],
                 target_membership: (
                     SELECT * FROM organization_members
@@ -388,7 +389,7 @@ async def _load_org_member_add_records(
     payload = _record_payload(payload)
     return (
         _normalize_record(payload.get("organization")),
-        _normalize_record(payload.get("actor_membership")),
+        _actor_membership(payload, "actor_membership"),
         _normalize_record(payload.get("target_user")),
         _normalize_record(payload.get("target_membership")),
         _normalize_records(payload.get("owner_memberships")),
@@ -419,6 +420,7 @@ async def _load_org_member_mutation_records(
                         AND user_id = $actor_id
                     LIMIT 1
                 )[0],
+                actor: (SELECT kind FROM users WHERE uuid = $actor_id LIMIT 1)[0],
                 target_membership: (
                     SELECT * FROM organization_members
                     WHERE organization_id IN (
@@ -444,10 +446,24 @@ async def _load_org_member_mutation_records(
     payload = _record_payload(payload)
     return (
         _normalize_record(payload.get("organization")),
-        _normalize_record(payload.get("actor_membership")),
+        _actor_membership(payload, "actor_membership"),
         _normalize_record(payload.get("target_membership")),
         _normalize_records(payload.get("owner_memberships")),
     )
+
+
+def _actor_membership(payload: SurrealRecord, key: str) -> SurrealRecord | None:
+    """The caller's membership here; a bot's reads as member at most.
+
+    Organization gates read this row's role directly, so the bot clamp the
+    request resolver applies has to hold here too.
+    """
+    membership = _normalize_record(payload.get(key))
+    if membership is None or not is_service_record(_normalize_record(payload.get("actor"))):
+        return membership
+    if OrganizationRole(str(membership.get("role") or "member")) in BOT_FORBIDDEN_ORG_ROLES:
+        return {**membership, "role": OrganizationRole.MEMBER.value}
+    return membership
 
 
 async def _load_org_role_records(
@@ -468,15 +484,14 @@ async def _load_org_role_records(
                         AND user_id = $user_id
                     LIMIT 1
                 )[0],
+                actor: (SELECT kind FROM users WHERE uuid = $user_id LIMIT 1)[0],
             };
         """,
         slug=slug,
         user_id=str(user_id),
     )
     payload = _record_payload(payload)
-    return _normalize_record(payload.get("organization")), _normalize_record(
-        payload.get("membership")
-    )
+    return _normalize_record(payload.get("organization")), _actor_membership(payload, "membership")
 
 
 async def _load_org_member_list_records(
@@ -502,6 +517,7 @@ async def _load_org_member_list_records(
                         AND user_id = $actor_id
                     LIMIT 1
                 )[0],
+                actor: (SELECT kind FROM users WHERE uuid = $actor_id LIMIT 1)[0],
                 memberships: (
                     SELECT * FROM organization_members
                     WHERE organization_id IN (
@@ -526,7 +542,7 @@ async def _load_org_member_list_records(
     payload = _record_payload(payload)
     return (
         _normalize_record(payload.get("organization")),
-        _normalize_record(payload.get("actor_membership")),
+        _actor_membership(payload, "actor_membership"),
         _normalize_records(payload.get("memberships")),
         _normalize_records(payload.get("users")),
     )

@@ -14,7 +14,7 @@ from surrealdb.errors import SurrealError
 
 from sibyl.api.errors import http_exception_payload
 from sibyl.api.routes import auth as auth_routes
-from sibyl_core.auth import AuthContext, AuthOrganization, AuthUser, OrganizationRole
+from sibyl_core.auth import AuthContext, AuthOrganization, AuthUser, OrganizationRole, PrincipalKind
 
 
 class FakeRequest:
@@ -1091,6 +1091,36 @@ async def test_device_verify_post_approve_uses_active_session_claims(
         user_code="ABCD-EFGH",
         request=request,
     )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("action", ["approve", "deny"])
+async def test_device_verify_post_refuses_a_bot_key(
+    monkeypatch: pytest.MonkeyPatch, action: str
+) -> None:
+    # Approving would sign the bot in and mint it a personal org it owns.
+    bot_id = uuid4()
+    request = FakeRequest(form_data={"action": action, "user_code": "ABCD-EFGH"})
+    claims = AsyncMock(return_value={"sub": str(bot_id), "org": str(uuid4()), "typ": "api_key"})
+    get_user = AsyncMock(return_value=SimpleNamespace(id=bot_id, kind=PrincipalKind.SERVICE))
+    approve = AsyncMock()
+    deny = AsyncMock()
+
+    monkeypatch.setattr(
+        auth_routes, "_require_jwt_secret", lambda: "test-jwt-secret-key-for-api-tests"
+    )
+    monkeypatch.setattr(auth_routes, "resolve_claims", claims)
+    monkeypatch.setattr(auth_routes, "get_user_by_id", get_user)
+    monkeypatch.setattr(auth_routes, "approve_device_authorization", approve)
+    monkeypatch.setattr(auth_routes, "deny_device_authorization", deny)
+
+    with pytest.raises(HTTPException) as refused:
+        await _call_route(auth_routes.device_verify_post, request=request)
+
+    assert refused.value.status_code == 403
+    assert refused.value.detail["error"] == "bot_forbidden"
+    approve.assert_not_awaited()
+    deny.assert_not_awaited()
 
 
 @pytest.mark.asyncio

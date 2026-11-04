@@ -677,6 +677,21 @@ async def add_memory_space_member(
         raise HTTPException(status_code=409, detail=space.disabled_reason or "scope_not_enabled")
     async with _auth_client_scope() as client:
         repo = _SurrealRepository(client)
+        if principal_type == "user" and is_service_record(
+            await repo.select_one(
+                "SELECT kind FROM users WHERE uuid = $user_id LIMIT 1;", user_id=principal_id
+            )
+        ):
+            # A memory space grants recall no sponsor caps, so bots stay out,
+            # as they stay off teams.
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "error": "bot_memory_space_membership",
+                    "message": "Bots cannot be members of memory spaces.",
+                    "remediation": "Grant the bot project access with `sibyl bot grant`.",
+                },
+            )
         existing = await repo.select_one(
             "SELECT * FROM memory_space_members "
             "WHERE organization_id = $organization_id "
@@ -1738,9 +1753,10 @@ def _effective_project_role_from_records(
 ) -> ProjectRole | None:
     """The one place a principal's role on a project is decided.
 
-    A bot's role is capped on every call: never above contributor, and never
-    above what its sponsor holds on the project right now. A bot whose
-    sponsor is no longer an active member holds nothing.
+    A bot's role is capped on every call: never above contributor (viewer
+    when it or its sponsor is an org viewer), and never above what its
+    sponsor holds on the project right now. A bot whose sponsor is no longer
+    an active member holds nothing.
     """
     role = _principal_project_role(
         org_role=ctx.org_role,
@@ -1763,7 +1779,14 @@ def _effective_project_role_from_records(
     )
     if sponsor_role is None:
         return None
-    return min(role, sponsor_role, BOT_PROJECT_ROLE_CEILING, key=_PROJECT_ROLE_LEVELS.__getitem__)
+    # An org viewer writes nowhere, so neither does a bot that is one, or
+    # whose sponsor is one.
+    ceiling = (
+        ProjectRole.VIEWER
+        if "viewer" in {_role_value(ctx.org_role), _role_value(sponsor_org_role)}
+        else BOT_PROJECT_ROLE_CEILING
+    )
+    return min(role, sponsor_role, ceiling, key=_PROJECT_ROLE_LEVELS.__getitem__)
 
 
 def _principal_project_role(
