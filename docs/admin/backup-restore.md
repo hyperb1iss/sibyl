@@ -265,7 +265,7 @@ interrupted fetch leaves a run the drill ignores. `restoreDrill.decryption.comma
 export hook: it runs once per file, manifest first, reads `$SIBYL_RESTORE_ENCRYPTED_FILE`, and
 writes the plaintext to `$SIBYL_RESTORE_FILE`.
 
-The scratch server keeps its copy with RocksDB under the pod's `/tmp` emptyDir
+The scratch server keeps its copy with SurrealKV under the pod's `/tmp` emptyDir
 (`restoreDrill.restore.path`), so the node needs ephemeral disk for a full copy of the data.
 
 For the enterprise evidence gate, enable a sampled recall check and have the command write a JSON
@@ -402,9 +402,12 @@ secret the drill mounts and wherever a restore operator can reach it.
 
 To import an export run into a fresh server, decrypt every file first if the run is encrypted (the
 manifest's checksums describe the plaintext), check the files against the manifest, then define each
-namespace and database, quoted, before importing its file. SurrealDB answers both calls with HTTP
-200 and a status per statement, so the `jq` checks are what catch a refused import. The last
-statement puts STRICT back:
+namespace and database, quoted, before importing its file. `/sql` answers HTTP 200 with a status per
+statement, so its `jq` check is what catches a refused statement. `/import` answers HTTP 422 on
+SurrealDB 4.0 when any statement fails, with only the failed statements in the body, after applying
+every statement that did succeed. The loop keeps that body so a failure names its statements, and
+stops there: remove that database (`REMOVE DATABASE`) and import its file again rather than
+importing over a partial copy. The last statement puts STRICT back:
 
 ```bash
 set -euo pipefail
@@ -423,9 +426,15 @@ for i in $(seq 0 $((count - 1))); do
   sql "$(jq -r 'def ident: "`" + (gsub("\\\\"; "\\\\") | gsub("`"; "\\`")) + "`";
     "DEFINE NAMESPACE IF NOT EXISTS \(.namespace | ident); USE NS \(.namespace | ident);
      DEFINE DATABASE IF NOT EXISTS \(.database | ident);"' <<<"$entry")"
-  curl -fsS -u "root:$SURREAL_PASS" -H "Accept: application/json" \
-    -H "surreal-ns: $ns" -H "surreal-db: $db" -X POST -T "$run/$file" \
-    "$SURREAL_URL/import" | jq -e 'all(.[]; .status == "OK")' >/dev/null
+  response="$(curl -sS -w '\n%{http_code}' -u "root:$SURREAL_PASS" -H "Accept: application/json" \
+    -H "surreal-ns: $ns" -H "surreal-db: $db" -X POST -T "$run/$file" "$SURREAL_URL/import")"
+  status="${response##*$'\n'}"
+  body="${response%$'\n'*}"
+  if [ "$status" != 200 ] || ! jq -e 'type == "array" and all(.[]; .status == "OK")' \
+    <<<"$body" >/dev/null; then
+    printf 'import of %s/%s failed (HTTP %s): %s\n' "$ns" "$db" "$status" "$body" >&2
+    exit 1
+  fi
 done
 sql 'USE NS sibyl_auth; DEFINE DATABASE OVERWRITE auth STRICT;
      USE NS sibyl_content; DEFINE DATABASE OVERWRITE content STRICT;'

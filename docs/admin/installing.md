@@ -33,7 +33,8 @@ controller for TLS and routing.
 - A Gateway API-compatible controller or classic Ingress controller.
 - A secrets injector such as External Secrets Operator, Sealed Secrets, or your cloud KMS-backed
   secret manager.
-- SurrealDB 3.x, either through `charts/surrealdb` or a separately managed endpoint.
+- SurrealDB 4.0.0, either through `charts/surrealdb` or a separately managed endpoint. A store a 3.x
+  server wrote needs the one-way [SurrealDB 4.0 upgrade](../deployment/surrealdb-4-upgrade.md).
 - Valkey or Redis when backend or worker replicas are greater than one.
 - For enterprise SSO only: corporate OIDC app registration with MFA enforced at the provider.
 

@@ -221,17 +221,25 @@ ingress:
 
 ### SurrealDB Requirements (default)
 
-- SurrealDB 3.x. Pin an explicit tested image tag for production instead of floating on `latest`.
-- TiKV-backed storage for replicated SurrealDB pods, or RocksDB-backed storage for a single pod
+- SurrealDB 4.0.0 (`surrealdb/surrealdb:v4.0.0`), the one server release Sibyl supports. Pin that
+  tag for production instead of floating on `latest`.
+- A single SurrealDB pod on a SurrealKV-backed PVC (`surrealkv:/data/db`)
 - Root credentials set at start (`--user` / `--pass`)
 - Persistence and backups live in the selected SurrealDB storage engine
 
-For a scalable in-cluster shape, deploy the TiDB Operator, create a small TiKV/PD cluster, and point
-the official SurrealDB Helm chart at `tikv://<pd-service>:2379`. For single-pod installs, a
-RocksDB-backed PVC is simpler. Either way, `tikv://` and `rocksdb://` configure the SurrealDB server
-only. Point Sibyl's `backend.surreal.url` at that server with a `ws://`, `wss://`, `http://`, or
-`https://` URL. The backend rejects unsupported schemes such as `rocksdb://` and `tikv://` at
-startup; the embedded forms have their own rules and are not meant for a cluster (see
+The `charts/surrealdb` wrapper runs that shape: one pod, `Recreate` rollouts, a PVC the kubelet
+hands to the image's 65532 group (`fsGroup: 65532`), readiness on `/ready`, and a liveness delay
+that covers the one start that converts a 3.x store. Moving a store a 3.x server wrote is a one-way
+conversion; follow the [SurrealDB 4.0 upgrade](./surrealdb-4-upgrade.md#helm) runbook.
+
+The standard 4.0 image has no TiKV engine and refuses `tikv://` ("not enabled in this build"), so a
+replicated SurrealDB needs the separate TiKV build of the server, which Sibyl does not test. Either
+way, the store path configures the SurrealDB server only. Point Sibyl's `backend.surreal.url` at
+that server with a `ws://`, `wss://`, `http://`, or `https://` URL; the first start after a move to
+SurrealDB 4 needs `ws://` or `wss://`, because rebuilding indexes can outlast the HTTP transport's
+30 s limit. The backend rejects `rocksdb://` and `tikv://` at startup, and `surrealkv://` would open
+an embedded store inside the backend instead of reaching the server; the embedded forms have their
+own rules and are not meant for a cluster (see
 [SurrealDB URL forms](./environment.md#surrealdb-url-forms)).
 
 ### Coordination Requirements

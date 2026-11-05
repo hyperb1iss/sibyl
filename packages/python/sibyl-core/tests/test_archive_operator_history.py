@@ -10,6 +10,7 @@ from uuid import uuid4
 
 import pytest
 
+from sibyl_core.backends.surreal.server_version import SURREAL_SERVER_VERSION_STRING
 from sibyl_core.migrate.archive_native_values import prepare_archive_native_value
 from sibyl_core.migrate.archive_operator_history import (
     ArchiveHistoryScope,
@@ -188,7 +189,7 @@ def dataset(tmp_path):
         "endpoint": "ws://127.0.0.1:23108/rpc",
         "operator_id": "inert-assertion",
         "decision_id": "inert-decision",
-        "server_version": "surrealdb-3.2.4",
+        "server_version": SURREAL_SERVER_VERSION_STRING,
         "graph_namespace_prefix": "history_",
         "namespace_catalog": {"namespaces": {s.namespace: "namespace-definition" for s in scopes}},
         "scopes": [],
@@ -611,6 +612,22 @@ def test_history_rejects_membership_native_type_pair_and_affinity_drift(dataset,
         )
     with pytest.raises(ValueError):
         validate(data, scopes)
+
+
+@pytest.mark.parametrize(
+    "server_version", ["surrealdb-3.2.4", "surrealdb-4.0.1", "surrealdb-4.1.0"]
+)
+def test_history_rejects_a_root_captured_on_another_backend(dataset, server_version):
+    data, scopes, _, _ = dataset
+    data["server_version"] = server_version
+    with pytest.raises(ValueError, match="unsupported history backend"):
+        validate(data, scopes)
+
+
+def test_history_accepts_the_supported_backend_with_a_build_suffix(dataset):
+    data, scopes, _, _ = dataset
+    data["server_version"] = f"{SURREAL_SERVER_VERSION_STRING}+build.7"
+    assert validate(data, scopes).payload["chains"] == []
 
 
 def test_history_registered_empty_and_optional_diagnostic_absence_are_bound(dataset):

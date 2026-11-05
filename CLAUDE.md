@@ -203,8 +203,9 @@ from sibyl.cli.common import ELECTRIC_PURPLE
 ### SurrealDB (default)
 
 - **Port 8000** for ws/http; RPC path is `/rpc`
-- **Dev server:** `moon run dev` runs a RocksDB-backed SurrealDB server with data in
-  `.moon/cache/surreal-dev`
+- **Dev server:** `moon run dev` runs a SurrealKV-backed SurrealDB 4.0 server with data in
+  `.moon/cache/surreal-dev`. A directory a 3.x server wrote is refused until it is converted once:
+  back it up, then run `SURREAL_EXPERIMENTAL_UPGRADE_FROM_3X=true moon run dev`
 - **Embedded mode** (`SIBYL_SURREAL_DATA_DIR`, SurrealKV) is single-writer and single-process; give
   it its own directory
 - **Namespace-per-org** (`org_<uuid_hex>`): missing group_id routes queries to the wrong namespace

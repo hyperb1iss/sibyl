@@ -10,7 +10,7 @@ Four long-running containers plus a one-shot volume initializer (`surreal-init`)
 
 | Container   | Source                                              | Purpose                        |
 | ----------- | --------------------------------------------------- | ------------------------------ |
-| `surrealdb` | `surrealdb/surrealdb:v3.2.4`                        | Graph, content, and auth store |
+| `surrealdb` | `surrealdb/surrealdb:v4.0.0`                        | Graph, content, and auth store |
 | `backend`   | `ghcr.io/hyperb1iss/sibyl-api`                      | FastAPI + MCP server           |
 | `frontend`  | `ghcr.io/hyperb1iss/sibyl-web`                      | Next.js web UI                 |
 | `caddy`     | built from `caddy:2` with the Cloudflare DNS module | TLS + path routing             |
@@ -36,15 +36,18 @@ provisions a host end to end:
 
 ### Variables
 
-| Variable                    | Default                   | Purpose                                         |
-| --------------------------- | ------------------------- | ----------------------------------------------- |
-| `sibyl_domain`              | `sibyl.example.com`       | Hostname Caddy serves                           |
-| `sibyl_version`             | `1.4.13`                  | ghcr.io image tag                               |
-| `sibyl_dir`                 | `/opt/sibyl`              | Deployment directory                            |
-| `sibyl_proxy_interface`     | `tailscale0`              | Interface HTTP/HTTPS is exposed on              |
-| `sibyl_mcp_auth_mode`       | `auto`                    | MCP bearer-token enforcement                    |
-| `sibyl_network_prefix`      | `10.47.213`               | First three octets of the compose network's /24 |
-| `sibyl_forwarded_allow_ips` | `10.47.213.10/32` (Caddy) | Proxies trusted to name the client              |
+| Variable                        | Default                      | Purpose                                                |
+| ------------------------------- | ---------------------------- | ------------------------------------------------------ |
+| `sibyl_domain`                  | `sibyl.example.com`          | Hostname Caddy serves                                  |
+| `sibyl_version`                 | `1.4.13`                     | ghcr.io image tag                                      |
+| `sibyl_dir`                     | `/opt/sibyl`                 | Deployment directory                                   |
+| `sibyl_proxy_interface`         | `tailscale0`                 | Interface HTTP/HTTPS is exposed on                     |
+| `sibyl_mcp_auth_mode`           | `auto`                       | MCP bearer-token enforcement                           |
+| `sibyl_network_prefix`          | `10.47.213`                  | First three octets of the compose network's /24        |
+| `sibyl_forwarded_allow_ips`     | `10.47.213.10/32` (Caddy)    | Proxies trusted to name the client                     |
+| `sibyl_surreal_image`           | `surrealdb/surrealdb:v4.0.0` | SurrealDB server image                                 |
+| `sibyl_surreal_path`            | `surrealkv:///data/sibyl.db` | Store path; `rocksdb:///data/sibyl.db` for a 3.x image |
+| `sibyl_surreal_upgrade_from_3x` | `false`                      | Set `true` for the one run that converts a 3.x store   |
 
 Secrets have no defaults and must be supplied, ideally through ansible-vault: `sibyl_jwt_secret`,
 `sibyl_surreal_password`, `sibyl_openai_api_key`, `sibyl_anthropic_api_key`, `sibyl_cf_api_token`.
@@ -169,6 +172,13 @@ curl -sf https://<sibyl_domain>/api/health
 - **Update:** bump the collection's `version` in `requirements.yml` to the new release tag,
   reinstall it with `ansible-galaxy collection install -r requirements.yml --force`, and re-run the
   role
+- **SurrealDB 4.0:** a host whose store a 3.x server wrote stays refused by 4.0 until it is
+  converted once, and the conversion is one-way. Either follow the
+  [SurrealDB 4.0 upgrade](./surrealdb-4-upgrade.md#ansible) runbook, or hold the host on 3.x by
+  setting both `sibyl_surreal_image` to the 3.x image and `sibyl_surreal_path` to
+  `rocksdb:///data/sibyl.db`. The role refuses a path that does not match the image's major, and an
+  image reference without a version tag, because a 3.x server opened with `surrealkv://` serves an
+  empty database beside the data; the stack's `surreal-init` checks the same pairing on every start.
 - **Backups:** schedule `surreal export` against the running stack and copy the dump off-host. The
   graph is your memory; back it up.
 

@@ -36,9 +36,11 @@ SIBYL_SURREAL_USERNAME=root
 SIBYL_SURREAL_PASSWORD=<secure-password>
 ```
 
-- Run SurrealDB 3.x as a service and pin the exact server image or tag in production.
-- `moon run dev` uses this mode: it starts a local RocksDB-backed SurrealDB server with data under
-  `.moon/cache/surreal-dev` and points Sibyl at `ws://127.0.0.1:8000/rpc`.
+- Run SurrealDB 4.0.0 as a service and pin the exact server image or tag in production. A store a
+  3.x server wrote needs the one-way [SurrealDB 4.0 upgrade](../deployment/surrealdb-4-upgrade.md)
+  first.
+- `moon run dev` uses this mode: it starts a local SurrealKV-backed SurrealDB 4.0 server with data
+  under `.moon/cache/surreal-dev` and points Sibyl at `ws://127.0.0.1:8000/rpc`.
 - Each org gets its own connection-pooled client scoped to its namespace, so queries within an org
   run concurrently.
 
@@ -54,8 +56,9 @@ SIBYL_SURREAL_DATA_DIR=./data/surreal
   `install.sh --daemon` run) uses this mode with `~/.sibyl/data/surreal`. Auth, content, and every
   org graph share one engine on that directory and persist across restarts. Through 1.4.1 the
   daemon's graph ran in memory, so upgrade before relying on it.
-- Use a directory of its own. The `moon run dev` server keeps RocksDB data in
-  `.moon/cache/surreal-dev`, so do not point SurrealKV there.
+- Use a directory of its own. The `moon run dev` server keeps its store in
+  `.moon/cache/surreal-dev`, and the embedded engine is a different SurrealDB release than that
+  server, so never point embedded mode there.
 - Embedded mode is single-writer. The embedded engine misses concurrent write-write conflicts, so
   Sibyl clamps embedded clients to one connection and each namespace writes through one client. Keep
   it to a single process. For real concurrency, run SurrealDB as a server.

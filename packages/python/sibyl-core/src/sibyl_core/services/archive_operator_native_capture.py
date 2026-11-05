@@ -33,6 +33,10 @@ from sibyl_core.backends.surreal.native_cleanup import (
 )
 from sibyl_core.backends.surreal.schema import GRAPH_EDGES, GRAPH_TABLES
 from sibyl_core.backends.surreal.schema_version import GRAPH_SCHEMA_CURRENT_VERSION
+from sibyl_core.backends.surreal.server_version import (
+    SURREAL_SERVER_VERSION_STRING,
+    is_supported_server_version,
+)
 from sibyl_core.migrate.archive_operator_native_root import (
     PROFILE,
     PreparedArchiveOperatorRoot,
@@ -246,8 +250,12 @@ async def capture_archive_operator_native_root(
         await connection.signin(credentials)
         require_native_socket_affinity(connection, original_socket)
         server_version = await connection.version()
-        if server_version.split("+", 1)[0] != "surrealdb-3.2.4":
-            raise ValueError("operator capture requires the proven native 3.2.4 backend")
+        # The capture fingerprints the server's own rendering of every row,
+        # so it runs only on the one release Sibyl supports.
+        if not is_supported_server_version(server_version):
+            raise ValueError(
+                f"operator capture requires the supported {SURREAL_SERVER_VERSION_STRING} backend"
+            )
         require_native_socket_affinity(connection, original_socket)
         transaction = await connection.begin()
         if type(transaction) is not UUID:

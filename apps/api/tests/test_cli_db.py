@@ -543,7 +543,7 @@ class _StubSchemaClient:
     def __init__(
         self,
         *,
-        version: int,
+        version: int | None,
         tables: dict[str, str] | None = None,
         indexes: dict[str, dict[str, str]] | None = None,
         version_read_error: str = "",
@@ -557,10 +557,10 @@ class _StubSchemaClient:
     async def execute_query(self, statement: str, **_params: object) -> object:
         self.statements.append(statement)
         stripped = statement.strip()
-        if stripped.startswith("SELECT version FROM schema_version"):
+        if stripped.startswith("SELECT version FROM (IF record::exists(schema_version:"):
             if self.version_read_error:
                 raise RuntimeError(self.version_read_error)
-            return [{"version": self.version}]
+            return [] if self.version is None else [{"version": self.version}]
         if stripped == "INFO FOR DB;":
             return [{"tables": self.tables}]
         if stripped.startswith("INFO FOR TABLE "):
@@ -574,7 +574,14 @@ class _StubSchemaClient:
         return None
 
 
-def _run_db_init(auth_client: object, content_client: object, *, args: list[str] | None = None):
+def _run_db_init(
+    auth_client: object,
+    content_client: object,
+    *,
+    args: list[str] | None = None,
+    auth_bootstrap: object | None = None,
+    content_bootstrap: object | None = None,
+):
     from sibyl_core.backends.surreal.schema_invariants import SchemaInvariantPlan
 
     empty_plan = SchemaInvariantPlan()
@@ -584,8 +591,11 @@ def _run_db_init(auth_client: object, content_client: object, *, args: list[str]
             "sibyl.persistence.surreal.content.build_surreal_content_client",
             lambda: content_client,
         ),
-        patch("sibyl_core.backends.surreal.bootstrap_auth_schema", AsyncMock()),
-        patch("sibyl_core.backends.surreal.bootstrap_content_schema", AsyncMock()),
+        patch("sibyl_core.backends.surreal.bootstrap_auth_schema", auth_bootstrap or AsyncMock()),
+        patch(
+            "sibyl_core.backends.surreal.bootstrap_content_schema",
+            content_bootstrap or AsyncMock(),
+        ),
         patch(
             "sibyl_core.backends.surreal.auth_schema.auth_schema_invariant_plan",
             lambda: empty_plan,
@@ -625,6 +635,45 @@ def test_db_init_fails_when_migrations_stop_short_of_the_target() -> None:
 
     assert result.exit_code == 1
     assert f"expected v{CONTENT_SCHEMA_CURRENT_VERSION}" in result.output
+
+
+def test_db_init_reads_a_fresh_store_through_the_record_existence_check() -> None:
+    """A store never bootstrapped has no schema_version table yet.
+
+    SurrealDB 4 fails a plain read of an undefined table, so init must ask
+    through the existence-checked record query, see v0, and then bootstrap.
+    """
+    from sibyl_core.backends.surreal.auth_schema import AUTH_SCHEMA_CURRENT_VERSION
+    from sibyl_core.backends.surreal.content_schema import CONTENT_SCHEMA_CURRENT_VERSION
+
+    auth = _StubSchemaClient(version=None)
+    content = _StubSchemaClient(version=None)
+
+    def bootstrapped(client: _StubSchemaClient, version: int) -> AsyncMock:
+        async def bootstrap(_client: object) -> None:
+            client.version = version
+
+        return AsyncMock(side_effect=bootstrap)
+
+    result = _run_db_init(
+        auth,
+        content,
+        args=["--json"],
+        auth_bootstrap=bootstrapped(auth, AUTH_SCHEMA_CURRENT_VERSION),
+        content_bootstrap=bootstrapped(content, CONTENT_SCHEMA_CURRENT_VERSION),
+    )
+
+    assert result.exit_code == 0, result.output
+    planes = json.loads(result.output)["planes"]
+    assert [plane["version_before"] for plane in planes] == [0, 0]
+    assert [plane["version_after"] for plane in planes] == [
+        AUTH_SCHEMA_CURRENT_VERSION,
+        CONTENT_SCHEMA_CURRENT_VERSION,
+    ]
+    for client in (auth, content):
+        reads = [s for s in client.statements if "schema_version" in s]
+        assert reads
+        assert all("record::exists(schema_version:" in s for s in reads)
 
 
 def test_db_init_succeeds_when_both_planes_reach_their_target() -> None:

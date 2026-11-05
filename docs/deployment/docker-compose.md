@@ -53,44 +53,39 @@ SIBYL_COORDINATION_BACKEND=redis moon run dev
 
 ## Service Definitions
 
-The root `docker-compose.yml` defines a Surreal-first local stack plus an opt-in `redis` profile. It
-runs only the data services; the API and web apps run natively for hot reload.
+The root [`docker-compose.yml`](https://github.com/hyperb1iss/sibyl/blob/main/docker-compose.yml)
+defines a Surreal-first local stack plus opt-in `redis` and `eval` profiles. It runs only the data
+services; the API and web apps run natively for hot reload. Start from that file rather than a copy
+of its parts: its `surreal-init` one-shot carries the store guard described below, and a SurrealDB
+service started without it can open existing data as an empty database.
 
-```yaml
-services:
-  surrealdb:
-    image: ${SIBYL_SURREAL_IMAGE:-surrealdb/surrealdb:v3.2.4}
-    container_name: ${COMPOSE_PROJECT_NAME:-sibyl}-surrealdb
-    command:
-      [
-        "start",
-        "--log",
-        "info",
-        "--user",
-        "${SIBYL_SURREAL_USERNAME:-root}",
-        "--pass",
-        "${SIBYL_SURREAL_PASSWORD:-root}",
-        "${SIBYL_SURREAL_PATH:-rocksdb:///data/sibyl.db}",
-      ]
-    ports:
-      - "${SIBYL_SURREAL_PORT:-8000}:8000"
-    volumes:
-      # `:U` chowns the bind mount to the container UID under rootless podman
-      - "${SURREAL_DATA_DIR:-./.moon/cache/surreal-dev}:/data:U"
+- `surreal-init` checks the image and store path, then hands the data directory to uid 65532.
+  `surrealdb` starts only after it exits cleanly.
+- `surrealdb` runs `${SIBYL_SURREAL_IMAGE:-surrealdb/surrealdb:v4.0.0}` on
+  `${SIBYL_SURREAL_PATH:-surrealkv:///data/sibyl.db}`, published on `${SIBYL_SURREAL_PORT:-8000}`,
+  with its data in `${SURREAL_DATA_DIR:-./.moon/cache/surreal-dev}` and the value log off.
+- `surrealdb-eval` (the `eval` profile) runs the same pinned image behind its own guarded init, on
+  `127.0.0.1:8018`, with data under `${SIBYL_RELEASE_ROOT:-./.moon/cache/surreal-eval}`.
+- `redis` (the `redis` profile) runs Valkey 8 on `${SIBYL_REDIS_PORT:-6381}` without persistence.
 
-  redis:
-    image: valkey/valkey:8-alpine
-    container_name: ${COMPOSE_PROJECT_NAME:-sibyl}-redis
-    profiles: ["redis"]
-    ports:
-      - "${SIBYL_REDIS_PORT:-6381}:6379"
-    command: ["valkey-server", "--save", "", "--appendonly", "no"]
-```
+The default image is pinned to SurrealDB server `v4.0.0` for reproducible local and CI behavior, and
+it stores data with SurrealKV. Override `SIBYL_SURREAL_IMAGE` when rehearsing a newer server patch.
+The root compose stores SurrealDB data in a bind mount under `.moon/cache/surreal-dev` so it
+survives container churn and is easy to inspect.
 
-The default image is pinned to SurrealDB server `v3.2.4` for reproducible local and CI behavior.
-Override `SIBYL_SURREAL_IMAGE` when rehearsing a newer server patch. The root compose stores
-SurrealDB data in a bind mount under `.moon/cache/surreal-dev` so it survives container churn and is
-easy to inspect.
+The SurrealDB image runs as uid and gid 65532, and a bind-mounted directory keeps its host owner, so
+the `surreal-init` one-shot hands the directory to 65532 before the server starts. A plain
+`docker compose up` therefore works on Linux with a directory your own user created.
+
+A data directory a SurrealDB 3.x server wrote is refused by 4.0 until it is converted, and the
+conversion is one-way. Follow the [SurrealDB 4.0 upgrade](./surrealdb-4-upgrade.md) runbook, which
+starts the server once with `SURREAL_EXPERIMENTAL_UPGRADE_FROM_3X=true` in the shell. To stay on a
+3.x server for now, set both `SIBYL_SURREAL_IMAGE` and
+`SIBYL_SURREAL_PATH=rocksdb:///data/sibyl.db`: a 3.x server opened with `surrealkv://` serves an
+empty database beside the data. The `surreal-init` one-shot checks the image and path before every
+start and stops with the reason instead of starting a pairing that would open the data wrong. The
+image must name its version, the path must be absolute, 3.x runs only on `rocksdb://` and 4.x only
+on `surrealkv://`; then the store in the directory has to be one that server opens.
 
 ## Port Mappings
 
@@ -242,13 +237,17 @@ services:
         condition: service_healthy
 
   surrealdb:
-    image: ${SIBYL_SURREAL_IMAGE:-surrealdb/surrealdb:v3.2.4}
+    image: ${SIBYL_SURREAL_IMAGE:-surrealdb/surrealdb:v4.0.0}
     ports:
       - "${SIBYL_SURREAL_PORT:-8000}:8000"
     volumes:
       - surreal_data:/data
+    environment:
+      - SURREAL_EXPERIMENTAL_UPGRADE_FROM_3X
+      - SURREAL_SURREALKV_ENABLE_VLOG=false
     healthcheck:
       test: ["CMD", "/surreal", "is-ready", "--endpoint", "http://localhost:8000"]
+      start_period: 10m
 
 volumes:
   surreal_data:
@@ -261,8 +260,11 @@ network and stop publishing port 3334; the
 never safe to list.
 
 The production compose persists SurrealDB to a named Docker volume (`surreal_data`) rather than a
-bind mount. `NEXT_PUBLIC_API_URL` is the browser-facing API URL; `SIBYL_API_URL` is the in-network
-URL the Next.js server uses for SSR fetches.
+bind mount, and its `surreal-init` one-shot hands the volume to the image's 65532 user. The
+healthcheck's ten-minute `start_period` covers the one start that converts a 3.x store, when nothing
+listens on the port; see the [SurrealDB 4.0 upgrade](./surrealdb-4-upgrade.md).
+`NEXT_PUBLIC_API_URL` is the browser-facing API URL; `SIBYL_API_URL` is the in-network URL the
+Next.js server uses for SSR fetches.
 
 ## Quickstart Compose (Zero-Config)
 

@@ -1,5 +1,5 @@
 # Sibyl SurrealDB wrapper values.
-# The upstream chart is pinned and configured for a single RocksDB-backed pod.
+# The upstream chart is pinned and configured for a single SurrealKV-backed pod.
 
 global:
   imagePullSecrets: []
@@ -7,28 +7,69 @@ global:
 surrealdb:
   replicaCount: 1
   image:
-    tag: v3.2.4
+    tag: v4.0.0
   args:
     - start
   surrealdb:
-    path: rocksdb:/data/db
+    # The path moves with the image: a 3.x server handed surrealkv:// on its
+    # RocksDB directory serves an empty database, so the chart renders a 3.x
+    # tag only with rocksdb: and 4.x only with surrealkv:, at an absolute
+    # path. A pod held on 3.x keeps rocksdb:/data/db.
+    path: surrealkv:/data/db
     unauthenticated: false
   strategy:
     type: Recreate
-  # RocksDB can still be flushing at SIGTERM; the default 30s kubelet grace
+  # The store can still be flushing at SIGTERM; the default 30s kubelet grace
   # period risks losing the tail of a compaction on node drains.
   terminationGracePeriodSeconds: 120
   persistence:
     enabled: true
     # Empty uses the cluster default storage class; premium block storage
-    # recommended for RocksDB.
+    # recommended. Converting a 3.x store in place needs about 2.4x its size
+    # free while it runs.
     storageClassName: ""
     size: 100Gi
+  # The image runs as 65532:65532 and a PVC mount hides the image's own
+  # /data ownership, so the kubelet hands the volume to that group.
+  # OnRootMismatch skips the recursive walk once the root already matches.
+  podSecurityContext:
+    runAsNonRoot: true
+    runAsUser: 65532
+    runAsGroup: 65532
+    fsGroup: 65532
+    fsGroupChangePolicy: OnRootMismatch
+  securityContext:
+    allowPrivilegeEscalation: false
+    capabilities:
+      drop:
+        - ALL
+  # /ready answers 503 until the datastore serves queries. While 4.0
+  # converts a 3.x store in place nothing listens at all, and the upstream
+  # chart has no startupProbe value, so liveness waits out the conversion
+  # window instead. Allow 30 s per GB of the RocksDB store: 600 covers 20 GB;
+  # raise it for a larger store before the conversion rollout.
+  readinessProbe:
+    httpGet:
+      path: /ready
+      port: http
+    periodSeconds: 5
+    timeoutSeconds: 5
+  livenessProbe:
+    httpGet:
+      path: /health
+      port: http
+    initialDelaySeconds: 600
+    periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 6
   podExtraEnv:
     - name: OTEL_EXPORTER_OTLP_ENDPOINT
       value: ""
     - name: OTEL_SERVICE_NAME
       value: sibyl-surrealdb
+    # Off from a directory's first 4.0 start: value-log files are never reclaimed.
+    - name: SURREAL_SURREALKV_ENABLE_VLOG
+      value: "false"
 
 # opsImage runs the operational jobs (strict bootstrap, export, restore
 # drill). The official surrealdb image is distroless (no shell since v2),
@@ -97,6 +138,10 @@ jobDefaults:
 bootstrap:
   enabled: true
   backoffLimit: 3
+  # The hook waits this long for /ready before it gives up. A rollout that
+  # converts a 3.x store in place keeps the port closed until the
+  # conversion ends.
+  readyTimeoutSeconds: 1800
   ttlSecondsAfterFinished: 600
   annotations: {}
 
@@ -238,9 +283,9 @@ restoreDrill:
     username: drill
     password: drill
     # The drill restores every namespace, so the scratch server holds a
-    # full copy of the data. RocksDB on the pod's /tmp emptyDir keeps it
+    # full copy of the data. SurrealKV on the pod's /tmp emptyDir keeps it
     # on node disk rather than in memory; "memory" suits small datasets.
-    path: rocksdb:/tmp/restore-db
+    path: surrealkv:/tmp/restore-db
   # The scratch server runs as its own sidecar container, so a restore
   # path that lives on a volume (anything other than "memory" or a
   # path under /tmp) needs its mount declared here as well; the

@@ -9,6 +9,7 @@ from uuid import uuid4
 
 import pytest
 
+from sibyl_core.backends.surreal.server_version import SURREAL_SERVER_VERSION_STRING
 from sibyl_core.migrate.archive_native_values import prepare_archive_native_value
 from sibyl_core.migrate.archive_operator_native_root import (
     PROFILE,
@@ -59,7 +60,7 @@ def inert_native():
         "endpoint": "ws://127.0.0.1:23108/rpc",
         "operator_id": "asserted-label",
         "decision_id": "asserted-decision",
-        "server_version": "surrealdb-3.2.4",
+        "server_version": SURREAL_SERVER_VERSION_STRING,
         "graph_namespace_prefix": "test_",
         "namespace_catalog": {"namespaces": namespaces},
         "scopes": scopes,
@@ -199,7 +200,7 @@ async def test_operator_primary_and_cleanup_failures_remain_visible(monkeypatch,
             pass
 
         async def version(self):
-            return "surrealdb-3.2.4"
+            return SURREAL_SERVER_VERSION_STRING
 
         async def begin(self):
             calls.append("begin")
@@ -272,7 +273,16 @@ async def test_operator_primary_and_cleanup_failures_remain_visible(monkeypatch,
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    "server_version", ["surrealdb-3.2.40+future", "surrealdb-3.3.0", "surrealdb-2.3.10"]
+    "server_version",
+    # The release before the supported one, a pre-release and a patch that share
+    # its prefix, the next minor, and an older major.
+    [
+        "surrealdb-3.2.4",
+        "surrealdb-4.0.0-rc.1",
+        "surrealdb-4.0.1+future",
+        "surrealdb-4.1.0",
+        "surrealdb-2.3.10",
+    ],
 )
 async def test_operator_unknown_engine_version_closes_without_begin(monkeypatch, server_version):
     grant = authorization()
@@ -309,7 +319,7 @@ async def test_operator_unknown_engine_version_closes_without_begin(monkeypatch,
     async def authorize():
         return grant
 
-    with pytest.raises(ValueError, match="proven native"):
+    with pytest.raises(ValueError, match=f"supported {SURREAL_SERVER_VERSION_STRING} backend"):
         await product.capture_archive_operator_native_root(authorize, credentials={})
     assert calls == ["connect", "signin", "socket-close", "close"]
 

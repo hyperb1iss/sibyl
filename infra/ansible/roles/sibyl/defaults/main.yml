@@ -9,7 +9,18 @@ sibyl_version: "1.4.13"
 # fallback so the engine a host runs is a deliberate, reviewable value: an
 # unset variable would otherwise let a checkout's default silently upgrade
 # the database on the next restart, independently of sibyl_version.
-sibyl_surreal_image: "surrealdb/surrealdb:v3.2.4"
+sibyl_surreal_image: "surrealdb/surrealdb:v4.0.0"
+
+# The store path SurrealDB opens. It moves with the image: 4.x opens
+# surrealkv://, and a 3.x server given surrealkv:// on its RocksDB directory
+# starts an empty database beside the data. A host held on a 3.x image keeps
+# rocksdb:///data/sibyl.db; the role refuses a path that does not match.
+sibyl_surreal_path: "surrealkv:///data/sibyl.db"
+
+# Set true for the one run that converts a store a 3.x server wrote; 4.x
+# refuses that store otherwise. The conversion is one-way. Back up first and
+# follow docs/deployment/surrealdb-4-upgrade.md, then set it back to false.
+sibyl_surreal_upgrade_from_3x: false
 
 # Public hostname Caddy serves and requests a certificate for.
 sibyl_domain: sibyl.example.com

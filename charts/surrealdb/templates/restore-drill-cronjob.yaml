@@ -89,6 +89,10 @@ spec:
                   value: {{ .Values.restoreDrill.restore.password | quote }}
                 - name: SURREAL_RESTORE_PATH
                   value: {{ .Values.restoreDrill.restore.path | quote }}
+                # The scratch store is created by 4.0, so it carries the
+                # storage settings every SurrealDB server Sibyl starts does.
+                - name: SURREAL_SURREALKV_ENABLE_VLOG
+                  value: "false"
               resources:
                 {{- toYaml .Values.jobDefaults.resources | nindent 16 }}
               volumeMounts:

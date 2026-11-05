@@ -752,7 +752,7 @@ tasks:
     command:
       uv run pytest tools/tests/test_runtime_surface.py
       tools/tests/test_longmemeval_v2_reader_replay.py tools/tests/test_usage_rerank_harness.py
-      tools/tests/test_installer_qualification.py -v
+      tools/tests/test_installer_qualification.py tools/tests/test_surreal_server_pins.py -v
     inputs:
       - tools/**/*.py
       - benchmarks/git_provenance.py

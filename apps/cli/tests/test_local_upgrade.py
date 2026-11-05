@@ -10,8 +10,13 @@ import pytest
 import yaml
 from typer.testing import CliRunner
 
-from sibyl_cli import local
-from sibyl_cli.docker_storage import SURREAL_IMAGE_REFERENCE, upgraded_surreal_image
+from sibyl_cli import docker_storage, local
+from sibyl_cli.docker_storage import (
+    SURREAL_IMAGE,
+    SURREAL_IMAGE_REFERENCE,
+    held_surreal_tag,
+    upgraded_surreal_image,
+)
 from sibyl_cli.local import ComposeContainer
 from sibyl_cli.main import app
 
@@ -25,6 +30,7 @@ def local_runtime(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     monkeypatch.setattr(local, "check_docker", lambda: True)
     monkeypatch.setattr(local, "check_docker_compose", lambda: True)
     monkeypatch.setattr(local, "container_owner", lambda name="sibyl-api": "local")
+    monkeypatch.delenv("SIBYL_SURREAL_IMAGE", raising=False)
     local.write_compose_file(local.compose_config_for("1.4.0"))
     return local_dir / "docker-compose.yml"
 
@@ -88,9 +94,7 @@ class FakeCompose:
         files = (local.SIBYL_LOCAL_COMPOSE.resolve(),)
         api_image = self.api_image or f"ghcr.io/hyperb1iss/sibyl-api:{self.running_tag}"
         return [
-            ComposeContainer(
-                files, "surrealdb", "surrealdb/surrealdb:v3.2.4", "s1", "sibyl-surrealdb"
-            ),
+            ComposeContainer(files, "surrealdb", SURREAL_IMAGE, "s1", "sibyl-surrealdb"),
             ComposeContainer(files, "api", api_image, "a1", "sibyl-api"),
         ]
 
@@ -202,7 +206,7 @@ def test_sibyl_up_keeps_a_newer_surrealdb(
     local_runtime: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """The start the retry advice leads to must not undo what `local upgrade` kept."""
-    newer = "${SIBYL_SURREAL_IMAGE:-surrealdb/surrealdb:v3.9.0}"
+    newer = "${SIBYL_SURREAL_IMAGE:-surrealdb/surrealdb:v4.9.0}"
     config = yaml.safe_load(local_runtime.read_text())
     config["services"]["surrealdb"]["image"] = newer
     local.write_compose_file(config)
@@ -217,7 +221,7 @@ def test_sibyl_up_keeps_a_newer_surrealdb(
 def test_surrealdb_is_never_moved_backwards(
     local_runtime: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    newer = "${SIBYL_SURREAL_IMAGE:-surrealdb/surrealdb:v3.9.0}"
+    newer = "${SIBYL_SURREAL_IMAGE:-surrealdb/surrealdb:v4.9.0}"
     config = yaml.safe_load(local_runtime.read_text())
     config["services"]["surrealdb"]["image"] = newer
     local.write_compose_file(config)
@@ -234,7 +238,9 @@ def test_an_older_cli_written_surrealdb_moves_up(
     local_runtime: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     config = yaml.safe_load(local_runtime.read_text())
-    config["services"]["surrealdb"]["image"] = "${SIBYL_SURREAL_IMAGE:-surrealdb/surrealdb:v3.2.3}"
+    config["services"]["surrealdb"]["image"] = (
+        "${SIBYL_SURREAL_IMAGE:-surrealdb/surrealdb:v4.0.0-beta.1}"
+    )
     local.write_compose_file(config)
 
     result = _invoke(monkeypatch, FakeCompose(), healthy=[True])
@@ -248,14 +254,86 @@ def test_an_older_cli_written_surrealdb_moves_up(
     ("image", "expected"),
     [
         (SURREAL_IMAGE_REFERENCE, SURREAL_IMAGE_REFERENCE),
-        ("${SIBYL_SURREAL_IMAGE:-surrealdb/surrealdb:v3.2.3}", SURREAL_IMAGE_REFERENCE),
+        # Same major, older: moves up.
+        ("${SIBYL_SURREAL_IMAGE:-surrealdb/surrealdb:v4.0.0-beta.1}", SURREAL_IMAGE_REFERENCE),
+        # Older major: held, because crossing converts the store one way.
+        ("${SIBYL_SURREAL_IMAGE:-surrealdb/surrealdb:v3.2.4}", None),
         ("${SIBYL_SURREAL_IMAGE:-surrealdb/surrealdb:v3.9.0}", None),
+        # Newer, on this major or the next: never moved backwards.
+        ("${SIBYL_SURREAL_IMAGE:-surrealdb/surrealdb:v4.9.0}", None),
+        ("${SIBYL_SURREAL_IMAGE:-surrealdb/surrealdb:v5.0.0}", None),
+        # Hand-written or unparseable: left as written.
         ("surrealdb/surrealdb:v3.2.1", None),
         ("${SIBYL_SURREAL_IMAGE:-surrealdb/surrealdb:nightly}", None),
     ],
 )
 def test_the_shared_surrealdb_rule(image: str, expected: str | None) -> None:
     assert upgraded_surreal_image(image) == expected
+
+
+def test_the_rule_moves_within_a_major_and_holds_across_one(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """With a later 4.x shipped, any 4.x default moves up and a 3.x one still waits."""
+    shipped = "surrealdb/surrealdb:v4.2.0"
+    monkeypatch.setattr(docker_storage, "SURREAL_IMAGE", shipped)
+    monkeypatch.setattr(
+        docker_storage, "SURREAL_IMAGE_REFERENCE", f"${{SIBYL_SURREAL_IMAGE:-{shipped}}}"
+    )
+    four, three = (
+        "${SIBYL_SURREAL_IMAGE:-surrealdb/surrealdb:v4.0.0}",
+        "${SIBYL_SURREAL_IMAGE:-surrealdb/surrealdb:v3.2.4}",
+    )
+
+    assert upgraded_surreal_image(four) == f"${{SIBYL_SURREAL_IMAGE:-{shipped}}}"
+    assert upgraded_surreal_image(three) is None
+    assert (held_surreal_tag(four), held_surreal_tag(three)) == (None, "v3.2.4")
+    # Only a CLI-written default is ever held; a hand-written 3.x image is the user's.
+    assert held_surreal_tag("surrealdb/surrealdb:v3.2.4") is None
+
+
+# The surrealdb service a 3.x CLI wrote, which a 4.0 store path must never reach.
+SURREAL_3X_SERVICE = {
+    "image": "${SIBYL_SURREAL_IMAGE:-surrealdb/surrealdb:v3.2.4}",
+    "container_name": "sibyl-surrealdb",
+    "command": [
+        "start",
+        "--user",
+        "${SIBYL_SURREAL_USERNAME:-root}",
+        "--pass",
+        "${SIBYL_SURREAL_PASSWORD:-sibyl_local}",
+        "rocksdb:///data/sibyl.db",
+    ],
+    "healthcheck": {
+        "test": ["CMD", "/surreal", "is-ready", "--endpoint", "http://localhost:8000"],
+        "interval": "5s",
+        "timeout": "3s",
+        "retries": 5,
+    },
+}
+
+
+def _hold_on_3x(compose: Path) -> None:
+    config = yaml.safe_load(compose.read_text())
+    config["services"]["surrealdb"] = SURREAL_3X_SERVICE
+    local.write_compose_file(config)
+
+
+def test_upgrade_holds_a_3x_surrealdb_service_whole(
+    local_runtime: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _hold_on_3x(local_runtime)
+
+    result = _invoke(monkeypatch, FakeCompose(), healthy=[True])
+
+    assert result.exit_code == 0, result.output
+    services = yaml.safe_load(local_runtime.read_text())["services"]
+    assert services["surrealdb"] == SURREAL_3X_SERVICE
+    assert services["surrealdb"]["command"][-1] == "rocksdb:///data/sibyl.db"
+    assert services["api"]["image"].endswith(":1.5.0")
+    output = " ".join(result.output.split())
+    assert "SurrealDB stays on v3.2.4" in output
+    assert "sibyl local upgrade --surreal-major" in output
 
 
 def test_a_concurrent_upgrade_fails_cleanly(
@@ -522,7 +600,7 @@ def test_containers_are_matched_on_the_compose_file_not_the_directory_name(
     listing = (
         f"{foreign}\tapi\tmycorp/api:1.0.3\n"
         f"{ours}\tapi\tghcr.io/hyperb1iss/sibyl-api:1.4.0\n"
-        f"{ours}\tsurrealdb\tsurrealdb/surrealdb:v3.2.4\n"
+        f"{ours}\tsurrealdb\t{SURREAL_IMAGE}\n"
         "\t\tbare-container:latest\n"
     )
 

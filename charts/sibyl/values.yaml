@@ -174,9 +174,13 @@ backend:
   # The API applies pending schema migrations before it answers HTTP, and an
   # upgrade that snapshots embedding evidence scans raw captures (about 12s
   # per 100k rows). Liveness is held off until startup succeeds, so a large
-  # migration is not killed and restarted from scratch. The default allows
-  # 10 minutes; raise failureThreshold for larger stores. To drop the probe,
-  # set startupProbe to null: an empty map merges with these defaults and
+  # migration is not killed and restarted from scratch. The first start after
+  # the store moves to SurrealDB 4 also rebuilds the auth and content indexes
+  # before it serves, about 60 s per GB of those databases: allow a
+  # failureThreshold of at least 6 per GB. A lease serializes the rebuild, so
+  # replicas are safe; one replica for that start is only faster. The default
+  # allows 10 minutes; raise failureThreshold for larger stores. To drop the
+  # probe, set startupProbe to null: an empty map merges with these defaults and
   # leaves the probe in place.
   startupProbe:
     httpGet:
@@ -249,7 +253,9 @@ backend:
 
   # -- SurrealDB connection settings
   surreal:
-    # -- SurrealDB connection URL (ws:// or http:// to an external Surreal instance)
+    # -- SurrealDB connection URL (ws:// or http:// to an external Surreal instance).
+    # The first start after a store moves to SurrealDB 4 needs ws:// or wss://:
+    # its index rebuild can outlast the HTTP transport's 30 s request limit.
     url: "ws://surrealdb:8000/rpc"
     # -- Root username
     username: "root"

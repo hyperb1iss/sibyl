@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import io
 import json
+import re
 import shutil
 import subprocess
 import tarfile
@@ -14,8 +15,15 @@ from typer.testing import CliRunner
 from sibyl_cli import config_store
 from sibyl_cli import docker as docker_module
 from sibyl_cli import local as local_module
-from sibyl_cli.docker_storage import SURREAL_IMAGE_REFERENCE
+from sibyl_cli.docker_storage import (
+    SURREAL_IMAGE,
+    SURREAL_IMAGE_REFERENCE,
+    SURREAL_STORAGE_ENV,
+    SURREAL_STORE_PATH,
+    shipped_surreal_tag,
+)
 from sibyl_cli.main import app
+from sibyl_core.backends.surreal.server_version import SURREAL_STORE_GUARD
 
 
 def _use_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -246,7 +254,7 @@ def test_docker_upgrade_tag_updates_pinned_compose_images(
     assert services["api"]["image"] == "ghcr.io/hyperb1iss/sibyl-api-crawler:1.0.0-rc.8"
     assert services["worker"]["image"] == "ghcr.io/hyperb1iss/sibyl-api-crawler:1.0.0-rc.8"
     assert services["web"]["image"] == "ghcr.io/hyperb1iss/sibyl-web:1.0.0-rc.8"
-    assert services["surrealdb"]["image"] == "${SIBYL_SURREAL_IMAGE:-surrealdb/surrealdb:v3.2.4}"
+    assert services["surrealdb"]["image"] == SURREAL_IMAGE_REFERENCE
 
 
 def _as_older_worker_bundle(compose_path: Path) -> None:
@@ -416,7 +424,7 @@ def test_docker_upgrade_moves_older_surreal_default_to_shipped_pin(
     monkeypatch: pytest.MonkeyPatch,
     tag_args: list[str],
 ) -> None:
-    old_pin = "${SIBYL_SURREAL_IMAGE:-surrealdb/surrealdb:v3.2.3}"
+    old_pin = "${SIBYL_SURREAL_IMAGE:-surrealdb/surrealdb:v4.0.0-beta.1}"
     compose_path, calls = _docker_runtime(tmp_path, monkeypatch, surreal_image=old_pin)
 
     result = CliRunner().invoke(app, ["docker", "upgrade", *tag_args])
@@ -424,7 +432,7 @@ def test_docker_upgrade_moves_older_surreal_default_to_shipped_pin(
     assert result.exit_code == 0, result.output
     services = yaml.safe_load(compose_path.read_text())["services"]
     assert services["surrealdb"]["image"] == SURREAL_IMAGE_REFERENCE
-    assert "Upgrading SurrealDB from v3.2.3 to v3.2.4" in result.output
+    assert f"Upgrading SurrealDB from v4.0.0-beta.1 to {shipped_surreal_tag()}" in result.output
     # The pull reads a staged copy with the new pin while the live file still
     # holds the old one; only then does the live file move and `up -d` run.
     assert calls == [
@@ -453,7 +461,7 @@ def test_docker_upgrade_failed_pull_leaves_pins_untouched(
     compose_path, calls = _docker_runtime(
         tmp_path,
         monkeypatch,
-        surreal_image="${SIBYL_SURREAL_IMAGE:-surrealdb/surrealdb:v3.2.3}",
+        surreal_image="${SIBYL_SURREAL_IMAGE:-surrealdb/surrealdb:v4.0.0-beta.1}",
         pull_status=1,
     )
     env_path = compose_path.parent / ".env"
@@ -478,9 +486,11 @@ def test_docker_upgrade_keeps_explicit_surreal_override(
     source: str,
 ) -> None:
     compose_path, calls = _docker_runtime(
-        tmp_path, monkeypatch, surreal_image="${SIBYL_SURREAL_IMAGE:-surrealdb/surrealdb:v3.2.3}"
+        tmp_path,
+        monkeypatch,
+        surreal_image="${SIBYL_SURREAL_IMAGE:-surrealdb/surrealdb:v4.0.0-beta.1}",
     )
-    pinned = "registry.example/surrealdb:v3.2.3-patched"
+    pinned = "registry.example/surrealdb:v4.0.0-patched"
     env_path = compose_path.parent / ".env"
     if source == "shell":
         monkeypatch.setenv("SIBYL_SURREAL_IMAGE", pinned)
@@ -505,7 +515,7 @@ def test_docker_upgrade_keeps_explicit_surreal_override(
         "surrealdb/surrealdb:v3.2.3",
         "registry.example/surrealdb:custom",
         "${SIBYL_SURREAL_IMAGE:-surrealdb/surrealdb:nightly}",
-        "${SIBYL_SURREAL_IMAGE:-surrealdb/surrealdb:v3.3.0}",
+        "${SIBYL_SURREAL_IMAGE:-surrealdb/surrealdb:v4.3.0}",
     ],
 )
 def test_docker_upgrade_leaves_hand_edited_surreal_image(
@@ -514,13 +524,53 @@ def test_docker_upgrade_leaves_hand_edited_surreal_image(
     image: str,
 ) -> None:
     compose_path, _ = _docker_runtime(tmp_path, monkeypatch, surreal_image=image)
-    compose_before = compose_path.read_text()
+    surrealdb_before = yaml.safe_load(compose_path.read_text())["services"]["surrealdb"]
 
     result = CliRunner().invoke(app, ["docker", "upgrade"])
 
     assert result.exit_code == 0, result.output
-    assert compose_path.read_text() == compose_before
+    services = yaml.safe_load(compose_path.read_text())["services"]
+    assert services["surrealdb"] == surrealdb_before
+    # The guard follows the image as written, so a start it would open wrong refuses.
+    assert services["surreal-init"]["environment"]["SURREAL_IMAGE"] == image
     assert "Leaving the SurrealDB image" in result.output
+
+
+def _as_3x_surreal_bundle(compose_path: Path) -> dict[str, object]:
+    """Rewrite the bundle's surrealdb service the way a 3.x CLI wrote it; return it."""
+    config = yaml.safe_load(compose_path.read_text())
+    service = config["services"]["surrealdb"]
+    service["image"] = "${SIBYL_SURREAL_IMAGE:-surrealdb/surrealdb:v3.2.4}"
+    service["command"][-1] = "rocksdb:///data/sibyl.db"
+    del service["environment"]
+    del service["healthcheck"]["start_period"]
+    compose_path.write_text(yaml.dump(config, sort_keys=False))
+    return service
+
+
+def test_docker_upgrade_holds_an_older_major_whole(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The 3.x image keeps its RocksDB path; only `--surreal-major` crosses the major."""
+    compose_path, calls = _docker_runtime(tmp_path, monkeypatch)
+    held = _as_3x_surreal_bundle(compose_path)
+
+    result = CliRunner().invoke(app, ["docker", "upgrade", "--tag", "1.4.0"])
+
+    assert result.exit_code == 0, result.output
+    services = yaml.safe_load(compose_path.read_text())["services"]
+    assert services["surrealdb"] == held
+    assert services["surrealdb"]["command"][-1] == "rocksdb:///data/sibyl.db"
+    assert services["surreal-init"]["environment"] == {
+        "SURREAL_IMAGE": held["image"],
+        "SURREAL_STORE": "rocksdb:///data/sibyl.db",
+    }
+    assert services["api"]["image"] == "ghcr.io/hyperb1iss/sibyl-api:1.4.0"
+    output = " ".join(result.output.split())
+    assert "SurrealDB stays on v3.2.4" in output
+    assert "converts its data in place" in output
+    assert "sibyl docker upgrade --surreal-major" in output
+    assert [call["args"] for call in calls] == [["pull"], ["up", "-d"]]
 
 
 def test_up_starts_local_runtime_without_agent_setup(
@@ -560,6 +610,40 @@ def test_up_starts_local_runtime_without_agent_setup(
     assert "Connect page" in result.output
 
 
+def _fresh_config(runtime: str) -> dict:
+    if runtime == "local":
+        return local_module.compose_config_for("test")
+    return docker_module.compose_config(
+        image_tag="test",
+        api_port=3334,
+        web_port=3337,
+        surreal_port=8000,
+        with_worker=True,
+        with_crawler=False,
+    )
+
+
+@pytest.mark.parametrize("runtime", ["local", "docker"])
+def test_fresh_configs_run_surrealdb_4_on_a_surrealkv_store(runtime: str) -> None:
+    surrealdb = _fresh_config(runtime)["services"]["surrealdb"]
+
+    assert SURREAL_IMAGE == "surrealdb/surrealdb:v4.0.0"
+    assert surrealdb["image"] == SURREAL_IMAGE_REFERENCE
+    assert surrealdb["command"][-1] == SURREAL_STORE_PATH == "surrealkv:///data/sibyl.db"
+    assert not any("rocksdb" in part for part in surrealdb["command"])
+    assert surrealdb["environment"] == SURREAL_STORAGE_ENV
+    healthcheck = surrealdb["healthcheck"]
+    assert healthcheck["test"] == [
+        "CMD",
+        "/surreal",
+        "is-ready",
+        "--endpoint",
+        "http://localhost:8000",
+    ]
+    # Nothing listens while 4.0 converts a store; start-period failures do not count.
+    assert healthcheck["start_period"] == "10m"
+
+
 @pytest.mark.parametrize("runtime", ["local", "docker"])
 def test_surreal_volume_initialization_preserves_nonroot_and_existing_files(runtime: str) -> None:
     config = (
@@ -577,7 +661,15 @@ def test_surreal_volume_initialization_preserves_nonroot_and_existing_files(runt
     services = config["services"]
     initializer = services["surreal-init"]
     database = services["surrealdb"]
-    assert initializer["command"] == ["chown", "65532:65532", "/data"]
+    shell, flag, script = initializer["command"]
+    assert (shell, flag) == ("sh", "-c")
+    # The guard runs first, with every `$` doubled so Compose leaves it alone.
+    assert script == SURREAL_STORE_GUARD.replace("$", "$$") + "chown 65532:65532 /data"
+    assert re.search(r"(?<!\$)\$(?!\$)", script.replace("$$", "")) is None
+    assert initializer["environment"] == {
+        "SURREAL_IMAGE": SURREAL_IMAGE_REFERENCE,
+        "SURREAL_STORE": SURREAL_STORE_PATH,
+    }
     assert initializer["user"] == "0:0"
     assert initializer["network_mode"] == "none"
     assert initializer["cap_drop"] == ["ALL"]
@@ -597,3 +689,50 @@ def test_surreal_volume_initialization_preserves_nonroot_and_existing_files(runt
             }
         ]
     )
+
+
+def _guard(store: Path, image: str, path: str, *, converting: bool = False) -> int:
+    """Run the unescaped guard the way the init's `sh` does; its exit status."""
+    env = {"PATH": "/usr/bin:/bin", "SURREAL_IMAGE": image, "SURREAL_STORE": f"{path}{store}"}
+    if converting:
+        env["SURREAL_EXPERIMENTAL_UPGRADE_FROM_3X"] = "true"
+    sh = shutil.which("sh") or "/bin/sh"
+    return subprocess.run(
+        [sh, "-c", SURREAL_STORE_GUARD + "exit 0"], env=env, capture_output=True, check=False
+    ).returncode
+
+
+@pytest.mark.parametrize(
+    ("layout", "image", "path", "converting", "refuses"),
+    [
+        # A 3.x image given surrealkv:// on a RocksDB store serves an empty database.
+        ("rocksdb", "surrealdb/surrealdb:v3.2.4", "surrealkv://", False, True),
+        ("rocksdb", "surrealdb/surrealdb:v3.2.4", "rocksdb://", False, False),
+        # 4.x converts a RocksDB store one way, so only the opt-in lets it start.
+        ("rocksdb", "surrealdb/surrealdb:v4.0.0", "surrealkv://", False, True),
+        ("rocksdb", "surrealdb/surrealdb:v4.0.0", "surrealkv://", True, False),
+        # A 3.x image given rocksdb:// on a SurrealKV store serves an empty database.
+        ("surrealkv", "surrealdb/surrealdb:v3.2.4", "rocksdb://", False, True),
+        ("surrealkv", "surrealdb/surrealdb:v4.0.0", "surrealkv://", False, False),
+        # The pairing alone decides first: 3.x runs only rocksdb://, 4.x only surrealkv://.
+        ("surrealkv", "surrealdb/surrealdb:v3.2.4", "surrealkv://", False, True),
+        ("empty", "surrealdb/surrealdb:v3.2.4", "surrealkv://", False, True),
+        ("empty", "surrealdb/surrealdb:v4.0.0", "rocksdb://", False, True),
+        ("empty", "surrealdb/surrealdb:v3.2.4", "rocksdb://", False, False),
+        ("empty", "surrealdb/surrealdb:v4.0.0", "surrealkv://", False, False),
+        # An image that names no version could be either major.
+        ("empty", "surrealdb/surrealdb:latest", "surrealkv://", False, True),
+        ("empty", "surrealdb/surrealdb@sha256:0123", "surrealkv://", True, True),
+    ],
+)
+def test_the_store_guard_refuses_a_start_that_opens_data_wrong(
+    tmp_path: Path, layout: str, image: str, path: str, converting: bool, refuses: bool
+) -> None:
+    store = tmp_path / "sibyl.db"
+    store.mkdir()
+    if layout == "rocksdb":
+        (store / "CURRENT").write_text("MANIFEST-000001\n")
+    elif layout == "surrealkv":
+        (store / "manifest").mkdir()
+
+    assert (_guard(store, image, path, converting=converting) != 0) is refuses

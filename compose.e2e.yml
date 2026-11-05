@@ -8,9 +8,76 @@
 #   moon run e2e-down
 
 services:
+  # The one-shot that prepares the data directory also refuses an image and
+  # store path that would open existing data wrong, so the server never starts
+  # on them: an unversioned image, a relative path, 3.x on anything but
+  # rocksdb://, 4.x on anything but surrealkv://, or a store that server would
+  # misread (4.0 converts a 3.x store only with the opt-in).
+  surreal-init:
+    image: busybox:1.37
+    container_name: sibyl-surreal-init-e2e
+    command:
+      - sh
+      - -c
+      - |
+        # Refuse a SurrealDB image and store path that would open the data wrong.
+        refuse() {
+          echo "surreal-init: $$1" >&2
+          echo "surreal-init: nothing was started; see docs/deployment/surrealdb-4-upgrade.md" >&2
+          exit 1
+        }
+        # First, the pairing itself, whatever the directory holds: Sibyl runs 3.x
+        # only on rocksdb:// and 4.x only on surrealkv://, at an absolute path.
+        ref="$${SURREAL_IMAGE%%@*}"
+        tag="$${ref##*/}"
+        case "$$tag" in *:*) tag="$${tag##*:}" ;; *) tag="" ;; esac
+        tag="$${tag#v}"
+        major="$${tag%%.*}"
+        case "$$major" in "" | *[!0-9]*) refuse "the image $$SURREAL_IMAGE names no version; pin a tag such as v4.0.0" ;; esac
+        case "$$SURREAL_STORE" in
+          rocksdb:///*) scheme=rocksdb ;;
+          surrealkv:///*) scheme=surrealkv ;;
+          *) refuse "the store path $$SURREAL_STORE is not an absolute rocksdb:// or surrealkv:// path" ;;
+        esac
+        store="$${SURREAL_STORE#*://}"
+        if [ "$$major" -lt 4 ] && [ "$$scheme" != rocksdb ]; then
+          refuse "a $$major.x server runs only on a rocksdb:// path; on $$SURREAL_STORE it serves an empty database beside the data"
+        fi
+        if [ "$$major" -ge 4 ] && [ "$$scheme" != surrealkv ]; then
+          refuse "a $$major.x server runs on a surrealkv:// path, not $$SURREAL_STORE"
+        fi
+        # Then what the directory holds.
+        readable() { (cd "$$1" && ls . > /dev/null) 2> /dev/null; }
+        if ! readable "$${store%/*}/"; then
+          refuse "cannot read $${store%/*}/ to check which store it holds"
+        fi
+        if [ -e "$$store" ] && ! readable "$$store"; then
+          refuse "cannot read $$store to check which store it holds"
+        fi
+        if [ "$$major" -lt 4 ] && { [ -e "$$store/manifest" ] || [ -e "$$store/_rocksdb_backup" ]; }; then
+          refuse "$$store holds a store SurrealDB 4 wrote, which a 3.x server opens as an empty database"
+        fi
+        if [ -e "$$store/_rocksdb_backup" ] && [ ! -e "$$store/manifest" ]; then
+          refuse "$$store holds only the 3.x copy a conversion keeps in _rocksdb_backup/, so any server would start an empty database beside it; restore or remove it first"
+        fi
+        if [ "$$major" -ge 4 ] && [ -e "$$store/CURRENT" ] && [ "$${SURREAL_EXPERIMENTAL_UPGRADE_FROM_3X:-}" != true ]; then
+          refuse "$$store holds a store a SurrealDB 3.x server wrote; 4.0 converts it once and for good: back it up, then start once with SURREAL_EXPERIMENTAL_UPGRADE_FROM_3X=true"
+        fi
+        chown -R 65532:65532 /data
+    environment:
+      SURREAL_IMAGE: ${SIBYL_SURREAL_IMAGE:-surrealdb/surrealdb:v4.0.0}
+      SURREAL_STORE: surrealkv:///data/sibyl-e2e.db
+      SURREAL_EXPERIMENTAL_UPGRADE_FROM_3X: ${SURREAL_EXPERIMENTAL_UPGRADE_FROM_3X:-}
+    volumes:
+      - sibyl_e2e_surreal:/data
+    restart: "no"
+
   surrealdb-e2e:
-    image: ${SIBYL_SURREAL_IMAGE:-surrealdb/surrealdb:v3.2.4}
+    image: ${SIBYL_SURREAL_IMAGE:-surrealdb/surrealdb:v4.0.0}
     container_name: sibyl-surrealdb-e2e
+    depends_on:
+      surreal-init:
+        condition: service_completed_successfully
     command:
       [
         "start",
@@ -20,12 +87,15 @@ services:
         "${SIBYL_SURREAL_USERNAME:-root}",
         "--pass",
         "${SIBYL_SURREAL_PASSWORD:-root}",
-        "rocksdb:///data/sibyl-e2e.db",
+        "surrealkv:///data/sibyl-e2e.db",
       ]
     ports:
       - "${SIBYL_E2E_SURREAL_PORT:-8011}:8000"
     volumes:
       - sibyl_e2e_surreal:/data
+    environment:
+      # Off from a directory's first 4.0 start: value-log files are never reclaimed.
+      - SURREAL_SURREALKV_ENABLE_VLOG=false
     healthcheck:
       test: ["CMD", "/surreal", "is-ready", "--endpoint", "http://localhost:8000"]
       interval: 5s

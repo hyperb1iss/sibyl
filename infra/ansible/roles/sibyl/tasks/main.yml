@@ -21,6 +21,36 @@
       sibyl_network_prefix takes the first three octets of a /24, such as 10.47.213, not a full
       address or a CIDR range.
 
+# A 3.x server handed surrealkv:// on its RocksDB directory starts an empty
+# database beside the data, so the path has to match the image's major. The
+# major comes from the tag, whatever registry or digest the reference carries;
+# a reference without a version tag is refused rather than guessed.
+- name: Read the SurrealDB image's major version
+  ansible.builtin.set_fact:
+    sibyl_surreal_major: >-
+      {{ sibyl_surreal_image | regex_replace('@.*$', '') | regex_replace('^.*/', '')
+         | regex_replace('^[^:]+:v?([0-9]+)[.][0-9]+[.][0-9]+[^:]*$', '\1') }}
+
+- name: Assert the SurrealDB image names a version
+  ansible.builtin.assert:
+    that:
+      - (sibyl_surreal_major | string) is match('^[0-9]+$')
+    quiet: true
+    fail_msg: >-
+      sibyl_surreal_image must carry a version tag such as surrealdb/surrealdb:v4.0.0 (a digest may
+      follow it), so the role can pair it with its store path; got {{ sibyl_surreal_image }}.
+
+- name: Assert the SurrealDB store path matches the image's major version
+  ansible.builtin.assert:
+    that:
+      - (sibyl_surreal_major | int != 3) or (sibyl_surreal_path is match('^rocksdb://'))
+      - (sibyl_surreal_major | int < 4) or (sibyl_surreal_path is match('^surrealkv://'))
+    quiet: true
+    fail_msg: >-
+      sibyl_surreal_path must be rocksdb:///data/sibyl.db for a 3.x sibyl_surreal_image and
+      surrealkv:///data/sibyl.db for 4.x. A 3.x server opened with surrealkv:// serves an empty
+      database; see docs/deployment/surrealdb-4-upgrade.md.
+
 # ─── Docker engine ─────────────────────────────────────────────────────────────
 - name: Create the apt keyring directory
   ansible.builtin.file:

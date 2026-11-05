@@ -518,8 +518,8 @@ jobs:
       SIBYL_SURREAL_URL: ws://localhost:8000/rpc
       SIBYL_SURREAL_USERNAME: sibyl_ci
       SIBYL_SURREAL_PASSWORD: sibyl_ci_password
-      SIBYL_SURREAL_PATH: rocksdb:///data/sibyl-longmemeval-v2.db
-      SURREAL_ROCKSDB_BLOCK_CACHE_SIZE: "4294967296"
+      SIBYL_SURREAL_PATH: surrealkv:///data/sibyl-longmemeval-v2.db
+      SURREAL_SURREALKV_BLOCK_CACHE_CAPACITY: "4294967296"
       SIBYL_REDIS_HOST: 127.0.0.1
       SIBYL_REDIS_PORT: "6381"
       SIBYL_GRAPH_EMBEDDING_PROVIDER: local
@@ -810,15 +810,15 @@ jobs:
             echo "::error::SurrealDB container ID is unavailable."
             exit 1
           fi
-          expected_cache_size="${SURREAL_ROCKSDB_BLOCK_CACHE_SIZE:-}"
+          expected_cache_size="${SURREAL_SURREALKV_BLOCK_CACHE_CAPACITY:-}"
           actual_cache_size="$(
             docker inspect --format '{{range .Config.Env}}{{println .}}{{end}}' \
               "$surrealdb_id" |
-              sed -n 's/^SURREAL_ROCKSDB_BLOCK_CACHE_SIZE=//p'
+              sed -n 's/^SURREAL_SURREALKV_BLOCK_CACHE_CAPACITY=//p'
           )"
           if [[ ! "$expected_cache_size" =~ ^[1-9][0-9]*$ ]] ||
             [[ "$actual_cache_size" != "$expected_cache_size" ]]; then
-            echo "::error::SurrealDB RocksDB cache size was not applied exactly."
+            echo "::error::SurrealDB block cache capacity was not applied exactly."
             exit 1
           fi
           if ! surrealdb_logs="$(
@@ -831,9 +831,9 @@ jobs:
             echo "::error::SurrealDB rejected a runtime configuration value."
             exit 1
           fi
-          if ! grep -Fq "Block cache size: $expected_cache_size" \
+          if ! grep -Fq "Setting block cache capacity: $expected_cache_size" \
             <<< "$surrealdb_logs"; then
-            echo "::error::SurrealDB did not confirm the requested RocksDB cache size."
+            echo "::error::SurrealDB did not confirm the requested block cache capacity."
             exit 1
           fi
           mkdir -p "$telemetry"

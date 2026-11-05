@@ -3,9 +3,9 @@
 The export and restore-drill CronJobs are shell scripts embedded in the
 chart. These tests render them with helm and execute them unchanged, with
 real jq and sha256sum, while a fake curl (fixtures/fake_surreal_curl.py)
-answers with SurrealDB 3.x response shapes. That proves the script logic
-in CI without a database; the shapes themselves were taken from a live
-v3.2.4 server.
+answers with SurrealDB response shapes. That proves the script logic in
+CI without a database; the shapes themselves were taken from live v3.2.4
+and v4.0.0 servers (fixtures/fake_surreal_curl.py lists where they differ).
 """
 
 from __future__ import annotations
@@ -153,7 +153,7 @@ class OpsHarness:
         if source is not None:
             servers["http://source"] = {
                 "user": "root:secret",
-                "version": "surrealdb-3.2.4",
+                "version": "surrealdb-4.0.0",
                 "namespaces": source,
                 "org_uuids": list(org_uuids),
             }
@@ -292,7 +292,7 @@ def test_helm_export_discovers_every_namespace_without_a_list(harness: OpsHarnes
     assert manifest["format"] == "sibyl-surrealdb-export"
     assert manifest["version"] == MANIFEST_VERSION
     assert manifest["failures"] == []
-    assert manifest["server_version"] == "surrealdb-3.2.4"
+    assert manifest["server_version"] == "surrealdb-4.0.0"
     assert manifest["created_at"].endswith("Z")
     exported = {(entry["namespace"], entry["database"]): entry for entry in manifest["databases"]}
     assert set(exported) == {
@@ -596,8 +596,8 @@ def test_helm_restore_drill_scratch_server_keeps_data_on_its_tmp_volume() -> Non
             pod = document["spec"]["jobTemplate"]["spec"]["template"]["spec"]
             (server,) = (c for c in pod["initContainers"] if c["name"] == "restore-server")
             env = {item["name"]: item.get("value") for item in server["env"]}
-            assert env["SURREAL_RESTORE_PATH"] == "rocksdb:/tmp/restore-db"
-            store_path = env["SURREAL_RESTORE_PATH"].removeprefix("rocksdb:")
+            assert env["SURREAL_RESTORE_PATH"] == "surrealkv:/tmp/restore-db"
+            store_path = env["SURREAL_RESTORE_PATH"].removeprefix("surrealkv:")
             tmp_mount = next(
                 m for m in server["volumeMounts"] if store_path.startswith(m["mountPath"] + "/")
             )
@@ -1113,6 +1113,63 @@ def test_helm_ops_values_are_validated_at_render(override: tuple[str, str], mess
     )
     assert rendered.returncode != 0
     assert message in rendered.stderr
+
+
+def _render_surrealdb(tag: str, path: str) -> subprocess.CompletedProcess[str]:
+    assert _HELM is not None
+    return subprocess.run(  # noqa: S603
+        [
+            _HELM,
+            "template",
+            "pairing",
+            "charts/surrealdb",
+            "--set-string",
+            f"surrealdb.image.tag={tag}",
+            "--set-string",
+            f"surrealdb.surrealdb.path={path}",
+        ],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+
+@pytest.mark.parametrize(
+    ("tag", "path", "message"),
+    [
+        ("latest", "surrealkv:/data/db", "names no SurrealDB version"),
+        ("sha256:0123", "surrealkv:/data/db", "names no SurrealDB version"),
+        ("nightly", "rocksdb:/data/db", "names no SurrealDB version"),
+        ("v3.2.4", "surrealkv:/data/db", "is a 3.x server, which would open an empty database"),
+        ("3.2.4@sha256:0123", "surrealkv:///data/db", "is a 3.x server"),
+        ("v4.0.0", "rocksdb:/data/db", "is a 4.x server, which runs only on surrealkv"),
+        ("v4.0.0", "surrealkv://data/db", "is not an absolute rocksdb: or surrealkv: path"),
+        ("v4.0.0", "memory", "is not an absolute rocksdb: or surrealkv: path"),
+        ("v3.2.4", "rocksdb:data/db", "is not an absolute rocksdb: or surrealkv: path"),
+    ],
+)
+def test_helm_store_path_must_pair_with_the_image_major(tag: str, path: str, message: str) -> None:
+    """3.x renders only on rocksdb:, 4.x only on surrealkv:, from a versioned tag."""
+    rendered = _render_surrealdb(tag, path)
+    assert rendered.returncode != 0
+    assert message in rendered.stderr
+
+
+@pytest.mark.parametrize(
+    ("tag", "path"),
+    [
+        ("v4.0.0", "surrealkv:/data/db"),
+        ("v4.0.0", "surrealkv:///data/db"),
+        ("4.0.1@sha256:0123", "surrealkv:/data/db"),
+        ("v3.2.4", "rocksdb:/data/db"),
+        ("v3.2.4@sha256:0123", "rocksdb:///data/db"),
+    ],
+)
+def test_helm_renders_each_supported_pairing(tag: str, path: str) -> None:
+    rendered = _render_surrealdb(tag, path)
+    assert rendered.returncode == 0, rendered.stderr
+    assert f"value: {path}" in rendered.stdout
 
 
 def _org_uuid(namespace: str) -> str:

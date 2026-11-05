@@ -10,6 +10,7 @@ from typer.testing import CliRunner
 from sibyl_cli import docker as docker_module
 from sibyl_cli import local as local_module
 from sibyl_cli import update as update_module
+from sibyl_cli.docker_storage import SURREAL_IMAGE
 from sibyl_cli.local import ApiState
 from sibyl_cli.update import (
     ContainerPlan,
@@ -176,6 +177,12 @@ def _pin(compose: Path, tag: str | None) -> None:
     compose.write_text(f"services:\n  api:\n    image: {image}\n")
 
 
+def _hold_surreal(compose: Path, tag: str = "v3.2.4") -> None:
+    """Give the compose file a CLI-written SurrealDB default on an older major."""
+    image = f"${{SIBYL_SURREAL_IMAGE:-surrealdb/surrealdb:{tag}}}"
+    compose.write_text(compose.read_text() + f"  surrealdb:\n    image: {image}\n")
+
+
 def _plan(
     tmp_path: Path,
     current: str | None,
@@ -208,7 +215,7 @@ def _docker_probe(
     lines = []
     for compose in _PINS:
         if up:
-            lines.append(_ps_line(compose, "surrealdb", "surrealdb/surrealdb:v3.2.4"))
+            lines.append(_ps_line(compose, "surrealdb", SURREAL_IMAGE))
         if running_tag:
             lines.append(_ps_line(compose, "api", f"ghcr.io/hyperb1iss/sibyl-api:{running_tag}"))
     return subprocess.CompletedProcess(cmd, 0, stdout="\n".join(lines) + "\n")
@@ -508,7 +515,7 @@ class TestContainerPlans:
         digest = "sha256:" + "ab12" * 16
         listing = (
             f"{runtime.compose_file}\tapi\t{digest}\tc0ffee\tsibyl-api\n"
-            f"{runtime.compose_file}\tsurrealdb\tsurrealdb/surrealdb:v3.2.4\tbeef\tsibyl-surrealdb\n"
+            f"{runtime.compose_file}\tsurrealdb\t{SURREAL_IMAGE}\tbeef\tsibyl-surrealdb\n"
         )
 
         def fake_run(cmd: list[str], **_: object) -> subprocess.CompletedProcess[str]:
@@ -599,6 +606,85 @@ class TestContainerPlans:
         self, tmp_path: Path, current: str, target: str, source: str, label: str
     ) -> None:
         assert label in _plan(tmp_path, current, target, source=source).status()
+
+
+class TestSurrealMajorHold:
+    """`update` reports a SurrealDB held on an older major and never crosses it."""
+
+    def test_a_held_surrealdb_names_the_explicit_command(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.delenv("SIBYL_IMAGE_TAG", raising=False)
+        runtime = _runtime(tmp_path, name="local", tag="1.5.0")
+        _hold_surreal(runtime.compose_file)
+        monkeypatch.setattr(update_module, "installed_container_runtimes", lambda: [runtime])
+        monkeypatch.setattr(ContainerRuntime, "is_running", lambda _self: True)
+        monkeypatch.setattr(ContainerRuntime, "api_state", lambda _self: ApiState(True, "1.5.0"))
+
+        [plan] = plan_container_upgrades("1.5.0")
+
+        assert plan.surreal_held == "v3.2.4"
+        assert plan.applies is False
+        status = " ".join(plan.status().split())
+        assert "SurrealDB stays on v3.2.4" in status
+        assert "`sibyl local upgrade --surreal-major` moves it to v4.0.0" in status
+
+    @pytest.mark.parametrize(
+        "tag", ["v4.0.0", "v4.9.0", None], ids=["shipped", "newer", "no-surreal"]
+    )
+    def test_nothing_is_held_on_this_major(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, tag: str | None
+    ) -> None:
+        runtime = _runtime(tmp_path, tag="1.5.0")
+        if tag:
+            _hold_surreal(runtime.compose_file, tag)
+        assert runtime.surreal_held() is None
+
+    def test_update_reports_the_hold_and_hands_off_without_crossing_it(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.delenv("SIBYL_IMAGE_TAG", raising=False)
+        runtime = _runtime(tmp_path, "docker", "1.4.0")
+        _hold_surreal(runtime.compose_file)
+        _PINS.append(runtime.compose_file)
+        calls: list[list[str]] = []
+        monkeypatch.setattr(update_module, "is_dev_mode", lambda: False)
+        monkeypatch.setattr(update_module, "installed_container_runtimes", lambda: [runtime])
+        monkeypatch.setattr(update_module.subprocess, "run", _upgrader(calls, running="1.4.0"))
+        monkeypatch.setattr(ContainerRuntime, "is_running", lambda _self: True)
+        monkeypatch.setattr(update_module, "get_current_cli_version", lambda: "1.5.0")
+
+        checked = CliRunner().invoke(update_module.app, ["--containers", "--check"])
+
+        assert checked.exit_code == 0, checked.output
+        output = " ".join(checked.output.split())
+        assert "SurrealDB stays on v3.2.4" in output
+        assert "sibyl docker upgrade --surreal-major" in output
+        assert calls == []
+
+        applied = CliRunner().invoke(update_module.app, ["--containers", "--yes"])
+
+        assert applied.exit_code == 0, applied.output
+        # The API moves; SurrealDB's major is left to the explicit command.
+        assert calls == [["sibyl", "docker", "upgrade", "--tag", "1.5.0"]]
+
+    def test_a_held_surrealdb_is_not_up_to_date(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.delenv("SIBYL_IMAGE_TAG", raising=False)
+        runtime = _runtime(tmp_path, "docker", "1.5.0")
+        _hold_surreal(runtime.compose_file)
+        monkeypatch.setattr(update_module, "is_dev_mode", lambda: False)
+        monkeypatch.setattr(update_module, "installed_container_runtimes", lambda: [runtime])
+        monkeypatch.setattr(ContainerRuntime, "is_running", lambda _self: True)
+        monkeypatch.setattr(ContainerRuntime, "api_state", lambda _self: ApiState(True, "1.5.0"))
+        monkeypatch.setattr(update_module, "get_current_cli_version", lambda: "1.5.0")
+
+        result = CliRunner().invoke(update_module.app, ["--containers", "--check"])
+
+        assert result.exit_code == 0, result.output
+        assert "matches CLI" in result.output
+        assert "Everything is up to date" not in result.output
 
 
 class TestUpdateFunctions:

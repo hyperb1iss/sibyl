@@ -112,7 +112,34 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- end }}
 
 {{- define "sibyl-surrealdb.surrealImage" -}}
-{{- printf "%s:%s" (.Values.surrealdb.image.repository | default "surrealdb/surrealdb") (.Values.surrealdb.image.tag | default .Chart.AppVersion) }}
+{{- printf "%s:%s" (.Values.surrealdb.image.repository | default "surrealdb/surrealdb") (.Values.surrealdb.image.tag | default (printf "v%s" .Chart.AppVersion)) }}
+{{- end }}
+
+{{/*
+The store path has to pair with the image's major version, whatever the
+volume holds. A 3.x server handed surrealkv: on its RocksDB directory serves
+an empty database beside the data, and 4.x has no RocksDB engine (rocksdb:
+only survives as a deprecated alias for SurrealKV), so Sibyl runs 3.x only
+on rocksdb: and 4.x only on surrealkv:, at an absolute path on the volume.
+A tag that names no version could be either major, so it fails too.
+*/}}
+{{- define "sibyl-surrealdb.validateStorePath" -}}
+{{- $tag := toString (.Values.surrealdb.image.tag | default (printf "v%s" .Chart.AppVersion)) -}}
+{{- $path := toString .Values.surrealdb.surrealdb.path -}}
+{{- $version := trimPrefix "v" (first (splitList "@" $tag)) -}}
+{{- if not (regexMatch "^[0-9]+([.]|$)" $version) -}}
+{{- fail (printf "surrealdb.image.tag %q names no SurrealDB version; pin a tag such as v4.0.0" $tag) -}}
+{{- end -}}
+{{- $major := atoi (regexFind "^[0-9]+" $version) -}}
+{{- if not (regexMatch "^(rocksdb|surrealkv):(/[^/]|///)" $path) -}}
+{{- fail (printf "surrealdb.surrealdb.path %q is not an absolute rocksdb: or surrealkv: path such as surrealkv:/data/db" $path) -}}
+{{- end -}}
+{{- if and (lt $major 4) (not (hasPrefix "rocksdb:" $path)) -}}
+{{- fail (printf "surrealdb.surrealdb.path is %q but surrealdb.image.tag %q is a %d.x server, which would open an empty database beside its RocksDB data; keep rocksdb:/data/db on 3.x" $path $tag $major) -}}
+{{- end -}}
+{{- if and (ge $major 4) (not (hasPrefix "surrealkv:" $path)) -}}
+{{- fail (printf "surrealdb.surrealdb.path is %q but surrealdb.image.tag %q is a %d.x server, which runs only on surrealkv:/data/db" $path $tag $major) -}}
+{{- end -}}
 {{- end }}
 
 {{/*

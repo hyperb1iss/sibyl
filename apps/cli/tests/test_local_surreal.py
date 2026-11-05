@@ -9,14 +9,18 @@ import typer
 import yaml
 
 from sibyl_cli import local
-from sibyl_cli.docker_storage import SURREAL_IMAGE_REFERENCE
+from sibyl_cli.docker_storage import (
+    SURREAL_IMAGE_REFERENCE,
+    SURREAL_STORAGE_ENV,
+    SURREAL_STORE_PATH,
+)
 
 
 def test_local_compose_defaults_to_fully_surreal_runtime() -> None:
     services = local.COMPOSE_CONFIG["services"]
 
     assert "surrealdb" in services
-    assert services["surrealdb"]["image"] == "${SIBYL_SURREAL_IMAGE:-surrealdb/surrealdb:v3.2.4}"
+    assert services["surrealdb"]["image"] == SURREAL_IMAGE_REFERENCE
     assert "falkordb" not in services
     assert "postgres" not in services
     assert "worker" not in services
@@ -145,14 +149,10 @@ def test_local_start_opens_browser_after_successful_health_check(
     assert "Sibyl is ready" in capsys.readouterr().out
 
 
-def test_local_start_rewrites_an_older_surreal_pin(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """`sibyl up` rewrites the compose file on every start, so start owns the pin too."""
+def _start_on(compose_text: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """Run `sibyl up` over an existing compose file and return its path."""
     compose_path = tmp_path / "docker-compose.yml"
-    compose_path.write_text(
-        "services:\n  surrealdb:\n    image: ${SIBYL_SURREAL_IMAGE:-surrealdb/surrealdb:v3.2.3}\n"
-    )
+    compose_path.write_text(compose_text)
     (tmp_path / ".env").touch()
     monkeypatch.setattr(local, "SIBYL_LOCAL_DIR", tmp_path)
     monkeypatch.setattr(local, "SIBYL_LOCAL_ENV", tmp_path / ".env")
@@ -162,17 +162,82 @@ def test_local_start_rewrites_an_older_surreal_pin(
     monkeypatch.setattr(local, "is_running", lambda: False)
     monkeypatch.setattr(local, "wait_for_healthy", lambda: True)
     monkeypatch.setattr(local, "run_compose", lambda _args: SimpleNamespace(returncode=0))
-
     local.start(no_browser=True, pull=True)
+    return compose_path
+
+
+def test_local_start_rewrites_an_older_surreal_pin(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`sibyl up` rewrites the compose file on every start, so start owns the pin too."""
+    older = "${SIBYL_SURREAL_IMAGE:-surrealdb/surrealdb:v4.0.0-beta.1}"
+    compose_path = _start_on(
+        f"services:\n  surrealdb:\n    image: {older}\n", tmp_path, monkeypatch
+    )
 
     services = yaml.safe_load(compose_path.read_text())["services"]
     assert services["surrealdb"]["image"] == SURREAL_IMAGE_REFERENCE
+    # A moved image takes this release's whole service with it.
+    assert services["surrealdb"]["command"][-1] == SURREAL_STORE_PATH
+    assert services["surrealdb"]["environment"] == SURREAL_STORAGE_ENV
     assert services["api"]["depends_on"]["surrealdb"] == {"condition": "service_healthy"}
 
 
+# The surrealdb service a 3.x CLI wrote, which a 4.0 store path must never reach.
+SURREAL_3X_SERVICE = {
+    "image": "${SIBYL_SURREAL_IMAGE:-surrealdb/surrealdb:v3.2.4}",
+    "container_name": "sibyl-surrealdb",
+    "depends_on": {"surreal-init": {"condition": "service_completed_successfully"}},
+    "command": [
+        "start",
+        "--log",
+        "info",
+        "--user",
+        "${SIBYL_SURREAL_USERNAME:-root}",
+        "--pass",
+        "${SIBYL_SURREAL_PASSWORD:-sibyl_local}",
+        "rocksdb:///data/sibyl.db",
+    ],
+    "ports": ["127.0.0.1:8000:8000"],
+    "healthcheck": {
+        "test": ["CMD", "/surreal", "is-ready", "--endpoint", "http://localhost:8000"],
+        "interval": "5s",
+        "timeout": "3s",
+        "retries": 5,
+    },
+    "restart": "unless-stopped",
+}
+
+
+def test_sibyl_up_keeps_a_3x_surrealdb_service_whole(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A 3.x image must keep its RocksDB path; 4.0's surrealkv path would open it wrong."""
+    old_config = {"services": {"surrealdb": SURREAL_3X_SERVICE}}
+
+    compose_path = _start_on(yaml.dump(old_config), tmp_path, monkeypatch)
+
+    services = yaml.safe_load(compose_path.read_text())["services"]
+    assert services["surrealdb"] == SURREAL_3X_SERVICE
+    assert services["surrealdb"]["command"][-1].startswith("rocksdb://")
+    # The guard runs against the kept service, so it lets 3.x open its RocksDB store.
+    assert services["surreal-init"]["environment"] == {
+        "SURREAL_IMAGE": SURREAL_3X_SERVICE["image"],
+        "SURREAL_STORE": "rocksdb:///data/sibyl.db",
+    }
+    assert services["api"]["image"].endswith(f":{local.DEFAULT_IMAGE_TAG}")
+    output = " ".join(capsys.readouterr().out.split())
+    assert "SurrealDB stays on v3.2.4" in output
+    assert "converts its data in place" in output
+    assert "sibyl local upgrade --surreal-major" in output
+
+
 def test_local_api_healthcheck_requires_success_status() -> None:
-    command = local.COMPOSE_CONFIG["services"]["api"]["healthcheck"]["test"]
-    assert command[-1].endswith(".raise_for_status()")
+    healthcheck = local.COMPOSE_CONFIG["services"]["api"]["healthcheck"]
+    assert healthcheck["test"][-1].endswith(".raise_for_status()")
+    # The first start on a new SurrealDB major rebuilds every index before it
+    # serves; web waits on this check and must not give up meanwhile.
+    assert healthcheck["start_period"] == "10m"
 
 
 @pytest.mark.parametrize("status", [200, 503])
