@@ -176,8 +176,9 @@ curl -sf https://<sibyl_domain>/api/health
   converted once, and the conversion is one-way. Either follow the
   [SurrealDB 4.0 upgrade](./surrealdb-4-upgrade.md#ansible) runbook, or hold the host on 3.x by
   setting both `sibyl_surreal_image` to the 3.x image and `sibyl_surreal_path` to
-  `rocksdb:///data/sibyl.db`. The role refuses a path that does not match the image's major, because
-  a 3.x server opened with `surrealkv://` serves an empty database beside the data.
+  `rocksdb:///data/sibyl.db`. The role refuses a path that does not match the image's major, and an
+  image reference without a version tag, because a 3.x server opened with `surrealkv://` serves an
+  empty database beside the data; the stack's `surreal-init` checks the same pairing on every start.
 - **Backups:** schedule `surreal export` against the running stack and copy the dump off-host. The
   graph is your memory; back it up.
 

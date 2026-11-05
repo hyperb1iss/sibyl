@@ -55,6 +55,8 @@ PIN_PATHSPECS = (
 
 # The literal pins the scan finds today; fewer means a pin moved out of its reach.
 KNOWN_IMAGE_LITERALS = 21
+# The role reads the major with three regex_replace steps.
+ANSIBLE_MAJOR_STEPS = 3
 
 IMAGE_LITERAL = re.compile(r"surrealdb/surrealdb:v?(\d+\.\d+\.\d+[^\s\"'`}]*)")
 
@@ -200,3 +202,36 @@ def test_compose_servers_start_behind_the_store_guard(relative: str, name: str) 
     environment = _environment(services[init])
     assert environment["SURREAL_IMAGE"] == server["image"]
     assert environment["SURREAL_STORE"] == _store_path(server)
+
+
+def _ansible_major(image: str) -> str:
+    """The role's own regex_replace chain, applied with Python's re as Ansible does."""
+    tasks = (REPO_ROOT / "infra/ansible/roles/sibyl/tasks/main.yml").read_text(encoding="utf-8")
+    expression = tasks.split("sibyl_surreal_major: >-", 1)[1].split("}}", 1)[0]
+    steps = re.findall(r"regex_replace\('([^']*)', '([^']*)'\)", expression)
+    assert len(steps) == ANSIBLE_MAJOR_STEPS
+    for pattern, replacement in steps:
+        image = re.sub(pattern, replacement, image)
+    return image
+
+
+@pytest.mark.parametrize(
+    ("image", "major"),
+    [
+        ("surrealdb/surrealdb:v4.0.0", "4"),
+        ("surrealdb/surrealdb:v3.2.4", "3"),
+        ("docker.io/surrealdb/surrealdb:v3.2.4", "3"),
+        ("registry.example:5000/mirror/surrealdb:3.2.4", "3"),
+        ("docker.io/surrealdb/surrealdb:v4.0.0@sha256:0123abcd", "4"),
+        ("surrealdb/surrealdb@sha256:0123abcd", None),
+        ("surrealdb/surrealdb:latest", None),
+        ("registry.example:5000/surrealdb", None),
+    ],
+)
+def test_ansible_reads_the_major_from_any_image_reference(image: str, major: str | None) -> None:
+    found = _ansible_major(image)
+    if major is None:
+        # The role refuses a reference whose result is not a bare number.
+        assert not found.isdigit(), found
+    else:
+        assert found == major
