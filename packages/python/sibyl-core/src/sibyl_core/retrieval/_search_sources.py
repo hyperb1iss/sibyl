@@ -838,7 +838,10 @@ async def _edge_vector_candidates(
 ) -> list[RetrievalCandidate]:
     if limit <= 0:
         return []
-    filter_clauses, filter_params = _edge_filter_clause(search_filter)
+    filter_clauses, filter_params = _edge_filter_clause(
+        search_filter,
+        project_endpoints=await _project_endpoints(client, search_filter),
+    )
     candidate_limit = max(int(limit), 1)
     knn_effort = knn_search_effort(candidate_limit, core_config.graph_knn_ef)
     overfetch = search_filter.knn_type_overfetch
@@ -1074,11 +1077,33 @@ def _node_project_clause(search_filter: SearchFilter) -> tuple[str, dict[str, An
     return clause, params
 
 
+async def _project_endpoints(client: Any, search_filter: SearchFilter) -> list[object] | None:
+    """The entity records an edge may end on to count as inside the filter's projects.
+
+    The vector lane's filter is evaluated for every candidate the HNSW search
+    visits, and a selective one visits most of the graph. Following `in` and
+    `out` to read each endpoint's project costs two record reads per visited
+    edge on top of the edge itself; testing the endpoints against this set
+    reads nothing more, and holds exactly the endpoints those reads admit.
+    """
+    if not search_filter.project_ids:
+        return None
+    rows = await _execute_query_records(
+        client,
+        # Aliased: record normalization drops a row's own id.
+        "SELECT id AS endpoint FROM entity"
+        " WHERE project_id IN $project_ids OR attributes.project_id IN $project_ids;",
+        project_ids=list(search_filter.project_ids),
+    )
+    return [row["endpoint"] for row in rows if row.get("endpoint") is not None]
+
+
 def _edge_filter_clause(
     search_filter: SearchFilter,
     *,
     source_node_uuid: str | None = None,
     target_node_uuid: str | None = None,
+    project_endpoints: list[object] | None = None,
 ) -> tuple[list[str], dict[str, Any]]:
     clauses: list[str] = []
     params: dict[str, Any] = {}
@@ -1091,7 +1116,17 @@ def _edge_filter_clause(
     if search_filter.node_labels:
         clauses.append("in.labels CONTAINS $node_label AND out.labels CONTAINS $node_label")
         params["node_label"] = search_filter.node_labels[0]
-    if search_filter.project_ids:
+    if search_filter.project_ids and project_endpoints is not None:
+        clauses.append(
+            "("
+            "attributes.project_id IN $project_ids "
+            "OR in IN $project_endpoints "
+            "OR out IN $project_endpoints"
+            ")"
+        )
+        params["project_ids"] = list(search_filter.project_ids)
+        params["project_endpoints"] = project_endpoints
+    elif search_filter.project_ids:
         clauses.append(
             "("
             "attributes.project_id IN $project_ids "
