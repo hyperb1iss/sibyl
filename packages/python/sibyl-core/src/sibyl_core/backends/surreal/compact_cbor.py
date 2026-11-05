@@ -12,6 +12,13 @@ resolves ``dumps`` at call time, so replacing that one function covers every
 transport, the embedded engine included. Installing is idempotent and must
 happen before the first query; Sibyl does it wherever it opens an SDK
 connection.
+
+Replies need one repair too. SurrealDB leaves a duration's trailing zero parts
+out, so a zero duration arrives as tag 14 over an empty array. SDK 2.0.0 reads
+the seconds unconditionally and raises inside its receive loop, which strands
+the socket; SurrealDB 4 sends one in the reply to a read-only ``begin``. The
+SDK decodes through ``surrealdb.data.cbor.tag_decoder``, resolved at call time
+as well, so the installer wraps it.
 """
 
 from __future__ import annotations
@@ -22,7 +29,7 @@ from datetime import UTC, date, datetime, timedelta, timezone
 from io import BytesIO
 from typing import Any
 
-from surrealdb.cbor import CBOREncoder, CBORTag
+from surrealdb.cbor import CBORDecoder, CBOREncoder, CBORTag
 from surrealdb.data import cbor as sdk_cbor
 from surrealdb.data.types.constants import TAG_DATETIME_COMPACT, TAG_DURATION_COMPACT
 from surrealdb.data.types.datetime import Datetime
@@ -135,14 +142,25 @@ def dumps(obj: object, **options: Any) -> bytes:
         return fp.getvalue()
 
 
+_sdk_tag_decoder = sdk_cbor.tag_decoder
+
+
+def tag_decoder(decoder: CBORDecoder, tag: CBORTag, shareable_index: int | None = None) -> Any:
+    """The SDK's tag decoder, reading a zero duration's empty array as zero."""
+    if tag.tag == TAG_DURATION_COMPACT and len(tag.value) == 0:
+        return Duration(0)
+    return _sdk_tag_decoder(decoder, tag, shareable_index)
+
+
 def install_compact_cbor() -> None:
-    """Route every SDK request through the compact encoder."""
+    """Route every SDK request through the compact encoder, and replies through its decoder."""
     global _installed
     if _installed:
         return
-    # setattr: this deliberately rebinds the SDK module's own function.
+    # setattr: this deliberately rebinds the SDK module's own functions.
     setattr(sdk_cbor, "dumps", dumps)  # noqa: B010
+    setattr(sdk_cbor, "tag_decoder", tag_decoder)  # noqa: B010
     _installed = True
 
 
-__all__ = ["dumps", "install_compact_cbor"]
+__all__ = ["dumps", "install_compact_cbor", "tag_decoder"]
