@@ -178,6 +178,18 @@ def write_json_file(path: Path, value: Any) -> int:
     return path.stat().st_size
 
 
+# A page path from `datetime_paths({"page": rows})`: `page`[i].`column`...
+_PAGE_PATH_COLUMN = re.compile(r"^`page`\[\d+\]\.(`(?:[^`\\]|\\.)*`)")
+
+
+def _column_of(path: str) -> str:
+    """The top-level column a page path runs through, still escaped and quoted."""
+    match = _PAGE_PATH_COLUMN.match(path)
+    if match is None:
+        raise ValueError(f"not a page datetime path: {path!r}")
+    return match.group(1)
+
+
 class PageReader:
     """Reads tables in id order, one bounded page per statement.
 
@@ -238,13 +250,17 @@ class PageReader:
         """Replace the SDK's truncated datetimes with the server's text for them.
 
         The page is selected again in the same transaction, so it is the same
-        page, and only the datetime paths are stringified.
+        page, and only the datetime paths are stringified. The document they
+        are read from keeps only the columns that hold a datetime: SurrealDB 4
+        charges each `type::field` in proportion to the document it walks, and
+        a page that still carried its vectors cost seconds.
         """
         dates = datetime_paths({"page": rows})
         if not dates:
             return
+        columns = ", ".join(dict.fromkeys(_column_of(path) for _, _, path in dates))
         captured = await self._execute(
-            f"RETURN {{ LET $document = {{ page: ({select}) }}; "
+            f"RETURN {{ LET $document = {{ page: (SELECT {columns} FROM ({select})) }}; "
             "RETURN SELECT array::map($paths, |$path| type::string(type::field($path))) "
             "AS datetimes FROM ONLY $document; };",
             **params,
