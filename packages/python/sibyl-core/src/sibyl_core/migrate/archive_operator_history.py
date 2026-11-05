@@ -22,6 +22,7 @@ from sibyl_core.backends.surreal.content_schema import (
 )
 from sibyl_core.backends.surreal.schema import GRAPH_EDGES, GRAPH_TABLES
 from sibyl_core.backends.surreal.schema_version import GRAPH_SCHEMA_CURRENT_VERSION
+from sibyl_core.backends.surreal.server_version import is_supported_server_version
 from sibyl_core.migrate.archive_operator_native_root import PreparedArchiveOperatorRoot
 from sibyl_core.migrate.archive_phase_receipts import (
     ArchivePhaseControl,
@@ -205,7 +206,7 @@ def _rows(
 ) -> dict[ArchiveHistoryScope, dict[str, tuple[_Row, ...]]]:
     native = root.native.payload
     value = native["value"]
-    if value["server_version"].split("+", 1)[0] != "surrealdb-3.2.4":
+    if not is_supported_server_version(value["server_version"]):
         raise ValueError("unsupported history backend")
     actual = tuple(
         ArchiveHistoryScope(s["store"], s["namespace"], s["database"], s["organization_id"])
