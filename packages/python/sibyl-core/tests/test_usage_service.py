@@ -14,12 +14,12 @@ from sibyl_core.services.content_models import RawMemory, raw_memory_record
 from sibyl_core.services.content_raw_persistence import replace_raw_memory_records_bulk
 from sibyl_core.services.graph import EntityManager, SurrealGraphClient, prepare_graph_schema
 from sibyl_core.services.usage import (
-    _GRAPH_ENTITY_STAMP_QUERY,
-    _RAW_CAPTURE_STAMP_QUERY,
     MemoryUsageEvent,
     MemoryUsageItemKind,
     MemoryUsageSignal,
     MemoryUsageStamp,
+    _graph_entity_stamp_query,
+    _raw_capture_stamp_query,
     _stamp_graph_entity,
     record_memory_usage,
 )
@@ -37,23 +37,22 @@ class _FakeContentClient:
             for row in cast("list[dict[str, object]]", params["rows"]):
                 self.events.setdefault(str(row["uuid"]), row)
             return list(self.events.values())
-        if query.lstrip().startswith("RETURN $targets.map"):
+        if "FROM memory_usage_events" in query:
             return [
                 {
-                    "item_kind": target["item_kind"],
-                    "item_id": target["item_id"],
-                    **self._stamp_for_item(
-                        organization_id=str(target["organization_id"]),
-                        item_kind=str(target["item_kind"]),
-                        item_id=str(target["item_id"]),
+                    "item_kind": params[f"kind_{index}"],
+                    "item_id": params[f"item_{index}"],
+                    "signals": self._signals_for_item(
+                        organization_id=str(params[f"org_{index}"]),
+                        item_kind=str(params[f"kind_{index}"]),
+                        item_id=str(params[f"item_{index}"]),
                     ),
                 }
-                for target in cast("list[dict[str, object]]", params["targets"])
+                for index in range(sum(name.startswith("item_") for name in params))
             ]
-        if "UPDATE (SELECT VALUE id FROM raw_captures" in query:
+        if "SELECT VALUE id FROM raw_captures WHERE uuid IN $stamp_ids_0" in query:
             rows = []
-            for stamp in cast("list[dict[str, object]]", params["stamps"]):
-                item_id = str(stamp["item_id"])
+            for item_id, stamp in cast("dict[str, dict[str, object]]", params["stamps"]).items():
                 previous = self.raw_stamps.get(item_id, {})
                 merged = _merge_stamp(previous, stamp)
                 self.raw_stamps[item_id] = merged
@@ -67,18 +66,15 @@ class _FakeContentClient:
             return rows
         raise AssertionError(f"unexpected content query: {query}")
 
-    def _stamp_for_item(
+    def _signals_for_item(
         self,
         *,
         organization_id: str,
         item_kind: str,
         item_id: str,
-    ) -> dict[str, object]:
-        retrieval_count = 0
-        citation_count = 0
-        misled_count = 0
-        last_recalled_at: datetime | None = None
-        last_used_at: datetime | None = None
+    ) -> list[dict[str, object]]:
+        """One group per signal, as the GROUP BY signal_type read returns them."""
+        groups: dict[str, dict[str, object]] = {}
         for row in self.events.values():
             if (
                 row["organization_id"] != organization_id
@@ -86,22 +82,15 @@ class _FakeContentClient:
                 or row["item_id"] != item_id
             ):
                 continue
-            event_at = coerce_datetime(row["event_at"])
-            if row["signal_type"] == MemoryUsageSignal.EXPOSURE.value:
-                retrieval_count += 1
-                last_recalled_at = _max_datetime(last_recalled_at, event_at)
-            elif row["signal_type"] == MemoryUsageSignal.CITATION.value:
-                citation_count += 1
-                last_used_at = _max_datetime(last_used_at, event_at)
-            elif row["signal_type"] == MemoryUsageSignal.MISLED.value:
-                misled_count += 1
-        return {
-            "retrieval_count": retrieval_count,
-            "citation_count": citation_count,
-            "misled_count": misled_count,
-            "last_recalled_at": last_recalled_at,
-            "last_used_at": last_used_at,
-        }
+            group = groups.setdefault(
+                str(row["signal_type"]),
+                {"signal_type": row["signal_type"], "total": 0, "latest": None},
+            )
+            group["total"] = cast("int", group["total"]) + 1
+            group["latest"] = _max_datetime(
+                coerce_datetime(group["latest"]), coerce_datetime(row["event_at"])
+            )
+        return list(groups.values())
 
 
 class _FakeGraphClient:
@@ -111,11 +100,10 @@ class _FakeGraphClient:
 
     async def execute_query(self, query: str, **params: object) -> object:
         self.calls.append((query, params))
-        if "UPDATE entity SET" not in query:
+        if "SELECT VALUE id FROM entity WHERE uuid IN $stamp_ids_0" not in query:
             raise AssertionError(f"unexpected graph query: {query}")
         rows = []
-        for stamp in cast("list[dict[str, object]]", params["stamps"]):
-            item_id = str(stamp["item_id"])
+        for item_id, stamp in cast("dict[str, dict[str, object]]", params["stamps"]).items():
             merged = _merge_stamp(self.entity_stamps.get(item_id, {}), stamp)
             self.entity_stamps[item_id] = merged
             rows.append({"uuid": item_id, "group_id": params["organization_id"], **merged})
@@ -295,22 +283,29 @@ async def test_record_memory_usage_stamps_a_batch_with_one_write_per_store() -> 
         "insert"
         if query.lstrip().startswith("INSERT")
         else "aggregate"
-        if query.lstrip().startswith("RETURN $targets.map")
+        if "FROM memory_usage_events" in query
         else "stamp"
         for query, _ in content_client.calls
     ]
     assert content_statements == ["insert", "aggregate", "stamp"], content_statements
     raw_write = content_client.calls[2]
-    assert [stamp["item_id"] for stamp in raw_write[1]["stamps"]] == raw_ids
+    assert list(cast("dict[str, object]", raw_write[1]["stamps"])) == raw_ids
+    assert raw_write[1]["stamp_ids_0"] == raw_ids
     assert len(graph_client.calls) == 1
-    assert [stamp["item_id"] for stamp in graph_client.calls[0][1]["stamps"]] == graph_ids
+    assert list(cast("dict[str, object]", graph_client.calls[0][1]["stamps"])) == graph_ids
     for query, _ in [*content_client.calls, *graph_client.calls]:
         assert "revision" not in query
 
 
 def test_stamp_statements_are_single_block_statements() -> None:
     """One result on every engine: the server answers BEGIN/COMMIT per statement."""
-    for query in (_RAW_CAPTURE_STAMP_QUERY, _GRAPH_ENTITY_STAMP_QUERY):
+    item_ids = [f"item-{index:02d}" for index in range(40)]
+    for query, clumps in (_raw_capture_stamp_query(item_ids), _graph_entity_stamp_query(item_ids)):
+        # Index operands are client params of at most 32 values, never a FOR
+        # variable or closure argument, which 4.0 cannot plan an index for.
+        assert [len(value) for value in clumps.values()] == [32, 8]
+        assert "FOR " not in query
+        assert "|$" not in query
         stripped = query.strip()
         assert stripped.startswith("RETURN {")
         assert stripped.endswith("};")

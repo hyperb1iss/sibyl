@@ -15,7 +15,10 @@ from sibyl_core.backends.surreal.schema_archive_phases import (
     ARCHIVE_PHASE_STATEMENTS,
     ARCHIVE_PHASE_TABLES,
 )
-from sibyl_core.backends.surreal.schema_derivations import DERIVATION_DEFINITIONS
+from sibyl_core.backends.surreal.schema_derivations import (
+    DERIVATION_DEFINITIONS,
+    migrate_derivation_target_index,
+)
 from sibyl_core.backends.surreal.schema_embedding_states import (
     EMBEDDING_STATE_DEFINITIONS,
     EMBEDDING_STATES_TABLE,
@@ -983,6 +986,11 @@ GRAPH_SCHEMA_MIGRATIONS = (
         name="entity_name_index",
         statements=tuple(split_statements(ENTITY_NAME_INDEX_DEFINITIONS)),
     ),
+    SchemaMigration(
+        version=38,
+        name="graph_derivation_target_index",
+        action=migrate_derivation_target_index,
+    ),
 )
 
 
@@ -1004,6 +1012,12 @@ def _graph_schema_migrations(
                     ownership=ownership,
                 )
                 if migration.action is migrate_lifecycle_repair
+                else partial(
+                    migrate_derivation_target_index,
+                    concurrent=not is_embedded_surreal_url(url),
+                    ownership=ownership,
+                )
+                if migration.action is migrate_derivation_target_index
                 else partial(migrate_graph_source_states, ownership=ownership)
                 if migration.action is migrate_graph_source_states
                 else partial(migrate_graph_source_integrity, ownership=ownership)

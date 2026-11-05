@@ -14,6 +14,7 @@ from sibyl_core.backends.surreal.fulltext import (
     build_fulltext_terms,
     build_match_disjunction,
 )
+from sibyl_core.backends.surreal.in_clumps import clumped
 from sibyl_core.backends.surreal.knn import knn_overfetch_pool, knn_search_effort
 from sibyl_core.config import settings
 from sibyl_core.embeddings.provenance import VECTOR_SPACE_FIELDS, vector_space_predicate
@@ -174,24 +175,16 @@ class _EntitySearchManager:
         if not ordered_ids:
             return []
         fields = "*" if include_embeddings else _ENTITY_ROW_FIELDS_WITHOUT_VECTORS
-        rows = normalize_records(
-            await self._client.execute_query(
-                # Past 32 values `uuid IN $list` is no longer index-served: the
-                # scan decodes every full row (contents plus embeddings) and
-                # tests it against the whole list. Clumps of 32 stay on the
-                # unique index and cost a fraction of one lookup per uuid. The
-                # closure body may reference nothing but its own argument: any
-                # other binding silently evaluates to nothing on at least one
-                # engine, so the group guard is applied to the returned rows
-                # instead (uuid is unique table-wide).
-                f"""
-                RETURN array::flatten(array::clump($uuids, 32).map(|$clump|
-                    (SELECT {fields} FROM entity WHERE uuid IN $clump)
-                ));
-                """,
-                uuids=ordered_ids,
-            )
+        # Past 32 values `uuid IN $list` is no longer index-served: the scan
+        # decodes every full row (contents plus embeddings) and tests it
+        # against the whole list. Clumps of 32, each its own client param,
+        # stay on the unique index on every version; 4.0 scans for a clump
+        # bound inside the statement. The group guard is applied to the
+        # returned rows (uuid is unique table-wide).
+        lookup, clumps = clumped(
+            f"SELECT {fields} FROM entity WHERE uuid IN $uuids", "uuids", ordered_ids
         )
+        rows = normalize_records(await self._client.execute_query(f"RETURN {lookup};", **clumps))
         rows_by_id = {
             str(row["uuid"]): row for row in rows if row.get("group_id") == self._group_id
         }

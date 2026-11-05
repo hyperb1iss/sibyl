@@ -2,13 +2,15 @@
 
 from __future__ import annotations
 
+import re
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from enum import StrEnum
 from hashlib import sha256
-from typing import Protocol
+from typing import Protocol, cast
 
+from sibyl_core.backends.surreal.in_clumps import clumped
 from sibyl_core.backends.surreal.records import coerce_datetime, normalize_records
 
 
@@ -89,37 +91,36 @@ INSERT INTO memory_usage_events $rows ON DUPLICATE KEY UPDATE
     created_at = created_at;
 """
 
-# One statement reads the aggregates for every target. Each lookup is an
-# equality probe on idx_memory_usage_events_item (organization, kind, item,
-# signal, event_at), so the cost is the matched events, not the table. The
-# closure body may reference nothing but its own argument on at least one
-# engine, so the organization travels inside each target.
-_USAGE_AGGREGATES_QUERY = """
-RETURN $targets.map(|$t| {
-    item_kind: $t.item_kind,
-    item_id: $t.item_id,
-    retrieval_count: (SELECT count() AS total FROM memory_usage_events
-        WHERE organization_id = $t.organization_id AND item_kind = $t.item_kind
-            AND item_id = $t.item_id AND signal_type = "exposure"
-        GROUP ALL)[0].total ?? 0,
-    citation_count: (SELECT count() AS total FROM memory_usage_events
-        WHERE organization_id = $t.organization_id AND item_kind = $t.item_kind
-            AND item_id = $t.item_id AND signal_type = "citation"
-        GROUP ALL)[0].total ?? 0,
-    misled_count: (SELECT count() AS total FROM memory_usage_events
-        WHERE organization_id = $t.organization_id AND item_kind = $t.item_kind
-            AND item_id = $t.item_id AND signal_type = "misled"
-        GROUP ALL)[0].total ?? 0,
-    last_recalled_at: (SELECT VALUE event_at FROM memory_usage_events
-        WHERE organization_id = $t.organization_id AND item_kind = $t.item_kind
-            AND item_id = $t.item_id AND signal_type = "exposure"
-        ORDER BY event_at DESC LIMIT 1)[0],
-    last_used_at: (SELECT VALUE event_at FROM memory_usage_events
-        WHERE organization_id = $t.organization_id AND item_kind = $t.item_kind
-            AND item_id = $t.item_id AND signal_type = "citation"
-        ORDER BY event_at DESC LIMIT 1)[0]
-});
-"""
+# One statement reads the aggregates for every target: per target, one GROUP
+# BY over its prefix of idx_memory_usage_events_item (organization, kind,
+# item, signal, event_at) counts each signal and finds its latest event, so
+# the cost is the matched events, not the table. Each target's fields are
+# client params (`_N` becomes the target's index): a closure argument is
+# unknown when 4.0 plans the statement, and every probe scanned the events
+# table there. One grouped read per target also costs 4.0 a fraction of the
+# five count and latest probes it answers. `time::max`, not `math::max`,
+# which reads datetimes as numbers.
+_USAGE_AGGREGATE = """{
+    item_kind: $kind_N,
+    item_id: $item_N,
+    signals: (SELECT signal_type, count() AS total, time::max(event_at) AS latest
+        FROM memory_usage_events
+        WHERE organization_id = $org_N AND item_kind = $kind_N AND item_id = $item_N
+        GROUP BY signal_type)
+}"""
+_TARGET_SLOT = re.compile(r"\$(org|kind|item)_N\b")
+
+
+def _usage_aggregates_query(targets: Sequence[MemoryUsageTarget]) -> tuple[str, dict[str, str]]:
+    objects = []
+    params: dict[str, str] = {}
+    for index, target in enumerate(targets):
+        objects.append(_TARGET_SLOT.sub(rf"$\1_{index}", _USAGE_AGGREGATE))
+        params[f"org_{index}"] = target.organization_id
+        params[f"kind_{index}"] = target.item_kind.value
+        params[f"item_{index}"] = target.item_id
+    return "RETURN [" + ", ".join(objects) + "];", params
+
 
 # A stamp is telemetry, not an edit, so it leaves revision alone. The counts
 # and timestamps it writes are derived from the append-only events table and
@@ -136,72 +137,73 @@ RETURN $targets.map(|$t| {
 # carries exactly one result on every engine. The server answers BEGIN/COMMIT
 # with one entry per statement while the embedded engine collapses it, so a
 # RETURN inside a transaction read the rows on one engine and NONE on the other.
-_RAW_CAPTURE_STAMP_QUERY = """
+#
+# Rows are found by uuid in index-served clumps of client params, and one
+# UPDATE applies every stamp, each row reading its own from `$stamps` (keyed
+# by uuid). A uuid bound by a FOR variable or a closure argument would scan
+# the table on 4.0 for every stamp. Stamps for one item are merged first
+# (_merged_stamps), which leaves the row as applying them in turn would.
+_STAMP_SET = """
+    last_recalled_at = IF last_recalled_at != NONE
+        AND ($stamps[uuid].last_recalled_at = NONE
+            OR last_recalled_at > $stamps[uuid].last_recalled_at)
+        THEN last_recalled_at ELSE $stamps[uuid].last_recalled_at END,
+    last_used_at = IF last_used_at != NONE
+        AND ($stamps[uuid].last_used_at = NONE OR last_used_at > $stamps[uuid].last_used_at)
+        THEN last_used_at ELSE $stamps[uuid].last_used_at END,
+    retrieval_count = math::max([retrieval_count ?? 0, $stamps[uuid].retrieval_count]),
+    citation_count = math::max([citation_count ?? 0, $stamps[uuid].citation_count]),
+    misled_count = math::max([misled_count ?? 0, $stamps[uuid].misled_count]),
+    __BAG__.last_recalled_at = IF last_recalled_at != NONE
+        AND ($stamps[uuid].last_recalled_at = NONE
+            OR last_recalled_at > $stamps[uuid].last_recalled_at)
+        THEN last_recalled_at ELSE $stamps[uuid].last_recalled_at END,
+    __BAG__.last_used_at = IF last_used_at != NONE
+        AND ($stamps[uuid].last_used_at = NONE OR last_used_at > $stamps[uuid].last_used_at)
+        THEN last_used_at ELSE $stamps[uuid].last_used_at END,
+    __BAG__.retrieval_count = math::max([retrieval_count ?? 0, $stamps[uuid].retrieval_count]),
+    __BAG__.citation_count = math::max([citation_count ?? 0, $stamps[uuid].citation_count]),
+    __BAG__.misled_count = math::max([misled_count ?? 0, $stamps[uuid].misled_count])
+"""
+
+_STAMP_QUERY = """
 RETURN {
-FOR $stamp IN $stamps {
-    UPDATE (SELECT VALUE id FROM raw_captures WHERE uuid = $stamp.item_id) SET
-        last_recalled_at = IF last_recalled_at != NONE
-            AND ($stamp.last_recalled_at = NONE
-                OR last_recalled_at > $stamp.last_recalled_at)
-            THEN last_recalled_at ELSE $stamp.last_recalled_at END,
-        last_used_at = IF last_used_at != NONE
-            AND ($stamp.last_used_at = NONE OR last_used_at > $stamp.last_used_at)
-            THEN last_used_at ELSE $stamp.last_used_at END,
-        retrieval_count = math::max([retrieval_count ?? 0, $stamp.retrieval_count]),
-        citation_count = math::max([citation_count ?? 0, $stamp.citation_count]),
-        misled_count = math::max([misled_count ?? 0, $stamp.misled_count]),
-        metadata.last_recalled_at = IF last_recalled_at != NONE
-            AND ($stamp.last_recalled_at = NONE
-                OR last_recalled_at > $stamp.last_recalled_at)
-            THEN last_recalled_at ELSE $stamp.last_recalled_at END,
-        metadata.last_used_at = IF last_used_at != NONE
-            AND ($stamp.last_used_at = NONE OR last_used_at > $stamp.last_used_at)
-            THEN last_used_at ELSE $stamp.last_used_at END,
-        metadata.retrieval_count = math::max([retrieval_count ?? 0, $stamp.retrieval_count]),
-        metadata.citation_count = math::max([citation_count ?? 0, $stamp.citation_count]),
-        metadata.misled_count = math::max([misled_count ?? 0, $stamp.misled_count])
-    WHERE organization_id = $organization_id
-    RETURN NONE;
-};
-RETURN $stamps.map(|$s| (SELECT uuid, organization_id, retrieval_count, citation_count,
-    misled_count, last_recalled_at, last_used_at
-    FROM raw_captures WHERE uuid = $s.item_id LIMIT 1)[0]);
+LET $stamped = __TARGETS__;
+UPDATE $stamped SET __SET__
+WHERE __ORGANIZATION__ = $organization_id
+RETURN NONE;
+RETURN __ROWS__;
 };
 """
 
-_GRAPH_ENTITY_STAMP_QUERY = """
-RETURN {
-FOR $stamp IN $stamps {
-    UPDATE entity SET
-        last_recalled_at = IF last_recalled_at != NONE
-            AND ($stamp.last_recalled_at = NONE
-                OR last_recalled_at > $stamp.last_recalled_at)
-            THEN last_recalled_at ELSE $stamp.last_recalled_at END,
-        last_used_at = IF last_used_at != NONE
-            AND ($stamp.last_used_at = NONE OR last_used_at > $stamp.last_used_at)
-            THEN last_used_at ELSE $stamp.last_used_at END,
-        retrieval_count = math::max([retrieval_count ?? 0, $stamp.retrieval_count]),
-        citation_count = math::max([citation_count ?? 0, $stamp.citation_count]),
-        misled_count = math::max([misled_count ?? 0, $stamp.misled_count]),
-        attributes.last_recalled_at = IF last_recalled_at != NONE
-            AND ($stamp.last_recalled_at = NONE
-                OR last_recalled_at > $stamp.last_recalled_at)
-            THEN last_recalled_at ELSE $stamp.last_recalled_at END,
-        attributes.last_used_at = IF last_used_at != NONE
-            AND ($stamp.last_used_at = NONE OR last_used_at > $stamp.last_used_at)
-            THEN last_used_at ELSE $stamp.last_used_at END,
-        attributes.retrieval_count = math::max([retrieval_count ?? 0, $stamp.retrieval_count]),
-        attributes.citation_count = math::max([citation_count ?? 0, $stamp.citation_count]),
-        attributes.misled_count = math::max([misled_count ?? 0, $stamp.misled_count])
-    WHERE group_id = $organization_id
-        AND uuid = $stamp.item_id
-    RETURN NONE;
-};
-RETURN $stamps.map(|$s| (SELECT uuid, group_id, retrieval_count, citation_count,
-    misled_count, last_recalled_at, last_used_at
-    FROM entity WHERE uuid = $s.item_id LIMIT 1)[0]);
-};
-"""
+
+def _stamp_query(
+    table: str, organization_field: str, bag: str, item_ids: Sequence[str]
+) -> tuple[str, dict[str, list]]:
+    targets, clumps = clumped(
+        f"SELECT VALUE id FROM {table} WHERE uuid IN $stamp_ids", "stamp_ids", item_ids
+    )
+    rows, _ = clumped(
+        f"SELECT uuid, {organization_field}, retrieval_count, citation_count, misled_count,"
+        f" last_recalled_at, last_used_at FROM {table} WHERE uuid IN $stamp_ids",
+        "stamp_ids",
+        item_ids,
+    )
+    query = (
+        _STAMP_QUERY.replace("__TARGETS__", targets)
+        .replace("__SET__", _STAMP_SET.replace("__BAG__", bag))
+        .replace("__ORGANIZATION__", organization_field)
+        .replace("__ROWS__", rows)
+    )
+    return query, clumps
+
+
+def _raw_capture_stamp_query(item_ids: Sequence[str]) -> tuple[str, dict[str, list]]:
+    return _stamp_query("raw_captures", "organization_id", "metadata", item_ids)
+
+
+def _graph_entity_stamp_query(item_ids: Sequence[str]) -> tuple[str, dict[str, list]]:
+    return _stamp_query("entity", "group_id", "attributes", item_ids)
 
 
 async def record_memory_usage_events(
@@ -332,24 +334,30 @@ async def _usage_aggregates(
     content_client: UsageContentClient,
     targets: Sequence[MemoryUsageTarget],
 ) -> dict[tuple[MemoryUsageItemKind, str], MemoryUsageStamp]:
-    rows = normalize_records(
-        await content_client.execute_query(
-            _USAGE_AGGREGATES_QUERY,
-            targets=[
-                {
-                    "organization_id": target.organization_id,
-                    "item_kind": target.item_kind.value,
-                    "item_id": target.item_id,
-                }
-                for target in targets
-            ],
-        )
-    )
+    query, params = _usage_aggregates_query(targets)
+    rows = normalize_records(await content_client.execute_query(query, **params))
     aggregates: dict[tuple[MemoryUsageItemKind, str], MemoryUsageStamp] = {}
     for row in rows:
         item_kind = MemoryUsageItemKind(str(row.get("item_kind") or ""))
         item_id = str(row.get("item_id") or "")
-        aggregates[(item_kind, item_id)] = _stamp_from_row(item_kind, item_id, row)
+        signals = {
+            str(group.get("signal_type")): group
+            for group in cast("list[Mapping[str, object]]", row.get("signals") or [])
+        }
+        exposure = signals.get(MemoryUsageSignal.EXPOSURE.value, {})
+        citation = signals.get(MemoryUsageSignal.CITATION.value, {})
+        misled = signals.get(MemoryUsageSignal.MISLED.value, {})
+        aggregates[(item_kind, item_id)] = _stamp_from_row(
+            item_kind,
+            item_id,
+            {
+                "retrieval_count": exposure.get("total"),
+                "citation_count": citation.get("total"),
+                "misled_count": misled.get("total"),
+                "last_recalled_at": exposure.get("latest"),
+                "last_used_at": citation.get("latest"),
+            },
+        )
     for target in targets:
         aggregates.setdefault(
             (target.item_kind, target.item_id),
@@ -364,11 +372,11 @@ async def _stamp_raw_captures(
     organization_id: str,
     stamps: Sequence[MemoryUsageStamp],
 ) -> list[MemoryUsageStamp]:
+    merged = _merged_stamps(stamps)
+    query, clumps = _raw_capture_stamp_query(list(merged))
     rows = normalize_records(
         await content_client.execute_query(
-            _RAW_CAPTURE_STAMP_QUERY,
-            organization_id=organization_id,
-            stamps=[_stamp_parameters(stamp) for stamp in stamps],
+            query, organization_id=organization_id, stamps=merged, **clumps
         )
     )
     return _stamps_from_rows(
@@ -384,11 +392,14 @@ async def _stamp_graph_entities(
     organization_id: str,
     stamps: Sequence[MemoryUsageStamp],
 ) -> list[MemoryUsageStamp]:
+    merged = _merged_stamps(stamps)
+    query, clumps = _graph_entity_stamp_query(list(merged))
     rows = normalize_records(
         await graph_client.execute_query(
-            _GRAPH_ENTITY_STAMP_QUERY,
+            query,
             organization_id=organization_id,
-            stamps=[_stamp_parameters(stamp) for stamp in stamps],
+            stamps=merged,
+            **clumps,
             # Bookkeeping only: the graph caches stay warm (BOOKKEEPING_QUERY_LABELS).
             _query_label="usage.graph_stamp",
         )
@@ -415,15 +426,45 @@ async def _stamp_graph_entity(
     return stamped[0]
 
 
-def _stamp_parameters(stamp: MemoryUsageStamp) -> dict[str, object]:
-    return {
-        "item_id": stamp.item_id,
-        "retrieval_count": stamp.retrieval_count,
-        "citation_count": stamp.citation_count,
-        "misled_count": stamp.misled_count,
-        "last_recalled_at": stamp.last_recalled_at,
-        "last_used_at": stamp.last_used_at,
-    }
+def _merged_stamps(stamps: Sequence[MemoryUsageStamp]) -> dict[str, dict[str, object]]:
+    """One stamp per item, in first-seen order: its latest timestamps and largest counters.
+
+    Applying a stamp keeps each stored timestamp unless the stamp's is later
+    (a missing one keeps it) and each counter at the larger value, so
+    applying several in turn leaves the row as applying this one does.
+    """
+    merged: dict[str, dict[str, object]] = {}
+    for stamp in stamps:
+        prior = merged.get(stamp.item_id)
+        if prior is None:
+            merged[stamp.item_id] = {
+                "retrieval_count": stamp.retrieval_count,
+                "citation_count": stamp.citation_count,
+                "misled_count": stamp.misled_count,
+                "last_recalled_at": stamp.last_recalled_at,
+                "last_used_at": stamp.last_used_at,
+            }
+            continue
+        for counter in ("retrieval_count", "citation_count", "misled_count"):
+            prior[counter] = max(cast("int", prior[counter]), getattr(stamp, counter))
+        for moment in ("last_recalled_at", "last_used_at"):
+            prior[moment] = _later(cast("datetime | None", prior[moment]), getattr(stamp, moment))
+    return merged
+
+
+def _later(current: datetime | None, candidate: datetime | None) -> datetime | None:
+    if current is None or candidate is None:
+        return candidate if current is None else current
+    return candidate if _instant(candidate) >= _instant(current) else current
+
+
+def _instant(moment: datetime) -> datetime:
+    # Compared in UTC: two values sharing a zone compare by wall time in Python,
+    # which orders a repeated hour (a DST fold) by its clock reading instead of
+    # its instant. A naive value is UTC, as coerce_datetime and the SDK read it.
+    if moment.tzinfo is not None:
+        return moment.astimezone(UTC)
+    return moment.replace(tzinfo=UTC)
 
 
 def _dedupe_event_records(rows: Iterable[Mapping[str, object]]) -> tuple[Mapping[str, object], ...]:

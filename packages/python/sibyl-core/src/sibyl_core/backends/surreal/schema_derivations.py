@@ -1,5 +1,15 @@
 """Protected target associations for observations used to derive memory."""
 
+from __future__ import annotations
+
+from sibyl_core.backends.surreal.schema_index_recovery import ensure_owned_concurrent_index
+from sibyl_core.backends.surreal.schema_ownership import SchemaOwnership
+from sibyl_core.backends.surreal.schema_version import (
+    ConcurrentIndexDefinition,
+    SurrealExecute,
+    wait_for_index_ready,
+)
+
 DERIVATION_DEFINITIONS = """
 DEFINE TABLE IF NOT EXISTS memory_derivations SCHEMAFULL PERMISSIONS NONE;
 DEFINE FIELD IF NOT EXISTS organization_id ON memory_derivations TYPE string;
@@ -26,3 +36,44 @@ FOR $derivation IN $derivations {
     CREATE memory_derivations CONTENT $derivation;
 };
 """
+
+
+# Reads that look associations up for a set of targets go through this index.
+# The UNIQUE identity index keeps one association per target, but an IN on its
+# last column is served by walking the whole organization and kind prefix on
+# 3.2.4 and 4.0 alike, so those reads grew with the organization's ledger.
+DERIVATION_TARGET_ID_INDEX = "memory_derivation_target_id"
+_DERIVATION_TARGET_ID_DEFINITION = (
+    f"DEFINE INDEX {DERIVATION_TARGET_ID_INDEX} ON memory_derivations FIELDS target_id"
+)
+
+
+async def migrate_derivation_target_index(
+    execute_query: SurrealExecute,
+    *,
+    concurrent: bool = False,
+    ownership: SchemaOwnership | None = None,
+) -> None:
+    """Build the target id index, resuming a build an earlier owner left unfinished."""
+    if concurrent and ownership is not None:
+        await ensure_owned_concurrent_index(
+            ownership,
+            ConcurrentIndexDefinition(
+                name=DERIVATION_TARGET_ID_INDEX,
+                table="memory_derivations",
+                definition=_DERIVATION_TARGET_ID_DEFINITION,
+            ),
+        )
+        return
+    mutate = ownership.mutate if ownership is not None else execute_query
+    await mutate(
+        _DERIVATION_TARGET_ID_DEFINITION.replace("DEFINE INDEX", "DEFINE INDEX IF NOT EXISTS")
+        + (" CONCURRENTLY;" if concurrent else ";")
+    )
+    if concurrent:
+        await wait_for_index_ready(
+            execute_query,
+            name=DERIVATION_TARGET_ID_INDEX,
+            table="memory_derivations",
+            require_status=True,
+        )

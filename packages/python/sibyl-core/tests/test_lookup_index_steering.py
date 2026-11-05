@@ -15,6 +15,8 @@ import re
 from typing import Any
 from unittest.mock import AsyncMock
 
+import pytest
+
 from sibyl_core.backends.surreal.schema import GRAPH_SCHEMA_MIGRATIONS
 from sibyl_core.backends.surreal.schema_version import GRAPH_SCHEMA_CURRENT_VERSION
 from sibyl_core.models.entities import EntityType
@@ -105,6 +107,81 @@ async def test_epic_progress_without_epics_issues_no_query() -> None:
 
     assert await manager._epic_progress_map(set()) == {}
     manager._client.execute_query_batch.assert_not_awaited()  # type: ignore[union-attr]
+
+
+def test_migration_38_builds_the_derivation_target_index() -> None:
+    from sibyl_core.backends.surreal.schema_derivations import migrate_derivation_target_index
+
+    assert GRAPH_SCHEMA_CURRENT_VERSION >= 38
+    migration = next(item for item in GRAPH_SCHEMA_MIGRATIONS if item.version == 38)
+    assert migration.name == "graph_derivation_target_index"
+    assert migration.action is migrate_derivation_target_index
+
+
+@pytest.fixture(params=["embedded", "live"])
+async def upgrade_client(request):
+    """An embedded store, then a SurrealDB server when SIBYL_LIVE_SURREAL_TESTS=1 and
+    SIBYL_SURREAL_URL name one: there the index builds concurrently under the lease."""
+    import os
+    from uuid import uuid4
+
+    from sibyl_core.backends.surreal.url_schemes import is_embedded_surreal_url
+    from sibyl_core.services.graph_client import SurrealGraphClient
+
+    group_id = f"derivation-index-{uuid4().hex[:10]}"
+    if request.param == "embedded":
+        client = SurrealGraphClient(group_id=group_id, url="memory://")
+    else:
+        url = os.environ.get("SIBYL_SURREAL_URL", "")
+        if (
+            os.environ.get("SIBYL_LIVE_SURREAL_TESTS") != "1"
+            or not url
+            or is_embedded_surreal_url(url)
+        ):
+            pytest.skip("live SurrealDB tests require SIBYL_LIVE_SURREAL_TESTS=1 and a server URL")
+        client = SurrealGraphClient(
+            group_id=group_id,
+            url=url,
+            username=os.environ.get("SIBYL_SURREAL_USERNAME", "root"),
+            password=os.environ.get("SIBYL_SURREAL_PASSWORD", "root"),
+            namespace_prefix="verify_",
+            database="graph",
+            pool_size=2,
+        )
+    try:
+        yield client
+    finally:
+        if request.param == "live":
+            await client.execute_query(f"REMOVE NAMESPACE IF EXISTS {client.namespace};")
+        await client.close()
+
+
+async def test_a_namespace_at_37_gains_the_derivation_target_index(upgrade_client) -> None:
+    from sibyl_core.backends.surreal.schema_version import get_index_build_status
+    from sibyl_core.services.graph_client import mark_graph_schema_dirty, prepare_graph_schema
+
+    client = upgrade_client
+
+    async def indexes() -> dict[str, object]:
+        info = await client.execute_query("INFO FOR TABLE memory_derivations;")
+        return (info[0] if isinstance(info, list) else info)["indexes"]
+
+    await prepare_graph_schema(client)
+    assert "memory_derivation_target_id" in await indexes()
+    await client.execute_query(
+        "REMOVE INDEX memory_derivation_target_id ON memory_derivations;"
+        " UPDATE schema_version:graph SET version = 37;"
+    )
+    assert "memory_derivation_target_id" not in await indexes()
+    mark_graph_schema_dirty(client.group_id)
+    await prepare_graph_schema(client)
+    assert "memory_derivation_target_id" in await indexes()
+    status = await get_index_build_status(
+        client.execute_query, name="memory_derivation_target_id", table="memory_derivations"
+    )
+    assert status is None or status.status in {"ready", "built"}
+    version = await client.execute_query("SELECT VALUE version FROM schema_version:graph;")
+    assert version == [GRAPH_SCHEMA_CURRENT_VERSION]
 
 
 def test_migration_37_defines_the_entity_name_index() -> None:

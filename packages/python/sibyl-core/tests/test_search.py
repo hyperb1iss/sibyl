@@ -8,6 +8,7 @@ from dataclasses import asdict, replace
 from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
+from typing import cast
 from unittest.mock import AsyncMock
 from uuid import uuid4
 
@@ -4161,7 +4162,64 @@ async def test_edge_fulltext_splits_matches_from_relation_hydration() -> None:
     assert client.calls[0][1]["match_limit"] == 32
     assert client.calls[0][1]["project_ids"] == ["project_123"]
     assert "fact @0@" not in hydrate_query
-    assert "uuid IN $match_uuids" in hydrate_query
+    assert hydrate_query.startswith("RETURN array::flatten([")
+    assert "uuid IN $match_uuids_0" in hydrate_query
+    assert "LIMIT" not in hydrate_query
+    assert client.calls[1][1]["match_uuids_0"] == ["edge-1", "edge-2", "edge-3", "edge-4"]
+
+
+@pytest.mark.asyncio
+async def test_edge_fulltext_hydrates_past_32_matches_in_index_served_clumps() -> None:
+    """Neither planner index-serves an `IN` list past 32 values."""
+
+    class _ManyMatches:
+        def __init__(self) -> None:
+            self.calls: list[tuple[str, dict[str, object]]] = []
+
+        async def execute_query(self, query: str, **params: object) -> list[dict[str, object]]:
+            self.calls.append((query, params))
+            if "fact @0@" in query:
+                return [
+                    {"uuid": f"edge-{index:02d}", "score": 1 - index / 100} for index in range(70)
+                ]
+            return [
+                {
+                    "uuid": uuid,
+                    "name": "RELATES_TO",
+                    "fact": uuid,
+                    "group_id": "org-123",
+                    "episodes": [],
+                    "attributes": {},
+                    "source_node_uuid": "a",
+                    "target_node_uuid": "b",
+                }
+                for name, uuids in params.items()
+                if name.startswith("match_uuids_")
+                for uuid in reversed(cast("list[str]", uuids))
+            ]
+
+    plan = build_context_retrieval_plan(
+        query="surreal planner warning",
+        organization_id="org-123",
+        facets=[ContextFacet.ACTIVE_WORK],
+        facet_types={ContextFacet.ACTIVE_WORK: ["task"]},
+        principal_id="user-123",
+        project="project_123",
+        accessible_projects={"project_123"},
+    )
+    client = _ManyMatches()
+
+    candidates = await source_module._edge_fulltext_candidates(
+        client=client, plan=plan, search_filter=search_module.SearchFilter(), limit=10
+    )
+
+    hydrate_query, hydrate_params = client.calls[1]
+    clumps = {name: value for name, value in hydrate_params.items() if name.startswith("match_")}
+    assert [len(value) for value in clumps.values()] == [32, 32, 6]
+    assert hydrate_query.count("uuid IN $match_uuids_") == 3
+    assert [candidate.id for candidate in candidates] == [
+        f"edge-{index:02d}" for index in range(10)
+    ]
 
 
 # --- H6: one shared fusion+ranking core across both retrieval surfaces -------

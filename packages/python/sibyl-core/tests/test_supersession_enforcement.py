@@ -779,9 +779,10 @@ async def test_the_edge_lookup_is_not_fed_ids_that_cannot_be_edge_endpoints() ->
         async def execute_query(self, _query: str, **params: object) -> list[dict[str, object]]:
             if "uuids" in params:
                 seen_uuids.append(list(params["uuids"]))
-            elif "relationship_ids" in params:
-                assert params["ids"] == []
-                assert params["relationship_ids"] == ["rel-1"]
+            elif "snapshot_relationship_ids_0" in params:
+                assert params["snapshot_ids_0"] == []
+                assert params["snapshot_relationship_ids_0"] == ["rel-1"]
+                assert "snapshot_relationship_ids_1" not in params
                 return [{"targets": [], "states": [], "associations": [], "relationships": []}]
             else:
                 # The edge lookup binds `ids`; the endpoint read binds clumps `ids_0`, ...
