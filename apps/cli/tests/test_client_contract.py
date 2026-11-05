@@ -83,6 +83,8 @@ PUBLIC_METHOD_OWNERS = {
         "update_task",
         "create_note",
         "list_notes",
+        "assign_task",
+        "unassign_task",
     },
     ClientMemoryMixin: {
         "remember_raw_memory",
@@ -147,7 +149,7 @@ def test_public_methods_resolve_directly_to_one_canonical_owner() -> None:
         if not name.startswith("_")
     }
 
-    assert len(expected) == 104
+    assert len(expected) == 106
     assert actual == expected
     assert {
         name
