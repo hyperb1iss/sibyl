@@ -154,10 +154,10 @@ def surreal_volume_initializer(
 ) -> dict[str, Any]:
     """Guard the image and store pairing, then initialize only the mount root.
 
-    The guard refuses a start that would open existing data wrong (a 3.x image
-    on a SurrealKV store or with surrealkv:// on a RocksDB one, or a 4.x image
-    on a RocksDB store without the conversion opt-in), so the server never
-    starts. `image` is the surrealdb service's image reference, which Compose
+    The guard refuses a start that would open existing data wrong (an
+    unversioned image, a relative path, 3.x on anything but rocksdb://, 4.x on
+    anything but surrealkv://, or a store that server would misread), so the
+    server never starts. `image` is the surrealdb service's image reference, which Compose
     interpolates, and `store` its store path. Existing database file metadata
     is left alone.
     """

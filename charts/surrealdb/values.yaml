@@ -12,8 +12,9 @@ surrealdb:
     - start
   surrealdb:
     # The path moves with the image: a 3.x server handed surrealkv:// on its
-    # RocksDB directory serves an empty database, so the chart refuses a 3.x
-    # tag with this path. A pod held on 3.x keeps rocksdb:/data/db.
+    # RocksDB directory serves an empty database, so the chart renders a 3.x
+    # tag only with rocksdb: and 4.x only with surrealkv:, at an absolute
+    # path. A pod held on 3.x keeps rocksdb:/data/db.
     path: surrealkv:/data/db
     unauthenticated: false
   strategy:

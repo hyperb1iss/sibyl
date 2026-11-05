@@ -1115,6 +1115,63 @@ def test_helm_ops_values_are_validated_at_render(override: tuple[str, str], mess
     assert message in rendered.stderr
 
 
+def _render_surrealdb(tag: str, path: str) -> subprocess.CompletedProcess[str]:
+    assert _HELM is not None
+    return subprocess.run(  # noqa: S603
+        [
+            _HELM,
+            "template",
+            "pairing",
+            "charts/surrealdb",
+            "--set-string",
+            f"surrealdb.image.tag={tag}",
+            "--set-string",
+            f"surrealdb.surrealdb.path={path}",
+        ],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+
+@pytest.mark.parametrize(
+    ("tag", "path", "message"),
+    [
+        ("latest", "surrealkv:/data/db", "names no SurrealDB version"),
+        ("sha256:0123", "surrealkv:/data/db", "names no SurrealDB version"),
+        ("nightly", "rocksdb:/data/db", "names no SurrealDB version"),
+        ("v3.2.4", "surrealkv:/data/db", "is a 3.x server, which would open an empty database"),
+        ("3.2.4@sha256:0123", "surrealkv:///data/db", "is a 3.x server"),
+        ("v4.0.0", "rocksdb:/data/db", "is a 4.x server, which runs only on surrealkv"),
+        ("v4.0.0", "surrealkv://data/db", "is not an absolute rocksdb: or surrealkv: path"),
+        ("v4.0.0", "memory", "is not an absolute rocksdb: or surrealkv: path"),
+        ("v3.2.4", "rocksdb:data/db", "is not an absolute rocksdb: or surrealkv: path"),
+    ],
+)
+def test_helm_store_path_must_pair_with_the_image_major(tag: str, path: str, message: str) -> None:
+    """3.x renders only on rocksdb:, 4.x only on surrealkv:, from a versioned tag."""
+    rendered = _render_surrealdb(tag, path)
+    assert rendered.returncode != 0
+    assert message in rendered.stderr
+
+
+@pytest.mark.parametrize(
+    ("tag", "path"),
+    [
+        ("v4.0.0", "surrealkv:/data/db"),
+        ("v4.0.0", "surrealkv:///data/db"),
+        ("4.0.1@sha256:0123", "surrealkv:/data/db"),
+        ("v3.2.4", "rocksdb:/data/db"),
+        ("v3.2.4@sha256:0123", "rocksdb:///data/db"),
+    ],
+)
+def test_helm_renders_each_supported_pairing(tag: str, path: str) -> None:
+    rendered = _render_surrealdb(tag, path)
+    assert rendered.returncode == 0, rendered.stderr
+    assert f"value: {path}" in rendered.stdout
+
+
 def _org_uuid(namespace: str) -> str:
     hexes = namespace.removeprefix("org_")
     return f"{hexes[:8]}-{hexes[8:12]}-{hexes[12:16]}-{hexes[16:20]}-{hexes[20:]}"

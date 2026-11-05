@@ -203,8 +203,10 @@ Deployment and PVC `<release>-surrealdb`, and `<ns>` for its namespace.
    SurrealDB to zero and run a one-off `busybox:1.37` pod that mounts the PVC, or wait for the next
    maintenance window.
 
-The chart refuses to render a 3.x `surrealdb.image.tag` with a `surrealkv:` path. To stay on 3.x,
-set `surrealdb.surrealdb.path: rocksdb:/data/db` with the 3.x tag.
+The chart refuses to render a store path that does not pair with `surrealdb.image.tag`: the tag must
+name its version (such as `v3.2.4`, not `latest`), the path must be absolute, a 3.x tag runs only on
+`rocksdb:`, and 4.x runs only on `surrealkv:`. To stay on 3.x, set
+`surrealdb.surrealdb.path: rocksdb:/data/db` with the 3.x tag.
 
 ## CLI runtimes
 

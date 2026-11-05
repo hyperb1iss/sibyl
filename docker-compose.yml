@@ -15,9 +15,10 @@
 # file share that cannot change owners (some desktop VMs) only warns here;
 # SurrealDB itself reports a directory it cannot write.
 # The one-shot that prepares the data directory also refuses an image and
-# store path that would open existing data wrong (a 3.x image on surrealkv://
-# or on a converted store, or 4.0 on a 3.x store without the opt-in), so the
-# server never starts on them.
+# store path that would open existing data wrong, so the server never starts
+# on them: an unversioned image, a relative path, 3.x on anything but
+# rocksdb://, 4.x on anything but surrealkv://, or a store that server would
+# misread (4.0 converts a 3.x store only with the opt-in).
 x-surreal-init: &surreal-init
   image: busybox:1.37
   command:
