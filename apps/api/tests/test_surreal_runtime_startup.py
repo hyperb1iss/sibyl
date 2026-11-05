@@ -144,7 +144,7 @@ async def test_bootstrap_surreal_content_schema_closes_client_after_failure(
 async def test_a_failed_index_rebuild_stops_startup_even_in_development(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from sibyl_core.backends.surreal.index_engine import IndexRebuildFailed
+    from sibyl_core.backends.surreal.index_engine import IndexReadinessError
 
     monkeypatch.setattr(
         surreal_runtime_startup.config_module.settings, "environment", "development"
@@ -153,7 +153,7 @@ async def test_a_failed_index_rebuild_stops_startup_even_in_development(
     monkeypatch.setattr(
         surreal_runtime_startup,
         "bootstrap_surreal_content_schema",
-        AsyncMock(side_effect=IndexRebuildFailed("REBUILD INDEX raw_uuid ON raw failed")),
+        AsyncMock(side_effect=IndexReadinessError("REBUILD INDEX raw_uuid ON raw failed")),
     )
 
     with pytest.raises(surreal_runtime_startup.RuntimeSchemaBootstrapError) as exc_info:

@@ -15,6 +15,7 @@ from sibyl_core.backends.surreal.index_engine import (
     INDEX_ENGINE_FIELD,
     index_engine_current,
     index_engine_of,
+    index_readiness_step,
     settle_database_indexes,
 )
 from sibyl_core.backends.surreal.schema_archive_phases import (
@@ -1420,16 +1421,17 @@ async def _bootstrap_owned_schema(
     reset: bool,
     force: bool,
 ) -> None:
-    info = await pin_schema_compatibility_level(ownership.read, ownership.mutate)
     # A reset rebuilds every table from nothing; otherwise a database written
     # before its 4.x server has every index rebuilt before anything reads it.
-    index_engine = (
-        index_engine_of(info)
-        if reset
-        else await settle_database_indexes(
-            cast("Any", driver), name=GRAPH_SCHEMA_NAME, info=info, ownership=ownership
+    async with index_readiness_step(f"graph {driver.group_id}"):
+        info = await pin_schema_compatibility_level(ownership.read, ownership.mutate)
+        index_engine = (
+            index_engine_of(info)
+            if reset
+            else await settle_database_indexes(
+                cast("Any", driver), name=GRAPH_SCHEMA_NAME, info=info, ownership=ownership
+            )
         )
-    )
     await prepare_source_integrity_upgrade(ownership.read, ownership=ownership)
     current_version = 0
     if reset:

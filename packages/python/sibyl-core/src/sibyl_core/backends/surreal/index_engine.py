@@ -10,23 +10,27 @@ that database's schema lease. On a 4.x server a database whose schema_version
 record exists without ``index_engine = 4`` predates the server: every index is
 rebuilt, checked, and only then is the record marked. A database the
 bootstrap creates on a 4.x server carries the mark from its first record, and
-a 3.x server or the embedded engine is never touched. A failed or incomplete
-rebuild raises and leaves the database unmarked, so the next bootstrap tries
-again and nothing serves it in the meantime.
+a 3.x server or the embedded engine is never touched. Every failure of this
+step, from the first INFO FOR DB to the mark, raises IndexReadinessError and
+leaves the database unmarked, so the next bootstrap tries again and nothing
+serves it in the meantime.
 """
 
 from __future__ import annotations
 
 import time
-from collections.abc import Awaitable, Callable, Mapping
+from collections.abc import AsyncGenerator, Awaitable, Callable, Mapping
+from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING, Any, Protocol, cast
 
 import structlog
 
 from sibyl_core.backends.surreal.schema_version import (
+    ensure_schema_version_table,
     schema_version_record_id,
     schema_version_record_query,
 )
+from sibyl_core.backends.surreal.url_schemes import surreal_url_scheme
 
 if TYPE_CHECKING:
     from sibyl_core.backends.surreal.schema_ownership import SchemaOwnership
@@ -61,8 +65,25 @@ class LeaseableClient(Protocol):
     def schema_lease_executor(self) -> Any: ...
 
 
-class IndexRebuildFailed(RuntimeError):
-    """A database's indexes could not all be rebuilt; it stays unmarked and must not serve."""
+class IndexReadinessError(RuntimeError):
+    """A database's indexes could not be shown built by its server; it stays unmarked and must not serve."""
+
+
+@asynccontextmanager
+async def index_readiness_step(where: str) -> AsyncGenerator[None]:
+    """Turn any failure while establishing index readiness into IndexReadinessError.
+
+    The step spans the INFO FOR DB it decides on, the record reads, the lease,
+    the inventory, every REBUILD, the status checks and the mark. Callers fail
+    closed on this one type in every environment.
+    """
+    try:
+        yield
+    except IndexReadinessError:
+        raise
+    except Exception as exc:
+        msg = f"index readiness for {where} could not be established: {exc}"
+        raise IndexReadinessError(msg) from exc
 
 
 def index_engine_of(info: object) -> int | None:
@@ -122,35 +143,65 @@ async def settle_database_indexes(
     if not version and not holds_sibyl_tables(info):
         # Nothing of Sibyl's here yet: this bootstrap builds every index.
         return engine
+    _refuse_http(client)
     if ownership is not None:
-        await _rebuild_and_mark(ownership, client=client, name=name, recorded=version is not None)
+        await _rebuild_and_mark(ownership, client=client, name=name)
     else:
         from sibyl_core.backends.surreal.schema import hold_schema_ownership
 
         async with hold_schema_ownership(client) as owned:
-            version, recorded = await recorded_index_engine(owned.read, name=name)
-            if index_engine_current(recorded):
-                return None
-            await _rebuild_and_mark(owned, client=client, name=name, recorded=version is not None)
-    # Tables without a record yet: the mark goes on the record this bootstrap
-    # creates, after the rebuild above.
-    return None if version is not None else engine
+            _, recorded = await recorded_index_engine(owned.read, name=name)
+            if not index_engine_current(recorded):
+                await _rebuild_and_mark(owned, client=client, name=name)
+    return None
+
+
+async def database_needs_rebuild(read: SurrealExecute, *, name: str) -> object | None:
+    """The bootstrap's rule, for code that reaches a database without bootstrapping it.
+
+    Returns the INFO FOR DB that shows a rebuild is due (a 4.x server, and a
+    schema_version record without the mark or tables without a record), or
+    None. A marked database costs one record read; anything else one more
+    INFO FOR DB. A namespace or database that does not exist yet holds nothing.
+    """
+    try:
+        version, recorded = await recorded_index_engine(read, name=name)
+    except Exception as exc:
+        if "does not exist" in str(exc).lower():
+            return None
+        raise
+    if index_engine_current(recorded):
+        return None
+    info = await read("INFO FOR DB;")
+    if index_engine_of(info) is None:
+        return None
+    return info if version or holds_sibyl_tables(info) else None
 
 
 async def ensure_database_indexes(client: LeaseableClient, *, name: str) -> bool:
-    """For a process that uses a database without running its bootstrap: rebuild if it is due.
+    """For a process that uses auth or content without running their bootstrap.
 
-    Returns whether a rebuild ran. A database without a schema_version record
-    is left to the bootstrap that will create it.
+    Returns whether a rebuild ran; raises IndexReadinessError on any failure.
     """
-    version, recorded = await recorded_index_engine(client.execute_query, name=name)
-    if version is None or index_engine_current(recorded):
-        return False
-    info = await client.execute_query("INFO FOR DB;")
-    if index_engine_of(info) is None:
-        return False
-    await settle_database_indexes(client, name=name, info=info)
-    return True
+    async with index_readiness_step(f"{client.namespace}/{client.database}"):
+        info = await database_needs_rebuild(client.execute_query, name=name)
+        if info is None:
+            return False
+        await settle_database_indexes(client, name=name, info=info)
+        return True
+
+
+def _refuse_http(client: LeaseableClient) -> None:
+    # The SDK's HTTP transport gives every request 30 s in total, and a 4.0
+    # REBUILD can wait up to 60 s for older write transactions before it
+    # starts. Every shipped configuration speaks WebSocket.
+    if surreal_url_scheme(client._url) in {"http", "https"}:
+        msg = (
+            f"{client.namespace}/{client.database} needs its indexes rebuilt after the move to "
+            "SurrealDB 4, and a rebuild can outlast the 30 s HTTP request limit. Start once "
+            "with SIBYL_SURREAL_URL set to the server's ws:// (or wss://) /rpc endpoint."
+        )
+        raise IndexReadinessError(msg)
 
 
 async def rebuild_database_indexes(
@@ -174,12 +225,12 @@ async def rebuild_database_indexes(
             await read(f"REBUILD INDEX {_ident(index)} ON {_ident(table)};")
         except Exception as exc:
             msg = f"REBUILD INDEX {index} ON {table} failed: {exc}"
-            raise IndexRebuildFailed(msg) from exc
+            raise IndexReadinessError(msg) from exc
     present = set(await _index_inventory(read))
     for table, index in inventory:
         if (table, index) not in present:
             msg = f"index {index} on {table} is no longer defined after its rebuild"
-            raise IndexRebuildFailed(msg)
+            raise IndexReadinessError(msg)
         building = _mapping(
             _mapping(await read(f"INFO FOR INDEX {_ident(index)} ON {_ident(table)};")).get(
                 "building"
@@ -188,7 +239,7 @@ async def rebuild_database_indexes(
         status = building.get("status")
         if status is not None and status not in _BUILT:
             msg = f"index {index} on {table} is {status} after its rebuild: {building.get('error')}"
-            raise IndexRebuildFailed(msg)
+            raise IndexReadinessError(msg)
     return len(inventory)
 
 
@@ -197,7 +248,6 @@ async def _rebuild_and_mark(
     *,
     client: LeaseableClient,
     name: str,
-    recorded: bool,
 ) -> None:
     started = time.monotonic()
     where = {"namespace": client.namespace, "database": client.database}
@@ -207,16 +257,18 @@ async def _rebuild_and_mark(
         **where,
     )
     count = await rebuild_database_indexes(ownership.read, heartbeat=ownership.heartbeat)
-    if recorded:
-        # Fenced by the lease: an owner that lost it cannot mark the database.
-        # A record from before this field needs its definition first.
-        await ownership.mutate(
-            f"DEFINE FIELD IF NOT EXISTS {INDEX_ENGINE_FIELD} ON schema_version "
-            "TYPE option<int>;\n"
-            f"UPDATE {schema_version_record_id(name)} "
-            f"SET {INDEX_ENGINE_FIELD} = $index_engine, updated_at = time::now();",
-            index_engine=INDEX_ENGINE,
-        )
+    # Completion is persisted before the lease is released, fenced by it: an
+    # owner that lost the lease cannot mark. A database with tables but no
+    # record gets one at version 0, which its migrations then carry forward.
+    await ensure_schema_version_table(ownership.mutate)
+    await ownership.mutate(
+        f"UPSERT {schema_version_record_id(name)} SET name = $name, "
+        "version = version ?? 0, migrations = migrations ?? [], "
+        f"{INDEX_ENGINE_FIELD} = $index_engine, "
+        "created_at = created_at ?? time::now(), updated_at = time::now();",
+        name=name,
+        index_engine=INDEX_ENGINE,
+    )
     log.warning(
         "surreal_index_rebuild_finished",
         indexes=count,
@@ -256,11 +308,13 @@ def _first(value: object) -> Mapping[str, object] | None:
 __all__ = [
     "INDEX_ENGINE",
     "INDEX_ENGINE_FIELD",
-    "IndexRebuildFailed",
+    "IndexReadinessError",
+    "database_needs_rebuild",
     "ensure_database_indexes",
     "holds_sibyl_tables",
     "index_engine_current",
     "index_engine_of",
+    "index_readiness_step",
     "rebuild_database_indexes",
     "recorded_index_engine",
     "settle_database_indexes",

@@ -82,21 +82,21 @@ async def bootstrap_surreal_content_schema() -> None:
 async def bootstrap_surreal_runtime_schemas() -> bool:
     from sibyl_core.backends.surreal.auth_schema import AUTH_SCHEMA_CURRENT_VERSION
     from sibyl_core.backends.surreal.content_schema import CONTENT_SCHEMA_CURRENT_VERSION
-    from sibyl_core.backends.surreal.index_engine import IndexRebuildFailed
+    from sibyl_core.backends.surreal.index_engine import IndexReadinessError
 
     failures: list[SchemaBootstrapFailure] = []
     auth_ready = False
     content_ready = False
     # A database whose indexes could not be rebuilt answers range queries
     # wrongly, so that failure stops startup in every environment.
-    index_rebuild_failed = False
+    index_readiness_failed = False
 
     try:
         log.info("Bootstrapping Surreal auth schema", target_version=AUTH_SCHEMA_CURRENT_VERSION)
         await bootstrap_surreal_auth_schema()
         auth_ready = True
     except Exception as exc:
-        index_rebuild_failed |= isinstance(exc, IndexRebuildFailed)
+        index_readiness_failed |= isinstance(exc, IndexReadinessError)
         failures.append(
             SchemaBootstrapFailure(
                 plane="auth",
@@ -120,7 +120,7 @@ async def bootstrap_surreal_runtime_schemas() -> bool:
         await bootstrap_surreal_content_schema()
         content_ready = True
     except Exception as exc:
-        index_rebuild_failed |= isinstance(exc, IndexRebuildFailed)
+        index_readiness_failed |= isinstance(exc, IndexReadinessError)
         failures.append(
             SchemaBootstrapFailure(
                 plane="content",
@@ -142,7 +142,7 @@ async def bootstrap_surreal_runtime_schemas() -> bool:
         content_ready=content_ready,
         failures=tuple(failures),
     )
-    if failures and (index_rebuild_failed or config_module.settings.environment != "development"):
+    if failures and (index_readiness_failed or config_module.settings.environment != "development"):
         raise RuntimeSchemaBootstrapError(_schema_bootstrap_state.status)
     return _schema_bootstrap_state.status.ready
 

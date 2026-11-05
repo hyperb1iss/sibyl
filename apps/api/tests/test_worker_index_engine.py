@@ -38,17 +38,17 @@ async def test_worker_settles_auth_and_content_indexes_before_it_reads_them(
 
 @pytest.mark.asyncio
 async def test_a_failed_rebuild_stops_the_worker(monkeypatch: pytest.MonkeyPatch) -> None:
-    from sibyl_core.backends.surreal.index_engine import IndexRebuildFailed
+    from sibyl_core.backends.surreal.index_engine import IndexReadinessError
 
     client = SimpleNamespace(close=AsyncMock())
     monkeypatch.setattr(worker.settings, "surreal_url", "ws://127.0.0.1:8000/rpc")
     monkeypatch.setattr("sibyl.persistence.surreal.auth.build_surreal_auth_client", lambda: client)
     monkeypatch.setattr(
         "sibyl_core.backends.surreal.index_engine.ensure_database_indexes",
-        AsyncMock(side_effect=IndexRebuildFailed("REBUILD INDEX x ON y failed")),
+        AsyncMock(side_effect=IndexReadinessError("REBUILD INDEX x ON y failed")),
     )
 
-    with pytest.raises(IndexRebuildFailed):
+    with pytest.raises(IndexReadinessError):
         await worker.ensure_runtime_plane_indexes()
     client.close.assert_awaited_once()
 
@@ -62,3 +62,45 @@ async def test_the_embedded_engine_is_left_alone(monkeypatch: pytest.MonkeyPatch
     monkeypatch.setattr("sibyl.persistence.surreal.auth.build_surreal_auth_client", refuse)
 
     await worker.ensure_runtime_plane_indexes()
+
+
+@pytest.mark.asyncio
+async def test_the_archive_preview_graph_read_waits_for_a_due_rebuild(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The preview calls the raw graph getter and queries at once; the getter is the gate."""
+    from sibyl.api.routes import archive_import_preview
+    from sibyl_core.services import graph_client
+
+    order: list[str] = []
+
+    class Client:
+        _url = "ws://127.0.0.1:8000/rpc"
+        group_id = "org-converted"
+
+        async def execute_query(self, statement: str, **params: object) -> object:
+            order.append("graph query")
+            return [{"rows": [], "states": [], "associations": [], "edges": []}]
+
+    async def needs_rebuild(read: object, *, name: str) -> object:
+        order.append("readiness check")
+        return {"compatibility": 3, "tables": {"entity": ""}}
+
+    async def prepare(client: object) -> None:
+        order.append("bootstrap with rebuild")
+
+    monkeypatch.setattr(graph_client, "_new_graph_client", lambda group_id: Client())
+    monkeypatch.setattr(graph_client, "database_needs_rebuild", needs_rebuild)
+    monkeypatch.setattr(graph_client, "prepare_graph_schema", prepare)
+    graph_client._clients.pop("org-converted", None)
+    graph_client._index_ready_groups.discard("org-converted")
+    try:
+        _, graph = await archive_import_preview._read_cuts(
+            organization_id="org-converted", raw_ids=[], node_ids=["node-1"], edge_ids=[]
+        )
+    finally:
+        graph_client._clients.pop("org-converted", None)
+        graph_client._index_ready_groups.discard("org-converted")
+
+    assert order == ["readiness check", "bootstrap with rebuild", "graph query"]
+    assert graph.store == "graph"

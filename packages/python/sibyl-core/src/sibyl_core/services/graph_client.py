@@ -13,9 +13,8 @@ from weakref import WeakValueDictionary
 
 from sibyl_core.backends.surreal.dedicated_client import DedicatedSurrealClient
 from sibyl_core.backends.surreal.index_engine import (
-    index_engine_current,
-    index_engine_of,
-    recorded_index_engine,
+    database_needs_rebuild,
+    index_readiness_step,
 )
 from sibyl_core.backends.surreal.schema import EMBEDDING_DIM, bootstrap_schema
 from sibyl_core.backends.surreal.schema_version import GRAPH_SCHEMA_NAME
@@ -259,6 +258,7 @@ async def background_graph_client(group_id: str) -> AsyncGenerator[SurrealGraphC
             closing = lease.closing
         await asyncio.shield(closing)
     try:
+        await _ensure_graph_indexes(lease.client)
         yield lease.client
     finally:
         cleanup = asyncio.create_task(_release_background_lease(group_id, lease))
@@ -303,18 +303,20 @@ async def get_surreal_graph_client(group_id: str) -> SurrealGraphClient:
                 _retired.append((evicted_client, retired_at))
         else:
             _clients.move_to_end(group_id)
+    await _ensure_graph_indexes(client)
     return client
 
 
-async def ensure_graph_indexes(client: SurrealGraphClient) -> None:
+async def _ensure_graph_indexes(client: SurrealGraphClient) -> None:
     """Hold back an organization's graph until a database 3.x wrote has its indexes rebuilt.
 
-    For graph access that skips schema preparation (read paths, the runtime
-    a worker binds without ``ensure_schema``). The first call per organization
-    per process reads the schema_version record; a database marked by its
-    engine, one with no record yet, a 3.x server and the embedded engine pass.
-    An unmarked database on a 4.x server runs its bootstrap, which rebuilds
-    under the schema lease, before the caller gets the client.
+    The one gate between a graph client and its caller: both places a graph
+    client comes from (this module's LRU getter and the background pool) call
+    it before handing the client out. The first call per organization per
+    process applies the bootstrap's rule (a 4.x server, and a schema_version
+    record without the mark or tables without a record) and runs the bootstrap,
+    which rebuilds under the schema lease; a marked database costs one record
+    read, then nothing. Any failure raises IndexReadinessError.
     """
     group_id = client.group_id
     if (
@@ -327,22 +329,9 @@ async def ensure_graph_indexes(client: SurrealGraphClient) -> None:
     async with lock:
         if group_id in _index_ready_groups or group_id in _prepared_groups:
             return
-        try:
-            version, recorded = await recorded_index_engine(
-                client.execute_query, name=GRAPH_SCHEMA_NAME
-            )
-        except Exception as exc:
-            # 4.x refuses a read in a namespace or database that does not exist
-            # yet; there is nothing of Sibyl's there to rebuild.
-            if "does not exist" not in str(exc).lower():
-                raise
-            version, recorded = None, None
-        if (
-            version
-            and not index_engine_current(recorded)
-            and index_engine_of(await client.execute_query("INFO FOR DB;")) is not None
-        ):
-            await prepare_graph_schema(client)
+        async with index_readiness_step(f"graph {group_id}"):
+            if await database_needs_rebuild(client.execute_query, name=GRAPH_SCHEMA_NAME):
+                await prepare_graph_schema(client)
         _index_ready_groups.add(group_id)
 
 
@@ -433,7 +422,6 @@ __all__ = [
     "background_graph_client",
     "close_graph_clients",
     "close_idle_background_clients",
-    "ensure_graph_indexes",
     "get_surreal_graph_client",
     "graph_schema_fact",
     "mark_graph_schema_dirty",

@@ -122,22 +122,15 @@ async def test_get_graph_client_connects_native_client() -> None:
     client = MagicMock()
     client.connect = AsyncMock()
 
-    with (
-        patch(
-            "sibyl_core.services.graph_runtime.get_surreal_graph_client",
-            AsyncMock(return_value=client),
-        ) as get_client,
-        patch(
-            "sibyl_core.services.graph_runtime.ensure_graph_indexes", AsyncMock()
-        ) as ensure_indexes,
-    ):
+    with patch(
+        "sibyl_core.services.graph_runtime.get_surreal_graph_client",
+        AsyncMock(return_value=client),
+    ) as get_client:
         result = await get_graph_client("org-123")
 
     assert result is client
     get_client.assert_awaited_once_with("org-123")
     client.connect.assert_awaited_once()
-    # A caller that skips schema preparation still waits for a pending rebuild.
-    ensure_indexes.assert_awaited_once_with(client)
 
 
 def test_services_package_exports_neutral_graph_helpers() -> None:

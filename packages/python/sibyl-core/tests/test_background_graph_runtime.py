@@ -10,6 +10,16 @@ from sibyl_core.services import graph_client, graph_runtime
 from sibyl_core.services.graph_client import SurrealGraphClient
 
 
+@pytest.fixture(autouse=True)
+def _index_gate_passes(monkeypatch: pytest.MonkeyPatch) -> None:
+    """These tests cover pool lifetimes; the index gate in front of the pool has its own."""
+
+    async def ready(client: object) -> None:
+        return None
+
+    monkeypatch.setattr(graph_client, "_ensure_graph_indexes", ready)
+
+
 @pytest.mark.parametrize("cancel", [False, True])
 async def test_background_pool_saturation_preserves_interactive_capacity(monkeypatch, cancel):
     started = asyncio.Event()
