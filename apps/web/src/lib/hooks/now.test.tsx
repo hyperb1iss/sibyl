@@ -22,11 +22,11 @@ describe('useNow', () => {
     const setIntervalSpy = vi.spyOn(globalThis, 'setInterval');
     const clearIntervalSpy = vi.spyOn(globalThis, 'clearInterval');
     const { unmount } = render(
-      <>
+      <div>
         {Array.from({ length: 50 }, (_, index) => (
           <Clock key={index} label={`clock-${index}`} />
         ))}
-      </>
+      </div>
     );
     expect(setIntervalSpy).toHaveBeenCalledTimes(1);
     const start = Number(screen.getByTestId('clock-0').textContent);
