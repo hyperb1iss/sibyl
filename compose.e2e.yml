@@ -9,7 +9,7 @@
 
 services:
   surrealdb-e2e:
-    image: ${SIBYL_SURREAL_IMAGE:-surrealdb/surrealdb:v3.2.4}
+    image: ${SIBYL_SURREAL_IMAGE:-surrealdb/surrealdb:v4.0.0}
     container_name: sibyl-surrealdb-e2e
     command:
       [
@@ -20,12 +20,15 @@ services:
         "${SIBYL_SURREAL_USERNAME:-root}",
         "--pass",
         "${SIBYL_SURREAL_PASSWORD:-root}",
-        "rocksdb:///data/sibyl-e2e.db",
+        "surrealkv:///data/sibyl-e2e.db",
       ]
     ports:
       - "${SIBYL_E2E_SURREAL_PORT:-8011}:8000"
     volumes:
       - sibyl_e2e_surreal:/data
+    environment:
+      # PENDING-VLOG-DECISION: the 4.0 disk lane confirms or replaces this setting.
+      - SURREAL_SURREALKV_ENABLE_VLOG=false
     healthcheck:
       test: ["CMD", "/surreal", "is-ready", "--endpoint", "http://localhost:8000"]
       interval: 5s

@@ -294,12 +294,12 @@ def test_longmemeval_v2_workflow_packages_receipts_and_diagnostics() -> None:
     assert '--output "$OUTPUT_ROOT/arm_run.json"' in workflow
     assert ".moon/cache/evals/longmemeval-v2-official/arm_run.json" in workflow
     assert "Upload service diagnostics" in workflow
-    assert "SIBYL_SURREAL_PATH: rocksdb:///data/sibyl-longmemeval-v2.db" in workflow
-    assert official_env["SURREAL_ROCKSDB_BLOCK_CACHE_SIZE"] == "4294967296"
+    assert "SIBYL_SURREAL_PATH: surrealkv:///data/sibyl-longmemeval-v2.db" in workflow
+    assert official_env["SURREAL_SURREALKV_BLOCK_CACHE_CAPACITY"] == "4294967296"
     assert 'actual_cache_size="$(' in telemetry_script
     assert '[[ "$actual_cache_size" != "$expected_cache_size" ]]' in telemetry_script
     assert "Could not parse configuration value" in telemetry_script
-    assert "Block cache size: $expected_cache_size" in telemetry_script
+    assert "Setting block cache capacity: $expected_cache_size" in telemetry_script
     assert "logs are unavailable for configuration validation" in telemetry_script
     assert '[[ ! -s "$telemetry/container.id" ]]' in runtime_gate_script
     assert "sibyld.log" in workflow
@@ -419,23 +419,23 @@ def test_release_compose_service_pins_the_bounded_surreal_runtime() -> None:
     compose = (Path(__file__).parents[2] / "docker-compose.yml").read_text(encoding="utf-8")
     eval_service = compose.split("  surrealdb-eval:", 1)[1].split("  redis:", 1)[0]
 
-    assert "surrealdb/surrealdb:v3.2.4" in eval_service
-    assert '["start", "--log", "info", "rocksdb:///data/sibyl.db"]' in eval_service
+    assert "surrealdb/surrealdb:v4.0.0" in eval_service
+    assert '["start", "--log", "info", "surrealkv:///data/sibyl.db"]' in eval_service
     assert "SURREAL_BIND: 0.0.0.0:8000" in eval_service
-    assert 'SURREAL_ROCKSDB_BLOCK_CACHE_SIZE: "8589934592"' in eval_service
-    assert 'SURREAL_ROCKSDB_WRITE_BUFFER_SIZE: "134217728"' in eval_service
-    assert 'SURREAL_ROCKSDB_MAX_WRITE_BUFFER_NUMBER: "4"' in eval_service
+    assert 'SURREAL_SURREALKV_BLOCK_CACHE_CAPACITY: "8589934592"' in eval_service
+    assert 'SURREAL_SURREALKV_MAX_MEMTABLE_SIZE: "536870912"' in eval_service
     assert '"127.0.0.1:8018:8000"' in eval_service
     assert "${SIBYL_RELEASE_ROOT:-./.moon/cache/surreal-eval}/surreal" in eval_service
 
 
-def test_default_compose_service_forwards_an_explicit_rocksdb_cache_size() -> None:
+def test_default_compose_service_forwards_an_explicit_block_cache_capacity() -> None:
     compose = yaml.safe_load(
         (Path(__file__).parents[2] / "docker-compose.yml").read_text(encoding="utf-8")
     )
     environment = compose["services"]["surrealdb"]["environment"]
 
-    assert environment == ["SURREAL_ROCKSDB_BLOCK_CACHE_SIZE"]
+    # A bare name passes the host's value through, and nothing when it is unset.
+    assert "SURREAL_SURREALKV_BLOCK_CACHE_CAPACITY" in environment
 
 
 def _write_dataset(

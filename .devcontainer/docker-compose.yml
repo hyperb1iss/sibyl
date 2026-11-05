@@ -18,7 +18,7 @@ services:
       SIBYL_SURREAL_PASSWORD: root
 
   surrealdb:
-    image: surrealdb/surrealdb:v3.2.4
+    image: surrealdb/surrealdb:v4.0.0
     command:
       [
         "start",
@@ -28,12 +28,15 @@ services:
         "root",
         "--pass",
         "root",
-        "rocksdb:///data/sibyl.db",
+        "surrealkv:///data/sibyl.db",
       ]
     ports:
       - "8000"
     volumes:
       - surreal-data:/data
+    environment:
+      # PENDING-VLOG-DECISION: the 4.0 disk lane confirms or replaces this setting.
+      - SURREAL_SURREALKV_ENABLE_VLOG=false
     healthcheck:
       test: ["CMD", "/surreal", "is-ready", "--endpoint", "http://localhost:8000"]
       interval: 5s

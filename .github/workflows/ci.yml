@@ -695,7 +695,7 @@ jobs:
         run: moon run bench-gate-test --force
 
   live-ingestion:
-    name: Live SurrealDB 3.x Ingestion
+    name: Live SurrealDB Ingestion
     needs: changes
     if: needs.changes.outputs.run_tests == 'true'
     runs-on: ubuntu-latest

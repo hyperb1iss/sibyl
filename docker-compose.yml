@@ -3,11 +3,40 @@
 # To run multiple instances, use different project names and ports:
 #   COMPOSE_PROJECT_NAME=sibyl-test SIBYL_SURREAL_PORT=8010 docker compose --env-file /dev/null up -d surrealdb
 #   COMPOSE_PROJECT_NAME=sibyl-redis SIBYL_REDIS_PORT=6391 docker compose --env-file /dev/null --profile redis up -d surrealdb redis
+#
+# A data directory a SurrealDB 3.x server wrote is refused by 4.0 until it is
+# converted, once and for good. Back it up, then start once with
+# SURREAL_EXPERIMENTAL_UPGRADE_FROM_3X=true in the shell; see
+# docs/deployment/surrealdb-4-upgrade.md.
+
+# The SurrealDB image runs as 65532:65532, and a bind-mounted host directory
+# keeps its host owner, so a plain `docker compose up` on Linux could not write
+# it. This one-shot hands the mount to that user before SurrealDB starts. A
+# file share that cannot change owners (some desktop VMs) only warns here;
+# SurrealDB itself reports a directory it cannot write.
+x-surreal-init: &surreal-init
+  image: busybox:1.37
+  command:
+    - sh
+    - -c
+    - chown -R 65532:65532 /data || echo "surreal-init could not hand /data to 65532:65532" >&2
+  network_mode: none
+  restart: "no"
 
 services:
+  surreal-init:
+    <<: *surreal-init
+    volumes:
+      - "${SURREAL_DATA_DIR:-./.moon/cache/surreal-dev}:/data"
+
   surrealdb:
-    image: ${SIBYL_SURREAL_IMAGE:-surrealdb/surrealdb:v3.2.4}
+    # A 3.x image needs SIBYL_SURREAL_PATH=rocksdb:///data/sibyl.db with it:
+    # a 3.x server opened with surrealkv:// serves an empty database.
+    image: ${SIBYL_SURREAL_IMAGE:-surrealdb/surrealdb:v4.0.0}
     container_name: ${COMPOSE_PROJECT_NAME:-sibyl}-surrealdb
+    depends_on:
+      surreal-init:
+        condition: service_completed_successfully
     command:
       [
         "start",
@@ -17,7 +46,7 @@ services:
         "${SIBYL_SURREAL_USERNAME:-root}",
         "--pass",
         "${SIBYL_SURREAL_PASSWORD:-root}",
-        "${SIBYL_SURREAL_PATH:-rocksdb:///data/sibyl.db}",
+        "${SIBYL_SURREAL_PATH:-surrealkv:///data/sibyl.db}",
       ]
     ports:
       - "${SIBYL_SURREAL_PORT:-8000}:8000"
@@ -26,21 +55,36 @@ services:
       # on first start (no-op under Docker Engine). Fixes rootless podman perm denied.
       - "${SURREAL_DATA_DIR:-./.moon/cache/surreal-dev}:/data:U"
     environment:
-      - SURREAL_ROCKSDB_BLOCK_CACHE_SIZE
+      - SURREAL_SURREALKV_BLOCK_CACHE_CAPACITY
+      - SURREAL_EXPERIMENTAL_UPGRADE_FROM_3X
+      # PENDING-VLOG-DECISION: the 4.0 disk lane confirms or replaces this setting.
+      - SURREAL_SURREALKV_ENABLE_VLOG=false
     restart: unless-stopped
 
+  surreal-eval-init:
+    <<: *surreal-init
+    profiles: ["eval"]
+    volumes:
+      - "${SIBYL_RELEASE_ROOT:-./.moon/cache/surreal-eval}/surreal:/data"
+
   surrealdb-eval:
-    image: surrealdb/surrealdb:v3.2.4
+    image: surrealdb/surrealdb:v4.0.0
     container_name: ${COMPOSE_PROJECT_NAME:-sibyl}-surrealdb-eval
     profiles: ["eval"]
-    command: ["start", "--log", "info", "rocksdb:///data/sibyl.db"]
+    depends_on:
+      surreal-eval-init:
+        condition: service_completed_successfully
+    command: ["start", "--log", "info", "surrealkv:///data/sibyl.db"]
     environment:
       SURREAL_BIND: 0.0.0.0:8000
       SURREAL_USER: root
       SURREAL_PASS: root
-      SURREAL_ROCKSDB_BLOCK_CACHE_SIZE: "8589934592"
-      SURREAL_ROCKSDB_WRITE_BUFFER_SIZE: "134217728"
-      SURREAL_ROCKSDB_MAX_WRITE_BUFFER_NUMBER: "4"
+      # The bounded runtime: an 8 GiB block cache and a 512 MiB memtable, the
+      # same envelope the RocksDB cache and write buffers held on 3.x.
+      SURREAL_SURREALKV_BLOCK_CACHE_CAPACITY: "8589934592"
+      SURREAL_SURREALKV_MAX_MEMTABLE_SIZE: "536870912"
+      # PENDING-VLOG-DECISION: the 4.0 disk lane confirms or replaces this setting.
+      SURREAL_SURREALKV_ENABLE_VLOG: "false"
     ports:
       - "127.0.0.1:8018:8000"
     volumes:
