@@ -230,6 +230,13 @@ The readiness probe must hit `/api/health/ready`, the deep readiness endpoint th
 when SurrealDB is unreachable. Liveness stays on `/api/health`, which only asserts the process is
 up.
 
+`backend.startupProbe` (10 s period, `failureThreshold: 60`) holds liveness off while the API
+migrates before it serves. The first start after a store moves to SurrealDB 4 also rebuilds the auth
+and content indexes first, about 60 s per GB of those databases, so allow a `failureThreshold` of at
+least 6 per GB. A lease serializes the rebuild, so replicas are safe, and a probe kill is safe too,
+because the next start picks up where it stopped. Each organization's graph rebuilds on its first
+use. See the [SurrealDB 4.0 upgrade](./surrealdb-4-upgrade.md#helm).
+
 ### Environment Variables
 
 ```yaml
