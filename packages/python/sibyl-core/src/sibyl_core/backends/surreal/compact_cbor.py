@@ -147,7 +147,9 @@ _sdk_tag_decoder = sdk_cbor.tag_decoder
 
 def tag_decoder(decoder: CBORDecoder, tag: CBORTag, shareable_index: int | None = None) -> Any:
     """The SDK's tag decoder, reading a zero duration's empty array as zero."""
-    if tag.tag == TAG_DURATION_COMPACT and len(tag.value) == 0:
+    # cbor2's C decoder hands arrays over as tuples; anything else malformed
+    # still goes to the SDK, which refuses it as before.
+    if tag.tag == TAG_DURATION_COMPACT and isinstance(tag.value, list | tuple) and not tag.value:
         return Duration(0)
     return _sdk_tag_decoder(decoder, tag, shareable_index)
 

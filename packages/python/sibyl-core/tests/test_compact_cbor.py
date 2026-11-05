@@ -251,3 +251,23 @@ def test_durations_with_their_trailing_zero_parts_left_out_decode(fast: bool, mo
     assert decoded["snapshot"]["age"] == Duration(0)
     assert decoded["whole"] == Duration(5 * 10**9)
     assert decoded["both"] == Duration(5 * 10**9 + 7)
+
+
+@pytest.mark.parametrize("payload", ["", b"", {}], ids=["text", "bytes", "map"])
+@pytest.mark.parametrize("fast", [False, True], ids=["sdk-decoder", "c-decoder"])
+def test_only_an_empty_array_reads_as_a_zero_duration(
+    payload: object, fast: bool, monkeypatch
+) -> None:
+    monkeypatch.setattr(sdk_cbor, "loads", sdk_cbor.loads)
+    monkeypatch.setattr(fast_cbor, "_installed", False)
+    if fast:
+        assert fast_cbor.install_fast_cbor() is True
+    compact_cbor.install_compact_cbor()
+    encoded = cbor2.dumps(cbor2.CBORTag(14, payload))
+    # A malformed empty payload fails exactly as it did without the shim.
+    with monkeypatch.context() as sdk_alone:
+        sdk_alone.setattr(sdk_cbor, "tag_decoder", compact_cbor._sdk_tag_decoder)
+        with pytest.raises(Exception) as before:
+            sdk_cbor.decode(encoded)
+    with pytest.raises(type(before.value)):
+        sdk_cbor.decode(encoded)
