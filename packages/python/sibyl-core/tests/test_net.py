@@ -42,6 +42,8 @@ from sibyl_core.services.net import (
     normalize_thread,
     post_net_message,
     read_net_feed,
+    recent_authors_statement,
+    recent_net_authors,
     render_net_transcript,
     settle_net_thread,
 )
@@ -924,3 +926,80 @@ async def test_selection_reads_only_pending_threads(live_store: SurrealContentCl
     assert "net_thread_pending" in plan
     assert "net_thread_key" not in plan
     assert [c.thread for c in await idle_net_threads(idle_minutes=1, limit=10)] == ["waiting"]
+
+
+# --- recent authors --------------------------------------------------------
+
+
+async def test_recent_authors_are_one_row_per_channel_author_and_agent(
+    store: SurrealContentClient,
+) -> None:
+    await post("#reviews", author=ADA, agent="claude-code")
+    await post("#reviews", author=ADA, agent="claude-code", thread="gh:acme/app#42")
+    await post("#reviews", author=ADA, agent="codex")
+    await post("@ada", author=GRACE, agent=None)
+    newest = await post("@ada", author=GRACE, agent=None)
+    await post("@ada", author=GRACE, org=OTHER_ORG)
+
+    rows = await recent_net_authors(organization_id=ORG)
+
+    assert {(row.channel, row.author_user_id, row.author_agent) for row in rows} == {
+        ("#reviews", ADA, "claude-code"),
+        ("#reviews", ADA, "codex"),
+        ("@ada", GRACE, None),
+    }
+    assert len(rows) == 3
+    assert rows == sorted(rows, key=lambda row: row.last_post_at, reverse=True)
+    graces = next(row for row in rows if row.author_user_id == GRACE)
+    assert graces.last_post_at == newest.created_at
+
+    only = await recent_net_authors(organization_id=ORG, channel="@ada")
+    assert [(row.channel, row.author_user_id) for row in only] == [("@ada", GRACE)]
+
+
+async def test_recent_authors_end_at_the_window_and_the_scan_cap(
+    store: SurrealContentClient,
+) -> None:
+    await post("#reviews", author=GRACE)
+    await age(store, 3600 + 5)
+    for _ in range(3):
+        await post("#reviews", author=ADA)
+
+    assert [row.author_user_id for row in await recent_net_authors(organization_id=ORG)] == [ADA]
+    wider = await recent_net_authors(organization_id=ORG, window_seconds=2 * 3600)
+    assert {row.author_user_id for row in wider} == {ADA, GRACE}
+    # The cap counts messages, newest first: Grace's lone older post is past it.
+    capped = await recent_net_authors(organization_id=ORG, window_seconds=2 * 3600, limit=3)
+    assert [row.author_user_id for row in capped] == [ADA]
+
+
+@pytest.mark.parametrize("channel", [None, "#reviews"])
+async def test_recent_authors_seek_the_window_instead_of_history(
+    live_store: SurrealContentClient, channel: str | None
+) -> None:
+    """The read ranges an index on created_ns from the window's start, newest first."""
+    for _ in range(3):
+        await post("#reviews")
+    await age(live_store, 7200)
+    await post("#reviews")
+    statement = recent_authors_statement(channel=channel).rstrip().rstrip(";")
+    params = {"organization_id": ORG, "since_ns": 0, "limit": 10}
+    if channel is not None:
+        params["channel"] = channel
+
+    explained = await live_store.execute_query(f"{statement} EXPLAIN FULL;", **params)
+    plan = explained[0] if isinstance(explained, list) else explained
+
+    # One backward index scan from the window's start, the limit pushed into
+    # it: no sort, no filter over rows the scan should never have read.
+    [scan] = plan["children"]
+    assert scan["operator"] == "IndexScan", json.dumps(plan, default=str)
+    attributes = scan["attributes"]
+    assert attributes["index"] == (
+        "net_message_org_ns" if channel is None else "net_message_org_channel_ns"
+    )
+    assert attributes["direction"] == "Backward"
+    assert "MoreThanEqual" in attributes["access"]
+    assert attributes["limit"] == "$limit"
+    rows = await recent_net_authors(organization_id=ORG, channel=channel)
+    assert [row.author_user_id for row in rows] == [ADA]

@@ -156,6 +156,32 @@ class NetThreadsResponse(BaseModel):
     threads: list[NetThread]
 
 
+class NetWatcher(BaseModel):
+    """A reader whose feed read, long poll or peek, was in the last two minutes."""
+
+    channel: str | None = Field(description="The channel read, or null for a read of every channel")
+    user_id: str
+    name: str | None = None
+    agent: str | None = None
+    session: str | None = None
+    last_seen: datetime = Field(description="When the reader's latest read began")
+
+
+class NetRecentPoster(BaseModel):
+    """Someone who posted in a channel in the last hour, under one agent label."""
+
+    channel: str
+    user_id: str
+    name: str | None = None
+    agent: str | None = None
+    last_post_at: datetime
+
+
+class NetPresenceResponse(BaseModel):
+    watching: list[NetWatcher] = Field(description="Most recently seen first")
+    recent: list[NetRecentPoster] = Field(description="Most recent post first")
+
+
 __all__ = [
     "NetAgentLabels",
     "NetAuthor",
@@ -166,6 +192,9 @@ __all__ = [
     "NetMessageCreateRequest",
     "NetMessageCreateResponse",
     "NetMessageKindLabel",
+    "NetPresenceResponse",
+    "NetRecentPoster",
     "NetThread",
     "NetThreadsResponse",
+    "NetWatcher",
 ]

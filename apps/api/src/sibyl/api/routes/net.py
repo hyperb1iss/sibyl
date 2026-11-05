@@ -4,8 +4,14 @@ Visibility in v0 is flat and organization-wide. Every member of the
 organization with a read role reads every channel, and posting needs a write
 role, enforced with the same ``READ_ROLES`` / ``WRITE_ROLES`` gates as the
 entity routes. Channels are organization-visible like public chat channels;
-there are no private channels, presence or delivery receipts. Receivers own
-dedupe (by message id), permissions on what they act on, and loop limits.
+there are no private channels or delivery receipts. Receivers own dedupe (by
+message id), permissions on what they act on, and loop limits.
+
+Presence is derived from use and never maintained: every feed read an agent
+makes lists its reader as watching what it read, for two minutes after the
+read's wait (see ``sibyl.coordination.presence``), and ``GET /presence``
+adds who posted in the last hour. A read made by the web app's own session
+is a person looking, not an agent listening, so it lists no one.
 
 Naming a graph project on a post takes contributor access to it, within
 the project grants of the API key the caller used, the same narrowing a
@@ -27,8 +33,10 @@ runs again on retry, so that decision can be remembered twice.
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Iterable, Mapping
+import time
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from typing import Annotated
 
 import structlog
@@ -52,20 +60,26 @@ from sibyl.api.schemas.net import (
     NetMessageCreateRequest,
     NetMessageCreateResponse,
     NetMessageKindLabel,
+    NetPresenceResponse,
+    NetRecentPoster,
     NetThread,
     NetThreadsResponse,
+    NetWatcher,
 )
 from sibyl.auth.authorization import verify_entity_project_access
 from sibyl.auth.context import AuthContext
 from sibyl.auth.dependencies import get_auth_context, get_current_organization, require_org_role
+from sibyl.coordination.presence import WATCHING_TTL_SECONDS, Watcher, get_presence
 from sibyl.persistence.auth_runtime import get_users_by_ids
 from sibyl_core.auth import AuthOrganization, ProjectRole
 from sibyl_core.auth.memory_policy import MemoryPolicyAction
 from sibyl_core.services.net import (
     DEFAULT_FEED_LIMIT,
+    MAX_AGENT_CHARS,
     MAX_FEED_CHANNELS,
     MAX_FEED_LIMIT,
     MAX_FEED_WAIT_SECONDS,
+    MAX_SESSION_CHARS,
     NetCursor,
     NetFeedPage,
     NetMessageRecord,
@@ -75,9 +89,11 @@ from sibyl_core.services.net import (
     net_thread_project,
     new_message_id,
     normalize_channel,
+    normalize_label,
     normalize_thread,
     post_net_message,
     read_net_feed,
+    recent_net_authors,
 )
 from sibyl_core.services.surreal_content import remember_raw_memory
 
@@ -509,6 +525,52 @@ def _feed_thread(thread: str | None) -> str | None:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
+def _reader_label(value: str | None, *, field: str, max_chars: int) -> str | None:
+    try:
+        return normalize_label(value, field=field, max_chars=max_chars)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+def read_by_web_session(request: Request) -> bool:
+    """Whether the web app's session cookie, not an agent's credential, authenticated a read.
+
+    The browser sends only the cookie; the CLI and every other agent client
+    send an Authorization header.
+    """
+    return not request.headers.get("authorization") and bool(
+        request.cookies.get("sibyl_access_token")
+    )
+
+
+async def note_watching(
+    *,
+    organization_id: str,
+    user_id: str,
+    channels: Sequence[str],
+    agent: str | None,
+    session: str | None,
+    wait: int,
+) -> None:
+    """List the reader as watching what it read until its wait plus the watching TTL.
+
+    A read of every channel is one watcher with no channel. Presence is a
+    nicety on top of the read, so a registry that cannot answer is logged and
+    the read goes on.
+    """
+    now = time.time()
+    read: list[str | None] = [*channels] or [None]
+    watchers = [
+        Watcher(channel=channel, user_id=user_id, agent=agent, session=session) for channel in read
+    ]
+    try:
+        await get_presence().note(
+            organization_id, watchers, now=now, until=now + wait + WATCHING_TTL_SECONDS
+        )
+    except Exception as exc:
+        log.warning("net_presence_note_failed", error=str(exc), organization_id=organization_id)
+
+
 @router.get("/feed", response_model=NetFeedResponse)
 async def read_feed(
     http_request: Request,
@@ -533,6 +595,17 @@ async def read_feed(
         le=MAX_FEED_WAIT_SECONDS,
         description="Seconds to hold the request open while nothing qualifies",
     ),
+    agent: str | None = Query(
+        default=None,
+        max_length=MAX_AGENT_CHARS,
+        description="Client-asserted agent label of the reader, shown in presence",
+    ),
+    session: str | None = Query(
+        default=None,
+        max_length=MAX_SESSION_CHARS,
+        description="Client-asserted session id of the reader, shown in presence",
+    ),
+    ctx: AuthContext = Depends(get_auth_context),
 ) -> NetFeedResponse:
     """Messages oldest first, after ``since`` or from the tail.
 
@@ -542,10 +615,16 @@ async def read_feed(
     open until a matching post settles (announced on the event bus, from any
     pod) or the wait runs out, re-reading on a slow safety interval in case
     an announcement was lost.
+
+    Every read lists its reader as watching the channels it read (see
+    ``GET /presence``), alongside the first read rather than ahead of it.
     """
     cursor = _feed_cursor(since)
     channels = _feed_channels(channel)
     thread_filter = _feed_thread(thread)
+    reader_agent = _reader_label(agent, field="agent", max_chars=MAX_AGENT_CHARS)
+    reader_session = _reader_label(session, field="session", max_chars=MAX_SESSION_CHARS)
+    reader_id = _caller_id(ctx)
     organization_id = str(org.id)
     question: FeedQuestion = (
         organization_id,
@@ -569,10 +648,21 @@ async def read_feed(
         )
         return page, await author_directory(record.author_user_id for record in page.messages)
 
+    async def noted() -> None:
+        if not read_by_web_session(http_request):
+            await note_watching(
+                organization_id=organization_id,
+                user_id=reader_id,
+                channels=channels,
+                agent=reader_agent,
+                session=reader_session,
+                wait=wait,
+            )
+
     # Registered before the first read, so a post landing between that read
     # and the wait still wakes this request.
     with net_wakeups.watch(*question) as waiter:
-        page, authors = await read()
+        (page, authors), _ = await asyncio.gather(read(), noted())
         while not page.messages and limit > 0:
             now = loop.time()
             remaining = deadline - now
@@ -603,6 +693,71 @@ async def list_channels(
             )
             for summary in summaries
         ]
+    )
+
+
+@router.get("/presence", response_model=NetPresenceResponse)
+async def read_presence(
+    channel: str | None = Query(
+        default=None, description="Only this channel; omit for the whole organization"
+    ),
+    org: AuthOrganization = Depends(get_current_organization),
+) -> NetPresenceResponse:
+    """Who is listening and who has been talking, derived from use alone.
+
+    ``watching`` lists every reader whose feed read began within the last two
+    minutes, or is still waiting: one row per channel, user, agent label and
+    session. A reader of every channel has a null channel and is listed under
+    any channel asked about, since it hears that channel too. ``recent`` lists
+    who posted in the last hour, one row per channel, user and agent label.
+    """
+    selected = None
+    if channel is not None:
+        try:
+            selected = normalize_channel(channel)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+    organization_id = str(org.id)
+    seen, posters = await asyncio.gather(
+        get_presence().watching(organization_id, now=time.time()),
+        recent_net_authors(organization_id=organization_id, channel=selected),
+    )
+    if selected is not None:
+        seen = [entry for entry in seen if entry.watcher.channel in (selected, None)]
+    seen.sort(key=lambda entry: (-entry.last_seen, entry.watcher.channel or ""))
+    names = await author_directory(
+        dict.fromkeys(
+            [entry.watcher.user_id for entry in seen]
+            + [poster.author_user_id for poster in posters]
+        )
+    )
+
+    def name(user_id: str) -> str | None:
+        member = names.get(user_id)
+        return member.name if member is not None else None
+
+    return NetPresenceResponse(
+        watching=[
+            NetWatcher(
+                channel=entry.watcher.channel,
+                user_id=entry.watcher.user_id,
+                name=name(entry.watcher.user_id),
+                agent=entry.watcher.agent,
+                session=entry.watcher.session,
+                last_seen=datetime.fromtimestamp(entry.last_seen, tz=UTC),
+            )
+            for entry in seen
+        ],
+        recent=[
+            NetRecentPoster(
+                channel=poster.channel,
+                user_id=poster.author_user_id,
+                name=name(poster.author_user_id),
+                agent=poster.author_agent,
+                last_post_at=poster.last_post_at,
+            )
+            for poster in posters
+        ],
     )
 
 
@@ -649,6 +804,8 @@ __all__ = [
     "decision_title",
     "deliver_net_message",
     "net_message",
+    "note_watching",
+    "read_by_web_session",
     "refuse_pinned_elsewhere",
     "router",
     "shared_feed_reads",

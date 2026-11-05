@@ -52,6 +52,7 @@ from __future__ import annotations
 import base64
 import binascii
 import re
+import time
 import unicodedata
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
@@ -80,6 +81,10 @@ MAX_FEED_CHANNELS = 32
 MAX_FEED_WAIT_SECONDS = 25
 SETTLE_SECONDS = 2
 LISTING_LIMIT = 200
+# Who posted recently: the newest messages inside this window, at most this
+# many per read, so a busy hour costs a bounded index range, never history.
+RECENT_AUTHORS_WINDOW_SECONDS = 3600
+RECENT_AUTHORS_SCAN_LIMIT = 1000
 
 MAX_REFLECTION_ATTEMPTS = 3
 DISTILL_WINDOW_MESSAGES = 200
@@ -461,6 +466,16 @@ class NetChannelSummary:
 
 
 @dataclass(frozen=True, slots=True)
+class NetRecentAuthor:
+    """One author's newest post in a channel, under one agent label."""
+
+    channel: str
+    author_user_id: str
+    author_agent: str | None
+    last_post_at: datetime
+
+
+@dataclass(frozen=True, slots=True)
 class NetThreadState:
     """One ``net_threads`` row: counts plus where distillation stands."""
 
@@ -762,6 +777,69 @@ async def list_net_threads(*, organization_id: str, channel: str) -> list[NetThr
             client, CHANNEL_THREADS_STATEMENT, organization_id=organization_id, channel=channel
         )
     return [_thread_from_row(row) for row in rows]
+
+
+def recent_authors_statement(*, channel: str | None) -> str:
+    """The recent-authors read, bound by ``$since_ns`` and ``$limit``; exposed so it can be explained.
+
+    Like a feed tail, it seeks the index that leads with its filters, newest
+    first, and stops at ``$limit``: the cost follows the window, never the
+    channel's history.
+    """
+    if channel is None:
+        scope = (
+            "FROM net_messages WITH INDEX net_message_org_ns "
+            "WHERE organization_id = $organization_id"
+        )
+    else:
+        scope = (
+            "FROM net_messages WITH INDEX net_message_org_channel_ns "
+            "WHERE organization_id = $organization_id AND channel = $channel"
+        )
+    return (
+        f"SELECT channel, author_user_id, author_agent, created_at, created_ns, uuid {scope} "
+        "AND created_ns >= $since_ns ORDER BY created_ns DESC, uuid DESC LIMIT $limit;"
+    )
+
+
+async def recent_net_authors(
+    *,
+    organization_id: str,
+    channel: str | None = None,
+    window_seconds: int = RECENT_AUTHORS_WINDOW_SECONDS,
+    limit: int = RECENT_AUTHORS_SCAN_LIMIT,
+) -> list[NetRecentAuthor]:
+    """Who posted in the last ``window_seconds``, newest first, one row per channel, author and agent.
+
+    Reads at most ``limit`` of the newest messages in the window. In a window
+    busier than that, an author whose posts all sit behind the newest
+    ``limit`` is left out: this answers "who has been talking", not a census.
+    """
+    since_ns = time.time_ns() - max(int(window_seconds), 0) * 1_000_000_000
+    params: dict[str, Any] = {
+        "organization_id": organization_id,
+        "since_ns": since_ns,
+        "limit": max(int(limit), 1),
+    }
+    if channel is not None:
+        params["channel"] = channel
+    async with content_client.surreal_content_client() as client:
+        rows = await content_client.select_many(
+            client, recent_authors_statement(channel=channel), **params
+        )
+    newest: dict[tuple[str, str, str | None], NetRecentAuthor] = {}
+    for row in rows:
+        created_at = _as_utc(row.get("created_at"))
+        author = str(row.get("author_user_id") or "")
+        if created_at is None or not author:
+            continue
+        key = (str(row.get("channel") or ""), author, _optional_str(row.get("author_agent")))
+        seen = newest.get(key)
+        if seen is None or created_at > seen.last_post_at:
+            newest[key] = NetRecentAuthor(
+                channel=key[0], author_user_id=author, author_agent=key[2], last_post_at=created_at
+            )
+    return sorted(newest.values(), key=lambda entry: entry.last_post_at, reverse=True)
 
 
 async def idle_net_threads(*, idle_minutes: int, limit: int) -> list[NetThreadState]:
@@ -1074,6 +1152,8 @@ __all__ = [
     "MAX_SESSION_CHARS",
     "MAX_THREAD_CHARS",
     "PROJECT_PINNED_MARKER",
+    "RECENT_AUTHORS_SCAN_LIMIT",
+    "RECENT_AUTHORS_WINDOW_SECONDS",
     "SETTLE_SECONDS",
     "TRANSCRIPT_CONTINUATION",
     "NetAuthorWindow",
@@ -1082,6 +1162,7 @@ __all__ = [
     "NetFeedPage",
     "NetMessageKind",
     "NetMessageRecord",
+    "NetRecentAuthor",
     "NetThreadProjectPinnedError",
     "NetThreadState",
     "author_windows",
@@ -1102,6 +1183,8 @@ __all__ = [
     "normalize_thread",
     "post_net_message",
     "read_net_feed",
+    "recent_authors_statement",
+    "recent_net_authors",
     "render_net_transcript",
     "settle_net_thread",
 ]
