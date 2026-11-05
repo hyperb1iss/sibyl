@@ -220,6 +220,11 @@ def test_sibyl_up_keeps_a_3x_surrealdb_service_whole(
     services = yaml.safe_load(compose_path.read_text())["services"]
     assert services["surrealdb"] == SURREAL_3X_SERVICE
     assert services["surrealdb"]["command"][-1].startswith("rocksdb://")
+    # The guard runs against the kept service, so it lets 3.x open its RocksDB store.
+    assert services["surreal-init"]["environment"] == {
+        "SURREAL_IMAGE": SURREAL_3X_SERVICE["image"],
+        "SURREAL_STORE": "rocksdb:///data/sibyl.db",
+    }
     assert services["api"]["image"].endswith(f":{local.DEFAULT_IMAGE_TAG}")
     output = " ".join(capsys.readouterr().out.split())
     assert "SurrealDB stays on v3.2.4" in output

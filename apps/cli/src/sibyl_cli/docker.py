@@ -28,6 +28,7 @@ from sibyl_cli.docker_storage import (
     surreal_data_mount,
     surreal_healthcheck,
     surreal_image_override,
+    surreal_init_for,
     surreal_kept_message,
     surreal_volume_initializer,
     upgraded_surreal_image,
@@ -37,7 +38,6 @@ from sibyl_cli.local import (
     check_docker,
     check_docker_compose,
     known_compose_files,
-    release_image_tag,
     wait_for_healthy,
 )
 
@@ -131,7 +131,7 @@ def compose_config(
             },
             "restart": "unless-stopped",
         },
-        "surreal-init": surreal_volume_initializer(),
+        "surreal-init": surreal_volume_initializer(SURREAL_IMAGE_REFERENCE, SURREAL_STORE_PATH),
         "surrealdb": {
             "image": SURREAL_IMAGE_REFERENCE,
             "container_name": "sibyl-surrealdb",
@@ -316,6 +316,9 @@ def upgraded_compose_config(config: dict[str, Any], image_tag: str | None) -> di
             service["image"] = _retag_managed_image(image, image_tag)
         if name == "surrealdb":
             _plan_surreal_image(service)
+    # The guard follows whatever SurrealDB service the upgrade leaves.
+    if isinstance(services.get("surrealdb"), dict) and "surreal-init" in services:
+        services["surreal-init"] = surreal_init_for(services["surrealdb"])
     _migrate_runtime_services(services)
     return target
 
@@ -599,7 +602,6 @@ def upgrade(
             SIBYL_DOCKER_ENV,
             compose_command([]),
             known_compose_files(),
-            release_tag=release_image_tag(DEFAULT_IMAGE_TAG),
         )
         if planned is not None:
             run_surreal_major_upgrade(planned, yes=yes, wait_for_api=wait_for_api)

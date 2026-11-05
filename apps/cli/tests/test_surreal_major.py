@@ -6,6 +6,8 @@ service each step runs against, and what a failure leaves behind.
 
 from __future__ import annotations
 
+import errno
+import shlex
 import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -17,9 +19,11 @@ from typer.testing import CliRunner
 from sibyl_cli import docker as docker_module
 from sibyl_cli import docker_storage, local
 from sibyl_cli.docker_storage import (
+    SURREAL_4_MIN_SIBYL,
     SURREAL_BACKUP_VOLUME,
     SURREAL_IMAGE,
     SURREAL_IMAGE_REFERENCE,
+    SURREAL_MAJOR_RUNBOOK,
     SURREAL_STORAGE_ENV,
     SURREAL_STORE_PATH,
 )
@@ -30,8 +34,8 @@ CONVERT_ENV = {**SURREAL_STORAGE_ENV, "SURREAL_EXPERIMENTAL_UPGRADE_FROM_3X": "t
 GIB = 1024 * 1024  # in KiB, the unit `du -sk` and `df -Pk` report
 
 
-def _surreal(path: Path) -> dict:
-    return yaml.safe_load(path.read_text())["services"]["surrealdb"]
+def _surreal(path: Path, service: str = "surrealdb") -> dict:
+    return yaml.safe_load(path.read_text())["services"][service]
 
 
 @dataclass
@@ -45,6 +49,7 @@ class FakeDocker:
     ready_after: int = 2
     calls: list[str] = field(default_factory=list)
     seen: dict[str, dict] = field(default_factory=dict)
+    seen_init: dict[str, dict] = field(default_factory=dict)
     commands: dict[str, list[str]] = field(default_factory=dict)
 
     @staticmethod
@@ -64,6 +69,7 @@ class FakeDocker:
         name = self.name(cmd)
         self.calls.append(name)
         self.seen.setdefault(name, _surreal(self.compose_file))
+        self.seen_init.setdefault(name, _surreal(self.compose_file, "surreal-init"))
         self.commands.setdefault(name, cmd)
         if name == self.fail:
             return subprocess.CompletedProcess(cmd, 1, stdout="")
@@ -88,6 +94,11 @@ class Stack:
     def held_compose_file(self) -> Path:
         return self.compose_file.with_name(f"{self.compose_file.name}.surreal3x.bak")
 
+    @property
+    def compose_command(self) -> str:
+        module = local if self.runtime == "local" else docker_module
+        return shlex.join(module.compose_command([]))
+
     def files(self) -> dict[str, bytes]:
         return {path.name: path.read_bytes() for path in self.compose_file.parent.iterdir()}
 
@@ -111,9 +122,7 @@ def stack(request: pytest.FixtureRequest, tmp_path: Path, monkeypatch: pytest.Mo
     monkeypatch.setattr(local, "check_docker_compose", lambda: True)
     monkeypatch.setattr(docker_module, "require_docker", lambda: None)
     monkeypatch.delenv("SIBYL_SURREAL_IMAGE", raising=False)
-    # This CLI's release; the stack's API pins the same one unless a test says otherwise.
-    monkeypatch.setattr(local, "DEFAULT_IMAGE_TAG", "1.5.0")
-    monkeypatch.setattr(docker_module, "DEFAULT_IMAGE_TAG", "1.5.0")
+    monkeypatch.delenv("SIBYL_IMAGE_TAG", raising=False)
 
     if runtime == "local":
         config = local.compose_config_for("1.5.0")
@@ -217,6 +226,13 @@ def test_the_move_converts_in_place_then_starts_sibyl_on_it(
     assert converting["healthcheck"]["start_period"] == "10m"
     serving = docker.seen["up -d"]
     assert serving["environment"] == SURREAL_STORAGE_ENV, "the opt-in is only for converting"
+    # The guard carries the opt-in exactly while the service does.
+    store = {"SURREAL_IMAGE": SURREAL_IMAGE_REFERENCE, "SURREAL_STORE": SURREAL_STORE_PATH}
+    assert docker.seen_init["up -d --no-deps surrealdb"]["environment"] == {
+        **store,
+        "SURREAL_EXPERIMENTAL_UPGRADE_FROM_3X": "true",
+    }
+    assert docker.seen_init["up -d"]["environment"] == store
     assert serving["command"][-1] == SURREAL_STORE_PATH
     assert _surreal(stack.compose_file) == serving
 
@@ -245,6 +261,21 @@ def test_a_declined_move_changes_nothing(stack: Stack, monkeypatch: pytest.Monke
     assert {k: v for k, v in stack.files().items() if k != ".upgrade.lock"} == before
 
 
+def _customize_storage(config: dict, case: str) -> None:
+    """Give the bundle one of the storage shapes the move will not touch."""
+    surrealdb = config["services"]["surrealdb"]
+    if case == "bind-mount":
+        surrealdb["volumes"] = ["/srv/sibyl/surreal:/data"]
+    elif case == "other-volume":
+        surrealdb["volumes"][0]["source"] = "my_surreal"
+    elif case == "extra-mount":
+        surrealdb["volumes"].append("/srv/sibyl/surreal-db:/data/sibyl.db")
+    elif case == "renamed-volume":
+        config["volumes"]["sibyl_surreal"]["name"] = "prod_surreal"
+    elif case == "unnamed-volume":
+        config["volumes"]["sibyl_surreal"] = {}
+
+
 @pytest.mark.parametrize(
     ("case", "says"),
     [
@@ -252,13 +283,18 @@ def test_a_declined_move_changes_nothing(stack: Stack, monkeypatch: pytest.Monke
         ("override", "would override the move"),
         ("tag", "moves only SurrealDB"),
         ("hand-edited", "does not open rocksdb:///data/sibyl.db"),
-        ("older-sibyl", "Sibyl runs 1.4.0 here, older than this CLI's 1.5.0"),
+        ("bind-mount", "somewhere other than the sibyl_surreal volume"),
+        ("other-volume", "somewhere other than the sibyl_surreal volume"),
+        ("extra-mount", "somewhere other than the sibyl_surreal volume"),
+        ("renamed-volume", "somewhere other than the sibyl_surreal volume"),
+        ("unnamed-volume", "somewhere other than the sibyl_surreal volume"),
     ],
 )
 def test_the_plan_refuses_before_touching_anything(
     stack: Stack, monkeypatch: pytest.MonkeyPatch, case: str, says: str
 ) -> None:
     args: tuple[str, ...] = ("--yes",)
+    config = yaml.safe_load(stack.compose_file.read_text())
     if case == "other-runtime":
         stack.other_compose_file.parent.mkdir(parents=True, exist_ok=True)
         stack.other_compose_file.write_text(
@@ -269,12 +305,11 @@ def test_the_plan_refuses_before_touching_anything(
         env.write_text(env.read_text() + "SIBYL_SURREAL_IMAGE=surrealdb/surrealdb:v3.2.4\n")
     elif case == "tag":
         args = ("--yes", "--tag", "1.5.0")
-    elif case == "older-sibyl":
-        _pin_api(stack, "1.4.0")
-    else:
-        config = yaml.safe_load(stack.compose_file.read_text())
+    elif case == "hand-edited":
         config["services"]["surrealdb"]["command"][-1] = "rocksdb:///data/elsewhere.db"
-        stack.compose_file.write_text(yaml.dump(config, sort_keys=False))
+    else:
+        _customize_storage(config, case)
+    stack.compose_file.write_text(yaml.dump(config, sort_keys=False))
     before = stack.files()
     docker = _docker(stack, monkeypatch)
 
@@ -283,32 +318,69 @@ def test_the_plan_refuses_before_touching_anything(
     assert result.exit_code == 1
     output = " ".join(result.output.split())
     assert says in output and "Nothing changed" in output
-    if case == "older-sibyl":
-        assert f"sibyl {stack.runtime} upgrade, then run this again" in output
+    if says.startswith("somewhere"):
+        assert SURREAL_MAJOR_RUNBOOK in output, "customized storage moves by hand"
     assert docker.calls == []
     assert stack.files() == before
 
 
-@pytest.mark.parametrize(
-    ("api_tag", "cli_tag"),
-    [
-        ("main", "1.5.0"),  # a custom build's tag is not a release
-        ("1.4.0", "1.5.1.dev3+gabc123"),  # a dev CLI has no release to compare
-        ("1.6.0", "1.5.0"),  # newer than this CLI is not older
-    ],
-)
-def test_only_an_older_release_holds_the_move_back(
-    stack: Stack, monkeypatch: pytest.MonkeyPatch, api_tag: str, cli_tag: str
+@pytest.mark.parametrize("shape", ["short-mount", "external-volume"])
+def test_the_stock_volume_in_either_spelling_is_moved(
+    stack: Stack, monkeypatch: pytest.MonkeyPatch, shape: str
 ) -> None:
-    _pin_api(stack, api_tag)
-    monkeypatch.setattr(local, "DEFAULT_IMAGE_TAG", cli_tag)
-    monkeypatch.setattr(docker_module, "DEFAULT_IMAGE_TAG", cli_tag)
+    config = yaml.safe_load(stack.compose_file.read_text())
+    if shape == "short-mount":
+        config["services"]["surrealdb"]["volumes"] = ["sibyl_surreal:/data"]
+    else:
+        config["volumes"]["sibyl_surreal"] = {"name": "sibyl_surreal", "external": True}
+    stack.compose_file.write_text(yaml.dump(config, sort_keys=False))
     docker = _docker(stack, monkeypatch)
 
     result = stack.upgrade("--yes")
 
     assert result.exit_code == 0, result.output
     assert docker.calls[-1] == "up -d"
+
+
+@pytest.mark.parametrize(
+    ("api_tag", "image_tag_env", "refuses"),
+    [
+        ("1.4.13", None, True),
+        ("main", None, True),  # a custom build cannot show it rebuilds the indexes
+        ("1.4.14-rc.1", None, True),
+        # SIBYL_IMAGE_TAG, whatever it names, never lowers the bar.
+        ("1.4.13", "1.3.0", True),
+        ("1.4.13", "main", True),
+        ("1.4.14", None, False),
+        ("1.5.0", "main", False),
+    ],
+)
+def test_the_move_needs_an_api_of_at_least_1_4_14(
+    stack: Stack,
+    monkeypatch: pytest.MonkeyPatch,
+    api_tag: str,
+    image_tag_env: str | None,
+    refuses: bool,
+) -> None:
+    _pin_api(stack, api_tag)
+    if image_tag_env:
+        monkeypatch.setenv("SIBYL_IMAGE_TAG", image_tag_env)
+        monkeypatch.setattr(local, "DEFAULT_IMAGE_TAG", image_tag_env)
+        monkeypatch.setattr(docker_module, "DEFAULT_IMAGE_TAG", image_tag_env)
+    before = stack.files()
+    docker = _docker(stack, monkeypatch)
+
+    result = stack.upgrade("--yes")
+
+    if not refuses:
+        assert result.exit_code == 0, result.output
+        return
+    assert result.exit_code == 1
+    output = " ".join(result.output.split())
+    assert f"sibyl {stack.runtime} upgrade --tag {SURREAL_4_MIN_SIBYL}" in output
+    assert SURREAL_MAJOR_RUNBOOK in output and "Nothing changed" in output
+    assert docker.calls == []
+    assert stack.files() == before
 
 
 def test_there_is_nothing_to_do_on_this_major(
@@ -424,3 +496,53 @@ def test_docker_waits_on_the_api_port_its_bundle_publishes(
 
     assert docker_module.wait_for_api(900) is True
     assert urls == [(900, "http://localhost:4444/api/health/ready")]
+
+
+@pytest.mark.parametrize(
+    "error",
+    [PermissionError(errno.EACCES, "Permission denied"), OSError(errno.ENOSPC, "No space left")],
+    ids=["eacces", "enospc"],
+)
+@pytest.mark.parametrize("failing_write", [1, 2, 3], ids=["held-copy", "converting", "serving"])
+def test_a_failed_compose_write_takes_the_path_its_state_allows(
+    stack: Stack, monkeypatch: pytest.MonkeyPatch, failing_write: int, error: OSError
+) -> None:
+    """Writes go: the held copy, the converting service, then the serving one."""
+    held_bytes = stack.compose_file.read_bytes()
+    docker = _docker(stack, monkeypatch)
+    real_replace = docker_storage.os.replace
+    writes: list[str] = []
+
+    def replace(source: str, destination: str | Path) -> None:
+        if Path(destination).parent == stack.compose_file.parent:
+            writes.append(Path(destination).name)
+            if len(writes) == failing_write:
+                raise error
+        real_replace(source, destination)
+
+    monkeypatch.setattr(docker_storage.os, "replace", replace)
+
+    result = stack.upgrade("--yes")
+
+    assert result.exit_code == 1
+    output = " ".join(result.output.split())
+    # Each write is atomic: a failed one leaves no partial or temporary file.
+    assert not [name for name in stack.files() if name.endswith(".tmp")]
+    before_start = ["pull", f"stop {_writers(stack)} surrealdb", "copy"]
+    if failing_write < 3:
+        # The compose file still holds 3.x, so the held stack comes back.
+        assert stack.compose_file.read_bytes() == held_bytes
+        assert docker.calls == before_start + ([] if failing_write == 1 else ["measure"]) + [
+            "up -d"
+        ]
+        assert stack.held_compose_file.exists() is (failing_write == 2)
+        assert "The store was not converted" in output and "Nothing changed" in output
+        assert "Never start" not in output
+        return
+    # 4.0 already converted the store, so the CLI says exactly where it stands.
+    assert docker.calls[-1] == "ready" and "up -d" not in docker.calls
+    assert _surreal(stack.compose_file)["environment"] == CONVERT_ENV
+    assert "runs the converted store" in output
+    assert "still starts SurrealDB with SURREAL_EXPERIMENTAL_UPGRADE_FROM_3X=true" in output
+    assert f"{stack.compose_command} up -d" in output
+    assert "Never start SurrealDB v3.2.4 on the converted volume" in output

@@ -122,11 +122,16 @@ names the command that does the move, `sibyl docker upgrade --surreal-major`, wh
 data in place, one way:
 
 1. It asks first (the default is no; `--yes` skips the question) and runs on its own, without
-   `--tag`. It refuses with nothing changed while the deployment pins a Sibyl release older than
-   this CLI's (run `sibyl docker upgrade` first, so the API that starts on `v4` is this release's),
-   while `SIBYL_SURREAL_IMAGE` is set, when the SurrealDB command was edited by hand, or while the
-   [`sibyl local`](./local.md) runtime still runs `v3` on the `sibyl_surreal` volume both runtimes
-   share.
+   `--tag`. It refuses with nothing changed in these cases:
+   - The deployment runs a Sibyl API older than 1.4.14, the first release whose API rebuilds a
+     converted store's indexes, or one whose tag is not a release (a custom build). Move it first
+     with `sibyl docker upgrade --tag 1.4.14` or newer. `SIBYL_IMAGE_TAG` does not change this.
+   - SurrealDB keeps its data anywhere but the `sibyl_surreal` volume as `init` writes it: a bind
+     mount, another or renamed volume, or a second mount over `/data`. Move such storage by hand
+     with the runbook.
+   - The SurrealDB command was edited by hand, or `SIBYL_SURREAL_IMAGE` is set.
+   - The [`sibyl local`](./local.md) runtime still runs `v3` on the `sibyl_surreal` volume both
+     runtimes share.
 2. It pulls the new image, stops the API, worker, web, and SurrealDB, copies the `sibyl_surreal`
    volume into `sibyl_surreal_3x_backup` (refusing a backup volume that already holds data), saves
    the compose file as `docker-compose.yml.surreal3x.bak`, and checks that about twice the store's

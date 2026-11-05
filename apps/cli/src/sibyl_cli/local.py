@@ -50,6 +50,7 @@ from sibyl_cli.docker_storage import (
     run_surreal_major_upgrade,
     surreal_data_mount,
     surreal_healthcheck,
+    surreal_init_for,
     surreal_kept_message,
     surreal_volume_initializer,
     upgraded_surreal_image,
@@ -200,7 +201,7 @@ COMPOSE_CONFIG = {
             },
             "restart": "unless-stopped",
         },
-        "surreal-init": surreal_volume_initializer(),
+        "surreal-init": surreal_volume_initializer(SURREAL_IMAGE_REFERENCE, SURREAL_STORE_PATH),
         "surrealdb": {
             "image": SURREAL_IMAGE_REFERENCE,
             "container_name": "sibyl-surrealdb",
@@ -259,6 +260,7 @@ def compose_config_for(image_tag: str, current: dict | None = None) -> dict:
     ):
         warn(surreal_kept_message(image, "local"))
         config["services"]["surrealdb"] = copy.deepcopy(existing)
+        config["services"]["surreal-init"] = surreal_init_for(existing)
     return config
 
 
@@ -829,7 +831,6 @@ def upgrade(
             SIBYL_LOCAL_ENV,
             compose_command([]),
             known_compose_files(),
-            release_tag=release_image_tag(DEFAULT_IMAGE_TAG),
         )
         if planned is not None:
             with _upgrade_lock():

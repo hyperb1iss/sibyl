@@ -80,10 +80,12 @@ skips the question), keeps a cold copy in the `sibyl_surreal_3x_backup` volume a
 file as `docker-compose.yml.surreal3x.bak`, converts the store, and then starts Sibyl, whose API
 rebuilds the auth and content indexes before it serves (each organization's graph rebuilds on its
 first use, so the first requests for each organization can be slow). It runs on its own without
-`--tag`, and refuses with nothing changed while the instance pins a Sibyl release older than this
-CLI's (run `sibyl local upgrade` first), while `SIBYL_SURREAL_IMAGE` is set, or while the
-[`sibyl docker`](./docker.md) runtime still runs `v3` on the volume both runtimes share. It prints
-the cleanup and rollback commands when it finishes. The
+`--tag`, and refuses with nothing changed while the instance runs a Sibyl API older than 1.4.14 or
+one whose tag is not a release (move it first with `sibyl local upgrade --tag 1.4.14` or newer;
+`SIBYL_IMAGE_TAG` does not change this), while SurrealDB keeps its data anywhere but the stock
+`sibyl_surreal` volume (move such storage by hand with the runbook), while `SIBYL_SURREAL_IMAGE` is
+set, or while the [`sibyl docker`](./docker.md) runtime still runs `v3` on the volume both runtimes
+share. It prints the cleanup and rollback commands when it finishes. The
 [SurrealDB 4 upgrade runbook](../deployment/surrealdb-4-upgrade.md) covers the move in depth.
 
 Outside `--surreal-major` there is no rollback once the new services start. The new SurrealDB may
