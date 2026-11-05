@@ -235,9 +235,11 @@ conversion; follow the [SurrealDB 4.0 upgrade](./surrealdb-4-upgrade.md#helm) ru
 The standard 4.0 image has no TiKV engine and refuses `tikv://` ("not enabled in this build"), so a
 replicated SurrealDB needs the separate TiKV build of the server, which Sibyl does not test. Either
 way, the store path configures the SurrealDB server only. Point Sibyl's `backend.surreal.url` at
-that server with a `ws://`, `wss://`, `http://`, or `https://` URL. The backend rejects `rocksdb://`
-and `tikv://` at startup, and `surrealkv://` would open an embedded store inside the backend instead
-of reaching the server; the embedded forms have their own rules and are not meant for a cluster (see
+that server with a `ws://`, `wss://`, `http://`, or `https://` URL; the first start after a move to
+SurrealDB 4 needs `ws://` or `wss://`, because rebuilding indexes can outlast the HTTP transport's
+30 s limit. The backend rejects `rocksdb://` and `tikv://` at startup, and `surrealkv://` would open
+an embedded store inside the backend instead of reaching the server; the embedded forms have their
+own rules and are not meant for a cluster (see
 [SurrealDB URL forms](./environment.md#surrealdb-url-forms)).
 
 ### Coordination Requirements

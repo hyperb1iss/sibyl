@@ -171,8 +171,8 @@ COMPOSE_CONFIG = {
                 "interval": "10s",
                 "timeout": "5s",
                 "retries": 5,
-                # The first start on a new SurrealDB major rebuilds every index
-                # before it serves, and dependents must not give up meanwhile.
+                # The first start on a new SurrealDB major rebuilds the auth and
+                # content indexes before it serves; dependents must not give up.
                 "start_period": "10m",
             },
             "restart": "unless-stopped",

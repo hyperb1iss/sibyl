@@ -27,13 +27,21 @@ surface Sibyl ships: the compose files, the Ansible role, the Helm chart, and th
   per GB of RocksDB data. Allow 30 s per GB: the compose healthchecks' ten-minute `start_period` and
   the Helm chart's ten-minute liveness delay cover a 20 GB store.
 - **Sibyl rebuilds the indexes itself.** Converted indexes are wrong or ignored until rebuilt, so
-  each database rebuilds its own indexes the first time Sibyl bootstraps it on 4.0, then marks
-  itself done. The API bootstraps the auth and content databases before it serves, so its first
-  start takes about 60 s per GB of those two; allow that much: the backend healthchecks' ten-minute
-  `start_period` and the Helm chart's default startup probe cover 10 GB. Each organization's graph
-  database rebuilds on that organization's first use, so its first requests can be slow. A schema
-  lease serializes the work, so extra API replicas and workers are safe; one replica for the first
-  start is only faster. A start that is killed picks up where it stopped.
+  each database rebuilds its own indexes the first time Sibyl bootstraps it on 4.0, under that
+  database's schema lease, then marks itself done. The API bootstraps the auth and content databases
+  before it serves, so its first start takes about 60 s per GB of those two; allow that much: the
+  backend healthchecks' ten-minute `start_period` and the Helm chart's default startup probe cover
+  10 GB. Each organization's graph database rebuilds on that organization's first access, from the
+  API or the worker, and that access waits for it, so the first requests for each organization are
+  slow. The lease makes extra API replicas and workers safe; one replica for the first start is only
+  faster. Each database logs `surreal_index_rebuild_started` and `surreal_index_rebuild_finished`.
+- **A rebuild that fails, fails closed.** The database stays unmarked and nothing serves it: the API
+  does not report ready while auth or content is unrebuilt, and an organization's requests fail
+  until its graph rebuilds. A restart tries again, and databases already marked are skipped.
+- **The first 4.0 start needs a WebSocket URL.** A rebuild can outlast the 30 s limit of the HTTP
+  transport, so a database due a rebuild refuses while `SIBYL_SURREAL_URL` is `http://` or
+  `https://`. Every configuration Sibyl ships uses `ws://`; if yours points at HTTP, start once on
+  the server's `ws://` (or `wss://`) `/rpc` endpoint.
 - **The way back is a copy.** A 3.x server pointed at the converted directory starts on an empty
   database and writes files that then stop 4.0 from opening the store. Roll back only from
   `_rocksdb_backup/` or the cold copy you take first.
@@ -54,8 +62,9 @@ Every surface below follows the same sequence:
    times while Sibyl rebuilds indexes with `_rocksdb_backup/` still in it.
 5. **Start 4.0 once with the opt-in** on the `surrealkv://` path, same directory, and wait for it to
    answer `/ready`. Its log shows `Datastore version recorded version=4.0.0`.
-6. **Remove the opt-in and start Sibyl.** The API rebuilds the auth and content indexes before it
-   answers `/api/health/ready`; each organization's graph rebuilds on its first use.
+6. **Remove the opt-in and start Sibyl** on a `ws://` URL. The API rebuilds the auth and content
+   indexes before it answers `/api/health/ready`; each organization's graph rebuilds on its first
+   access.
 7. **Verify,** then delete `_rocksdb_backup/` to reclaim about one store's worth of disk, and the
    cold copy when you no longer want it.
 
@@ -86,7 +95,7 @@ until docker compose exec -T surrealdb /surreal is-ready --endpoint http://local
 done
 
 # 6. Recreate SurrealDB without the opt-in and start Sibyl. The API turns healthy once its
-#    auth and content indexes are rebuilt; each organization's graph rebuilds on first use.
+#    auth and content indexes are rebuilt; each organization's graph rebuilds on first access.
 docker compose up -d
 docker compose ps api   # healthy once /api/health/ready answers
 ```

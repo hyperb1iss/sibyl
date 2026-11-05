@@ -253,7 +253,9 @@ backend:
 
   # -- SurrealDB connection settings
   surreal:
-    # -- SurrealDB connection URL (ws:// or http:// to an external Surreal instance)
+    # -- SurrealDB connection URL (ws:// or http:// to an external Surreal instance).
+    # The first start after a store moves to SurrealDB 4 needs ws:// or wss://:
+    # its index rebuild can outlast the HTTP transport's 30 s request limit.
     url: "ws://surrealdb:8000/rpc"
     # -- Root username
     username: "root"
