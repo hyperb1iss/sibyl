@@ -584,6 +584,7 @@ async def test_graph_client_cache_evicts_oldest_client(
     closed: list[str] = []
 
     class FakeNativeGraphClient:
+        _url = "memory://"
         idle_seconds = 1e9
 
         def __init__(self, *, group_id: str, **_: object) -> None:
@@ -624,6 +625,8 @@ async def test_graph_client_eviction_never_waits_on_the_victim(
     closed: list[str] = []
 
     class FakeNativeGraphClient:
+        _url = "memory://"
+
         def __init__(self, *, group_id: str, **_: object) -> None:
             self.group_id = group_id
             self.idle_seconds = 0.0
@@ -659,6 +662,7 @@ async def test_close_graph_clients_closes_retired_clients_too(
     closed: list[str] = []
 
     class FakeNativeGraphClient:
+        _url = "memory://"
         idle_seconds = 0.0
 
         def __init__(self, *, group_id: str, **_: object) -> None:
@@ -686,6 +690,8 @@ async def test_graph_client_uses_configured_pool_size(
     captured: dict[str, object] = {}
 
     class FakeNativeGraphClient:
+        _url = "memory://"
+
         def __init__(self, *, group_id: str, **kwargs: object) -> None:
             captured.update(kwargs)
             self.group_id = group_id

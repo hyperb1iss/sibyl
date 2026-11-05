@@ -6,6 +6,11 @@ from typing import TYPE_CHECKING
 from uuid import UUID
 
 from sibyl_core.auth import OrganizationRole, PrincipalKind, ProjectRole, ProjectVisibility
+from sibyl_core.backends.surreal.index_engine import (
+    index_engine_of,
+    index_readiness_step,
+    settle_database_indexes,
+)
 from sibyl_core.backends.surreal.schema import render_surreal_compatible_sql
 from sibyl_core.backends.surreal.schema_helpers import is_missing_table_error, split_statements
 from sibyl_core.backends.surreal.schema_invariants import (
@@ -868,7 +873,15 @@ async def backfill_api_key_scope_restrictions(
 
 
 async def bootstrap_auth_schema(client: SurrealAuthClient, *, reset: bool = False) -> None:
-    await pin_schema_compatibility_level(client.execute_query, client.execute_query)
+    # A reset rebuilds every table from nothing; otherwise a database written
+    # before its 4.x server has every index rebuilt before anything reads it.
+    async with index_readiness_step("auth"):
+        info = await pin_schema_compatibility_level(client.execute_query, client.execute_query)
+        index_engine = (
+            index_engine_of(info)
+            if reset
+            else await settle_database_indexes(client, name=AUTH_SCHEMA_NAME, info=info)
+        )
     if reset:
         for table in (*AUTH_TABLES, SCHEMA_VERSION_TABLE):
             await client.execute_query(f"REMOVE TABLE IF EXISTS {table};")
@@ -887,6 +900,7 @@ async def bootstrap_auth_schema(client: SurrealAuthClient, *, reset: bool = Fals
         AUTH_SCHEMA_MIGRATIONS,
         name=AUTH_SCHEMA_NAME,
         scope="auth_schema_migration",
+        index_engine=index_engine,
     )
 
 

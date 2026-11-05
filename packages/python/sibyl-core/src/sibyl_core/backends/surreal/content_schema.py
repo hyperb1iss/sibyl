@@ -7,6 +7,11 @@ from functools import partial
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from sibyl_core.backends.surreal.index_engine import (
+    index_engine_of,
+    index_readiness_step,
+    settle_database_indexes,
+)
 from sibyl_core.backends.surreal.schema import (
     render_fulltext_compatible_sql,
     render_surreal_compatible_sql,
@@ -1357,7 +1362,15 @@ async def bootstrap_content_schema(client: SurrealContentClient, *, reset: bool 
     async def execute_definition_batch(statement: str) -> object:
         return await client.execute_query(f"BEGIN TRANSACTION;\n{statement}\nCOMMIT TRANSACTION;")
 
-    await pin_schema_compatibility_level(client.execute_query, client.execute_query)
+    # A reset rebuilds every table from nothing; otherwise a database written
+    # before its 4.x server has every index rebuilt before anything reads it.
+    async with index_readiness_step("content"):
+        info = await pin_schema_compatibility_level(client.execute_query, client.execute_query)
+        index_engine = (
+            index_engine_of(info)
+            if reset
+            else await settle_database_indexes(client, name=CONTENT_SCHEMA_NAME, info=info)
+        )
     await prepare_source_integrity_upgrade(client.execute_query)
     if reset:
         await retire_source_states(client.execute_query, kind=SourceKind.RAW_CAPTURE)
@@ -1371,6 +1384,7 @@ async def bootstrap_content_schema(client: SurrealContentClient, *, reset: bool 
         name=CONTENT_SCHEMA_NAME,
         scope="content_schema_migration",
         batch_execute=execute_definition_batch,
+        index_engine=index_engine,
     )
 
 

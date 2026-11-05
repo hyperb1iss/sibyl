@@ -11,6 +11,13 @@ from typing import TYPE_CHECKING, cast
 
 import structlog
 
+from sibyl_core.backends.surreal.index_engine import (
+    INDEX_ENGINE_FIELD,
+    index_engine_current,
+    index_engine_of,
+    index_readiness_step,
+    settle_database_indexes,
+)
 from sibyl_core.backends.surreal.schema_archive_phases import (
     ARCHIVE_PHASE_STATEMENTS,
     ARCHIVE_PHASE_TABLES,
@@ -81,6 +88,8 @@ from sibyl_core.memory_pipeline.observations import SourceKind
 from sibyl_core.models.entities import EntityType
 
 if TYPE_CHECKING:
+    from typing import Any
+
     from sibyl_core.backends.surreal.protocols import SchemaDriver
 
 logger = structlog.get_logger()
@@ -1335,7 +1344,7 @@ async def _graph_schema_ownership(driver: SchemaDriver) -> AsyncGenerator[Schema
             except Exception as exc:
                 logger.warning(
                     "surreal_schema_lease_release_failed",
-                    group_id=driver.group_id,
+                    group_id=getattr(driver, "group_id", None),
                     error_type=type(exc).__name__,
                 )
             raise
@@ -1343,19 +1352,37 @@ async def _graph_schema_ownership(driver: SchemaDriver) -> AsyncGenerator[Schema
             await ownership.release()
 
 
-async def _recorded_graph_schema_version(driver: SchemaDriver) -> int:
-    # A new namespace has no schema_version table, and the client logs every
-    # failed query as a warning, so this read must answer no rows there.
-    result = await driver.execute_query(
-        schema_version_record_query(GRAPH_SCHEMA_NAME, "VALUE version")
-    )
-    version = result[0] if isinstance(result, list) and result else None
-    return int(version) if isinstance(version, int | float | str) else 0
+@asynccontextmanager
+async def hold_schema_ownership(client: object) -> AsyncGenerator[SchemaOwnership]:
+    """Hold one database's schema lease, as the graph bootstrap does, for any scoped client."""
+    async with _graph_schema_ownership(cast("SchemaDriver", client)) as ownership:
+        yield ownership
+
+
+async def _server_index_engine(driver: SchemaDriver) -> int | None:
+    """The server's index engine; the embedded engine is SurrealDB 2.x and is not asked."""
+    if is_embedded_surreal_url(driver._url):
+        return None
+    return index_engine_of(await driver.execute_query("INFO FOR DB;"))
 
 
 async def _graph_schema_is_current(driver: SchemaDriver) -> bool:
     try:
-        if await _recorded_graph_schema_version(driver) < GRAPH_SCHEMA_CURRENT_VERSION:
+        result = await driver.execute_query(
+            schema_version_record_query(GRAPH_SCHEMA_NAME, f"version, {INDEX_ENGINE_FIELD}")
+        )
+        record = result[0] if isinstance(result, list) and result else None
+        record = record if isinstance(record, Mapping) else {}
+        version = record.get("version")
+        if not isinstance(version, int | float) or version < GRAPH_SCHEMA_CURRENT_VERSION:
+            return False
+        # A database written before its 4.x server is not current until its
+        # indexes are rebuilt. A marked one costs nothing more; an unmarked
+        # one on a 3.x server or the embedded engine costs one INFO FOR DB.
+        if (
+            not index_engine_current(record.get(INDEX_ENGINE_FIELD))
+            and await _server_index_engine(driver) is not None
+        ):
             return False
         if await get_schema_embedding_dimension(driver.execute_query) != EMBEDDING_DIM:
             return False
@@ -1394,7 +1421,17 @@ async def _bootstrap_owned_schema(
     reset: bool,
     force: bool,
 ) -> None:
-    await pin_schema_compatibility_level(ownership.read, ownership.mutate)
+    # A reset rebuilds every table from nothing; otherwise a database written
+    # before its 4.x server has every index rebuilt before anything reads it.
+    async with index_readiness_step(f"graph {driver.group_id}"):
+        info = await pin_schema_compatibility_level(ownership.read, ownership.mutate)
+        index_engine = (
+            index_engine_of(info)
+            if reset
+            else await settle_database_indexes(
+                cast("Any", driver), name=GRAPH_SCHEMA_NAME, info=info, ownership=ownership
+            )
+        )
     await prepare_source_integrity_upgrade(ownership.read, ownership=ownership)
     current_version = 0
     if reset:
@@ -1421,6 +1458,7 @@ async def _bootstrap_owned_schema(
                 ),
                 group_id=driver.group_id,
                 ownership=ownership,
+                index_engine=index_engine,
             )
             await _reconcile_embedding_dimension(driver, ownership)
             return
@@ -1461,6 +1499,7 @@ async def _bootstrap_owned_schema(
         _graph_schema_migrations(url=driver._url, ownership=ownership, group_id=driver.group_id),
         group_id=driver.group_id,
         ownership=ownership,
+        index_engine=index_engine,
     )
     await _reconcile_embedding_dimension(driver, ownership)
 

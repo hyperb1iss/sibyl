@@ -97,6 +97,27 @@ def build_cron_jobs() -> list:
     ]
 
 
+async def ensure_runtime_plane_indexes() -> None:
+    from sibyl.persistence.surreal.auth import build_surreal_auth_client
+    from sibyl.persistence.surreal.content import build_surreal_content_client
+    from sibyl_core.backends.surreal.auth_schema import AUTH_SCHEMA_NAME
+    from sibyl_core.backends.surreal.content_schema import CONTENT_SCHEMA_NAME
+    from sibyl_core.backends.surreal.index_engine import ensure_database_indexes
+    from sibyl_core.backends.surreal.url_schemes import is_embedded_surreal_url
+
+    if is_embedded_surreal_url(settings.resolved_surreal_url):
+        return
+    for build, name in (
+        (build_surreal_auth_client, AUTH_SCHEMA_NAME),
+        (build_surreal_content_client, CONTENT_SCHEMA_NAME),
+    ):
+        client = build()
+        try:
+            await ensure_database_indexes(client, name=name)
+        finally:
+            await client.close()
+
+
 async def startup(ctx: dict[str, Any]) -> None:
     """Worker startup - initialize resources."""
     from sibyl.banner import log_banner
@@ -108,6 +129,11 @@ async def startup(ctx: dict[str, Any]) -> None:
     log_banner(component="worker")
     log.info("Job worker online")
     ctx["start_time"] = datetime.now(UTC)
+
+    # A worker reads auth and content without running their bootstraps, so on
+    # a store 3.x wrote it waits for, or does, their index rebuild first. Org
+    # graphs get theirs on first use, wherever that happens.
+    await ensure_runtime_plane_indexes()
 
     # A worker decrypts settings the API replicas saved, so it refuses to run
     # on a key of its own instead of reading every stored secret as empty.

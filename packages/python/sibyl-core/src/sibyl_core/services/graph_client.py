@@ -12,7 +12,12 @@ from typing import Any, cast
 from weakref import WeakValueDictionary
 
 from sibyl_core.backends.surreal.dedicated_client import DedicatedSurrealClient
+from sibyl_core.backends.surreal.index_engine import (
+    database_needs_rebuild,
+    index_readiness_step,
+)
 from sibyl_core.backends.surreal.schema import EMBEDDING_DIM, bootstrap_schema
+from sibyl_core.backends.surreal.schema_version import GRAPH_SCHEMA_NAME
 from sibyl_core.backends.surreal.url_schemes import is_embedded_surreal_url
 from sibyl_core.config import settings
 from sibyl_core.embeddings.providers import EmbeddingProvider
@@ -77,6 +82,10 @@ class SurrealGraphClient(DedicatedSurrealClient):
 
 _prepared_groups: set[str] = set()
 _prepare_locks: WeakValueDictionary[tuple[str, str], asyncio.Lock] = WeakValueDictionary()
+# Organizations whose graph indexes this process has seen built by the
+# server's own engine (or a server that needs nothing).
+_index_ready_groups: set[str] = set()
+_index_locks: WeakValueDictionary[str, asyncio.Lock] = WeakValueDictionary()
 _client_lock = asyncio.Lock()
 _clients: OrderedDict[str, SurrealGraphClient] = OrderedDict()
 # Clients evicted from the LRU wait here until they have been idle long enough
@@ -249,6 +258,7 @@ async def background_graph_client(group_id: str) -> AsyncGenerator[SurrealGraphC
             closing = lease.closing
         await asyncio.shield(closing)
     try:
+        await _ensure_graph_indexes(lease.client)
         yield lease.client
     finally:
         cleanup = asyncio.create_task(_release_background_lease(group_id, lease))
@@ -293,7 +303,36 @@ async def get_surreal_graph_client(group_id: str) -> SurrealGraphClient:
                 _retired.append((evicted_client, retired_at))
         else:
             _clients.move_to_end(group_id)
+    await _ensure_graph_indexes(client)
     return client
+
+
+async def _ensure_graph_indexes(client: SurrealGraphClient) -> None:
+    """Hold back an organization's graph until a database 3.x wrote has its indexes rebuilt.
+
+    The one gate between a graph client and its caller: both places a graph
+    client comes from (this module's LRU getter and the background pool) call
+    it before handing the client out. The first call per organization per
+    process applies the bootstrap's rule (a 4.x server, and a schema_version
+    record without the mark or tables without a record) and runs the bootstrap,
+    which rebuilds under the schema lease; a marked database costs one record
+    read, then nothing. Any failure raises IndexReadinessError.
+    """
+    group_id = client.group_id
+    if (
+        group_id in _index_ready_groups
+        or group_id in _prepared_groups
+        or is_embedded_surreal_url(client._url)
+    ):
+        return
+    lock = _index_locks.setdefault(group_id, asyncio.Lock())
+    async with lock:
+        if group_id in _index_ready_groups or group_id in _prepared_groups:
+            return
+        async with index_readiness_step(f"graph {group_id}"):
+            if await database_needs_rebuild(client.execute_query, name=GRAPH_SCHEMA_NAME):
+                await prepare_graph_schema(client)
+        _index_ready_groups.add(group_id)
 
 
 async def reap_retired_graph_clients(*, idle_seconds: float = RETIRED_CLIENT_IDLE_SECONDS) -> int:
@@ -322,6 +361,7 @@ async def close_graph_clients() -> None:
         _clients.clear()
         _retired.clear()
         _prepared_groups.clear()
+        _index_ready_groups.clear()
         _schema_facts.clear()
     await asyncio.gather(*(client.close() for client in clients), return_exceptions=True)
     await close_idle_background_clients()
@@ -343,6 +383,7 @@ async def prepare_graph_schema(client: SurrealGraphClient) -> None:
 
 def mark_graph_schema_dirty(group_id: str) -> None:
     _prepared_groups.discard(group_id)
+    _index_ready_groups.discard(group_id)
     _schema_facts.pop(group_id, None)
 
 

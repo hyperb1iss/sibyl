@@ -29,6 +29,7 @@ DEFINE FIELD IF NOT EXISTS name ON schema_version TYPE string;
 DEFINE FIELD IF NOT EXISTS version ON schema_version TYPE int;
 DEFINE FIELD IF NOT EXISTS embedding_dimension ON schema_version TYPE option<int>;
 DEFINE FIELD IF NOT EXISTS embedding_rebuild_dimension ON schema_version TYPE option<int>;
+DEFINE FIELD IF NOT EXISTS index_engine ON schema_version TYPE option<int>;
 DEFINE FIELD IF NOT EXISTS migrations ON schema_version TYPE array<object> DEFAULT [];
 DEFINE FIELD IF NOT EXISTS migrations.*.version ON schema_version TYPE int;
 DEFINE FIELD IF NOT EXISTS migrations.*.name ON schema_version TYPE string;
@@ -113,7 +114,9 @@ async def record_schema_version(
     migrations: Sequence[SchemaMigration],
     name: str = GRAPH_SCHEMA_NAME,
     embedding_dimension: int | None = None,
+    index_engine: int | None = None,
 ) -> None:
+    """Write the version record; ``index_engine`` marks a record its creator's engine built."""
     record_id = schema_version_record_id(name)
     migration_payload = [
         {"version": migration.version, "name": migration.name} for migration in migrations
@@ -126,6 +129,7 @@ async def record_schema_version(
             embedding_dimension = $embedding_dimension ?? embedding_dimension,
             embedding_rebuild_dimension = IF $embedding_dimension IS NOT NONE
                 THEN NONE ELSE embedding_rebuild_dimension END,
+            index_engine = $index_engine ?? index_engine,
             migrations = $migrations,
             created_at = created_at ?? time::now(),
             updated_at = time::now();
@@ -133,6 +137,7 @@ async def record_schema_version(
         name=name,
         version=version,
         embedding_dimension=embedding_dimension,
+        index_engine=index_engine,
         migrations=migration_payload,
     )
 
@@ -169,6 +174,7 @@ async def apply_schema_migrations(
     scope: str = "schema_migration",
     ownership: SchemaOwnership | None = None,
     batch_execute: Callable[[str], Awaitable[object]] | None = None,
+    index_engine: int | None = None,
 ) -> list[SchemaMigration]:
     mutate = ownership.mutate if ownership is not None else execute_query
     await ensure_schema_version_table(
@@ -200,6 +206,7 @@ async def apply_schema_migrations(
             version=migration.version,
             migrations=migration_history,
             name=name,
+            index_engine=index_engine,
         )
     return applied
 
@@ -365,11 +372,15 @@ def schema_version_record_query(name: str, projection: str) -> str:
 SCHEMA_COMPATIBILITY_LEVEL = 3
 
 
-async def pin_schema_compatibility_level(read: SurrealExecute, mutate: SurrealExecute) -> None:
+async def pin_schema_compatibility_level(
+    read: SurrealExecute, mutate: SurrealExecute
+) -> Mapping[str, object] | None:
+    """Pin the level and return the INFO FOR DB it read, taken before the bootstrap writes."""
     info = _first_record(await read("INFO FOR DB;"))
     level = info.get("compatibility") if info is not None else None
     if isinstance(level, int) and level != SCHEMA_COMPATIBILITY_LEVEL:
         await mutate(f"ALTER DATABASE COMPATIBILITY {SCHEMA_COMPATIBILITY_LEVEL};")
+    return info
 
 
 __all__ = [
