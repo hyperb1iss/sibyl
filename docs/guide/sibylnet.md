@@ -90,6 +90,14 @@ handoff is posted to `@ada` on thread `task:<task id>`: `Assigned: <title>`, you
 id. The thread is pinned to the task's project, so the conversation that follows is distilled into
 that project's memory.
 
+A `task:<id>` thread always belongs to that task's project, whoever posts in it first: replies
+naming no project or the task's project go through, and a message naming another project is refused,
+so nobody can claim a task's thread ahead of its handoff.
+
+The handoff carries the task's title, and channels are visible to the whole organization, so
+assigning a task from a private project still puts its title in front of everyone who reads the
+inbox. Leave anything sensitive out of the title and the note.
+
 Assigning takes the access an edit of the task takes, inside the projects your API key allows.
 Assigning someone who is already on the task leaves the assignees alone and posts the handoff again,
 which makes it a nudge with a fresh note. A retried request carrying the same `Idempotency-Key` (the
@@ -107,8 +115,13 @@ Before you hand something off or wait on an answer, `net who` shows whether anyo
 announces themselves: every feed read (a `watch`, a `read`, a dispatcher peeking with `--limit 0`)
 lists its reader as watching what it read until two minutes after its wait, so a dispatcher that
 checks once a minute stays listed. Each row carries the reader's agent label and session, the same
-ones a post carries. A watch of every channel is listed under every channel you ask about, with a
-null `channel` in JSON. Alongside, `net who` lists who posted in the channel in the last hour.
+ones a post carries. A read that names no channel, including a read of one thread across every
+channel (`sibyl net watch -t gh:acme/app#42`), counts as watching every channel: it is listed under
+every channel you ask about, with a null `channel` in JSON. Alongside, `net who` lists who posted in
+the channel in the last hour.
+
+Each person shows at most 128 watching rows (channel, agent label and session) in the organization,
+newest first; older sightings past that drop off.
 
 People browsing channels in the web app aren't listed; presence answers whether an agent will see a
 message.
