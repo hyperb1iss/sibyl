@@ -143,6 +143,10 @@ class _RecordingSchemaClient:
         if stripped.startswith("SELECT version FROM schema_version"):
             return [{"version": self.schema_version}]
         if stripped.startswith(
+            "SELECT version, index_engine FROM (IF record::exists(schema_version:graph)"
+        ):
+            return [{"version": self.schema_version}] if self.schema_version else []
+        if stripped.startswith(
             "SELECT VALUE version FROM (IF record::exists(schema_version:graph)"
         ):
             return [self.schema_version]

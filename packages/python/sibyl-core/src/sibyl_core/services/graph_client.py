@@ -12,7 +12,13 @@ from typing import Any, cast
 from weakref import WeakValueDictionary
 
 from sibyl_core.backends.surreal.dedicated_client import DedicatedSurrealClient
+from sibyl_core.backends.surreal.index_engine import (
+    index_engine_current,
+    index_engine_of,
+    recorded_index_engine,
+)
 from sibyl_core.backends.surreal.schema import EMBEDDING_DIM, bootstrap_schema
+from sibyl_core.backends.surreal.schema_version import GRAPH_SCHEMA_NAME
 from sibyl_core.backends.surreal.url_schemes import is_embedded_surreal_url
 from sibyl_core.config import settings
 from sibyl_core.embeddings.providers import EmbeddingProvider
@@ -77,6 +83,10 @@ class SurrealGraphClient(DedicatedSurrealClient):
 
 _prepared_groups: set[str] = set()
 _prepare_locks: WeakValueDictionary[tuple[str, str], asyncio.Lock] = WeakValueDictionary()
+# Organizations whose graph indexes this process has seen built by the
+# server's own engine (or a server that needs nothing).
+_index_ready_groups: set[str] = set()
+_index_locks: WeakValueDictionary[str, asyncio.Lock] = WeakValueDictionary()
 _client_lock = asyncio.Lock()
 _clients: OrderedDict[str, SurrealGraphClient] = OrderedDict()
 # Clients evicted from the LRU wait here until they have been idle long enough
@@ -296,6 +306,46 @@ async def get_surreal_graph_client(group_id: str) -> SurrealGraphClient:
     return client
 
 
+async def ensure_graph_indexes(client: SurrealGraphClient) -> None:
+    """Hold back an organization's graph until a database 3.x wrote has its indexes rebuilt.
+
+    For graph access that skips schema preparation (read paths, the runtime
+    a worker binds without ``ensure_schema``). The first call per organization
+    per process reads the schema_version record; a database marked by its
+    engine, one with no record yet, a 3.x server and the embedded engine pass.
+    An unmarked database on a 4.x server runs its bootstrap, which rebuilds
+    under the schema lease, before the caller gets the client.
+    """
+    group_id = client.group_id
+    if (
+        group_id in _index_ready_groups
+        or group_id in _prepared_groups
+        or is_embedded_surreal_url(client._url)
+    ):
+        return
+    lock = _index_locks.setdefault(group_id, asyncio.Lock())
+    async with lock:
+        if group_id in _index_ready_groups or group_id in _prepared_groups:
+            return
+        try:
+            version, recorded = await recorded_index_engine(
+                client.execute_query, name=GRAPH_SCHEMA_NAME
+            )
+        except Exception as exc:
+            # 4.x refuses a read in a namespace or database that does not exist
+            # yet; there is nothing of Sibyl's there to rebuild.
+            if "does not exist" not in str(exc).lower():
+                raise
+            version, recorded = None, None
+        if (
+            version
+            and not index_engine_current(recorded)
+            and index_engine_of(await client.execute_query("INFO FOR DB;")) is not None
+        ):
+            await prepare_graph_schema(client)
+        _index_ready_groups.add(group_id)
+
+
 async def reap_retired_graph_clients(*, idle_seconds: float = RETIRED_CLIENT_IDLE_SECONDS) -> int:
     """Close evicted clients that have been idle for the whole window.
 
@@ -322,6 +372,7 @@ async def close_graph_clients() -> None:
         _clients.clear()
         _retired.clear()
         _prepared_groups.clear()
+        _index_ready_groups.clear()
         _schema_facts.clear()
     await asyncio.gather(*(client.close() for client in clients), return_exceptions=True)
     await close_idle_background_clients()
@@ -343,6 +394,7 @@ async def prepare_graph_schema(client: SurrealGraphClient) -> None:
 
 def mark_graph_schema_dirty(group_id: str) -> None:
     _prepared_groups.discard(group_id)
+    _index_ready_groups.discard(group_id)
     _schema_facts.pop(group_id, None)
 
 
@@ -381,6 +433,7 @@ __all__ = [
     "background_graph_client",
     "close_graph_clients",
     "close_idle_background_clients",
+    "ensure_graph_indexes",
     "get_surreal_graph_client",
     "graph_schema_fact",
     "mark_graph_schema_dirty",

@@ -15,6 +15,7 @@ from sibyl_core.models.entities import EntityType
 from sibyl_core.services.graph_client import (
     SurrealGraphClient,
     background_graph_client,
+    ensure_graph_indexes,
     get_surreal_graph_client,
     prepare_graph_schema,
     validate_native_embedding_dimensions,
@@ -64,6 +65,8 @@ async def get_surreal_graph_runtime(
     client = await get_surreal_graph_client(group_id)
     if ensure_schema:
         await prepare_graph_schema(client)
+    else:
+        await ensure_graph_indexes(client)
     validate_native_embedding_dimensions(embedding_provider)
     return GraphRuntime(
         client=client,
@@ -97,6 +100,7 @@ async def get_graph_client(group_id: str = "default") -> SurrealGraphClient:
 
     client = await get_surreal_graph_client(str(group_id))
     await client.connect()
+    await ensure_graph_indexes(client)
     return client
 
 
