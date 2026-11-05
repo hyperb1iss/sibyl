@@ -17,7 +17,32 @@ from sibyl_core.services.net import (
 NetMessageKindLabel = Literal["message", "decision"]
 
 
-class NetMessageCreateRequest(BaseModel):
+class NetAgentLabels(BaseModel):
+    """What a client says about the agent behind a request; the user is what auth verified."""
+
+    agent: str | None = Field(
+        default=None,
+        max_length=MAX_AGENT_CHARS,
+        description="Client-asserted agent label such as `claude-code`; a label, not identity",
+    )
+    session: str | None = Field(
+        default=None,
+        max_length=MAX_SESSION_CHARS,
+        description="Client-asserted session id",
+    )
+
+    @field_validator("agent")
+    @classmethod
+    def _agent(cls, value: str | None) -> str | None:
+        return normalize_label(value, field="agent", max_chars=MAX_AGENT_CHARS)
+
+    @field_validator("session")
+    @classmethod
+    def _session(cls, value: str | None) -> str | None:
+        return normalize_label(value, field="session", max_chars=MAX_SESSION_CHARS)
+
+
+class NetMessageCreateRequest(NetAgentLabels):
     """One message for a channel; ``kind=decision`` is also remembered."""
 
     channel: str = Field(description="`@name` for an agent inbox, `#name` for a shared room")
@@ -35,16 +60,6 @@ class NetMessageCreateRequest(BaseModel):
             "first post that names one pins the thread to it"
         ),
     )
-    agent: str | None = Field(
-        default=None,
-        max_length=MAX_AGENT_CHARS,
-        description="Client-asserted agent label such as `claude-code`; a label, not identity",
-    )
-    session: str | None = Field(
-        default=None,
-        max_length=MAX_SESSION_CHARS,
-        description="Client-asserted session id",
-    )
 
     @field_validator("channel")
     @classmethod
@@ -60,16 +75,6 @@ class NetMessageCreateRequest(BaseModel):
     @classmethod
     def _thread(cls, value: str | None) -> str | None:
         return normalize_thread(value) or None
-
-    @field_validator("agent")
-    @classmethod
-    def _agent(cls, value: str | None) -> str | None:
-        return normalize_label(value, field="agent", max_chars=MAX_AGENT_CHARS)
-
-    @field_validator("session")
-    @classmethod
-    def _session(cls, value: str | None) -> str | None:
-        return normalize_label(value, field="session", max_chars=MAX_SESSION_CHARS)
 
     @field_validator("project_id")
     @classmethod
@@ -152,6 +157,7 @@ class NetThreadsResponse(BaseModel):
 
 
 __all__ = [
+    "NetAgentLabels",
     "NetAuthor",
     "NetChannel",
     "NetChannelsResponse",

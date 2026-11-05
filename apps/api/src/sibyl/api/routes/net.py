@@ -51,6 +51,7 @@ from sibyl.api.schemas.net import (
     NetMessage,
     NetMessageCreateRequest,
     NetMessageCreateResponse,
+    NetMessageKindLabel,
     NetThread,
     NetThreadsResponse,
 )
@@ -317,6 +318,81 @@ def _pinned_conflict(channel: str, thread: str, pinned: str | None) -> HTTPExcep
     )
 
 
+async def refuse_pinned_elsewhere(
+    *, organization_id: str, channel: str, thread: str, project_id: str | None
+) -> None:
+    """Refuse a plain message naming a project other than its thread's pin, before any write.
+
+    Answered here so a caller can refuse before writing anything else; the
+    message write checks again atomically.
+    """
+    if not project_id or not thread:
+        return
+    pinned = await net_thread_project(
+        organization_id=organization_id, channel=channel, thread=thread
+    )
+    if pinned is not None and pinned != project_id:
+        raise _pinned_conflict(channel, thread, pinned)
+
+
+async def deliver_net_message(
+    *,
+    organization_id: str,
+    ctx: AuthContext,
+    message_id: str,
+    channel: str,
+    thread: str,
+    kind: NetMessageKindLabel,
+    body: str,
+    project_id: str | None,
+    agent: str | None,
+    session: str | None,
+    decision_memory_id: str | None = None,
+) -> NetMessageRecord:
+    """Store a message as the caller, under the key they used, and wake its watchers.
+
+    Every post goes through here, so a message always carries the verified
+    author and key whichever route wrote it.
+    """
+    try:
+        record = await post_net_message(
+            organization_id=organization_id,
+            message_id=message_id,
+            channel=channel,
+            thread=thread,
+            kind=kind,
+            body=body,
+            author_user_id=_caller_id(ctx),
+            project_id=project_id,
+            api_key_id=ctx.api_key_id,
+            author_agent=agent,
+            author_session=session,
+            decision_memory_id=decision_memory_id,
+        )
+    except NetThreadProjectPinnedError as exc:
+        # Only a plain message is refused, so no decision memory is behind it.
+        pinned = await net_thread_project(
+            organization_id=organization_id, channel=channel, thread=thread
+        )
+        raise _pinned_conflict(channel, thread, pinned) from exc
+    await announce_net_message(
+        organization_id=organization_id,
+        channel=record.channel,
+        thread=record.thread,
+        message_id=record.id,
+    )
+    log.info(
+        "net_message_posted",
+        organization_id=organization_id,
+        channel=record.channel,
+        thread=record.thread or None,
+        kind=record.kind,
+        message_id=record.id,
+        decision_memory_id=decision_memory_id,
+    )
+    return record
+
+
 @router.post(
     "/messages",
     status_code=201,
@@ -349,13 +425,13 @@ async def post_message(
     )
     if replayed is not None:
         return replayed
-    if request.project_id and thread and not decision:
-        # Answered here for a clear refusal; the write checks again atomically.
-        pinned = await net_thread_project(
-            organization_id=str(org.id), channel=request.channel, thread=thread
+    if not decision:
+        await refuse_pinned_elsewhere(
+            organization_id=str(org.id),
+            channel=request.channel,
+            thread=thread,
+            project_id=request.project_id,
         )
-        if pinned is not None and pinned != request.project_id:
-            raise _pinned_conflict(request.channel, thread, pinned)
     message_id = new_message_id()
     members = caller_name(ctx)
     decision_memory_id = (
@@ -370,40 +446,17 @@ async def post_message(
         if decision
         else None
     )
-    try:
-        record = await post_net_message(
-            organization_id=str(org.id),
-            message_id=message_id,
-            channel=request.channel,
-            thread=thread,
-            kind=request.kind,
-            body=request.body,
-            author_user_id=principal_id,
-            project_id=request.project_id,
-            api_key_id=ctx.api_key_id,
-            author_agent=request.agent,
-            author_session=request.session,
-            decision_memory_id=decision_memory_id,
-        )
-    except NetThreadProjectPinnedError as exc:
-        # Only a plain message is refused, so no decision memory is behind it.
-        pinned = await net_thread_project(
-            organization_id=str(org.id), channel=request.channel, thread=thread
-        )
-        raise _pinned_conflict(request.channel, thread, pinned) from exc
-    await announce_net_message(
+    record = await deliver_net_message(
         organization_id=str(org.id),
-        channel=record.channel,
-        thread=record.thread,
-        message_id=record.id,
-    )
-    log.info(
-        "net_message_posted",
-        organization_id=str(org.id),
-        channel=record.channel,
-        thread=record.thread or None,
-        kind=record.kind,
-        message_id=record.id,
+        ctx=ctx,
+        message_id=message_id,
+        channel=request.channel,
+        thread=thread,
+        kind=request.kind,
+        body=request.body,
+        project_id=request.project_id,
+        agent=request.agent,
+        session=request.session,
         decision_memory_id=decision_memory_id,
     )
     response = NetMessageCreateResponse(
@@ -590,11 +643,13 @@ async def list_threads(
 __all__ = [
     "NET_CAPTURE_SURFACE",
     "authorize_project_naming",
-    "decision_content",
-    "decision_title",
     "author_directory",
     "caller_name",
+    "decision_content",
+    "decision_title",
+    "deliver_net_message",
     "net_message",
-    "shared_feed_reads",
+    "refuse_pinned_elsewhere",
     "router",
+    "shared_feed_reads",
 ]
