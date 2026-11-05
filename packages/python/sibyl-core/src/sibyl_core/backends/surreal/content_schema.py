@@ -163,7 +163,7 @@ CONTENT_TABLES = (
     *RAW_LEXICAL_TABLES,
     RAW_LEXICAL_STATE_TABLE,
 )
-CONTENT_SCHEMA_CURRENT_VERSION = 58
+CONTENT_SCHEMA_CURRENT_VERSION = 59
 CONTENT_SCHEMA_NAME = "content"
 _SCHEMA_CHECK_BATCH_SIZE = 128
 _CONTENT_MEMORY_SCOPE_VALUES = tuple(scope.value for scope in MemoryScope)
@@ -639,6 +639,22 @@ DEFINE FIELD IF NOT EXISTS skipped_records.* ON source_imports TYPE object FLEXI
 DEFINE FIELD IF NOT EXISTS errors.* ON source_imports TYPE object FLEXIBLE;
 DEFINE FIELD OVERWRITE skipped_records.* ON source_imports TYPE object FLEXIBLE;
 DEFINE FIELD OVERWRITE errors.* ON source_imports TYPE object FLEXIBLE;
+"""
+
+# A runtime rollup stores metric, event and trend rows whose labels vary by
+# metric, inside arrays of objects. SurrealDB 3.x stored undeclared keys of
+# such an object; 4.0 refuses the write ("Found field 'metrics[58].avg', but
+# no such field exists"), so every rollup failed. Each element is FLEXIBLE,
+# as the source_imports receipt arrays already were. OVERWRITE reaches tables
+# whose element definitions already exist, which 4.0 reports for every array
+# of objects.
+CONTENT_TELEMETRY_ROLLUP_ENTRY_MIGRATION_DEFINITIONS = """
+DEFINE FIELD IF NOT EXISTS trends.* ON telemetry_rollups TYPE object FLEXIBLE;
+DEFINE FIELD IF NOT EXISTS metrics.* ON telemetry_rollups TYPE object FLEXIBLE;
+DEFINE FIELD IF NOT EXISTS recent_events.* ON telemetry_rollups TYPE object FLEXIBLE;
+DEFINE FIELD OVERWRITE trends.* ON telemetry_rollups TYPE object FLEXIBLE;
+DEFINE FIELD OVERWRITE metrics.* ON telemetry_rollups TYPE object FLEXIBLE;
+DEFINE FIELD OVERWRITE recent_events.* ON telemetry_rollups TYPE object FLEXIBLE;
 """
 
 CONTENT_SOURCE_IMPORT_REVISION_MIGRATION_DEFINITIONS = """
@@ -1311,6 +1327,13 @@ def _content_schema_migrations(*, url: str) -> tuple[SchemaMigration, ...]:
             name="content_capture_sidecar_project",
             action=file_capture_sidecars_under_project,
         ),
+        SchemaMigration(
+            version=59,
+            name="content_telemetry_rollup_flexible_entries",
+            statements=tuple(
+                split_statements(CONTENT_TELEMETRY_ROLLUP_ENTRY_MIGRATION_DEFINITIONS)
+            ),
+        ),
     )
 
 
@@ -1729,6 +1752,7 @@ __all__ = [
     "CONTENT_SOURCE_IMPORT_REVISION_MIGRATION_DEFINITIONS",
     "CONTENT_SOURCE_URL_SCOPE_MIGRATION_DEFINITIONS",
     "CONTENT_TABLES",
+    "CONTENT_TELEMETRY_ROLLUP_ENTRY_MIGRATION_DEFINITIONS",
     "CONTENT_USAGE_SIGNAL_MIGRATION_DEFINITIONS",
     "bootstrap_content_schema",
     "content_schema_invariant_plan",
