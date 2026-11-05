@@ -20,47 +20,47 @@ services:
       - -c
       - |
         # Refuse a SurrealDB image and store path that would open the data wrong.
-        store="$${SURREAL_STORE#*://}"
-        case "$$store" in /*) ;; *) store="" ;; esac
-        ref="$${SURREAL_IMAGE%%@*}"
-        tag="$${ref##*/}"
-        case "$$tag" in *:*) tag="$${tag##*:}" ;; *) tag="" ;; esac
-        tag="$${tag#v}"
-        major="$${tag%%.*}"
-        case "$$major" in "" | *[!0-9]*) major="" ;; esac
-        convert="$${SURREAL_EXPERIMENTAL_UPGRADE_FROM_3X:-}"
         refuse() {
           echo "surreal-init: $$1" >&2
           echo "surreal-init: nothing was started; see docs/deployment/surrealdb-4-upgrade.md" >&2
           exit 1
         }
-        if [ -n "$$store" ] && [ -e "$$store" ] && ! ls "$$store" > /dev/null 2>&1; then
+        # First, the pairing itself, whatever the directory holds: Sibyl runs 3.x
+        # only on rocksdb:// and 4.x only on surrealkv://, at an absolute path.
+        ref="$${SURREAL_IMAGE%%@*}"
+        tag="$${ref##*/}"
+        case "$$tag" in *:*) tag="$${tag##*:}" ;; *) tag="" ;; esac
+        tag="$${tag#v}"
+        major="$${tag%%.*}"
+        case "$$major" in "" | *[!0-9]*) refuse "the image $$SURREAL_IMAGE names no version; pin a tag such as v4.0.0" ;; esac
+        case "$$SURREAL_STORE" in
+          rocksdb:///*) scheme=rocksdb ;;
+          surrealkv:///*) scheme=surrealkv ;;
+          *) refuse "the store path $$SURREAL_STORE is not an absolute rocksdb:// or surrealkv:// path" ;;
+        esac
+        store="$${SURREAL_STORE#*://}"
+        if [ "$$major" -lt 4 ] && [ "$$scheme" != rocksdb ]; then
+          refuse "a $$major.x server runs only on a rocksdb:// path; on $$SURREAL_STORE it serves an empty database beside the data"
+        fi
+        if [ "$$major" -ge 4 ] && [ "$$scheme" != surrealkv ]; then
+          refuse "a $$major.x server runs on a surrealkv:// path, not $$SURREAL_STORE"
+        fi
+        # Then what the directory holds.
+        readable() { (cd "$$1" && ls . > /dev/null) 2> /dev/null; }
+        if ! readable "$${store%/*}/"; then
+          refuse "cannot read $${store%/*}/ to check which store it holds"
+        fi
+        if [ -e "$$store" ] && ! readable "$$store"; then
           refuse "cannot read $$store to check which store it holds"
         fi
-        if [ -n "$$store" ] && [ -d "$$store/manifest" ]; then
-          case "$$SURREAL_STORE" in
-            rocksdb://*)
-              if [ "$$major" = 3 ]; then
-                refuse "$$store holds a SurrealKV store; a 3.x server opened with rocksdb:// on it serves an empty database and leaves files that stop 4.0 from opening the store"
-              fi
-              ;;
-          esac
-        elif [ -n "$$store" ] && [ -f "$$store/CURRENT" ]; then
-          case "$$SURREAL_STORE" in
-            surrealkv://*)
-              if [ "$$major" = 3 ]; then
-                refuse "a 3.x server opened with surrealkv:// serves an empty database beside the 3.x store in $$store; a 3.x image keeps the rocksdb:// store path"
-              fi
-              if [ "$$convert" != true ]; then
-                refuse "$$store holds a store a SurrealDB 3.x server wrote; 4.0 converts it once and for good: back it up, then start once with SURREAL_EXPERIMENTAL_UPGRADE_FROM_3X=true"
-              fi
-              ;;
-            *)
-              if [ -n "$$major" ] && [ "$$major" -ge 4 ] && [ "$$convert" != true ]; then
-                refuse "$$store holds a store a SurrealDB 3.x server wrote; 4.0 converts it once and for good: back it up, then start once with SURREAL_EXPERIMENTAL_UPGRADE_FROM_3X=true"
-              fi
-              ;;
-          esac
+        if [ "$$major" -lt 4 ] && { [ -e "$$store/manifest" ] || [ -e "$$store/_rocksdb_backup" ]; }; then
+          refuse "$$store holds a store SurrealDB 4 wrote, which a 3.x server opens as an empty database"
+        fi
+        if [ -e "$$store/_rocksdb_backup" ] && [ ! -e "$$store/manifest" ]; then
+          refuse "$$store holds only the 3.x copy a conversion keeps in _rocksdb_backup/, so any server would start an empty database beside it; restore or remove it first"
+        fi
+        if [ "$$major" -ge 4 ] && [ -e "$$store/CURRENT" ] && [ "$${SURREAL_EXPERIMENTAL_UPGRADE_FROM_3X:-}" != true ]; then
+          refuse "$$store holds a store a SurrealDB 3.x server wrote; 4.0 converts it once and for good: back it up, then start once with SURREAL_EXPERIMENTAL_UPGRADE_FROM_3X=true"
         fi
         chown -R 65532:65532 /data
     environment:

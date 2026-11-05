@@ -113,11 +113,15 @@ For `moon run dev`, stop it, copy `.moon/cache/surreal-dev`, and run
 it bootstraps.
 
 To stay on 3.x for now, set both `SIBYL_SURREAL_IMAGE` to the 3.x image you ran and
-`SIBYL_SURREAL_PATH=rocksdb:///data/sibyl.db`. A 3.x server opened with `surrealkv://` serves an
-empty database beside the data, so each compose file's `surreal-init` checks the pairing before the
-server starts and exits with the reason when the image and path would open the data wrong: a 3.x
-image with `surrealkv://` beside a RocksDB store, a 3.x image with `rocksdb://` on a SurrealKV
-store, or 4.0 on a RocksDB store without the opt-in.
+`SIBYL_SURREAL_PATH=rocksdb:///data/sibyl.db`. Each compose file's `surreal-init` checks the image
+and path before the server starts, and exits with the reason instead of starting one that would open
+the data wrong. First the pairing alone, whatever the directory holds: the image must name its
+version (a tag such as `v3.2.4`, not `latest` or a bare digest), the path must be absolute, a 3.x
+image runs only on `rocksdb://`, and 4.x runs only on `surrealkv://`. A 3.x server opened with
+`surrealkv://` serves an empty database beside the data, so no directory check can make that pairing
+safe. Then the directory: the one-shot refuses a directory it cannot list, a 3.x image on a store
+SurrealDB 4 wrote, a directory holding only the `_rocksdb_backup/` copy, and 4.0 on a RocksDB store
+without the opt-in.
 
 ## Ansible
 

@@ -9,6 +9,7 @@ setting change has to reach every surface in the same commit.
 
 from __future__ import annotations
 
+import os
 import re
 import shutil
 import subprocess
@@ -279,3 +280,110 @@ def test_ansible_reads_the_major_from_any_image_reference(image: str, major: str
         assert not found.isdigit(), found
     else:
         assert found == major
+
+
+_HELD_MAJOR = 3
+_SUPPORTED_MAJOR = 4
+# Image references by the SurrealDB major they name; None means no version at all.
+_GUARD_IMAGES = {
+    "surrealdb/surrealdb:v3.2.4": 3,
+    "docker.io/surrealdb/surrealdb:3.2.4@sha256:ab": 3,
+    "surrealdb/surrealdb:v4.0.0": 4,
+    "registry.example:5000/mirror/surrealdb:v4.0.0": 4,
+    "surrealdb/surrealdb:latest": None,
+    "surrealdb/surrealdb@sha256:ab": None,
+    "registry.example:5000/surrealdb": None,
+}
+_GUARD_STORES = {
+    "rocksdb": "rocksdb://{store}",
+    "surrealkv": "surrealkv://{store}",
+    "relative surrealkv": "surrealkv://data/sibyl.db",
+    "relative rocksdb": "rocksdb://data/sibyl.db",
+}
+_GUARD_LAYOUTS = (
+    "empty",
+    "missing",
+    "rocksdb",
+    "surrealkv",
+    "converted",
+    "backup only",
+    "mixed",
+    "unreadable rocksdb",
+    "rocksdb under an unreadable parent",
+)
+_UNREADABLE = {"unreadable rocksdb", "rocksdb under an unreadable parent"}
+
+
+def _lay_out(root: Path, layout: str) -> Path:
+    data = root / "data"
+    data.mkdir()
+    store = data / "sibyl.db"
+    if layout != "missing":
+        store.mkdir()
+    if layout in {"rocksdb", "mixed", *_UNREADABLE}:
+        (store / "CURRENT").touch()
+    if layout in {"surrealkv", "converted", "mixed"}:
+        (store / "manifest").mkdir()
+    if layout in {"converted", "backup only"}:
+        (store / "_rocksdb_backup").mkdir()
+    if layout == "unreadable rocksdb":
+        store.chmod(0)
+    if layout == "rocksdb under an unreadable parent":
+        data.chmod(0)
+    return store
+
+
+def _supported(layout: str, major: int | None, scheme: str, *, convert: bool) -> bool:
+    """The starts Sibyl supports: 3.x held on RocksDB, 4.x on SurrealKV, one opted-in conversion."""
+    if major == _HELD_MAJOR and scheme == "rocksdb":
+        return layout in {"empty", "missing", "rocksdb"}
+    if major == _SUPPORTED_MAJOR and scheme == "surrealkv":
+        return layout in {"empty", "missing", "surrealkv", "converted"} or (
+            convert and layout in {"rocksdb", "mixed"}
+        )
+    return False
+
+
+@pytest.mark.parametrize("layout", _GUARD_LAYOUTS)
+def test_store_guard_starts_only_supported_pairings(tmp_path: Path, layout: str) -> None:
+    """Run the guard itself over every image, path and opt-in against one directory layout."""
+    sh = shutil.which("sh")
+    assert sh is not None
+    script = tmp_path / "guard.sh"
+    script.write_text(SURREAL_STORE_GUARD, encoding="utf-8")
+    cases = [
+        (image, major, scheme, convert)
+        for image, major in _GUARD_IMAGES.items()
+        for scheme in _GUARD_STORES
+        for convert in (False, True)
+    ]
+    surprises = []
+    for index, (image, major, scheme, convert) in enumerate(cases):
+        root = tmp_path / f"case-{index}"
+        root.mkdir()
+        store = _lay_out(root, layout)
+        result = subprocess.run(  # noqa: S603 - the repo's own guard, run by a fixed shell
+            [sh, str(script)],
+            cwd=root,
+            env={
+                "PATH": os.environ.get("PATH", "/usr/bin:/bin"),
+                "SURREAL_IMAGE": image,
+                "SURREAL_STORE": _GUARD_STORES[scheme].format(store=store),
+                "SURREAL_EXPERIMENTAL_UPGRADE_FROM_3X": "true" if convert else "",
+            },
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        # A runner that reads through permissions, such as root, sees the RocksDB store inside.
+        seen = (
+            "rocksdb" if layout in _UNREADABLE and os.access(store, os.R_OK | os.X_OK) else layout
+        )
+        if (result.returncode == 0) != _supported(seen, major, scheme, convert=convert):
+            surprises.append(
+                f"{image} {scheme} opt-in={convert}: exit {result.returncode} {result.stderr}"
+            )
+        (root / "data").chmod(0o755)
+        if store.exists():
+            store.chmod(0o755)
+    assert surprises == []

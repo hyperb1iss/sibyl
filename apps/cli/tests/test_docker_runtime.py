@@ -714,8 +714,15 @@ def _guard(store: Path, image: str, path: str, *, converting: bool = False) -> i
         # A 3.x image given rocksdb:// on a SurrealKV store serves an empty database.
         ("surrealkv", "surrealdb/surrealdb:v3.2.4", "rocksdb://", False, True),
         ("surrealkv", "surrealdb/surrealdb:v4.0.0", "surrealkv://", False, False),
-        ("empty", "surrealdb/surrealdb:v3.2.4", "surrealkv://", False, False),
+        # The pairing alone decides first: 3.x runs only rocksdb://, 4.x only surrealkv://.
+        ("surrealkv", "surrealdb/surrealdb:v3.2.4", "surrealkv://", False, True),
+        ("empty", "surrealdb/surrealdb:v3.2.4", "surrealkv://", False, True),
+        ("empty", "surrealdb/surrealdb:v4.0.0", "rocksdb://", False, True),
+        ("empty", "surrealdb/surrealdb:v3.2.4", "rocksdb://", False, False),
         ("empty", "surrealdb/surrealdb:v4.0.0", "surrealkv://", False, False),
+        # An image that names no version could be either major.
+        ("empty", "surrealdb/surrealdb:latest", "surrealkv://", False, True),
+        ("empty", "surrealdb/surrealdb@sha256:0123", "surrealkv://", True, True),
     ],
 )
 def test_the_store_guard_refuses_a_start_that_opens_data_wrong(
