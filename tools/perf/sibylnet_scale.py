@@ -22,6 +22,11 @@ removes everything the seed wrote.
     uv run python -m tools.perf.sibylnet_scale distill
     uv run python -m tools.perf.sibylnet_scale cleanup
 
+``seed --reuse`` returns at once when the manifest's data is already in the
+store, so rerunning one scenario (``run --scenarios watchers``) against a
+stack that is still up skips the reseed. ``--manifest`` keeps one manifest per
+stack when two are up side by side.
+
 Reports land in ``.moon/cache/perf-results/sibylnet_scale_<scenario>_<run-id>.json``.
 The distillation job reflects with the heuristic extractor, which calls no
 model; run it with no provider keys in the environment and it costs nothing.
@@ -76,6 +81,16 @@ KEY_BATCH = 500
 FEED_SAMPLES = 200
 LISTING_SAMPLES = 100
 WATCH_WAIT_SECONDS = 25
+# uvicorn closes a keep-alive connection after 5 idle seconds. A client that
+# keeps one as long (httpx's default) can send on it just as the server closes
+# it and get RemoteProtocolError, so the harness lets its own go first.
+KEEPALIVE_EXPIRY_SECONDS = 2.0
+LOAD_POLL_SECONDS = 10.0
+WATCHERS_PER_WORKER = 50
+WORKER_READY = "WATCH-READY"
+WORKER_RESULT = "WATCH-RESULT"
+LAG_TICK_SECONDS = 0.05
+ERROR_SAMPLES = 20
 HTTP_OK = 200
 HTTP_CREATED = 201
 WORDS = (
@@ -158,6 +173,10 @@ def load_average() -> float | None:
 
 
 async def seed(args: argparse.Namespace) -> JsonObject:
+    if args.reuse and await _seeded(_existing_manifest(args.manifest)):
+        return {"reused": str(args.manifest)}
+    # Written only once seeding finishes, so a manifest always names a complete seed.
+    args.manifest.unlink(missing_ok=True)
     rng = _rng(args.seed)
     auth = build_surreal_auth_client()
     content = build_surreal_content_client()
@@ -197,9 +216,27 @@ async def seed(args: argparse.Namespace) -> JsonObject:
         "totals": totals,
         "seconds": round(time.perf_counter() - started, 1),
     }
-    MANIFEST_PATH.parent.mkdir(parents=True, exist_ok=True)
-    MANIFEST_PATH.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
-    return {"totals": totals, "seconds": manifest["seconds"], "manifest": str(MANIFEST_PATH)}
+    args.manifest.parent.mkdir(parents=True, exist_ok=True)
+    args.manifest.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+    return {"totals": totals, "seconds": manifest["seconds"], "manifest": str(args.manifest)}
+
+
+async def _seeded(manifest: JsonObject | None) -> bool:
+    """Whether the store holds the seed this manifest describes."""
+    if manifest is None:
+        return False
+    content = build_surreal_content_client()
+    try:
+        rows = await _scalar(
+            content,
+            "SELECT uuid FROM net_messages WHERE organization_id = $org LIMIT 1;",
+            org=manifest["orgs"][BIG_ORG_INDEX]["id"],
+        )
+    except RuntimeError:
+        return False
+    finally:
+        await content.close()
+    return bool(normalize_records(rows))
 
 
 def _plan_org(rng: random.Random, index: int, args: argparse.Namespace) -> SeedOrg:
@@ -395,8 +432,7 @@ async def insert_thread_rows(content: Any, rows: list[JsonObject]) -> None:
 
 
 async def cleanup(args: argparse.Namespace) -> JsonObject:
-    del args
-    manifest = _manifest()
+    manifest = _manifest(args.manifest)
     org_ids = [org["id"] for org in manifest["orgs"]]
     users = [user for org in manifest["orgs"] for user in org["users"]] + [manifest["admin_id"]]
     auth = build_surreal_auth_client()
@@ -424,7 +460,7 @@ async def cleanup(args: argparse.Namespace) -> JsonObject:
     finally:
         await content.close()
         await auth.close()
-    MANIFEST_PATH.unlink(missing_ok=True)
+    args.manifest.unlink(missing_ok=True)
     return {"organizations": len(org_ids), "users": len(users)}
 
 
@@ -432,72 +468,100 @@ async def cleanup(args: argparse.Namespace) -> JsonObject:
 
 
 class Api:
-    def __init__(self, base_url: str, *, connections: int) -> None:
-        self.client = httpx.AsyncClient(
-            base_url=base_url.rstrip("/"),
-            timeout=httpx.Timeout(WATCH_WAIT_SECONDS + 30),
-            limits=httpx.Limits(max_connections=connections, max_keepalive_connections=connections),
-        )
+    """HTTP clients for one or more API replicas; ``route`` picks the replica, round robin."""
+
+    def __init__(self, base_urls: Sequence[str], *, connections: int) -> None:
+        self.clients = [
+            httpx.AsyncClient(
+                base_url=base_url.rstrip("/"),
+                timeout=httpx.Timeout(WATCH_WAIT_SECONDS + 30),
+                limits=httpx.Limits(
+                    max_connections=connections,
+                    max_keepalive_connections=connections,
+                    keepalive_expiry=KEEPALIVE_EXPIRY_SECONDS,
+                ),
+            )
+            for base_url in base_urls
+        ]
+        self.error_samples: list[str] = []
+
+    @property
+    def replicas(self) -> int:
+        return len(self.clients)
 
     async def request(
-        self, method: str, path: str, key: str, **kwargs: Any
+        self, method: str, path: str, key: str, *, route: int = 0, **kwargs: Any
     ) -> tuple[float, httpx.Response | None, str | None]:
         started = time.perf_counter()
+        client = self.clients[route % len(self.clients)]
         try:
-            response = await self.client.request(
+            response = await client.request(
                 method, path, headers={"Authorization": f"Bearer {key}"}, **kwargs
             )
         except httpx.HTTPError as exc:
+            if len(self.error_samples) < ERROR_SAMPLES:
+                self.error_samples.append(f"{method} {path}: {type(exc).__name__}: {exc}")
             return (time.perf_counter() - started) * 1000, None, type(exc).__name__
         return (time.perf_counter() - started) * 1000, response, None
 
     async def close(self) -> None:
-        await self.client.aclose()
+        for client in self.clients:
+            await client.aclose()
 
 
 @dataclass(slots=True)
 class ServerProbe:
-    """The API process's CPU time and its SurrealDB query counters, sampled together."""
+    """The API processes' CPU time and SurrealDB query counters, summed over replicas."""
 
     api: Api
     admin_key: str
-    pid: int | None
+    pids: Sequence[int]
 
     async def sample(self) -> JsonObject:
-        cpu = _process_cpu_seconds(self.pid)
-        _, response, error = await self.api.request("GET", "/telemetry/prometheus", self.admin_key)
-        queries: dict[str, float] = {}
-        pool_wait = {"count": 0.0, "sum_ms": 0.0}
-        if response is not None and _ok(response, error):
+        cpus = [_process_cpu_seconds(pid) for pid in self.pids]
+        cpu = sum(c for c in cpus if c is not None) if cpus and None not in cpus else None
+        counters: dict[str, dict[str, float]] = {
+            name: {} for name in ("queries", "retries", "wait_count", "wait_ms")
+        }
+        series = {
+            "sibyl_surreal_queries_total": "queries",
+            "sibyl_surreal_query_retries_total": "retries",
+            "sibyl_surreal_pool_wait_ms_count": "wait_count",
+            "sibyl_surreal_pool_wait_ms_sum": "wait_ms",
+        }
+        errors: list[str] = []
+        for replica in range(self.api.replicas):
+            _, response, error = await self.api.request(
+                "GET", "/telemetry/prometheus", self.admin_key, route=replica
+            )
+            if response is None or not _ok(response, error):
+                errors.append(error or str(response.status_code if response else "none"))
+                continue
             for line in response.text.splitlines():
                 match = re.match(r"^(sibyl_surreal_\w+)\{([^}]*)\} ([0-9.e+-]+)$", line)
-                if match is None:
+                if match is None or match.group(1) not in series:
                     continue
                 name, labels, value = match.groups()
-                if name == "sibyl_surreal_queries_total":
-                    client = re.search(r'client="([^"]+)"', labels)
-                    key = client.group(1) if client else "unknown"
-                    queries[key] = queries.get(key, 0.0) + float(value)
-                elif name == "sibyl_surreal_pool_wait_ms_count":
-                    pool_wait["count"] += float(value)
-                elif name == "sibyl_surreal_pool_wait_ms_sum":
-                    pool_wait["sum_ms"] += float(value)
-        return {
-            "at": time.perf_counter(),
-            "cpu_seconds": cpu,
-            "queries": queries,
-            "pool_wait": pool_wait,
-            "error": error,
-        }
+                client = re.search(r'client="([^"]+)"', labels)
+                key = client.group(1) if client else "unknown"
+                bucket = counters[series[name]]
+                bucket[key] = bucket.get(key, 0.0) + float(value)
+        return {"at": time.perf_counter(), "cpu_seconds": cpu, **counters, "errors": errors}
 
     @staticmethod
     def delta(before: JsonObject, after: JsonObject) -> JsonObject:
         seconds = after["at"] - before["at"]
-        clients = set(before["queries"]) | set(after["queries"])
-        queries = {
-            client: after["queries"].get(client, 0.0) - before["queries"].get(client, 0.0)
-            for client in clients
-        }
+
+        def change(name: str) -> dict[str, float]:
+            clients = set(before[name]) | set(after[name])
+            return {
+                client: after[name].get(client, 0.0) - before[name].get(client, 0.0)
+                for client in sorted(clients)
+            }
+
+        queries = change("queries")
+        waits = change("wait_count")
+        wait_ms = change("wait_ms")
         total = sum(queries.values())
         cpu = (
             after["cpu_seconds"] - before["cpu_seconds"]
@@ -511,8 +575,16 @@ class ServerProbe:
             "api_cpu_percent": round(100 * cpu / seconds, 1)
             if cpu is not None and seconds
             else None,
-            "pool_waits": int(after["pool_wait"]["count"] - before["pool_wait"]["count"]),
-            "pool_wait_ms": round(after["pool_wait"]["sum_ms"] - before["pool_wait"]["sum_ms"], 1),
+            "pool_waits": int(sum(waits.values())),
+            "pool_wait_ms": round(sum(wait_ms.values()), 1),
+            "pool_waits_by_client": {
+                client: {"waits": int(count), "ms": round(wait_ms.get(client, 0.0), 1)}
+                for client, count in waits.items()
+                if count
+            },
+            "conflict_retries": {
+                client: int(count) for client, count in change("retries").items() if count
+            },
         }
 
 
@@ -525,19 +597,21 @@ async def scenario_posts(api: Api, manifest: JsonObject, args: argparse.Namespac
     latencies: list[float] = []
     statuses: dict[str, int] = {}
 
-    async def poster(key: str) -> None:
+    async def poster(number: int, key: str) -> None:
         while time.perf_counter() < deadline:
             channel, thread = rng.choice(org["threads"])
             body = {"channel": channel, "body": "scale post " + uuid.uuid4().hex, "agent": "scale"}
             if thread:
                 body["thread"] = thread
-            elapsed, response, error = await api.request("POST", "/net/messages", key, json=body)
+            elapsed, response, error = await api.request(
+                "POST", "/net/messages", key, route=number, json=body
+            )
             latencies.append(elapsed)
             status = error or str(response.status_code if response is not None else "none")
             statuses[status] = statuses.get(status, 0) + 1
 
     started = time.perf_counter()
-    await asyncio.gather(*(poster(key) for key in keys))
+    await asyncio.gather(*(poster(number, key) for number, key in enumerate(keys)))
     seconds = time.perf_counter() - started
     errors = sum(count for status, count in statuses.items() if status != str(HTTP_CREATED))
     return {
@@ -606,9 +680,13 @@ async def scenario_listings(api: Api, manifest: JsonObject, args: argparse.Names
 
 @dataclass(slots=True)
 class WatchState:
-    """What the watchers saw: each message id mapped to watcher index and arrival time."""
+    """What the watchers saw: each message id mapped to watcher index and arrival time.
 
-    received: dict[str, dict[int, float]] = field(default_factory=dict)
+    Arrival is ``time.time_ns()``: watchers run in several processes, and the
+    wall clock is the one clock they share with the process that posts.
+    """
+
+    received: dict[str, dict[int, int]] = field(default_factory=dict)
     failures: dict[str, int] = field(default_factory=dict)
     ready: int = 0
     all_ready: asyncio.Event = field(default_factory=asyncio.Event)
@@ -620,7 +698,7 @@ async def _watch(
 ) -> None:
     """Start from now on one channel, then long-poll until told to stop."""
     _, response, _ = await api.request(
-        "GET", "/net/feed", key, params={"channel": channel, "limit": 0}
+        "GET", "/net/feed", key, route=index, params={"channel": channel, "limit": 0}
     )
     since = response.json()["next_since"] if response is not None else None
     state.ready += 1
@@ -630,17 +708,26 @@ async def _watch(
         params: dict[str, Any] = {"channel": channel, "wait": WATCH_WAIT_SECONDS, "limit": 100}
         if since:
             params["since"] = since
-        _, response, error = await api.request("GET", "/net/feed", key, params=params)
+        _, response, error = await api.request("GET", "/net/feed", key, route=index, params=params)
         if response is None or not _ok(response, error):
             label = error or str(response.status_code if response is not None else "none")
             state.failures[label] = state.failures.get(label, 0) + 1
             await asyncio.sleep(1)
             continue
         payload = response.json()
-        arrived = time.perf_counter()
+        arrived = time.time_ns()
         for message in payload["messages"]:
             state.received.setdefault(message["id"], {})[index] = arrived
         since = payload["next_since"]
+
+
+@dataclass(frozen=True, slots=True)
+class BurstPost:
+    """One burst post: its channel, and wall-clock nanoseconds when sent and when stored."""
+
+    channel: str
+    sent: int
+    stored: int
 
 
 async def _bursts(
@@ -649,105 +736,301 @@ async def _bursts(
     channels: Sequence[str],
     rng: random.Random,
     args: argparse.Namespace,
-) -> dict[str, tuple[str, float]]:
-    """Post ``args.bursts`` bursts; returns each stored message's channel and send time."""
-    posted: dict[str, tuple[str, float]] = {}
+    failures: dict[str, int],
+) -> dict[str, BurstPost]:
+    """Post ``args.bursts`` bursts; returns each stored message's channel, send and stored time."""
+    posted: dict[str, BurstPost] = {}
 
-    async def one_post(channel: str, key: str) -> None:
-        started = time.perf_counter()
+    async def one_post(number: int, channel: str, key: str) -> None:
+        started = time.time_ns()
         _, response, error = await api.request(
             "POST",
             "/net/messages",
             key,
+            route=number,
             json={"channel": channel, "body": "burst " + uuid.uuid4().hex},
         )
         if response is not None and _ok(response, error, HTTP_CREATED):
-            posted[response.json()["message"]["id"]] = (channel, started)
+            posted[response.json()["message"]["id"]] = BurstPost(
+                channel=channel, sent=started, stored=time.time_ns()
+            )
+        else:
+            label = error or str(response.status_code if response is not None else "none")
+            failures[label] = failures.get(label, 0) + 1
 
     for _ in range(args.bursts):
         await asyncio.gather(
-            *(one_post(rng.choice(channels), rng.choice(keys)) for _ in range(args.burst_size))
+            *(
+                one_post(number, rng.choice(channels), rng.choice(keys))
+                for number in range(args.burst_size)
+            )
         )
         await asyncio.sleep(args.burst_gap)
     return posted
 
 
 def _deliveries(
-    posted: dict[str, tuple[str, float]], assignments: Sequence[str], state: WatchState
-) -> tuple[list[float], int]:
-    delivery: list[float] = []
+    posted: dict[str, BurstPost], assignments: Sequence[str], received: dict[str, dict[int, int]]
+) -> tuple[list[float], list[float], int]:
+    """Milliseconds from each send, and from each stored response, to each watcher's copy."""
+    from_send: list[float] = []
+    from_stored: list[float] = []
     missed = 0
-    for message_id, (channel, started) in posted.items():
-        seen = state.received.get(message_id, {})
+    for message_id, sent in posted.items():
+        seen = received.get(message_id, {})
         for index, assigned in enumerate(assignments):
-            if assigned != channel:
+            if assigned != sent.channel:
                 continue
             if index in seen:
-                delivery.append((seen[index] - started) * 1000)
+                from_send.append((seen[index] - sent.sent) / 1e6)
+                from_stored.append((seen[index] - sent.stored) / 1e6)
             else:
                 missed += 1
-    return delivery, missed
+    return from_send, from_stored, missed
+
+
+async def _loop_lag(stop: asyncio.Event, lags: list[float]) -> None:
+    """How late this process's event loop runs a short sleep: the harness's own queueing."""
+    while not stop.is_set():
+        started = time.perf_counter()
+        await asyncio.sleep(LAG_TICK_SECONDS)
+        lags.append((time.perf_counter() - started - LAG_TICK_SECONDS) * 1000)
+
+
+class CpuWindow:
+    """This process's CPU use over a window, as a percent of one core."""
+
+    def __init__(self) -> None:
+        self.started = (time.process_time(), time.monotonic())
+
+    def percent(self) -> float:
+        cpu, wall = time.process_time() - self.started[0], time.monotonic() - self.started[1]
+        return round(100 * cpu / wall, 1) if wall > 0 else 0.0
+
+
+@dataclass(slots=True)
+class WatchWorker:
+    """One watcher process, driven over its stdin and read over its stdout."""
+
+    process: asyncio.subprocess.Process
+    watchers: int
+
+    async def send(self, command: str) -> None:
+        stdin = self.process.stdin
+        if stdin is None:
+            msg = "watch worker has no stdin"
+            raise RuntimeError(msg)
+        stdin.write(f"{command}\n".encode())
+        await stdin.drain()
+
+    async def expect(self, prefix: str) -> str:
+        stdout = self.process.stdout
+        if stdout is None:
+            msg = "watch worker has no stdout"
+            raise RuntimeError(msg)
+        while line := (await stdout.readline()).decode():
+            if line.startswith(prefix):
+                return line[len(prefix) :].strip()
+        msg = f"watch worker exited before {prefix.strip()}"
+        raise RuntimeError(msg)
+
+
+def watch_worker_count(args: argparse.Namespace) -> int:
+    if args.watch_workers > 0:
+        return args.watch_workers
+    by_size = math.ceil(args.watchers / WATCHERS_PER_WORKER)
+    return max(1, min(by_size, (os.cpu_count() or 2) // 2))
+
+
+async def _start_watch_workers(
+    args: argparse.Namespace, assignments: Sequence[str], keys: Sequence[str]
+) -> list[WatchWorker]:
+    count = watch_worker_count(args)
+    shares: list[list[list[Any]]] = [[] for _ in range(count)]
+    for index, channel in enumerate(assignments):
+        shares[index % count].append([index, keys[index % len(keys)], channel])
+    workers: list[WatchWorker] = []
+    for share in shares:
+        process = await asyncio.create_subprocess_exec(
+            sys.executable,
+            "-m",
+            "tools.perf.sibylnet_scale",
+            "watch-worker",
+            stdin=asyncio.subprocess.PIPE,
+            stdout=asyncio.subprocess.PIPE,
+        )
+        worker = WatchWorker(process=process, watchers=len(share))
+        await worker.send(json.dumps({"api_base_urls": args.api_base_url, "watchers": share}))
+        workers.append(worker)
+    await asyncio.gather(*(worker.expect(WORKER_READY) for worker in workers))
+    return workers
+
+
+async def watch_worker() -> None:
+    """A watcher process: long-poll the watchers it is given and report what each saw.
+
+    Reads one JSON line (base URLs and ``[index, key, channel]`` watchers), says
+    ``WATCH-READY`` once every watcher holds a cursor, then takes commands:
+    ``mark`` starts the measured window, ``stop`` ends it and prints the
+    result as ``WATCH-RESULT <json>``.
+    """
+    # Only the protocol lines reach the parent; anything else this process
+    # prints (a library's logging, say) goes to stderr, so it can never fill
+    # the pipe the parent reads only between commands.
+    protocol = os.fdopen(os.dup(1), "w", buffering=1)
+    os.dup2(2, 1)
+    loop = asyncio.get_running_loop()
+    config = json.loads(await loop.run_in_executor(None, sys.stdin.readline))
+    watchers = config["watchers"]
+    api = Api(config["api_base_urls"], connections=len(watchers) + 10)
+    state = WatchState()
+    tasks = [
+        asyncio.create_task(_watch(api, key, channel, index, len(watchers), state))
+        for index, key, channel in watchers
+    ]
+    await state.all_ready.wait()
+    idle = CpuWindow()
+    protocol.write(f"{WORKER_READY}\n")
+    await loop.run_in_executor(None, sys.stdin.readline)
+    idle_cpu = idle.percent()
+    measured = CpuWindow()
+    lags: list[float] = []
+    lag_stop = asyncio.Event()
+    lag_task = asyncio.create_task(_loop_lag(lag_stop, lags))
+    await loop.run_in_executor(None, sys.stdin.readline)
+    burst_cpu = measured.percent()
+    lag_stop.set()
+    await lag_task
+    state.stop.set()
+    await asyncio.wait(tasks, timeout=WATCH_WAIT_SECONDS + 10)
+    for task in tasks:
+        task.cancel()
+    await api.close()
+    result = {
+        "watchers": len(watchers),
+        "idle_cpu_percent": idle_cpu,
+        "burst_cpu_percent": burst_cpu,
+        "burst_loop_lag": latency_summary(lags),
+        "received": state.received,
+        "failures": state.failures,
+        "error_samples": api.error_samples,
+    }
+    protocol.write(f"{WORKER_RESULT} {json.dumps(result)}\n")
+    protocol.close()
 
 
 async def scenario_watchers(
     api: Api, probe: ServerProbe, manifest: JsonObject, args: argparse.Namespace
 ) -> JsonObject:
-    """Idle long-poll watchers, then bursts of posts each matching watcher must see."""
+    """Idle long-poll watchers, then bursts of posts each matching watcher must see.
+
+    The watchers run in worker processes of their own, so the client that
+    measures delivery is never the bottleneck; this process only posts.
+    """
     org = manifest["orgs"][BIG_ORG_INDEX]
     keys = list(org["keys"].values())
     rng = _rng(args.seed)
     watched = org["channels"][: args.watch_channels]
     assignments = [rng.choice(watched) for _ in range(args.watchers)]
-    state = WatchState()
-    tasks = [
-        asyncio.create_task(
-            _watch(api, keys[index % len(keys)], channel, index, len(assignments), state)
-        )
-        for index, channel in enumerate(assignments)
-    ]
-    await state.all_ready.wait()
-    await asyncio.sleep(2)
-    idle_before = await probe.sample()
-    await asyncio.sleep(args.idle_seconds)
-    idle = ServerProbe.delta(idle_before, await probe.sample())
+    workers = await _start_watch_workers(args, assignments, keys)
+    try:
+        await asyncio.sleep(2)
+        idle_before = await probe.sample()
+        await asyncio.sleep(args.idle_seconds)
+        idle = ServerProbe.delta(idle_before, await probe.sample())
 
-    burst_before = await probe.sample()
-    posted = await _bursts(api, keys, watched, rng, args)
-    await asyncio.sleep(WATCH_WAIT_SECONDS / 2)
-    burst = ServerProbe.delta(burst_before, await probe.sample())
-    state.stop.set()
-    await asyncio.wait(tasks, timeout=WATCH_WAIT_SECONDS + 10)
-    for task in tasks:
-        task.cancel()
-    delivery, missed = _deliveries(posted, assignments, state)
+        for worker in workers:
+            await worker.send("mark")
+        burst_before = await probe.sample()
+        poster_cpu = CpuWindow()
+        lags: list[float] = []
+        lag_stop = asyncio.Event()
+        lag_task = asyncio.create_task(_loop_lag(lag_stop, lags))
+        post_failures: dict[str, int] = {}
+        posted = await _bursts(api, keys, watched, rng, args, post_failures)
+        await asyncio.sleep(WATCH_WAIT_SECONDS / 2)
+        burst = ServerProbe.delta(burst_before, await probe.sample())
+        lag_stop.set()
+        await lag_task
+        poster_cpu_percent = poster_cpu.percent()
+        for worker in workers:
+            await worker.send("stop")
+        results = [json.loads(await worker.expect(WORKER_RESULT)) for worker in workers]
+    finally:
+        for worker in workers:
+            if worker.process.returncode is None:
+                worker.process.kill()
+            await worker.process.wait()
+
+    received: dict[str, dict[int, int]] = {}
+    failures: dict[str, int] = {}
+    for result in results:
+        for message_id, seen in result["received"].items():
+            received.setdefault(message_id, {}).update(
+                {int(index): arrived for index, arrived in seen.items()}
+            )
+        for label, count in result["failures"].items():
+            failures[label] = failures.get(label, 0) + count
+        api.error_samples.extend(result["error_samples"][: ERROR_SAMPLES - len(api.error_samples)])
+    from_send, from_stored, missed = _deliveries(posted, assignments, received)
     return {
-        "watchers": len(tasks),
+        "watchers": len(assignments),
         "watched_channels": len(watched),
+        "api_replicas": api.replicas,
         "idle": idle,
         "bursts": {
             "posts": len(posted),
-            "deliveries": len(delivery),
+            "post_latency": latency_summary(
+                [(sent.stored - sent.sent) / 1e6 for sent in posted.values()]
+            ),
+            "post_failures": post_failures,
+            "deliveries": len(from_send),
             "missed": missed,
-            "post_to_delivery": latency_summary(delivery),
+            "post_to_delivery": latency_summary(from_send),
+            "stored_to_delivery": latency_summary(from_stored),
             "server": burst,
         },
-        "watch_failures": state.failures,
+        "clients": {
+            "watch_processes": [
+                {
+                    key: result[key]
+                    for key in (
+                        "watchers",
+                        "idle_cpu_percent",
+                        "burst_cpu_percent",
+                        "burst_loop_lag",
+                    )
+                }
+                for result in results
+            ],
+            "poster": {
+                "burst_cpu_percent": poster_cpu_percent,
+                "burst_loop_lag": latency_summary(lags),
+            },
+            "max_cpu_percent": max(
+                [poster_cpu_percent, *(result["burst_cpu_percent"] for result in results)]
+            ),
+        },
+        "watch_failures": failures,
     }
 
 
 async def run(args: argparse.Namespace) -> JsonObject:
-    manifest = _manifest()
-    api = Api(args.api_base_url, connections=max(args.watchers, args.posters) + 50)
+    manifest = _manifest(args.manifest)
+    api = Api(args.api_base_url, connections=args.posters + args.burst_size + 50)
     probe = ServerProbe(api, manifest["admin_key"], args.server_pid)
     report: JsonObject = {"run_id": args.run_id, "scenarios": {}}
     try:
         for scenario in args.scenarios:
-            load = load_average()
+            waited_from = time.perf_counter()
+            load = await _quiet_load(args)
             if args.max_load is not None and load is not None and load > args.max_load:
                 report["scenarios"][scenario] = {
-                    "skipped": f"load average {load} > {args.max_load}"
+                    "skipped": f"load average {load} > {args.max_load} "
+                    f"after waiting {args.load_wait:.0f}s"
                 }
                 continue
+            load_waited = round(time.perf_counter() - waited_from, 1)
             before = await probe.sample()
             if scenario == "posts":
                 result = await scenario_posts(api, manifest, args)
@@ -765,11 +1048,26 @@ async def run(args: argparse.Namespace) -> JsonObject:
             )
             result["load_average_before"] = load
             result["load_average_after"] = load_average()
+            result["load_wait_seconds"] = load_waited
             report["scenarios"][scenario] = result
             _say(json.dumps({scenario: result}, indent=2))
     finally:
+        report["client_error_samples"] = api.error_samples
         await api.close()
     return report
+
+
+async def _quiet_load(args: argparse.Namespace) -> float | None:
+    """The 1-minute load average, once it is under ``--max-load`` or ``--load-wait`` ran out."""
+    load = load_average()
+    if args.max_load is None or load is None:
+        return load
+    deadline = time.perf_counter() + args.load_wait
+    while load is not None and load > args.max_load and time.perf_counter() < deadline:
+        _say(f"load average {load} > {args.max_load}; waiting")
+        await asyncio.sleep(LOAD_POLL_SECONDS)
+        load = load_average()
+    return load
 
 
 # --- distillation --------------------------------------------------------------------------------
@@ -781,7 +1079,7 @@ async def distill(args: argparse.Namespace) -> JsonObject:
         msg = "provider keys are set; refusing to run a distillation that could spend"
         raise SystemExit(msg)
     install_core_runtime_ports()
-    manifest = _manifest()
+    manifest = _manifest(args.manifest)
     rng = _rng(args.seed + 1)
     content = build_surreal_content_client()
     try:
@@ -863,7 +1161,7 @@ async def plans(args: argparse.Namespace) -> JsonObject:
     No HTTP and no auth: this isolates the database's share of each route.
     Times are sequential, so they read as latency, not throughput.
     """
-    manifest = _manifest()
+    manifest = _manifest(args.manifest)
     org = manifest["orgs"][BIG_ORG_INDEX]
     channels = org["channels"]
     content = build_surreal_content_client()
@@ -947,11 +1245,16 @@ async def _time_and_explain(
 # --- plumbing ------------------------------------------------------------------------------------
 
 
-def _manifest() -> JsonObject:
-    if not MANIFEST_PATH.exists():
-        msg = f"no seed manifest at {MANIFEST_PATH}; run `seed` first"
+def _existing_manifest(path: Path) -> JsonObject | None:
+    return json.loads(path.read_text(encoding="utf-8")) if path.exists() else None
+
+
+def _manifest(path: Path) -> JsonObject:
+    manifest = _existing_manifest(path)
+    if manifest is None:
+        msg = f"no seed manifest at {path}; run `seed` first"
         raise SystemExit(msg)
-    return json.loads(MANIFEST_PATH.read_text(encoding="utf-8"))
+    return manifest
 
 
 async def _checked(client: Any, query: str, **params: object) -> object:
@@ -994,6 +1297,12 @@ def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="sibylnet scale harness")
     parser.add_argument("--seed", type=int, default=20261102)
     parser.add_argument("--run-id", default=datetime.now(UTC).strftime("%Y%m%d%H%M%S"))
+    parser.add_argument(
+        "--manifest",
+        type=Path,
+        default=MANIFEST_PATH,
+        help="seed manifest to write or read; one per stack when several are up",
+    )
     sub = parser.add_subparsers(dest="command", required=True)
 
     seed_parser = sub.add_parser("seed", help="write the organizations, keys, messages and threads")
@@ -1013,16 +1322,49 @@ def _parser() -> argparse.ArgumentParser:
         action="store_true",
         help="leave the schema to the API (seeding a database for an older checkout)",
     )
+    seed_parser.add_argument(
+        "--reuse",
+        action="store_true",
+        help="do nothing when the store already holds this manifest's data",
+    )
 
     run_parser = sub.add_parser("run", help="drive the HTTP scenarios")
-    run_parser.add_argument("--api-base-url", required=True)
-    run_parser.add_argument("--server-pid", type=int, default=None)
+    run_parser.add_argument(
+        "--api-base-url",
+        required=True,
+        type=lambda value: [part for part in value.split(",") if part],
+        help="API base URL; several, comma separated, spread the load across replicas",
+    )
+    run_parser.add_argument(
+        "--server-pid",
+        type=lambda value: [int(part) for part in value.split(",") if part],
+        default=[],
+        help="API process ids (comma separated) whose CPU time to report",
+    )
+    run_parser.add_argument(
+        "--watch-workers",
+        type=int,
+        default=0,
+        help=f"watcher processes; 0 runs one per {WATCHERS_PER_WORKER} watchers, "
+        "at most half the cores",
+    )
     run_parser.add_argument(
         "--scenarios",
         type=lambda value: [part for part in value.split(",") if part],
         default=["feed", "listings", "posts", "watchers"],
     )
-    run_parser.add_argument("--max-load", type=float, default=None)
+    run_parser.add_argument(
+        "--max-load",
+        type=float,
+        default=None,
+        help="start a scenario only while the 1-minute load average is at most this",
+    )
+    run_parser.add_argument(
+        "--load-wait",
+        type=float,
+        default=300.0,
+        help="seconds to wait for the load to fall under --max-load before skipping a scenario",
+    )
     run_parser.add_argument("--posters", type=int, default=50)
     run_parser.add_argument("--seconds", type=float, default=60.0)
     run_parser.add_argument("--samples", type=int, default=FEED_SAMPLES)
@@ -1041,11 +1383,15 @@ def _parser() -> argparse.ArgumentParser:
     plans_parser.add_argument("--samples", type=int, default=50)
 
     sub.add_parser("cleanup", help="delete everything the seed wrote")
+    sub.add_parser("watch-worker", help="internal: one process of watchers for `run`")
     return parser
 
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = _parser().parse_args(argv)
+    if args.command == "watch-worker":
+        asyncio.run(watch_worker())
+        return 0
     handler = {
         "seed": seed,
         "run": run,
