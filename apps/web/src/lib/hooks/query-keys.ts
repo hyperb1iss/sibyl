@@ -150,6 +150,15 @@ export const queryKeys = {
     all: ['activity'] as const,
     team: (params: TeamActivityParams) => ['activity', 'team', params] as const,
   },
+  net: {
+    all: ['net'] as const,
+    channels: ['net', 'channels'] as const,
+    /** A null channel is the whole organization; a null thread, the whole channel. */
+    feed: (channel: string | null, thread: string | null) =>
+      ['net', 'feed', channel, thread] as const,
+    threads: (channel: string) => ['net', 'threads', channel] as const,
+    presence: (channel: string | null) => ['net', 'presence', channel] as const,
+  },
   jobs: {
     all: ['jobs'] as const,
     list: (params?: Parameters<typeof jobsApi.list>[0]) => ['jobs', 'list', params] as const,

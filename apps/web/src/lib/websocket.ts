@@ -93,6 +93,18 @@ export interface RawCaptureChangedPayload {
   next_versionstamp?: number;
 }
 
+/**
+ * A sibylnet post was stored. Carries where it landed, never what it says:
+ * the page refetches the body over REST, under the reader's own access.
+ */
+export interface NetMessagePostedPayload {
+  organization_id: string;
+  channel: string;
+  /** Empty for a threadless message. */
+  thread: string;
+  message_id: string;
+}
+
 export interface WebSocketErrorPayload {
   message: string;
 }
@@ -125,6 +137,7 @@ export interface WebSocketEventPayloadMap {
   question_answered: Record<string, unknown>;
   source_import_updated: SourceImportStatusResponse;
   raw_capture_changed: RawCaptureChangedPayload;
+  net_message_posted: NetMessagePostedPayload;
   pong: Record<string, unknown>;
   subscribed: WebSocketSubscribedPayload;
   error: WebSocketErrorPayload;
@@ -153,6 +166,7 @@ export const WEBSOCKET_BROADCAST_EVENT_TYPES = [
   'question_answered',
   'source_import_updated',
   'raw_capture_changed',
+  'net_message_posted',
 ] as const satisfies readonly WebSocketEventType[];
 
 export const WEBSOCKET_EVENT_TYPES = [

@@ -160,6 +160,20 @@ export type {
 } from './api/memory';
 export type { EntityMetadataMap } from './api/metadata';
 export type {
+  NetAuthor,
+  NetChannel,
+  NetChannelsResponse,
+  NetFeedParams,
+  NetFeedResponse,
+  NetMessage,
+  NetMessageKind,
+  NetPresenceResponse,
+  NetRecentAuthor,
+  NetThread,
+  NetThreadsResponse,
+  NetWatcher,
+} from './api/net';
+export type {
   CodeExampleParams,
   CodeExampleResponse,
   CodeExampleResult,
