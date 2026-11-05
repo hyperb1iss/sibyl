@@ -328,8 +328,8 @@ def unsupported_surreal_url_reason(url: str) -> str | None:
     if scheme == "rocksdb":
         return (
             "rocksdb:// is a storage argument for `surreal start`, not a client URL. "
-            "Run a SurrealDB server on RocksDB and point SIBYL_SURREAL_URL at its "
-            f"ws:// endpoint, or use surrealkv:// for an embedded store. Supported: {supported}"
+            "Run a SurrealDB server and point SIBYL_SURREAL_URL at its ws:// endpoint, "
+            f"or use surrealkv:// for an embedded store. Supported: {supported}"
         )
     # Name only the scheme: the rest of a URL can carry credentials.
     if not scheme:

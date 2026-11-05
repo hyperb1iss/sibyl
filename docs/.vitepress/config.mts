@@ -315,6 +315,7 @@ export default defineConfig({
                     text: 'Operations',
                     items: [
                         { text: 'Monitoring', link: '/deployment/monitoring' },
+                        { text: 'SurrealDB 4.0 Upgrade', link: '/deployment/surrealdb-4-upgrade' },
                         { text: 'Troubleshooting', link: '/deployment/troubleshooting' },
                     ],
                 },

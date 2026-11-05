@@ -58,9 +58,22 @@ runs only the data services; the API and web apps run natively for hot reload.
 
 ```yaml
 services:
+  surreal-init:
+    image: busybox:1.37
+    command:
+      - sh
+      - -c
+      - chown -R 65532:65532 /data || echo "surreal-init could not hand /data to 65532:65532" >&2
+    network_mode: none
+    volumes:
+      - "${SURREAL_DATA_DIR:-./.moon/cache/surreal-dev}:/data"
+
   surrealdb:
-    image: ${SIBYL_SURREAL_IMAGE:-surrealdb/surrealdb:v3.2.4}
+    image: ${SIBYL_SURREAL_IMAGE:-surrealdb/surrealdb:v4.0.0}
     container_name: ${COMPOSE_PROJECT_NAME:-sibyl}-surrealdb
+    depends_on:
+      surreal-init:
+        condition: service_completed_successfully
     command:
       [
         "start",
@@ -70,13 +83,17 @@ services:
         "${SIBYL_SURREAL_USERNAME:-root}",
         "--pass",
         "${SIBYL_SURREAL_PASSWORD:-root}",
-        "${SIBYL_SURREAL_PATH:-rocksdb:///data/sibyl.db}",
+        "${SIBYL_SURREAL_PATH:-surrealkv:///data/sibyl.db}",
       ]
     ports:
       - "${SIBYL_SURREAL_PORT:-8000}:8000"
     volumes:
       # `:U` chowns the bind mount to the container UID under rootless podman
       - "${SURREAL_DATA_DIR:-./.moon/cache/surreal-dev}:/data:U"
+    environment:
+      - SURREAL_SURREALKV_BLOCK_CACHE_CAPACITY
+      - SURREAL_EXPERIMENTAL_UPGRADE_FROM_3X
+      - SURREAL_SURREALKV_ENABLE_VLOG=false
 
   redis:
     image: valkey/valkey:8-alpine
@@ -87,10 +104,21 @@ services:
     command: ["valkey-server", "--save", "", "--appendonly", "no"]
 ```
 
-The default image is pinned to SurrealDB server `v3.2.4` for reproducible local and CI behavior.
-Override `SIBYL_SURREAL_IMAGE` when rehearsing a newer server patch. The root compose stores
-SurrealDB data in a bind mount under `.moon/cache/surreal-dev` so it survives container churn and is
-easy to inspect.
+The default image is pinned to SurrealDB server `v4.0.0` for reproducible local and CI behavior, and
+it stores data with SurrealKV. Override `SIBYL_SURREAL_IMAGE` when rehearsing a newer server patch.
+The root compose stores SurrealDB data in a bind mount under `.moon/cache/surreal-dev` so it
+survives container churn and is easy to inspect.
+
+The SurrealDB image runs as uid and gid 65532, and a bind-mounted directory keeps its host owner, so
+the `surreal-init` one-shot hands the directory to 65532 before the server starts. A plain
+`docker compose up` therefore works on Linux with a directory your own user created.
+
+A data directory a SurrealDB 3.x server wrote is refused by 4.0 until it is converted, and the
+conversion is one-way. Follow the [SurrealDB 4.0 upgrade](./surrealdb-4-upgrade.md) runbook, which
+starts the server once with `SURREAL_EXPERIMENTAL_UPGRADE_FROM_3X=true` in the shell. To stay on a
+3.x server for now, set both `SIBYL_SURREAL_IMAGE` and
+`SIBYL_SURREAL_PATH=rocksdb:///data/sibyl.db`: a 3.x server opened with `surrealkv://` serves an
+empty database beside the data.
 
 ## Port Mappings
 
@@ -242,13 +270,17 @@ services:
         condition: service_healthy
 
   surrealdb:
-    image: ${SIBYL_SURREAL_IMAGE:-surrealdb/surrealdb:v3.2.4}
+    image: ${SIBYL_SURREAL_IMAGE:-surrealdb/surrealdb:v4.0.0}
     ports:
       - "${SIBYL_SURREAL_PORT:-8000}:8000"
     volumes:
       - surreal_data:/data
+    environment:
+      - SURREAL_EXPERIMENTAL_UPGRADE_FROM_3X
+      - SURREAL_SURREALKV_ENABLE_VLOG=false
     healthcheck:
       test: ["CMD", "/surreal", "is-ready", "--endpoint", "http://localhost:8000"]
+      start_period: 10m
 
 volumes:
   surreal_data:
@@ -261,8 +293,11 @@ network and stop publishing port 3334; the
 never safe to list.
 
 The production compose persists SurrealDB to a named Docker volume (`surreal_data`) rather than a
-bind mount. `NEXT_PUBLIC_API_URL` is the browser-facing API URL; `SIBYL_API_URL` is the in-network
-URL the Next.js server uses for SSR fetches.
+bind mount, and its `surreal-init` one-shot hands the volume to the image's 65532 user. The
+healthcheck's ten-minute `start_period` covers the one start that converts a 3.x store, when nothing
+listens on the port; see the [SurrealDB 4.0 upgrade](./surrealdb-4-upgrade.md).
+`NEXT_PUBLIC_API_URL` is the browser-facing API URL; `SIBYL_API_URL` is the in-network URL the
+Next.js server uses for SSR fetches.
 
 ## Quickstart Compose (Zero-Config)
 

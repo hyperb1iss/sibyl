@@ -92,9 +92,9 @@ is set, Sibyl falls back to in-memory mode (`memory://`), which is rejected in p
 
 Schemes are case-insensitive. sibyld refuses any other scheme at startup in every environment,
 including `rocksdb://`, `tikv://`, `surrealdb://`, and a bare `host:port`. `rocksdb://` is a storage
-argument for `surreal start`, not a client URL: run a SurrealDB server on RocksDB and point
-`SIBYL_SURREAL_URL` at its `ws://` endpoint. The `sibyl` client CLI does not validate this setting,
-since it never opens the store itself.
+argument for `surreal start`, not a client URL: run a SurrealDB server and point `SIBYL_SURREAL_URL`
+at its `ws://` endpoint. The `sibyl` client CLI does not validate this setting, since it never opens
+the store itself.
 
 Embedded URLs clamp every pool to a single connection. The embedded engine misses concurrent
 write-write conflicts, so each namespace must write through one connection. Running file-backed
