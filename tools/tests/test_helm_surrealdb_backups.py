@@ -3,9 +3,9 @@
 The export and restore-drill CronJobs are shell scripts embedded in the
 chart. These tests render them with helm and execute them unchanged, with
 real jq and sha256sum, while a fake curl (fixtures/fake_surreal_curl.py)
-answers with SurrealDB 3.x response shapes. That proves the script logic
-in CI without a database; the shapes themselves were taken from a live
-v3.2.4 server.
+answers with SurrealDB response shapes. That proves the script logic in
+CI without a database; the shapes themselves were taken from live v3.2.4
+and v4.0.0 servers (fixtures/fake_surreal_curl.py lists where they differ).
 """
 
 from __future__ import annotations
@@ -153,7 +153,7 @@ class OpsHarness:
         if source is not None:
             servers["http://source"] = {
                 "user": "root:secret",
-                "version": "surrealdb-3.2.4",
+                "version": "surrealdb-4.0.0",
                 "namespaces": source,
                 "org_uuids": list(org_uuids),
             }
@@ -292,7 +292,7 @@ def test_helm_export_discovers_every_namespace_without_a_list(harness: OpsHarnes
     assert manifest["format"] == "sibyl-surrealdb-export"
     assert manifest["version"] == MANIFEST_VERSION
     assert manifest["failures"] == []
-    assert manifest["server_version"] == "surrealdb-3.2.4"
+    assert manifest["server_version"] == "surrealdb-4.0.0"
     assert manifest["created_at"].endswith("Z")
     exported = {(entry["namespace"], entry["database"]): entry for entry in manifest["databases"]}
     assert set(exported) == {
@@ -596,8 +596,8 @@ def test_helm_restore_drill_scratch_server_keeps_data_on_its_tmp_volume() -> Non
             pod = document["spec"]["jobTemplate"]["spec"]["template"]["spec"]
             (server,) = (c for c in pod["initContainers"] if c["name"] == "restore-server")
             env = {item["name"]: item.get("value") for item in server["env"]}
-            assert env["SURREAL_RESTORE_PATH"] == "rocksdb:/tmp/restore-db"
-            store_path = env["SURREAL_RESTORE_PATH"].removeprefix("rocksdb:")
+            assert env["SURREAL_RESTORE_PATH"] == "surrealkv:/tmp/restore-db"
+            store_path = env["SURREAL_RESTORE_PATH"].removeprefix("surrealkv:")
             tmp_mount = next(
                 m for m in server["volumeMounts"] if store_path.startswith(m["mountPath"] + "/")
             )

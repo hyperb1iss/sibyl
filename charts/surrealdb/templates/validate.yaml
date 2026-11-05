@@ -1,0 +1,2 @@
+{{- /* Renders nothing; fails the render on a store path the image cannot open. */ -}}
+{{- include "sibyl-surrealdb.validateStorePath" . -}}

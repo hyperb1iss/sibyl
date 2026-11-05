@@ -1,5 +1,6 @@
 {{- if .Values.bootstrap.enabled -}}
 {{- include "sibyl-surrealdb.validateDatabases" . -}}
+{{- include "sibyl-surrealdb.validateWholeNumber" (dict "field" "bootstrap.readyTimeoutSeconds" "value" .Values.bootstrap.readyTimeoutSeconds) -}}
 apiVersion: batch/v1
 kind: Job
 metadata:
@@ -51,6 +52,16 @@ spec:
           # so the jq gate is what actually fails the Job on SQL errors.
           args:
             - |
+              # Nothing listens while SurrealDB converts a store in place,
+              # and /ready answers 503 until it serves queries.
+              deadline=$(( $(date +%s) + {{ .Values.bootstrap.readyTimeoutSeconds }} ))
+              until curl -fsS -o /dev/null "$SURREAL_ENDPOINT/ready"; do
+                if [ "$(date +%s)" -ge "$deadline" ]; then
+                  echo "SurrealDB at $SURREAL_ENDPOINT was not ready within {{ .Values.bootstrap.readyTimeoutSeconds }}s" >&2
+                  exit 1
+                fi
+                sleep 5
+              done
               cat > /tmp/bootstrap.surql <<'SQL'
               {{- range .Values.databases }}
               USE NS {{ .namespace }};

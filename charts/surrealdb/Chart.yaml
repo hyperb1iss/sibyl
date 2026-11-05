@@ -3,7 +3,7 @@ name: sibyl-surrealdb
 description: Sibyl-owned SurrealDB wrapper with backup and restore operations
 type: application
 version: 1.4.13
-appVersion: "3.2.4"
+appVersion: "4.0.0"
 # The restore drill runs its scratch SurrealDB as a native sidecar (an init
 # container with restartPolicy Always, on by default from 1.29), and the
 # export Job's podFailurePolicy needs 1.26. The -0 admits provider version

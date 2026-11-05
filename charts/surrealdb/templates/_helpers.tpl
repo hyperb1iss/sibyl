@@ -112,7 +112,21 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- end }}
 
 {{- define "sibyl-surrealdb.surrealImage" -}}
-{{- printf "%s:%s" (.Values.surrealdb.image.repository | default "surrealdb/surrealdb") (.Values.surrealdb.image.tag | default .Chart.AppVersion) }}
+{{- printf "%s:%s" (.Values.surrealdb.image.repository | default "surrealdb/surrealdb") (.Values.surrealdb.image.tag | default (printf "v%s" .Chart.AppVersion)) }}
+{{- end }}
+
+{{/*
+The store path has to match the image's major version. A 3.x server
+handed surrealkv:// on its RocksDB directory starts an empty database
+beside the data, and 4.x has no RocksDB engine (rocksdb: only survives
+as a deprecated alias for SurrealKV).
+*/}}
+{{- define "sibyl-surrealdb.validateStorePath" -}}
+{{- $tag := toString (.Values.surrealdb.image.tag | default (printf "v%s" .Chart.AppVersion)) -}}
+{{- $path := toString .Values.surrealdb.surrealdb.path -}}
+{{- if and (regexMatch "^v?3[.]" $tag) (hasPrefix "surrealkv" $path) -}}
+{{- fail (printf "surrealdb.surrealdb.path is %q but surrealdb.image.tag %q is a 3.x server, which would open an empty database beside its RocksDB data; keep rocksdb:/data/db on 3.x" $path $tag) -}}
+{{- end -}}
 {{- end }}
 
 {{/*

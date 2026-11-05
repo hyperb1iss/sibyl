@@ -1,4 +1,4 @@
-"""A `curl` stand-in that answers like the SurrealDB 3.x HTTP API.
+"""A `curl` stand-in that answers like the SurrealDB HTTP API.
 
 The surrealdb chart's ops jobs are shell scripts that only reach the
 database through curl. Putting this script first on PATH lets a test run
@@ -7,7 +7,7 @@ work, against servers described in a JSON state file
 (``FAKE_SURREAL_STATE``):
 
     {"servers": {"http://source": {"user": "root:secret",
-                                   "version": "surrealdb-3.2.4",
+                                   "version": "surrealdb-4.0.0",
                                    "namespaces": {"ns": {"db": {"table": rows}}}}},
      "empty_exports": ["ns/db"], "drop_on_import": ["ns/db"],
      "sql_errors": ["ns/db"], "refuse_import": ["ns/db"],
@@ -27,10 +27,15 @@ count both see the change and the first count does not.
 has been exported, so only the export's second count fails.
 ``export_errors`` answers ``/export`` for ``ns/db`` with HTTP 500.
 
-Response shapes mirror a real v3.2.4 server: ``/sql`` answers HTTP 200
-with one ``{"status", "result"}`` entry per statement, ``/import`` answers
-``[]`` on success, and ``/export`` of a database that does not exist
-still succeeds with only the ``OPTION IMPORT`` header. Identifiers in
+Response shapes mirror real servers. ``/sql`` answers HTTP 200 with one
+``{"status", "result"}`` entry per statement and ``/import`` answers ``[]``
+on success, on v3.2.4 and v4.0.0 alike. A refused import answers its failed
+statements; v4.0.0 sends them with HTTP 422 after applying every statement
+that did succeed, and the fake leaves the status out because the drill
+reads an import's body, never its status. ``/export`` of a database that
+does not exist succeeds with only the ``OPTION IMPORT`` header, as v3.2.4
+answers; v4.0.0 cuts that transfer short (curl exits 18), which the export
+job never reaches because it counts the database's rows first. Identifiers in
 DEFINE/USE statements arrive backtick-quoted, as the drill sends them.
 
 Every request must carry --connect-timeout and --max-time: the jobs bound
@@ -301,7 +306,7 @@ def main(argv: list[str]) -> int:
     if route == "/health":
         body: object = ""
     elif route == "/version":
-        body = server.get("version", "surrealdb-3.2.4")
+        body = server.get("version", "surrealdb-4.0.0")
     elif request.user != server.get("user"):
         body = {"code": 401, "information": "There was a problem with authentication"}
         if request.fail:
