@@ -10,7 +10,7 @@ import type {
   NetThread,
 } from '@/lib/api/net';
 import { ChannelList } from './channel-list';
-import { plural, presenceFor, watchingCounts } from './net-format';
+import { plural, presenceFor } from './net-format';
 import {
   ChannelStream,
   NetEmpty,
@@ -29,7 +29,7 @@ export interface NetViewProps {
   feed: NetQueryState<NetFeedResponse>;
   /** The selected channel's threads; undefined while they load. */
   threads: NetThread[] | undefined;
-  /** Null when the server has no presence to offer. */
+  /** Null until presence loads. */
   presence: NetPresenceResponse | null;
   projectNames: Record<string, string>;
 }
@@ -62,14 +62,20 @@ export function NetView({
 }: NetViewProps) {
   const [pickerOpen, setPickerOpen] = useState(false);
   const rows = channels.data?.channels ?? [];
-  const watching = useMemo(() => watchingCounts(presence), [presence]);
+  const listening = useMemo(
+    () =>
+      new Map(
+        presence ? rows.map(row => [row.channel, presenceFor(presence, row.channel).listening]) : []
+      ),
+    [presence, rows]
+  );
   const channelPresence = useMemo(
-    () => (presence ? presenceFor(presence, channel) : null),
+    () => (presence && channel ? presenceFor(presence, channel) : null),
     [presence, channel]
   );
   const threadInfo = thread ? threads?.find(row => row.thread === thread) : undefined;
   const totalMessages = rows.reduce((sum, row) => sum + row.message_count, 0);
-  const watchingTotal = presence ? presenceFor(presence, null).watching.length : null;
+  const listeningTotal = presence ? presenceFor(presence, null).listening.length : null;
 
   // A picked row navigates; fold the picker once the page follows.
   // biome-ignore lint/correctness/useExhaustiveDependencies: close on navigation only
@@ -84,7 +90,7 @@ export function NetView({
       selectedChannel={channel}
       selectedThread={thread}
       threads={threads}
-      watching={watching}
+      listening={listening}
     />
   );
 
@@ -103,7 +109,7 @@ export function NetView({
           <dl className="flex flex-wrap items-baseline gap-x-5 gap-y-1">
             <Stat value={rows.length} label={rows.length === 1 ? 'channel' : 'channels'} />
             <Stat value={totalMessages} label={totalMessages === 1 ? 'message' : 'messages'} />
-            {watchingTotal !== null && <Stat value={watchingTotal} label="watching" />}
+            {listeningTotal !== null && <Stat value={listeningTotal} label="listening" />}
           </dl>
         )}
       </header>
@@ -172,6 +178,7 @@ export function NetView({
               info={threadInfo}
               feed={feed}
               projectNames={projectNames}
+              presence={channelPresence}
             />
           ) : (
             <ChannelStream

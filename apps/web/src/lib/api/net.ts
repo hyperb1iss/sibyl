@@ -1,4 +1,3 @@
-import { parseApiError } from './errors';
 import { fetchApi, type RequestOptions } from './transport';
 
 /** Page size the stream reads; the API caps a page at 500. */
@@ -75,9 +74,14 @@ export interface NetThreadsResponse {
   threads: NetThread[];
 }
 
-/** Someone whose agent is reading a channel right now. */
+/**
+ * An agent that read a channel in the last two minutes, or is waiting on one.
+ * Reads made by this web app are not recorded, so a person browsing never
+ * shows up as listening.
+ */
 export interface NetWatcher {
-  channel: string;
+  /** Null for a reader of every channel, which hears any channel too. */
+  channel: string | null;
   user_id: string;
   name: string | null;
   agent: string | null;
@@ -85,8 +89,8 @@ export interface NetWatcher {
   last_seen: string;
 }
 
-/** Someone who posted in a channel within the last hour. */
-export interface NetRecentAuthor {
+/** Someone who posted in a channel within the last hour, under one agent label. */
+export interface NetRecentPoster {
   channel: string;
   user_id: string;
   name: string | null;
@@ -95,8 +99,10 @@ export interface NetRecentAuthor {
 }
 
 export interface NetPresenceResponse {
+  /** Most recently seen first. */
   watching: NetWatcher[];
-  recent: NetRecentAuthor[];
+  /** Most recent post first. */
+  recent: NetRecentPoster[];
 }
 
 export interface NetFeedParams {
@@ -104,11 +110,6 @@ export interface NetFeedParams {
   channel?: string | null;
   thread?: string | null;
   limit?: number;
-}
-
-function isMissingRoute(error: unknown): boolean {
-  const body = parseApiError(error) as { detail?: unknown } | null;
-  return body?.detail === 'Not Found';
 }
 
 export const netApi = {
@@ -130,22 +131,7 @@ export const netApi = {
       signal: options?.signal,
     }),
 
-  /**
-   * Who is watching or recently posted, or null on a server that does not
-   * serve presence yet.
-   */
-  presence: async (
-    channel?: string | null,
-    options?: RequestOptions
-  ): Promise<NetPresenceResponse | null> => {
-    const query = channel ? `?${new URLSearchParams({ channel }).toString()}` : '';
-    try {
-      return await fetchApi<NetPresenceResponse>(`/net/presence${query}`, {
-        signal: options?.signal,
-      });
-    } catch (error) {
-      if (isMissingRoute(error)) return null;
-      throw error;
-    }
-  },
+  /** Who is listening and who posted in the last hour, across the organization. */
+  presence: (options?: RequestOptions) =>
+    fetchApi<NetPresenceResponse>('/net/presence', { signal: options?.signal }),
 };

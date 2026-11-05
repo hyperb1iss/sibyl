@@ -157,7 +157,7 @@ export const queryKeys = {
     feed: (channel: string | null, thread: string | null) =>
       ['net', 'feed', channel, thread] as const,
     threads: (channel: string) => ['net', 'threads', channel] as const,
-    presence: (channel: string | null) => ['net', 'presence', channel] as const,
+    presence: ['net', 'presence'] as const,
   },
   jobs: {
     all: ['jobs'] as const,

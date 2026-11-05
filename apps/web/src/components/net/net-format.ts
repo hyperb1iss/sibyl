@@ -2,7 +2,7 @@ import type {
   NetAuthor,
   NetMessage,
   NetPresenceResponse,
-  NetRecentAuthor,
+  NetRecentPoster,
   NetThread,
   NetWatcher,
 } from '@/lib/api/net';
@@ -258,49 +258,51 @@ export function plural(count: number, one: string, many = `${one}s`): string {
 // ---------------------------------------------------------------------------
 
 export interface ChannelPresence {
-  watching: NetWatcher[];
-  recent: NetRecentAuthor[];
+  /** One entry per user and agent label, most recently seen first. */
+  listening: NetWatcher[];
+  /** One entry per user and agent label, most recent post first. */
+  recent: NetRecentPoster[];
+}
+
+function latestPer<T>(rows: T[], key: (row: T) => string, at: (row: T) => string): T[] {
+  const latest = new Map<string, T>();
+  for (const row of rows) {
+    const seen = latest.get(key(row));
+    if (!seen || at(seen) < at(row)) latest.set(key(row), row);
+  }
+  return [...latest.values()].sort((a, b) => at(b).localeCompare(at(a)));
 }
 
 /**
- * Presence for one channel, or for the organization when `channel` is null:
- * one entry per reader (user, agent label and session) and per recent
- * author (user and agent label), most recent first.
+ * Who is listening to `channel` and who posted there in the last hour; with
+ * a null channel, everyone across the organization. A reader of every
+ * channel hears this one too, so it counts here. Several sessions of one
+ * agent are one listener: the question is which agents would see a post.
  */
 export function presenceFor(
   presence: NetPresenceResponse,
   channel: string | null
 ): ChannelPresence {
-  const watching = new Map<string, NetWatcher>();
-  for (const watcher of presence.watching) {
-    if (channel && watcher.channel !== channel) continue;
-    const key = `${watcher.user_id}\u0000${watcher.agent ?? ''}\u0000${watcher.session ?? ''}`;
-    const seen = watching.get(key);
-    if (!seen || seen.last_seen < watcher.last_seen) watching.set(key, watcher);
-  }
-  const recent = new Map<string, NetRecentAuthor>();
-  for (const author of presence.recent) {
-    if (channel && author.channel !== channel) continue;
-    const key = `${author.user_id}\u0000${author.agent ?? ''}`;
-    const seen = recent.get(key);
-    if (!seen || seen.last_post_at < author.last_post_at) recent.set(key, author);
-  }
+  const who = (row: { user_id: string; agent: string | null }) =>
+    `${row.user_id}\u0000${row.agent ?? ''}`;
   return {
-    watching: [...watching.values()].sort((a, b) => b.last_seen.localeCompare(a.last_seen)),
-    recent: [...recent.values()].sort((a, b) => b.last_post_at.localeCompare(a.last_post_at)),
+    listening: latestPer(
+      presence.watching.filter(
+        watcher => channel === null || watcher.channel === channel || watcher.channel === null
+      ),
+      who,
+      watcher => watcher.last_seen
+    ),
+    recent: latestPer(
+      presence.recent.filter(poster => channel === null || poster.channel === channel),
+      who,
+      poster => poster.last_post_at
+    ),
   };
 }
 
-/** Readers per channel, for the channel list. */
-export function watchingCounts(presence: NetPresenceResponse | null): Map<string, number> {
-  const counts = new Map<string, number>();
-  if (!presence) return counts;
-  const seen = new Set<string>();
-  for (const watcher of presence.watching) {
-    const key = `${watcher.channel}\u0000${watcher.user_id}\u0000${watcher.agent ?? ''}\u0000${watcher.session ?? ''}`;
-    if (seen.has(key)) continue;
-    seen.add(key);
-    counts.set(watcher.channel, (counts.get(watcher.channel) ?? 0) + 1);
-  }
-  return counts;
+/** "Ada Lovelace (claude-code)", the way a listener reads in a tooltip. */
+export function listenerLabel(listener: Pick<NetWatcher, 'name' | 'user_id' | 'agent'>): string {
+  const name = authorName({ name: listener.name, email: null, user_id: listener.user_id });
+  return listener.agent ? `${name} (${listener.agent})` : name;
 }

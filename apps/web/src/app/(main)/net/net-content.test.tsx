@@ -147,19 +147,28 @@ const PRESENCE: NetPresenceResponse = {
       user_id: 'u-grace',
       name: 'Grace Hopper',
       agent: 'codex',
-      session: 's-1',
+      session: 'session-grace-1',
       last_seen: '2026-11-05T10:07:30Z',
     },
+    // A dispatcher reading every channel listens on #reviews and @ada alike.
+    {
+      channel: null,
+      user_id: 'u-ada',
+      name: 'Ada Lovelace',
+      agent: 'herald',
+      session: 'session-ada-9',
+      last_seen: '2026-11-05T10:07:00Z',
+    },
+  ],
+  recent: [
     {
       channel: '#reviews',
       user_id: 'u-ada',
       name: 'Ada Lovelace',
       agent: 'claude-code',
-      session: 's-2',
-      last_seen: '2026-11-05T10:07:00Z',
+      last_post_at: '2026-11-05T10:06:00Z',
     },
   ],
-  recent: [],
 };
 
 function json(body: unknown, status = 200) {
@@ -191,7 +200,7 @@ function renderNet(search = '') {
 describe('NetContent', () => {
   beforeEach(() => {
     channels = CHANNELS;
-    presence = () => json({ detail: 'Not Found' }, 404);
+    presence = () => json({ watching: [], recent: [] });
     fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = new URL(String(input), 'http://localhost');
       switch (url.pathname) {
@@ -345,26 +354,65 @@ describe('NetContent', () => {
     expect(feedRequest?.searchParams.get('limit')).toBe('500');
   });
 
-  it('hides presence when the server does not serve it', async () => {
+  it('leaves the page whole when presence cannot be read', async () => {
+    presence = () => json({ detail: 'presence registry unavailable' }, 503);
     renderNet('channel=%23reviews');
 
     await screen.findByRole('region', { name: '#reviews' });
-    await waitFor(() => expect(requests('/api/net/presence')).toHaveLength(1));
-    expect(screen.queryByText(/watching/)).toBeNull();
+    await waitFor(() => expect(requests('/api/net/presence').length).toBeGreaterThan(0));
+    expect(
+      await screen.findByRole('article', { name: 'Decision from Ada Lovelace' })
+    ).toBeVisible();
+    expect(screen.queryByText(/listening/i)).toBeNull();
+    expect(screen.queryByText(/reading this channel/)).toBeNull();
   });
 
-  it('shows who is watching a channel when presence is served', async () => {
-    presence = () => json(PRESENCE);
-    const { user } = renderNet('channel=%23reviews');
+  it('says plainly when no agent is listening', async () => {
+    renderNet('channel=%23reviews');
 
+    expect(
+      await screen.findByText('No agent is reading this channel right now.')
+    ).toBeInTheDocument();
+    const nav = screen.getByRole('navigation', { name: 'Channels' });
+    expect(within(nav).queryByText(/listening/)).toBeNull();
+    expect(screen.getByText('listening', { selector: 'dt' }).nextSibling).toHaveTextContent('0');
+  });
+
+  it('shows who is listening and who posted, counting readers of every channel', async () => {
+    presence = () => json(PRESENCE);
+    renderNet('channel=%23reviews');
+
+    // Grace reads #reviews; Ada's dispatcher reads everything, so both hear it,
+    // and Ada's dispatcher alone hears @ada.
     const nav = await screen.findByRole('navigation', { name: 'Channels' });
-    expect(await within(nav).findByText('2 watching')).toBeInTheDocument();
-    const toggle = await screen.findByRole('button', { name: /2 watching/ });
-    await user.click(toggle);
-    expect(screen.getByRole('heading', { name: 'Watching now' })).toBeInTheDocument();
-    expect(screen.getAllByText('Grace Hopper').length).toBeGreaterThan(0);
-    // Sessions are plumbing.
-    expect(document.body.textContent).not.toContain('s-1');
+    const reviews = within(nav).getByRole('link', { name: /reviews/ });
+    expect(await within(reviews).findByText('2 listening')).toHaveAttribute(
+      'title',
+      'Grace Hopper (codex)\nAda Lovelace (herald)'
+    );
+    expect(
+      within(within(nav).getByRole('link', { name: /ada/ })).getByText('1 listening')
+    ).toBeInTheDocument();
+
+    const stream = screen.getByRole('region', { name: '#reviews' });
+    const header = stream.querySelector('header') as HTMLElement;
+    const listening = within(header).getByText('Listening').parentElement as HTMLElement;
+    expect(within(listening).getByText('Grace Hopper')).toBeInTheDocument();
+    expect(within(listening).getByText('herald')).toBeInTheDocument();
+    const posted = within(header).getByText('Posted in the last hour').parentElement as HTMLElement;
+    expect(within(posted).getByText('claude-code')).toBeInTheDocument();
+    expect(screen.getByText('listening', { selector: 'dt' })).toBeInTheDocument();
+    // No status vocabulary and no plumbing.
+    expect(document.body.textContent).not.toMatch(/online|away|session-/i);
+  });
+
+  it("shows who is listening on a thread's channel", async () => {
+    presence = () => json(PRESENCE);
+    renderNet('channel=%23reviews&thread=gh%3Aacme%2Fapp%2342');
+
+    const thread = await screen.findByRole('region', { name: 'gh:acme/app#42' });
+    expect(await within(thread).findByText('Listening')).toBeInTheDocument();
+    expect(within(thread).getByText('Posted in the last hour')).toBeInTheDocument();
   });
 
   it('folds a run of repeats into one quiet row that expands to each message', async () => {

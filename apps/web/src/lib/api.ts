@@ -168,7 +168,7 @@ export type {
   NetMessage,
   NetMessageKind,
   NetPresenceResponse,
-  NetRecentAuthor,
+  NetRecentPoster,
   NetThread,
   NetThreadsResponse,
   NetWatcher,

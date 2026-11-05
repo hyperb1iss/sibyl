@@ -7,13 +7,13 @@ import {
   controlName,
   foldRuns,
   isRemembered,
+  listenerLabel,
   MIN_FOLD_RUN,
   netHref,
   normalizeBody,
   presenceFor,
   runSpanPhrase,
   spanPhrase,
-  watchingCounts,
 } from './net-format';
 import { shellChannel } from './net-panes';
 
@@ -117,21 +117,23 @@ describe('presence', () => {
         session: 's1',
         last_seen: '2026-11-05T10:00:00Z',
       },
-      {
-        channel: '@ada',
-        user_id: 'u-ada',
-        name: 'Ada',
-        agent: 'claude-code',
-        session: 's1',
-        last_seen: '2026-11-05T10:01:00Z',
-      },
+      // A second session of the same agent is the same listener.
       {
         channel: '@ada',
         user_id: 'u-ada',
         name: 'Ada',
         agent: 'claude-code',
         session: 's2',
-        last_seen: '2026-11-05T09:59:00Z',
+        last_seen: '2026-11-05T10:01:00Z',
+      },
+      // A dispatcher reading every channel hears each of them.
+      {
+        channel: null,
+        user_id: 'u-grace',
+        name: 'Grace',
+        agent: 'herald',
+        session: 'd1',
+        last_seen: '2026-11-05T10:00:30Z',
       },
       {
         channel: '#reviews',
@@ -139,7 +141,7 @@ describe('presence', () => {
         name: 'Grace',
         agent: 'codex',
         session: null,
-        last_seen: '2026-11-05T10:00:30Z',
+        last_seen: '2026-11-05T09:59:00Z',
       },
     ],
     recent: [
@@ -150,22 +152,35 @@ describe('presence', () => {
         agent: 'codex',
         last_post_at: '2026-11-05T09:50:00Z',
       },
+      {
+        channel: '@ada',
+        user_id: 'u-grace',
+        name: 'Grace',
+        agent: 'codex',
+        last_post_at: '2026-11-05T09:55:00Z',
+      },
     ],
   };
 
-  it('counts each reading session once per channel', () => {
-    expect(Object.fromEntries(watchingCounts(presence))).toEqual({ '@ada': 2, '#reviews': 1 });
-    expect(watchingCounts(null).size).toBe(0);
+  function listeners(channel: string | null): string[] {
+    return presenceFor(presence, channel).listening.map(listenerLabel);
+  }
+
+  it('counts a reader of every channel under each channel, newest first', () => {
+    expect(listeners('@ada')).toEqual(['Ada (claude-code)', 'Grace (herald)']);
+    expect(listeners('#reviews')).toEqual(['Grace (herald)', 'Grace (codex)']);
+    expect(listeners('@nobody')).toEqual(['Grace (herald)']);
   });
 
-  it('narrows to a channel, newest first, keeping the latest sighting', () => {
-    const ada = presenceFor(presence, '@ada');
-    expect(ada.watching.map(watcher => [watcher.session, watcher.last_seen])).toEqual([
-      ['s1', '2026-11-05T10:01:00Z'],
-      ['s2', '2026-11-05T09:59:00Z'],
-    ]);
-    expect(ada.recent).toEqual([]);
-    expect(presenceFor(presence, null).watching).toHaveLength(3);
+  it("collapses an agent's sessions into one listener, keeping its latest read", () => {
+    const ada = presenceFor(presence, '@ada').listening[0];
+    expect(ada.last_seen).toBe('2026-11-05T10:01:00Z');
+    expect(listeners(null)).toEqual(['Ada (claude-code)', 'Grace (herald)', 'Grace (codex)']);
+  });
+
+  it('lists recent posters for the channel asked about', () => {
+    expect(presenceFor(presence, '#reviews').recent.map(listenerLabel)).toEqual(['Grace (codex)']);
+    expect(presenceFor(presence, '#deploys').recent).toEqual([]);
   });
 });
 

@@ -25,7 +25,7 @@ export const NET_REFETCH_DELAY_MS = NET_SETTLE_MS + 500;
  */
 const NET_SAFETY_REFETCH_MS = 30_000;
 
-/** Watching expires two minutes after a reader's last request. */
+/** A reader stops counting as listening two minutes after its last read. */
 const NET_PRESENCE_REFETCH_MS = 30_000;
 
 /**
@@ -87,7 +87,7 @@ export function netQueriesForPost(channel: string, thread: string): QueryKey[] {
     queryKeys.net.feed(null, null),
     queryKeys.net.feed(channel, null),
     queryKeys.net.threads(channel),
-    queryKeys.net.presence(null),
+    queryKeys.net.presence,
   ];
   if (thread) keys.push(queryKeys.net.feed(channel, thread));
   return keys;
@@ -137,17 +137,16 @@ export function useNetThreads(channel: string | null) {
 }
 
 /**
- * Who is watching and who posted lately, across the organization, or null
- * when the server has no presence to offer. Presence is a nicety: a server
- * without the endpoint, or a failed read, hides it rather than the page.
+ * Who is listening and who posted in the last hour, across the organization,
+ * or null until it loads. Presence decorates the page; a failed read hides
+ * it rather than the messages.
  */
 export function useNetPresence(): NetPresenceResponse | null {
   const query = useQuery({
-    queryKey: queryKeys.net.presence(null),
-    queryFn: ({ signal }) => netApi.presence(null, { signal }),
-    retry: false,
+    queryKey: queryKeys.net.presence,
+    queryFn: ({ signal }) => netApi.presence({ signal }),
     staleTime: NET_PRESENCE_REFETCH_MS,
-    refetchInterval: current => (current.state.data ? NET_PRESENCE_REFETCH_MS : false),
+    refetchInterval: NET_PRESENCE_REFETCH_MS,
   });
   return query.isError ? null : (query.data ?? null);
 }

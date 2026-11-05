@@ -4,10 +4,10 @@ import Link from 'next/link';
 import type { ReactNode } from 'react';
 import { useState } from 'react';
 import { Skeleton } from '@/components/ui/spinner';
-import type { NetChannel, NetThread } from '@/lib/api/net';
+import type { NetChannel, NetThread, NetWatcher } from '@/lib/api/net';
 import { formatActivityTime } from '@/lib/constants/activity';
 import { useNow } from '@/lib/hooks/now';
-import { netHref, plural } from './net-format';
+import { listenerLabel, netHref, plural } from './net-format';
 import { ChannelName } from './net-primitives';
 
 /** Threads listed under the open channel before "Show more". */
@@ -141,8 +141,8 @@ export interface ChannelListProps {
   selectedThread: string | null;
   /** Threads of the selected channel; undefined while they load. */
   threads: NetThread[] | undefined;
-  /** Readers per channel; empty when presence is unavailable. */
-  watching: Map<string, number>;
+  /** Who is listening on each channel; empty until presence loads. */
+  listening: Map<string, NetWatcher[]>;
   /** Called after a row is chosen, so a phone-width drawer can close. */
   onNavigate?: () => void;
   /** The phone-width picker already says "Channel" above the list. */
@@ -155,7 +155,7 @@ export function ChannelList({
   selectedChannel,
   selectedThread,
   threads,
-  watching,
+  listening,
   onNavigate,
   showHeading = true,
 }: ChannelListProps) {
@@ -185,7 +185,7 @@ export function ChannelList({
         </li>
         {channels.map(channel => {
           const open = channel.channel === selectedChannel;
-          const readers = watching.get(channel.channel) ?? 0;
+          const listeners = listening.get(channel.channel) ?? [];
           return (
             <li key={channel.channel}>
               <RailLink
@@ -210,9 +210,13 @@ export function ChannelList({
                     channel.thread_count > 0 && (
                       <span key="threads">{plural(channel.thread_count, 'thread')}</span>
                     ),
-                    readers > 0 && (
-                      <span key="readers" className="text-sc-fg-secondary">
-                        {readers} watching
+                    listeners.length > 0 && (
+                      <span
+                        key="listening"
+                        title={listeners.map(listenerLabel).join('\n')}
+                        className="text-sc-fg-secondary"
+                      >
+                        {listeners.length} listening
                       </span>
                     ),
                   ]

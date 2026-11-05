@@ -32,11 +32,21 @@ const AUTHOR_TONES = [
 ] as const;
 
 /** Initials on the author's tint. Telling two authors apart at a glance is how a loop shows. */
-export function AuthorMark({ name, seed }: { name: string; seed: string }) {
+export function AuthorMark({
+  name,
+  seed,
+  size = 'md',
+}: {
+  name: string;
+  seed: string;
+  size?: 'sm' | 'md';
+}) {
   return (
     <span
       aria-hidden="true"
-      className={`inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full border text-[10px] font-semibold ${AUTHOR_TONES[toneIndexFor(seed)]}`}
+      className={`inline-flex shrink-0 items-center justify-center rounded-full border font-semibold ${
+        size === 'sm' ? 'h-5 w-5 text-[8px]' : 'h-7 w-7 text-[10px]'
+      } ${AUTHOR_TONES[toneIndexFor(seed)]}`}
     >
       {initialsFor(name)}
     </span>

@@ -178,7 +178,7 @@ describe('useRealtimeUpdates', () => {
         queryKeys.net.feed('#reviews', null),
         queryKeys.net.feed('#reviews', 'gh:acme/app#42'),
         queryKeys.net.threads('#reviews'),
-        queryKeys.net.presence(null),
+        queryKeys.net.presence,
       ]) {
         expect(keys).toContain(JSON.stringify(key));
       }

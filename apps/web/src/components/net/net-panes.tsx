@@ -4,14 +4,7 @@ import Link from 'next/link';
 import { type ReactNode, useId, useMemo, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { ErrorState } from '@/components/ui/empty-state';
-import {
-  AntennaSignal,
-  ArrowLeft,
-  CheckCircle,
-  ChevronDown,
-  Eye,
-  Folder,
-} from '@/components/ui/icons';
+import { AntennaSignal, ArrowLeft, CheckCircle, ChevronDown, Folder } from '@/components/ui/icons';
 import { Skeleton } from '@/components/ui/spinner';
 import type { NetChannel, NetFeedResponse, NetMessage, NetThread } from '@/lib/api/net';
 import { formatActivityTime } from '@/lib/constants/activity';
@@ -21,6 +14,7 @@ import {
   authorName,
   type ChannelPresence,
   isRemembered,
+  listenerLabel,
   netHref,
   plural,
   spanPhrase,
@@ -113,102 +107,73 @@ function Dot() {
 // Presence
 // ---------------------------------------------------------------------------
 
-function PresenceToggle({
-  presence,
-  open,
-  onToggle,
-  panelId,
+/** People shown by name before the rest fold into "+N". */
+const PEOPLE_SHOWN = 4;
+
+function PeopleRow({
+  label,
+  people,
 }: {
-  presence: ChannelPresence;
-  open: boolean;
-  onToggle: () => void;
-  panelId: string;
+  label: string;
+  people: { key: string; name: string; seed: string; agent: string | null; title: string }[];
 }) {
-  const count = presence.watching.length;
+  const shown = people.slice(0, PEOPLE_SHOWN);
+  const rest = people.slice(PEOPLE_SHOWN);
   return (
-    <button
-      type="button"
-      aria-expanded={open}
-      aria-controls={panelId}
-      onClick={onToggle}
-      className={`inline-flex shrink-0 items-center gap-1.5 rounded-md border px-2 py-1 text-xs transition-colors ${FOCUS} ${
-        open
-          ? 'border-sc-fg-subtle/40 bg-sc-bg-highlight text-sc-fg-primary'
-          : 'border-sc-fg-subtle/25 text-sc-fg-secondary hover:bg-sc-bg-highlight'
-      }`}
-    >
-      <Eye width={13} height={13} aria-hidden="true" className="text-sc-fg-muted" />
-      {count === 0 ? 'No one watching' : `${count} watching`}
-      <ChevronDown
-        width={12}
-        height={12}
-        aria-hidden="true"
-        className={`text-sc-fg-muted transition-transform ${open ? 'rotate-180' : ''}`}
-      />
-    </button>
+    <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
+      <span className="text-[10px] font-semibold tracking-wider text-sc-fg-muted uppercase">
+        {label}
+      </span>
+      {shown.map(person => (
+        <span
+          key={person.key}
+          title={person.title}
+          className="inline-flex min-w-0 items-center gap-1.5"
+        >
+          <AuthorMark name={person.name} seed={person.seed} size="sm" />
+          <span className="truncate text-sc-fg-secondary">{person.name}</span>
+          {person.agent && <AgentLabel agent={person.agent} />}
+        </span>
+      ))}
+      {rest.length > 0 && (
+        <span title={rest.map(person => person.title).join('\n')} className="text-sc-fg-muted">
+          +{rest.length} more
+        </span>
+      )}
+    </div>
   );
 }
 
-function PresencePanel({ presence, panelId }: { presence: ChannelPresence; panelId: string }) {
+/**
+ * Who would hear a post here, and who has been talking: derived from agents'
+ * own reads and posts, never from anyone keeping a status up.
+ */
+function PresenceLine({ presence }: { presence: ChannelPresence }) {
   const now = useNow();
-  const rows = (
-    title: string,
-    people: { key: string; name: string; seed: string; agent: string | null; at: string }[]
-  ) =>
-    people.length > 0 && (
-      <div>
-        <h3 className="mb-1.5 text-[10px] font-semibold tracking-wider text-sc-fg-muted uppercase">
-          {title}
-        </h3>
-        <ul className="space-y-1.5">
-          {people.map(person => (
-            <li key={person.key} className="flex min-w-0 items-center gap-2 text-xs">
-              <AuthorMark name={person.name} seed={person.seed} />
-              <span className="min-w-0 truncate font-medium text-sc-fg-primary">{person.name}</span>
-              {person.agent && <AgentLabel agent={person.agent} />}
-              <time
-                dateTime={person.at}
-                title={formatDateTime(person.at)}
-                className="ml-auto shrink-0 text-sc-fg-muted tabular-nums"
-              >
-                {formatActivityTime(person.at, now)}
-              </time>
-            </li>
-          ))}
-        </ul>
-      </div>
-    );
-
-  const watching = presence.watching.map(watcher => ({
-    key: `${watcher.channel}:${watcher.user_id}:${watcher.agent ?? ''}:${watcher.session ?? ''}`,
+  const listening = presence.listening.map(watcher => ({
+    key: `${watcher.user_id}:${watcher.agent ?? ''}`,
     name: authorName({ name: watcher.name, email: null, user_id: watcher.user_id }),
     seed: watcher.user_id,
     agent: watcher.agent,
-    at: watcher.last_seen,
+    title: `${listenerLabel(watcher)}, read ${formatActivityTime(watcher.last_seen, now)}${
+      watcher.channel === null ? ' (reads every channel)' : ''
+    }`,
   }));
-  const recent = presence.recent.map(author => ({
-    key: `${author.channel}:${author.user_id}:${author.agent ?? ''}`,
-    name: authorName({ name: author.name, email: null, user_id: author.user_id }),
-    seed: author.user_id,
-    agent: author.agent,
-    at: author.last_post_at,
+  const recent = presence.recent.map(poster => ({
+    key: `${poster.user_id}:${poster.agent ?? ''}`,
+    name: authorName({ name: poster.name, email: null, user_id: poster.user_id }),
+    seed: poster.user_id,
+    agent: poster.agent,
+    title: `${listenerLabel(poster)}, posted ${formatActivityTime(poster.last_post_at, now)}`,
   }));
-
   return (
-    <div
-      id={panelId}
-      className="grid gap-4 border-b border-sc-fg-subtle/10 bg-sc-bg-base/60 px-4 py-3 sm:grid-cols-2"
-    >
-      {watching.length === 0 && recent.length === 0 ? (
-        <p className="text-xs text-sc-fg-muted sm:col-span-2">
-          No agent has read or posted here in the last hour.
-        </p>
+    <div className="mt-2.5 space-y-1.5 text-xs">
+      {listening.length > 0 ? (
+        <PeopleRow label="Listening" people={listening} />
       ) : (
-        <>
-          {rows('Watching now', watching)}
-          {rows('Posted in the last hour', recent)}
-        </>
+        <p className="text-sc-fg-muted">No agent is reading this channel right now.</p>
       )}
+      {recent.length > 0 && <PeopleRow label="Posted in the last hour" people={recent} />}
     </div>
   );
 }
@@ -223,14 +188,12 @@ export interface ChannelStreamProps {
   /** Every channel's summary; the stream reads its own row, or all of them. */
   channels: NetChannel[];
   feed: NetQueryState<NetFeedResponse>;
-  /** Null hides presence: the server has none to offer. */
+  /** Who is listening here; null while it loads, and across all channels. */
   presence: ChannelPresence | null;
 }
 
 export function ChannelStream({ channel, channels, feed, presence }: ChannelStreamProps) {
   const now = useNow();
-  const [presenceOpen, setPresenceOpen] = useState(false);
-  const panelId = useId();
   const summary = channel ? channels.find(row => row.channel === channel) : undefined;
   const messageTotal = channel
     ? (summary?.message_count ?? 0)
@@ -249,7 +212,7 @@ export function ChannelStream({ channel, channels, feed, presence }: ChannelStre
 
   return (
     <section aria-labelledby="net-stream-heading" className={PANE}>
-      <header className="flex flex-wrap items-start justify-between gap-3 border-b border-sc-fg-subtle/10 px-4 py-3.5">
+      <header className="border-b border-sc-fg-subtle/10 px-4 py-3.5">
         <div className="min-w-0">
           <h2
             id="net-stream-heading"
@@ -282,17 +245,9 @@ export function ChannelStream({ channel, channels, feed, presence }: ChannelStre
               </>
             )}
           </Meta>
+          {presence && <PresenceLine presence={presence} />}
         </div>
-        {presence && (
-          <PresenceToggle
-            presence={presence}
-            open={presenceOpen}
-            onToggle={() => setPresenceOpen(open => !open)}
-            panelId={panelId}
-          />
-        )}
       </header>
-      {presence && presenceOpen && <PresencePanel presence={presence} panelId={panelId} />}
 
       {feed.isError && !feed.data ? (
         <PaneErrorState what="messages" onRetry={feed.refetch} />
@@ -389,9 +344,18 @@ export interface ThreadViewProps {
   info: NetThread | undefined;
   feed: NetQueryState<NetFeedResponse>;
   projectNames: Record<string, string>;
+  /** Who is listening on the thread's channel; null while it loads. */
+  presence: ChannelPresence | null;
 }
 
-export function ThreadView({ channel, thread, info, feed, projectNames }: ThreadViewProps) {
+export function ThreadView({
+  channel,
+  thread,
+  info,
+  feed,
+  projectNames,
+  presence,
+}: ThreadViewProps) {
   const now = useNow();
   const [detailsOpen, setDetailsOpen] = useState(false);
   const detailsId = useId();
@@ -482,6 +446,7 @@ export function ThreadView({ channel, thread, info, feed, projectNames }: Thread
             )}
           </>
         )}
+        {presence && <PresenceLine presence={presence} />}
       </header>
       {info && detailsOpen && (
         <div id={detailsId}>
