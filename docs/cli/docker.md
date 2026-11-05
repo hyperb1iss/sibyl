@@ -125,7 +125,8 @@ data in place, one way:
    `--tag`. It refuses with nothing changed in these cases:
    - The deployment runs a Sibyl API older than 1.4.14, the first release whose API rebuilds a
      converted store's indexes, or one whose tag is not a release (a custom build). Move it first
-     with `sibyl docker upgrade --tag 1.4.14` or newer. `SIBYL_IMAGE_TAG` does not change this.
+     with `sibyl docker upgrade --tag <release>`, 1.4.14 or newer; the refusal prints the exact
+     command. `SIBYL_IMAGE_TAG` does not change this.
    - SurrealDB keeps its data anywhere but the `sibyl_surreal` volume as `init` writes it: a bind
      mount, another or renamed volume, or a second mount over `/data`. Move such storage by hand
      with the runbook.
