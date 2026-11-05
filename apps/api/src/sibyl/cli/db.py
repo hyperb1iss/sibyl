@@ -675,10 +675,16 @@ async def _plane_schema_version(client: Any, *, name: str) -> int:
 
     Swallowing the failure and reporting version 0 makes an unreachable or broken
     store look like a fresh one, which then reads as a successful migration.
+    `init` reads before it bootstraps, when a fresh store has no schema_version
+    table yet; SurrealDB 4 fails a plain read of an undefined table, so the
+    read goes through the existence-checked record query and answers 0 there.
     """
-    from sibyl_core.backends.surreal.schema_version import get_schema_version
+    from sibyl_core.backends.surreal.schema_version import schema_version_record_query
 
-    return await get_schema_version(client.execute_query, name=name)
+    rows = await client.execute_query(schema_version_record_query(name, "version"))
+    first = rows[0] if isinstance(rows, list) and rows else rows
+    version = first.get("version") if isinstance(first, dict) else None
+    return int(version) if isinstance(version, int | float | str) else 0
 
 
 async def _init_plane(
