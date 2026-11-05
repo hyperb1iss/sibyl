@@ -351,8 +351,11 @@ DEFINE FIELD IF NOT EXISTS window_seconds ON telemetry_rollups TYPE int DEFAULT 
 DEFINE FIELD IF NOT EXISTS uptime_seconds ON telemetry_rollups TYPE number DEFAULT 0;
 DEFINE FIELD IF NOT EXISTS summaries ON telemetry_rollups TYPE object FLEXIBLE DEFAULT {{}};
 DEFINE FIELD IF NOT EXISTS trends ON telemetry_rollups TYPE array<object> DEFAULT [];
+DEFINE FIELD IF NOT EXISTS trends.* ON telemetry_rollups TYPE object FLEXIBLE;
 DEFINE FIELD IF NOT EXISTS metrics ON telemetry_rollups TYPE array<object> DEFAULT [];
+DEFINE FIELD IF NOT EXISTS metrics.* ON telemetry_rollups TYPE object FLEXIBLE;
 DEFINE FIELD IF NOT EXISTS recent_events ON telemetry_rollups TYPE array<object> DEFAULT [];
+DEFINE FIELD IF NOT EXISTS recent_events.* ON telemetry_rollups TYPE object FLEXIBLE;
 DEFINE FIELD IF NOT EXISTS created_at ON telemetry_rollups TYPE datetime DEFAULT time::now();
 DEFINE FIELD IF NOT EXISTS updated_at ON telemetry_rollups TYPE datetime DEFAULT time::now();
 
