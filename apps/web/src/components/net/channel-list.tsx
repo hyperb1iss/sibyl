@@ -6,6 +6,7 @@ import { useState } from 'react';
 import { Skeleton } from '@/components/ui/spinner';
 import type { NetChannel, NetThread } from '@/lib/api/net';
 import { formatActivityTime } from '@/lib/constants/activity';
+import { useNow } from '@/lib/hooks/now';
 import { netHref, plural } from './net-format';
 import { ChannelName } from './net-primitives';
 
@@ -158,6 +159,7 @@ export function ChannelList({
   onNavigate,
   showHeading = true,
 }: ChannelListProps) {
+  const now = useNow();
   const total = channels.reduce((sum, channel) => sum + channel.message_count, 0);
 
   return (
@@ -202,7 +204,7 @@ export function ChannelList({
                   {[
                     channel.last_message_at && (
                       <time key="last" dateTime={channel.last_message_at}>
-                        {formatActivityTime(channel.last_message_at)}
+                        {formatActivityTime(channel.last_message_at, now)}
                       </time>
                     ),
                     channel.thread_count > 0 && (

@@ -16,6 +16,7 @@ import { Skeleton } from '@/components/ui/spinner';
 import type { NetChannel, NetFeedResponse, NetMessage, NetThread } from '@/lib/api/net';
 import { formatActivityTime } from '@/lib/constants/activity';
 import { formatDateTime } from '@/lib/constants/formatting';
+import { useNow } from '@/lib/hooks/now';
 import {
   authorName,
   type ChannelPresence,
@@ -149,6 +150,7 @@ function PresenceToggle({
 }
 
 function PresencePanel({ presence, panelId }: { presence: ChannelPresence; panelId: string }) {
+  const now = useNow();
   const rows = (
     title: string,
     people: { key: string; name: string; seed: string; agent: string | null; at: string }[]
@@ -169,7 +171,7 @@ function PresencePanel({ presence, panelId }: { presence: ChannelPresence; panel
                 title={formatDateTime(person.at)}
                 className="ml-auto shrink-0 text-sc-fg-muted tabular-nums"
               >
-                {formatActivityTime(person.at)}
+                {formatActivityTime(person.at, now)}
               </time>
             </li>
           ))}
@@ -226,6 +228,7 @@ export interface ChannelStreamProps {
 }
 
 export function ChannelStream({ channel, channels, feed, presence }: ChannelStreamProps) {
+  const now = useNow();
   const [presenceOpen, setPresenceOpen] = useState(false);
   const panelId = useId();
   const summary = channel ? channels.find(row => row.channel === channel) : undefined;
@@ -273,7 +276,7 @@ export function ChannelStream({ channel, channels, feed, presence }: ChannelStre
                 <span>
                   last post{' '}
                   <time dateTime={lastAt} title={formatDateTime(lastAt)}>
-                    {formatActivityTime(lastAt)}
+                    {formatActivityTime(lastAt, now)}
                   </time>
                 </span>
               </>
@@ -389,6 +392,7 @@ export interface ThreadViewProps {
 }
 
 export function ThreadView({ channel, thread, info, feed, projectNames }: ThreadViewProps) {
+  const now = useNow();
   const [detailsOpen, setDetailsOpen] = useState(false);
   const detailsId = useId();
   const messages = feed.data?.messages ?? [];
@@ -464,7 +468,7 @@ export function ThreadView({ channel, thread, info, feed, projectNames }: Thread
                       dateTime={info.last_message_at}
                       title={formatDateTime(info.last_message_at)}
                     >
-                      {formatActivityTime(info.last_message_at)}
+                      {formatActivityTime(info.last_message_at, now)}
                     </time>
                   </span>
                 )}
