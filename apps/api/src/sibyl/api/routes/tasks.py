@@ -5,13 +5,13 @@ Dedicated endpoints for task lifecycle operations with proper event broadcasting
 
 import asyncio
 import uuid
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Callable
 from contextlib import asynccontextmanager
 from typing import Any, cast
 
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from sibyl.api.decorators import handle_workflow_errors
 from sibyl.api.errors import entity_locked
@@ -22,7 +22,15 @@ from sibyl.api.idempotency import (
     save_idempotent_response,
     serialize_idempotent_request,
 )
-from sibyl.api.schemas import MutationReceipt
+from sibyl.api.routes.net import (
+    authorize_project_naming,
+    caller_name,
+    deliver_net_message,
+    net_message,
+    refuse_pinned_elsewhere,
+)
+from sibyl.api.schemas import EntityResponse, MutationReceipt
+from sibyl.api.schemas.net import NetAgentLabels, NetMessage
 from sibyl.api.websocket import broadcast_event, entity_change_payload
 from sibyl.auth.authorization import verify_entity_project_access
 from sibyl.auth.context import AuthContext
@@ -47,6 +55,12 @@ from sibyl_core.auth.memory_policy import (
 )
 from sibyl_core.errors import EntityNotFoundError, RevisionConflictError
 from sibyl_core.models.tasks import AuthorType, Note, TaskComplexity, TaskPriority, TaskStatus
+from sibyl_core.services.net import (
+    MAX_BODY_CHARS,
+    new_message_id,
+    normalize_body,
+    normalize_channel,
+)
 from sibyl_core.tools.helpers import _project_id_for_policy
 
 log = structlog.get_logger()
@@ -1076,6 +1090,303 @@ async def _locked_task_write(group_id: str, task_id: str) -> AsyncGenerator[Any]
         raise HTTPException(
             status_code=500, detail="Failed to update task. Please try again."
         ) from e
+
+
+# =============================================================================
+# Handing a task to another agent
+# =============================================================================
+
+TASK_THREAD_PREFIX = "task:"
+# A task title on the first line of a handoff is cut to this many characters.
+HANDOFF_TITLE_CHARS = 200
+
+
+class AssignTaskRequest(NetAgentLabels):
+    """Hand a task to a sibylnet channel, normally a person's ``@name`` agent inbox."""
+
+    to: str = Field(description="Channel to hand the task to, such as `@ada`")
+    note: str | None = Field(
+        default=None,
+        max_length=MAX_BODY_CHARS,
+        description="Context for whoever picks the task up, posted under the first line",
+    )
+
+    @field_validator("to")
+    @classmethod
+    def _to(cls, value: str) -> str:
+        return normalize_channel(value)
+
+    @field_validator("note")
+    @classmethod
+    def _note(cls, value: str | None) -> str | None:
+        return (value.strip() or None) if value is not None else None
+
+
+class UnassignTaskRequest(NetAgentLabels):
+    """Take a sibylnet channel off a task's assignees."""
+
+    assignee: str = Field(description="Channel to take off the task, such as `@ada`")
+
+    @field_validator("assignee")
+    @classmethod
+    def _assignee(cls, value: str) -> str:
+        return normalize_channel(value)
+
+
+class TaskAssignResponse(BaseModel):
+    """The task as it stands after the change, and the notice posted about it.
+
+    Absent values default to null, so a response saved for idempotent replay
+    reads back as it was sent.
+    """
+
+    task: EntityResponse
+    changed: bool = Field(description="Whether the task's assignees changed")
+    message: NetMessage | None = Field(
+        default=None,
+        description=(
+            "The notice posted to the channel on thread `task:<task_id>`; "
+            "null when an unassign found nothing to remove"
+        ),
+    )
+    mutation_receipt: MutationReceipt | None = None
+
+
+def _same_channel(assignee: object, channel: str) -> bool:
+    return str(assignee).strip().lower() == channel
+
+
+def _handoff_title(entity: Any) -> str:
+    title = " ".join(str(getattr(entity, "name", "") or "").split()) or "(untitled task)"
+    return title[:HANDOFF_TITLE_CHARS]
+
+
+def assignment_body(title: str, task_id: str, note: str | None) -> str:
+    """``Assigned: <title>``, then the note, then the task id."""
+    lines = [f"Assigned: {title}", *([note] if note else []), f"Task: {task_id}"]
+    try:
+        return normalize_body("\n".join(lines))
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail=f"note is too long: the handoff must fit in {MAX_BODY_CHARS} characters",
+        ) from exc
+
+
+def unassignment_body(title: str, task_id: str) -> str:
+    """One line: ``Unassigned: <title> (task <task_id>)``."""
+    return normalize_body(f"Unassigned: {title} (task {task_id})")
+
+
+def _task_entity_response(entity: Any) -> EntityResponse:
+    """The task the way ``GET /entities/{id}`` returns it, without related entities."""
+    metadata = dict(getattr(entity, "metadata", {}) or {})
+    return EntityResponse(
+        id=entity.id,
+        revision=getattr(entity, "revision", None),
+        entity_type=entity.entity_type,
+        name=entity.name,
+        description=entity.description or "",
+        content=(entity.content or "")[:50000],
+        category=getattr(entity, "category", None) or metadata.get("category"),
+        languages=getattr(entity, "languages", None) or metadata.get("languages", []) or [],
+        tags=getattr(entity, "tags", None) or metadata.get("tags", []) or [],
+        metadata=metadata,
+        source_file=getattr(entity, "source_file", None),
+        created_at=getattr(entity, "created_at", None),
+        updated_at=getattr(entity, "updated_at", None),
+    )
+
+
+async def _change_assignees(
+    group_id: str,
+    task_id: str,
+    *,
+    user_id: str,
+    change: Callable[[list[str]], list[str]],
+) -> tuple[Any, bool]:
+    """Apply ``change`` to the task's assignees through the synchronous update path.
+
+    The assignees are read under the task's lock, so concurrent assigns all
+    land. A change that leaves the list as it was writes and broadcasts
+    nothing, and the task comes back as it stands.
+    """
+    async with _locked_task_write(group_id, task_id) as runtime:
+        current = await runtime.entity_manager.get(task_id)
+        assignees = [str(entry) for entry in (current.metadata.get("assignees") or [])]
+        wanted = change(assignees)
+        if wanted == assignees:
+            return current, False
+        request = UpdateTaskRequest(assignees=wanted)
+        update_data = _build_update_data(request, user_id)
+        updated, _ = await _write_task_update(runtime, task_id, request, update_data)
+        await _broadcast_task_update(
+            task_id, "update_task", {"name": updated.name, **update_data}, org_id=group_id
+        )
+        return updated, True
+
+
+async def _hand_off(
+    *,
+    task_id: str,
+    route_action: str,
+    channel: str,
+    request: NetAgentLabels,
+    http_request: Request,
+    org: AuthOrganization,
+    auth: AuthContext,
+    change: Callable[[list[str]], list[str]],
+    notice: Callable[[str], str],
+    post_unchanged: bool,
+) -> TaskAssignResponse:
+    """Change a task's assignees, then post the notice on its ``task:<id>`` thread.
+
+    The caller needs the write access a task update needs, inside the API
+    key's project grants, because the notice names the task's project and so
+    pins its thread there and distills it into that project's memory. The
+    task is written first: a notice that fails to post after the write is
+    retried with the same ``Idempotency-Key``, and the retry finds the
+    assignees already changed and posts the notice once.
+    """
+    entity = await _verify_task_access(task_id, org, auth)
+    project_id = _project_id_for_policy(entity)
+    if project_id is not None:
+        await authorize_project_naming(auth, project_id)
+    elif auth.api_key_project_ids is not None:
+        raise HTTPException(status_code=403, detail="api_key_project_denied")
+
+    group_id = str(org.id)
+    principal_id = _task_principal_id(auth)
+    path = f"/tasks/{task_id}/{route_action}"
+    idempotency_payload = {"body": request.model_dump(mode="json")}
+    replayed = await replay_idempotent_response(
+        http_request,
+        organization_id=org.id,
+        principal_id=principal_id,
+        method="POST",
+        path=path,
+        payload=idempotency_payload,
+        response_model=TaskAssignResponse,
+        content_session=None,
+    )
+    if replayed is not None:
+        return replayed
+
+    thread = f"{TASK_THREAD_PREFIX}{task_id}"
+    body = notice(_handoff_title(entity))
+    await refuse_pinned_elsewhere(
+        organization_id=group_id, channel=channel, thread=thread, project_id=project_id
+    )
+    task, changed = await _change_assignees(group_id, task_id, user_id=principal_id, change=change)
+    message: NetMessage | None = None
+    if changed or post_unchanged:
+        record = await deliver_net_message(
+            organization_id=group_id,
+            ctx=auth,
+            message_id=new_message_id(),
+            channel=channel,
+            thread=thread,
+            kind="message",
+            body=body,
+            project_id=project_id,
+            agent=request.agent,
+            session=request.session,
+        )
+        message = net_message(record, caller_name(auth))
+
+    revision = getattr(task, "revision", None)
+    response = TaskAssignResponse(
+        task=_task_entity_response(task),
+        changed=changed,
+        message=message,
+        mutation_receipt=mutation_receipt(
+            http_request,
+            applied=changed or message is not None,
+            revision=revision if type(revision) is int else None,
+            affected_records=[
+                *([f"entity:{task_id}"] if changed else []),
+                *([f"net_message:{message.id}"] if message is not None else []),
+            ],
+        ),
+    )
+    await save_idempotent_response(
+        http_request,
+        organization_id=org.id,
+        principal_id=principal_id,
+        method="POST",
+        path=path,
+        payload=idempotency_payload,
+        response=response,
+        status_code=200,
+        content_session=None,
+    )
+    return response
+
+
+@router.post("/{task_id}/assign", response_model=TaskAssignResponse)
+@handle_workflow_errors("assign_task")
+@serialize_idempotent_request
+async def assign_task(
+    task_id: str,
+    request: AssignTaskRequest,
+    http_request: Request = _REQUEST_AUTO_INJECT_SENTINEL,
+    org: AuthOrganization = Depends(get_current_organization),
+    auth: AuthContext = Depends(get_auth_context),
+) -> TaskAssignResponse:
+    """Hand a task to a channel: add it to the assignees and post the handoff there.
+
+    The channel joins the assignees once; assigning it again leaves the task
+    alone but posts the handoff again, so a fresh note reaches the receiver.
+    The handoff lands on thread ``task:<task_id>`` in the channel, pinned to
+    the task's project: first line ``Assigned: <title>``, then the note, then
+    the task id. ``Idempotency-Key`` makes a retried assign post once.
+    """
+    return await _hand_off(
+        task_id=task_id,
+        route_action="assign",
+        channel=request.to,
+        request=request,
+        http_request=http_request,
+        org=org,
+        auth=auth,
+        change=lambda assignees: (
+            assignees
+            if any(_same_channel(entry, request.to) for entry in assignees)
+            else [*assignees, request.to]
+        ),
+        notice=lambda title: assignment_body(title, task_id, request.note),
+        post_unchanged=True,
+    )
+
+
+@router.post("/{task_id}/unassign", response_model=TaskAssignResponse)
+@handle_workflow_errors("unassign_task")
+@serialize_idempotent_request
+async def unassign_task(
+    task_id: str,
+    request: UnassignTaskRequest,
+    http_request: Request = _REQUEST_AUTO_INJECT_SENTINEL,
+    org: AuthOrganization = Depends(get_current_organization),
+    auth: AuthContext = Depends(get_auth_context),
+) -> TaskAssignResponse:
+    """Take a channel off a task's assignees and post a one-line notice on its thread.
+
+    A channel that was not assigned leaves the task alone and posts nothing.
+    """
+    return await _hand_off(
+        task_id=task_id,
+        route_action="unassign",
+        channel=request.assignee,
+        request=request,
+        http_request=http_request,
+        org=org,
+        auth=auth,
+        change=lambda assignees: [
+            entry for entry in assignees if not _same_channel(entry, request.assignee)
+        ],
+        notice=lambda title: unassignment_body(title, task_id),
+        post_unchanged=False,
+    )
 
 
 # =============================================================================
