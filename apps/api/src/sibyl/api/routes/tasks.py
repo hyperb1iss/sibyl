@@ -23,11 +23,11 @@ from sibyl.api.idempotency import (
     serialize_idempotent_request,
 )
 from sibyl.api.routes.net import (
+    TASK_THREAD_PREFIX,
     authorize_project_naming,
     caller_name,
     deliver_net_message,
     net_message,
-    refuse_pinned_elsewhere,
 )
 from sibyl.api.schemas import EntityResponse, MutationReceipt
 from sibyl.api.schemas.net import NetAgentLabels, NetMessage
@@ -1096,7 +1096,6 @@ async def _locked_task_write(group_id: str, task_id: str) -> AsyncGenerator[Any]
 # Handing a task to another agent
 # =============================================================================
 
-TASK_THREAD_PREFIX = "task:"
 # A task title on the first line of a handoff is cut to this many characters.
 HANDOFF_TITLE_CHARS = 200
 
@@ -1242,11 +1241,9 @@ async def _hand_off(
     """Change a task's assignees, then post the notice on its ``task:<id>`` thread.
 
     The caller needs the write access a task update needs, inside the API
-    key's project grants, because the notice names the task's project and so
-    pins its thread there and distills it into that project's memory. The
-    task is written first: a notice that fails to post after the write is
-    retried with the same ``Idempotency-Key``, and the retry finds the
-    assignees already changed and posts the notice once.
+    key's project grants, because the notice names the task's project, which
+    is the pin of every ``task:<id>`` thread, and so lands its distillation in
+    that project's memory. The task is written first, then the notice posted.
     """
     entity = await _verify_task_access(task_id, org, auth)
     project_id = _project_id_for_policy(entity)
@@ -1274,9 +1271,6 @@ async def _hand_off(
 
     thread = f"{TASK_THREAD_PREFIX}{task_id}"
     body = notice(_handoff_title(entity))
-    await refuse_pinned_elsewhere(
-        organization_id=group_id, channel=channel, thread=thread, project_id=project_id
-    )
     task, changed = await _change_assignees(group_id, task_id, user_id=principal_id, change=change)
     message: NetMessage | None = None
     if changed or post_unchanged:
@@ -1291,6 +1285,7 @@ async def _hand_off(
             project_id=project_id,
             agent=request.agent,
             session=request.session,
+            thread_pin=project_id,
         )
         message = net_message(record, caller_name(auth))
 

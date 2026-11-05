@@ -1003,3 +1003,45 @@ async def test_recent_authors_seek_the_window_instead_of_history(
     assert attributes["limit"] == "$limit"
     rows = await recent_net_authors(organization_id=ORG, channel=channel)
     assert [row.author_user_id for row in rows] == [ADA]
+
+
+async def test_a_thread_pin_given_by_the_caller_outranks_the_stored_one(
+    store: SurrealContentClient,
+) -> None:
+    await post(thread="task:t-1", project_id="project_squat")
+    assert (await thread_state("#reviews", "task:t-1")).project_id == "project_squat"
+
+    await post_net_message(
+        organization_id=ORG,
+        channel="#reviews",
+        thread="task:t-1",
+        kind="message",
+        body="reply",
+        author_user_id=GRACE,
+        thread_pin="project_task",
+    )
+    assert (await thread_state("#reviews", "task:t-1")).project_id == "project_task"
+
+    with pytest.raises(NetThreadProjectPinnedError):
+        await post_net_message(
+            organization_id=ORG,
+            channel="#reviews",
+            thread="task:t-1",
+            kind="message",
+            body="claim",
+            author_user_id=GRACE,
+            project_id="project_squat",
+            thread_pin="project_task",
+        )
+    named = await post_net_message(
+        organization_id=ORG,
+        channel="#reviews",
+        thread="task:t-1",
+        kind="message",
+        body="same project",
+        author_user_id=GRACE,
+        project_id="project_task",
+        thread_pin="project_task",
+    )
+    assert named.project_id == "project_task"
+    assert (await thread_state("#reviews", "task:t-1")).message_count == 3

@@ -32,6 +32,9 @@ messages share the thread ``''`` so the key stays total.
 
 Project pins. The first post to a named thread that names a project pins the
 thread to it, so its project can never be moved by whoever writes last. A
+caller that knows a thread's project outright (a ``task:<id>`` thread belongs
+to that task's project) passes it as ``thread_pin``: it is the pin whatever
+was stored, so nobody can claim such a thread for another project first. A
 later plain message naming a different project is refused in the same
 statement; a decision never is, because its project only decides where its
 own memory goes, and it leaves an existing pin alone. Threadless messages
@@ -133,7 +136,7 @@ PROJECT_PINNED_MARKER = "net_thread_project_pinned"
 _POST_MESSAGE = f"""
 RETURN {{
     LET $key = {_THREAD_RECORD};
-    LET $pinned = (SELECT VALUE project_id FROM $key)[0];
+    LET $pinned = $thread_pin ?? (SELECT VALUE project_id FROM $key)[0];
     IF $kind = 'message' AND $thread != '' AND $project_id != NONE
         AND $pinned != NONE AND $pinned != $project_id {{
         THROW '{PROJECT_PINNED_MARKER}';
@@ -536,6 +539,7 @@ async def post_net_message(
     author_agent: str | None = None,
     author_session: str | None = None,
     decision_memory_id: str | None = None,
+    thread_pin: str | None = None,
 ) -> NetMessageRecord:
     """Store one message and count it on its thread, in one statement.
 
@@ -544,7 +548,8 @@ async def post_net_message(
     never drifts from the rows. Raises ``NetThreadProjectPinnedError``, with
     nothing written, when a plain message on a named thread names a project
     other than the thread's pin. The message keeps the project it named
-    either way.
+    either way. ``thread_pin``, when given, is the thread's pin regardless of
+    the stored one, and is written onto the thread.
     """
     # The API validates these on the way in; a direct caller is held to the
     # same rules, since the labels are printed inside transcript lines.
@@ -581,6 +586,7 @@ async def post_net_message(
                 thread=thread,
                 kind=kind,
                 project_id=project_id,
+                thread_pin=thread_pin if thread else None,
             )
         except Exception as failure:
             # The live engine raises its own error type and the client its

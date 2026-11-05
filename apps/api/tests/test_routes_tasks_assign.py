@@ -10,6 +10,7 @@ SIBYL_LIVE_SURREAL_TESTS=1, on a live server.
 
 from __future__ import annotations
 
+import asyncio
 from types import SimpleNamespace
 from typing import Any
 from uuid import uuid4
@@ -20,6 +21,7 @@ import pytest
 from sibyl.api.routes import tasks as task_routes
 from sibyl.persistence.graph_runtime import get_task_graph_runtime
 from sibyl_core.models.tasks import Task, TaskStatus
+from sibyl_core.services.net import post_net_message
 from tests.test_routes_net import (
     api_key,
     client_for,
@@ -196,25 +198,69 @@ async def test_unassign_removes_the_assignee_and_posts_one_line_on_the_same_thre
     assert len(await stored_messages(world)) == 2
 
 
-async def test_a_thread_pinned_elsewhere_is_refused_before_the_task_is_touched(
+async def threads_of(world: SimpleNamespace, channel: str) -> list[tuple[object, object]]:
+    async with client_for(world, world.grace) as client:
+        listing = (await client.get("/api/net/threads", params={"channel": channel})).json()
+    return [(row["thread"], row["project_id"]) for row in listing["threads"]]
+
+
+async def test_a_task_thread_belongs_to_its_task_whoever_posts_first(
     world: SimpleNamespace,
 ) -> None:
-    pinned = await post(
-        world,
-        world.ada,
+    thread = f"task:{world.task}"
+    # Claiming the handoff thread for another project ahead of the handoff
+    # is refused; replying in it, with or without the task's project, is not.
+    squat = await post(
+        world, world.ada, channel="@grace", body="mine now", thread=thread, project_id=world.other
+    )
+    assert squat.status_code == 409, squat.text
+    assert squat.json()["detail"]["project_id"] == world.shared
+    for project in (None, world.shared):
+        reply = await post(
+            world,
+            world.grace,
+            channel="@grace",
+            body="On it",
+            thread=thread,
+            **({"project_id": project} if project else {}),
+        )
+        assert reply.status_code == 201, reply.text
+    assert await threads_of(world, "@grace") == [(thread, world.shared)]
+
+    assigned = await assign(world, world.ada, to="@grace")
+    assert assigned.status_code == 200, assigned.text
+    assert await threads_of(world, "@grace") == [(thread, world.shared)]
+
+
+async def test_a_pin_stored_for_another_project_never_blocks_the_handoff(
+    world: SimpleNamespace,
+) -> None:
+    """A squatted pin, or one racing the assign, gives way to the task's project."""
+    thread = f"task:{world.task}"
+    # A pin stored before task threads followed their task, or by a direct writer.
+    await post_net_message(
+        organization_id=world.id,
         channel="@grace",
+        thread=thread,
+        kind="message",
         body="An older conversation",
-        thread=f"task:{world.task}",
+        author_user_id=world.ada,
         project_id=world.other,
     )
-    assert pinned.status_code == 201, pinned.text
 
-    refused = await assign(world, world.ada, to="@grace")
+    async def squat() -> int:
+        response = await post(
+            world, world.ada, channel="@grace", body="x", thread=thread, project_id=world.other
+        )
+        return response.status_code
 
-    assert refused.status_code == 409, refused.text
-    assert refused.json()["detail"]["error"] == "thread_project_pinned"
-    assert await assignees(world) == []
-    assert len(await stored_messages(world)) == 1
+    outcomes = await asyncio.gather(assign(world, world.ada, to="@grace"), squat(), squat())
+
+    assert outcomes[0].status_code == 200, outcomes[0].text
+    assert outcomes[1:] == [409, 409]
+    assert await assignees(world) == ["@grace"]
+    assert await threads_of(world, "@grace") == [(thread, world.shared)]
+    assert len(await stored_messages(world)) == 2
 
 
 @pytest.mark.parametrize(

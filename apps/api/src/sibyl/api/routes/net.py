@@ -19,7 +19,10 @@ remembered write gets. On a named thread, the first post that names a
 project pins the thread to it. A later plain message naming a different
 project is refused with 409; a post naming none always goes through, and so
 does a decision, whose project only decides where its own memory goes.
-Threadless messages never pin.
+Threadless messages never pin. A ``task:<id>`` thread naming a task of this
+organization is pinned to that task's project from its first message on,
+whoever posts it, so it cannot be claimed for another project ahead of the
+task's handoff.
 
 A ``decision`` is remembered first, through the same scope resolution,
 project check and memory policy as ``POST /memory/raw``, and is posted only
@@ -36,7 +39,7 @@ import asyncio
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Annotated
+from typing import Annotated, Any
 
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
@@ -72,6 +75,8 @@ from sibyl.coordination.presence import WATCHING_TTL_SECONDS, get_presence
 from sibyl.persistence.auth_runtime import get_users_by_ids
 from sibyl_core.auth import AuthOrganization, ProjectRole
 from sibyl_core.auth.memory_policy import MemoryPolicyAction
+from sibyl_core.errors import EntityNotFoundError
+from sibyl_core.models.entities import EntityType
 from sibyl_core.services.net import (
     DEFAULT_FEED_LIMIT,
     MAX_AGENT_CHARS,
@@ -95,6 +100,7 @@ from sibyl_core.services.net import (
     recent_net_authors,
 )
 from sibyl_core.services.surreal_content import remember_raw_memory
+from sibyl_core.tools.helpers import _project_id_for_policy
 
 log = structlog.get_logger()
 
@@ -333,8 +339,45 @@ def _pinned_conflict(channel: str, thread: str, pinned: str | None) -> HTTPExcep
     )
 
 
+TASK_THREAD_PREFIX = "task:"
+
+
+async def get_knowledge_read_adapter(group_id: str) -> Any:
+    from sibyl.persistence.graph_runtime import get_knowledge_read_adapter as service
+
+    return await service(group_id)
+
+
+async def task_thread_pin(organization_id: str, thread: str) -> str | None:
+    """The project a ``task:<id>`` thread belongs to: its task's, when that task exists here.
+
+    Such a thread is the conversation about one task, so it is pinned to that
+    task's project whoever posts first, and nobody can claim it for another
+    project ahead of a handoff. Any other thread, or one naming a task this
+    organization does not hold, follows the first-post rule.
+    """
+    if not thread.startswith(TASK_THREAD_PREFIX):
+        return None
+    task_id = thread.removeprefix(TASK_THREAD_PREFIX).strip()
+    if not task_id:
+        return None
+    service = await get_knowledge_read_adapter(organization_id)
+    try:
+        entity = await service.get_entity(task_id)
+    except (EntityNotFoundError, KeyError):
+        return None
+    if entity is None or getattr(entity, "entity_type", None) != EntityType.TASK:
+        return None
+    return _project_id_for_policy(entity)
+
+
 async def refuse_pinned_elsewhere(
-    *, organization_id: str, channel: str, thread: str, project_id: str | None
+    *,
+    organization_id: str,
+    channel: str,
+    thread: str,
+    project_id: str | None,
+    thread_pin: str | None = None,
 ) -> None:
     """Refuse a plain message naming a project other than its thread's pin, before any write.
 
@@ -343,7 +386,7 @@ async def refuse_pinned_elsewhere(
     """
     if not project_id or not thread:
         return
-    pinned = await net_thread_project(
+    pinned = thread_pin or await net_thread_project(
         organization_id=organization_id, channel=channel, thread=thread
     )
     if pinned is not None and pinned != project_id:
@@ -363,6 +406,7 @@ async def deliver_net_message(
     agent: str | None,
     session: str | None,
     decision_memory_id: str | None = None,
+    thread_pin: str | None = None,
 ) -> NetMessageRecord:
     """Store a message as the caller, under the key they used, and wake its watchers.
 
@@ -383,10 +427,11 @@ async def deliver_net_message(
             author_agent=agent,
             author_session=session,
             decision_memory_id=decision_memory_id,
+            thread_pin=thread_pin,
         )
     except NetThreadProjectPinnedError as exc:
         # Only a plain message is refused, so no decision memory is behind it.
-        pinned = await net_thread_project(
+        pinned = thread_pin or await net_thread_project(
             organization_id=organization_id, channel=channel, thread=thread
         )
         raise _pinned_conflict(channel, thread, pinned) from exc
@@ -440,12 +485,14 @@ async def post_message(
     )
     if replayed is not None:
         return replayed
+    pin = await task_thread_pin(str(org.id), thread)
     if not decision:
         await refuse_pinned_elsewhere(
             organization_id=str(org.id),
             channel=request.channel,
             thread=thread,
             project_id=request.project_id,
+            thread_pin=pin,
         )
     message_id = new_message_id()
     members = caller_name(ctx)
@@ -473,6 +520,7 @@ async def post_message(
         agent=request.agent,
         session=request.session,
         decision_memory_id=decision_memory_id,
+        thread_pin=pin,
     )
     response = NetMessageCreateResponse(
         message=net_message(record, members), decision_memory_id=decision_memory_id
@@ -797,6 +845,7 @@ async def list_threads(
 
 __all__ = [
     "NET_CAPTURE_SURFACE",
+    "TASK_THREAD_PREFIX",
     "authorize_project_naming",
     "author_directory",
     "caller_name",
@@ -809,4 +858,5 @@ __all__ = [
     "refuse_pinned_elsewhere",
     "router",
     "shared_feed_reads",
+    "task_thread_pin",
 ]
