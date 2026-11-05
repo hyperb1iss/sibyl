@@ -13,7 +13,9 @@ after the write committed, so by then the database clock has passed the
 message's ``created_at`` plus the window. The bus is fire-and-forget (a
 Redis reconnect drops whatever was published meanwhile), so a waiter also
 re-reads on a slow safety interval; that interval, not a poll, bounds how
-late a message can be after a lost event.
+late a message can be after a lost event. Waiters on the same question share
+a beat for it, so their re-reads join one shared read (see ``net_reads``),
+while different questions spread their beats across the interval.
 
 A waiter registers before its first read. A post that lands between the read
 and the wait still wakes it, and a post announced shortly before it
@@ -43,6 +45,8 @@ WAKE_AFTER_SECONDS = SETTLE_SECONDS + 0.25
 # A waiter re-reads at least this often even with no event, which is the most
 # a message can be delayed if the bus drops its announcement.
 SAFETY_RECHECK_SECONDS = 5.0
+# Distinct phases a question's safety beat can take within the interval.
+_BEAT_STEPS = 1000
 
 
 @dataclass(eq=False, slots=True)
@@ -60,6 +64,12 @@ class NetWaiter:
             return False
         return self.thread is None or self.thread == thread
 
+    def recheck_in(self, now: float) -> float:
+        """Seconds from ``now`` to this waiter's next safety re-read, at most the interval."""
+        phase = hash((self.organization_id, self.channels, self.thread)) % _BEAT_STEPS
+        offset = SAFETY_RECHECK_SECONDS * phase / _BEAT_STEPS
+        return SAFETY_RECHECK_SECONDS - (now - offset) % SAFETY_RECHECK_SECONDS
+
     def wake_at(self, when: float) -> None:
         # The earliest pending wake wins: one re-read picks up every message
         # that settled by then, and anything later wakes it again.
@@ -67,18 +77,26 @@ class NetWaiter:
             self.due = when
         self.signal.set()
 
-    async def wait(self, at_most: float) -> None:
-        """Return when a matching message has settled, or after ``at_most`` seconds."""
+    async def wait(self, recheck: float, remaining: float) -> None:
+        """Return once a matching message has settled, or at the safety recheck.
+
+        Waits at most ``recheck`` seconds for a wake. A wake, once it comes,
+        is slept out to its due time even past the recheck: returning at the
+        recheck would re-read before the message settled and drop the wake,
+        leaving the message for the next recheck. Never past ``remaining``,
+        the request's own time; a message that settles after the request
+        ends wakes the next request through the recent announcements.
+        """
         loop = asyncio.get_running_loop()
-        deadline = loop.time() + at_most
+        end = loop.time() + remaining
         try:
-            await asyncio.wait_for(self.signal.wait(), at_most)
+            await asyncio.wait_for(self.signal.wait(), min(recheck, remaining))
         except TimeoutError:
             return
         due = self.due if self.due is not None else loop.time()
         self.signal.clear()
         self.due = None
-        delay = min(due, deadline) - loop.time()
+        delay = min(due, end) - loop.time()
         if delay > 0:
             await asyncio.sleep(delay)
 

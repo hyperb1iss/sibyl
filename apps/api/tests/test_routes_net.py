@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import itertools
 import os
 from collections.abc import AsyncIterator, Iterator
 from contextlib import asynccontextmanager
@@ -21,6 +22,7 @@ import pytest
 from fastapi import FastAPI, Request
 from pydantic import SecretStr
 
+from sibyl.api import net_events
 from sibyl.api.net_events import net_wakeup_subscriber
 from sibyl.api.pubsub import get_pubsub
 from sibyl.api.routes import net as net_routes
@@ -716,7 +718,11 @@ async def test_a_watcher_starts_from_now_and_long_polls(org: SimpleNamespace) ->
 
 @pytest.fixture
 def feed_reads(monkeypatch: pytest.MonkeyPatch) -> list[float]:
-    """When each feed query ran, as the route issued them."""
+    """When each feed query ran, as the route issued them.
+
+    The safety re-read is pushed past every wait here, so each read counted
+    is one a request or a wake asked for.
+    """
     reads: list[float] = []
     real = net_routes.read_net_feed
 
@@ -725,6 +731,7 @@ def feed_reads(monkeypatch: pytest.MonkeyPatch) -> list[float]:
         return await real(**kwargs)  # type: ignore[arg-type]
 
     monkeypatch.setattr(net_routes, "read_net_feed", counted)
+    monkeypatch.setattr(net_events, "SAFETY_RECHECK_SECONDS", 600.0)
     return reads
 
 
@@ -770,9 +777,54 @@ async def test_a_post_elsewhere_does_not_wake_a_long_poll(
     )
 
     assert waited.json()["messages"] == []
-    # The first read, one safety recheck at five seconds, and the last read
-    # when the wait runs out: no reads driven by the other channel's post.
-    assert len(feed_reads) == 3
+    # The first read and the last one when the wait runs out: no reads
+    # driven by the other channel's post.
+    assert len(feed_reads) == 2
+
+
+async def test_a_wait_rereads_on_its_safety_beat_without_any_post(
+    org: SimpleNamespace, feed_reads: list[float], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(net_events, "SAFETY_RECHECK_SECONDS", 1.0)
+    start = await feed(org, org.grace, channel="#quiet", limit=0)
+    feed_reads.clear()
+
+    waited = await feed(org, org.grace, channel="#quiet", since=start.json()["next_since"], wait=4)
+
+    assert waited.json()["messages"] == []
+    # A lost announcement costs at most one beat: the wait re-read about
+    # once a second rather than only when it ran out.
+    assert 4 <= len(feed_reads) <= 6
+    assert all(later - earlier <= 1.5 for earlier, later in itertools.pairwise(feed_reads))
+
+
+async def test_watchers_a_post_wakes_together_share_their_reads(
+    org: SimpleNamespace, feed_reads: list[float]
+) -> None:
+    start = await feed(org, org.grace, channel="#reviews", limit=0)
+    since = start.json()["next_since"]
+    feed_reads.clear()
+    readers = [org.grace, org.vic, org.ada] * 3
+
+    async def post_later() -> float:
+        await asyncio.sleep(1.0)
+        assert (await post(org, org.ada, channel="#reviews", body="news")).status_code == 201
+        return asyncio.get_running_loop().time()
+
+    poster = asyncio.create_task(post_later())
+    waited = await asyncio.gather(
+        *(feed(org, reader, channel="#reviews", since=since, wait=20) for reader in readers)
+    )
+    posted_at = await poster
+
+    for response in waited:
+        assert response.status_code == 200, response.text
+        assert [m["body"] for m in response.json()["messages"]] == ["news"]
+        assert response.json()["messages"][0]["author"]["name"] == "Ada"
+    # Nine watchers woke for one post. Each used to read on its own; now the
+    # wake costs one read, two if their timers straddle a turn of the loop.
+    assert len([at for at in feed_reads if at >= posted_at]) <= 2
+    assert len(feed_reads) <= len(readers) + 2
 
 
 async def test_channels_and_threads_list_newest_first(org: SimpleNamespace) -> None:

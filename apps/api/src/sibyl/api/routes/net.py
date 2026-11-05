@@ -27,7 +27,7 @@ runs again on retry, so that decision can be remembered twice.
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from typing import Annotated
 
@@ -39,7 +39,8 @@ from sibyl.api.idempotency import (
     save_idempotent_response,
     serialize_idempotent_request,
 )
-from sibyl.api.net_events import SAFETY_RECHECK_SECONDS, announce_net_message, net_wakeups
+from sibyl.api.net_events import announce_net_message, net_wakeups
+from sibyl.api.net_reads import FeedQuestion, SharedFeedReads
 from sibyl.api.raw_capture_events import publish_raw_capture_changed
 from sibyl.api.routes import entity_contracts as contracts, memory_auth
 from sibyl.api.schemas.net import (
@@ -149,9 +150,25 @@ def net_message(record: NetMessageRecord, members: Mapping[str, AuthorName]) -> 
     )
 
 
-async def _net_messages(records: Sequence[NetMessageRecord]) -> list[NetMessage]:
-    members = await author_directory(record.author_user_id for record in records)
-    return [net_message(record, members) for record in records]
+def caller_name(ctx: AuthContext) -> dict[str, AuthorName]:
+    """The caller's display name, from the user the request authenticated as."""
+    email = str(ctx.user.email).strip() if ctx.user.email else None
+    name = str(ctx.user.name).strip() if ctx.user.name else None
+    return {str(ctx.user.id): AuthorName(name=name or email, email=email)}
+
+
+async def _read_feed_page(question: FeedQuestion, since: NetCursor, limit: int) -> NetFeedPage:
+    organization_id, channels, thread = question
+    return await read_net_feed(
+        organization_id=organization_id,
+        since=since,
+        channels=sorted(channels or ()),
+        thread=thread,
+        limit=limit,
+    )
+
+
+shared_feed_reads: SharedFeedReads[AuthorName] = SharedFeedReads(_read_feed_page, author_directory)
 
 
 def decision_title(body: str) -> str:
@@ -340,7 +357,7 @@ async def post_message(
         if pinned is not None and pinned != request.project_id:
             raise _pinned_conflict(request.channel, thread, pinned)
     message_id = new_message_id()
-    members = await author_directory([principal_id])
+    members = caller_name(ctx)
     decision_memory_id = (
         await _remember_decision(
             request,
@@ -477,32 +494,41 @@ async def read_feed(
     channels = _feed_channels(channel)
     thread_filter = _feed_thread(thread)
     organization_id = str(org.id)
+    question: FeedQuestion = (
+        organization_id,
+        frozenset(channels) if channels else None,
+        thread_filter,
+    )
     loop = asyncio.get_running_loop()
     deadline = loop.time() + wait
 
-    async def read() -> NetFeedPage:
-        return await read_net_feed(
+    async def read() -> tuple[NetFeedPage, Mapping[str, AuthorName]]:
+        if cursor is not None and limit > 0:
+            # Every waiter a post wakes reads at once; same-question reads
+            # in this process share one query.
+            return await shared_feed_reads.read(question, cursor, limit)
+        page = await read_net_feed(
             organization_id=organization_id,
             since=cursor,
             channels=channels,
             thread=thread_filter,
             limit=limit,
         )
+        return page, await author_directory(record.author_user_id for record in page.messages)
 
     # Registered before the first read, so a post landing between that read
     # and the wait still wakes this request.
-    with net_wakeups.watch(
-        organization_id, frozenset(channels) if channels else None, thread_filter
-    ) as waiter:
-        page = await read()
+    with net_wakeups.watch(*question) as waiter:
+        page, authors = await read()
         while not page.messages and limit > 0:
-            remaining = deadline - loop.time()
+            now = loop.time()
+            remaining = deadline - now
             if remaining <= 0 or await http_request.is_disconnected():
                 break
-            await waiter.wait(min(SAFETY_RECHECK_SECONDS, remaining))
-            page = await read()
+            await waiter.wait(waiter.recheck_in(now), remaining)
+            page, authors = await read()
     return NetFeedResponse(
-        messages=await _net_messages(page.messages),
+        messages=[net_message(record, authors) for record in page.messages],
         next_since=page.next_since.encode(),
         more=page.more,
     )
@@ -567,6 +593,8 @@ __all__ = [
     "decision_content",
     "decision_title",
     "author_directory",
+    "caller_name",
     "net_message",
+    "shared_feed_reads",
     "router",
 ]
