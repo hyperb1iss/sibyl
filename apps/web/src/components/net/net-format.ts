@@ -1,5 +1,6 @@
 import type {
   NetAuthor,
+  NetMessage,
   NetPresenceResponse,
   NetRecentAuthor,
   NetThread,
@@ -143,6 +144,86 @@ export function bodyPreview(body: string): { preview: string; lines: number } | 
     preview = preview.slice(0, cut > BODY_PREVIEW_CHARS / 2 ? cut : BODY_PREVIEW_CHARS);
   }
   return { preview: preview.trimEnd(), lines: lines.length };
+}
+
+// ---------------------------------------------------------------------------
+// Runs: the loop signal
+// ---------------------------------------------------------------------------
+
+/** Fewer than this many repeats reads as a double post, not a loop. */
+export const MIN_FOLD_RUN = 3;
+
+/** A body with outer whitespace trimmed and every inner run collapsed to one space. */
+export function normalizeBody(body: string): string {
+  return body.trim().replace(/\s+/g, ' ');
+}
+
+/**
+ * Two messages belong to one run when the same author's same agent said the
+ * same thing in the same place: same channel and thread, and bodies equal
+ * once whitespace is collapsed and every number is masked, so "retry 3 of
+ * 5" and "retry 4 of 5" match. Decisions never fold.
+ */
+function runKey(message: NetMessage): string | null {
+  if (message.kind !== 'message') return null;
+  return [
+    message.channel,
+    message.thread ?? '',
+    message.author.user_id,
+    message.author.agent ?? '',
+    normalizeBody(message.body).replace(/\d+/g, '#'),
+  ].join('\u0000');
+}
+
+export type NetListItem =
+  | { kind: 'message'; message: NetMessage }
+  | {
+      kind: 'run';
+      /** In list order. */
+      messages: NetMessage[];
+      /** Every body is the same text, not only the same up to numbers. */
+      identical: boolean;
+    };
+
+/**
+ * Fold runs of `minRun` or more consecutive near-identical messages into one
+ * item, keeping list order. Anything that breaks the run (another author, a
+ * different body, a decision) ends it.
+ */
+export function foldRuns(messages: NetMessage[], minRun = MIN_FOLD_RUN): NetListItem[] {
+  const items: NetListItem[] = [];
+  let index = 0;
+  while (index < messages.length) {
+    const key = runKey(messages[index]);
+    let end = index + 1;
+    if (key !== null) {
+      while (end < messages.length && runKey(messages[end]) === key) end += 1;
+    }
+    const run = messages.slice(index, end);
+    if (run.length >= minRun) {
+      const first = normalizeBody(run[0].body);
+      items.push({
+        kind: 'run',
+        messages: run,
+        identical: run.every(message => normalizeBody(message.body) === first),
+      });
+    } else {
+      for (const message of run) items.push({ kind: 'message', message });
+    }
+    index = end;
+  }
+  return items;
+}
+
+/** "in 5 seconds", "over 6 minutes": how long a run of messages took. */
+export function runSpanPhrase(messages: NetMessage[]): string {
+  const times = messages.map(message => Date.parse(message.created_at));
+  const earliest = Math.min(...times);
+  const latest = Math.max(...times);
+  const seconds = (latest - earliest) / 1000;
+  if (!Number.isFinite(seconds) || seconds < 1) return 'within a second';
+  if (seconds < 90) return `in ${Math.round(seconds)} seconds`;
+  return spanPhrase(new Date(earliest).toISOString(), new Date(latest).toISOString()) ?? '';
 }
 
 // ---------------------------------------------------------------------------

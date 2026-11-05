@@ -1,13 +1,17 @@
 import { describe, expect, it } from 'vitest';
-import type { NetPresenceResponse } from '@/lib/api/net';
+import type { NetMessage, NetPresenceResponse } from '@/lib/api/net';
 import {
   BODY_PREVIEW_LINES,
   bodyPreview,
   bodySegments,
   controlName,
+  foldRuns,
   isRemembered,
+  MIN_FOLD_RUN,
   netHref,
+  normalizeBody,
   presenceFor,
+  runSpanPhrase,
   spanPhrase,
   watchingCounts,
 } from './net-format';
@@ -162,5 +166,120 @@ describe('presence', () => {
     ]);
     expect(ada.recent).toEqual([]);
     expect(presenceFor(presence, null).watching).toHaveLength(3);
+  });
+});
+
+describe('foldRuns', () => {
+  let sequence = 0;
+  function msg(
+    body: string,
+    overrides: Partial<NetMessage> & { user?: string; agent?: string | null } = {}
+  ): NetMessage {
+    sequence += 1;
+    const { user = 'u-ada', agent = 'claude-code', ...rest } = overrides;
+    return {
+      id: `m-${sequence}`,
+      channel: '@grace',
+      thread: 'deploy:staging',
+      kind: 'message',
+      body,
+      project_id: null,
+      api_key_id: null,
+      decision_memory_id: null,
+      created_at: new Date(Date.UTC(2026, 10, 5, 10, 0, sequence)).toISOString(),
+      cursor: `c-${sequence}`,
+      author: { user_id: user, name: user, email: null, agent, session: null },
+      ...rest,
+    };
+  }
+
+  function shape(items: ReturnType<typeof foldRuns>): (string | number)[] {
+    return items.map(item => (item.kind === 'run' ? item.messages.length : item.message.body));
+  }
+
+  it('folds a run of the same message from one agent into one item', () => {
+    const items = foldRuns(
+      Array.from({ length: 6 }, () => msg('Deploy check still red on staging. Retrying.'))
+    );
+    expect(items).toHaveLength(1);
+    expect(items[0]).toMatchObject({ kind: 'run', identical: true });
+    expect(shape(items)).toEqual([6]);
+  });
+
+  it('ignores outer and repeated whitespace', () => {
+    expect(normalizeBody('  Retrying.\n\n now  ')).toBe('Retrying. now');
+    const items = foldRuns([msg('Retrying now'), msg('Retrying   now\n'), msg(' Retrying\nnow')]);
+    expect(items).toEqual([expect.objectContaining({ kind: 'run', identical: true })]);
+  });
+
+  it('folds messages that differ only in their numbers, and says they are not identical', () => {
+    const items = foldRuns([msg('Retry 1 of 5'), msg('Retry 2 of 5'), msg('Retry 13 of 15')]);
+    expect(items).toEqual([expect.objectContaining({ kind: 'run', identical: false })]);
+  });
+
+  it('leaves a run shorter than the minimum alone', () => {
+    expect(MIN_FOLD_RUN).toBe(3);
+    expect(shape(foldRuns([msg('Retrying.'), msg('Retrying.')]))).toEqual([
+      'Retrying.',
+      'Retrying.',
+    ]);
+  });
+
+  it('does not fold a mixed sequence', () => {
+    const items = foldRuns([
+      // Two agents trading the same line: no run belongs to one author.
+      msg('Still red.', { user: 'u-ada' }),
+      msg('Still red.', { user: 'u-grace' }),
+      msg('Still red.', { user: 'u-ada' }),
+      msg('Still red.', { user: 'u-grace' }),
+      // Same author, different words.
+      msg('Opened the PR.'),
+      msg('Rebased on main.'),
+      msg('CI is green.'),
+      // Same words, different agents of one person.
+      msg('Looking.', { agent: 'claude-code' }),
+      msg('Looking.', { agent: 'codex' }),
+      msg('Looking.', { agent: null }),
+      // Same words, different threads.
+      msg('Retrying.', { thread: 'a' }),
+      msg('Retrying.', { thread: 'b' }),
+      msg('Retrying.', { thread: null }),
+      // Same words, different channels.
+      msg('Ping.', { channel: '@ada' }),
+      msg('Ping.', { channel: '@grace' }),
+      msg('Ping.', { channel: '#reviews' }),
+    ]);
+    expect(items.every(item => item.kind === 'message')).toBe(true);
+    expect(items).toHaveLength(16);
+  });
+
+  it('never folds a decision, and a decision ends the run around it', () => {
+    const items = foldRuns([
+      msg('Ship it.'),
+      msg('Ship it.'),
+      msg('Ship it.', { kind: 'decision', decision_memory_id: 'raw_1' }),
+      msg('Ship it.'),
+      msg('Ship it.'),
+    ]);
+    expect(items.every(item => item.kind === 'message')).toBe(true);
+  });
+
+  it('keeps list order and folds only the repeating stretch', () => {
+    const items = foldRuns([
+      msg('Starting the deploy check.'),
+      msg('Still red. Retrying.'),
+      msg('Still red. Retrying.'),
+      msg('Still red. Retrying.'),
+      msg('Still red. Retrying.', { user: 'u-grace', agent: 'codex' }),
+    ]);
+    expect(shape(items)).toEqual(['Starting the deploy check.', 3, 'Still red. Retrying.']);
+  });
+
+  it('says how long a run took, in either list order', () => {
+    const run = [msg('x'), msg('x'), msg('x'), msg('x'), msg('x'), msg('x')];
+    expect(runSpanPhrase(run)).toBe('in 5 seconds');
+    expect(runSpanPhrase([...run].reverse())).toBe('in 5 seconds');
+    const sameInstant = { created_at: '2026-11-05T10:00:00.000Z' };
+    expect(runSpanPhrase([msg('x', sameInstant), msg('x', sameInstant)])).toBe('within a second');
   });
 });

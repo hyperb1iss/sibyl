@@ -82,6 +82,35 @@ const INBOX = [
   }),
 ];
 
+// Ada's agent stuck retrying, with Grace's agent cutting in once: the fold
+// covers the six repeats and leaves the interruption and what follows alone.
+const LOOP = [
+  ...Array.from({ length: 6 }, (_, n) =>
+    message({
+      channel: '@grace',
+      thread: 'deploy:staging',
+      body: 'Deploy check still red on staging. Retrying.',
+      created_at: `2026-11-05T10:10:0${n}Z`,
+    })
+  ),
+  message(
+    {
+      channel: '@grace',
+      thread: 'deploy:staging',
+      body: 'Deploy check still red on staging. Retrying.',
+      created_at: '2026-11-05T10:10:07Z',
+    },
+    GRACE,
+    'codex'
+  ),
+  message({
+    channel: '@grace',
+    thread: 'deploy:staging',
+    body: 'Deploy check still red on staging. Retrying.',
+    created_at: '2026-11-05T10:10:08Z',
+  }),
+];
+
 const CHANNELS: NetChannelsResponse = {
   channels: [
     { channel: '@ada', message_count: 2, thread_count: 1, last_message_at: '2026-11-05T10:08:00Z' },
@@ -174,6 +203,7 @@ describe('NetContent', () => {
           if (!channel) return json(feed([...REVIEW_THREAD, ...INBOX]));
           if (channel === '#reviews') return json(feed(thread ? REVIEW_THREAD : REVIEW_THREAD));
           if (channel === '@ada') return json(feed(INBOX));
+          if (channel === '@grace') return json(feed(LOOP));
           return json(feed([]));
         }
         case '/api/net/threads':
@@ -335,6 +365,33 @@ describe('NetContent', () => {
     expect(screen.getAllByText('Grace Hopper').length).toBeGreaterThan(0);
     // Sessions are plumbing.
     expect(document.body.textContent).not.toContain('s-1');
+  });
+
+  it('folds a run of repeats into one quiet row that expands to each message', async () => {
+    const { user } = renderNet('channel=%40grace');
+
+    const stream = await screen.findByRole('region', { name: '@grace' });
+    const rows = await within(stream).findAllByRole('article');
+    // Newest first: Ada once more, Grace cutting in, then Ada's six folded.
+    expect(rows.map(row => row.getAttribute('aria-label'))).toEqual([
+      'Message from Ada Lovelace',
+      'Message from Grace Hopper',
+      'Ada Lovelace repeated a message 6 times',
+    ]);
+    const run = rows[2];
+    expect(within(run).getByText('×6')).toBeInTheDocument();
+    expect(within(run).getByText('Same message 6 times in 5 seconds')).toBeInTheDocument();
+    expect(within(run).getAllByText(/Deploy check still red/)).toHaveLength(1);
+
+    await user.click(within(run).getByRole('button', { name: 'Show each' }));
+    const each = within(run).getByRole('list', { name: '6 messages from Ada Lovelace' });
+    expect(within(each).getAllByRole('listitem')).toHaveLength(6);
+    expect(within(run).getByRole('button', { name: 'Fold' })).toHaveAttribute(
+      'aria-expanded',
+      'true'
+    );
+    // The day still counts every message.
+    expect(within(stream).getByRole('heading', { name: /8$/ })).toBeInTheDocument();
   });
 
   it('teaches the CLI when the organization has no traffic', async () => {

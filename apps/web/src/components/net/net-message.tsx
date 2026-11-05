@@ -1,12 +1,20 @@
 'use client';
 
 import Link from 'next/link';
-import { useMemo } from 'react';
-import { ArrowRight } from '@/components/ui/icons';
+import { useId, useMemo, useState } from 'react';
+import { ArrowRight, RefreshDouble } from '@/components/ui/icons';
 import type { NetMessage } from '@/lib/api/net';
 import { activityDayKey, formatActivityDay, formatActivityTime } from '@/lib/constants/activity';
 import { formatDateTime } from '@/lib/constants/formatting';
-import { authorName, decisionMemoryHref, netHref } from './net-format';
+import { useNow } from '@/lib/hooks/now';
+import {
+  authorName,
+  decisionMemoryHref,
+  foldRuns,
+  type NetListItem,
+  netHref,
+  runSpanPhrase,
+} from './net-format';
 import { AgentLabel, AuthorMark, ChannelName, MessageBody } from './net-primitives';
 
 /**
@@ -35,11 +43,56 @@ function DecisionLabel() {
 const CHIP_FOCUS =
   'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sc-cyan focus-visible:ring-offset-1 focus-visible:ring-offset-sc-bg-elevated';
 
+/** A stream says how long ago; a thread gives the clock, so its cadence shows. */
+function MessageTime({ iso, scope }: { iso: string; scope: NetListScope }) {
+  const now = useNow();
+  return (
+    <time
+      dateTime={iso}
+      title={formatDateTime(iso)}
+      className="ml-auto shrink-0 pl-2 text-xs whitespace-nowrap text-sc-fg-muted tabular-nums"
+    >
+      {scope === 'thread' ? clockTime(iso) : formatActivityTime(iso, now)}
+    </time>
+  );
+}
+
+/** Where a message was said, when the list does not already say it. */
+function MessageContext({ message, scope }: { message: NetMessage; scope: NetListScope }) {
+  const showChannel = scope === 'all';
+  const showThread = scope !== 'thread' && message.thread !== null;
+  if (!showChannel && !showThread) return null;
+  return (
+    <div className="mt-0.5 flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-1 text-xs">
+      {showChannel && (
+        <Link
+          href={netHref(message.channel)}
+          className={`inline-flex min-w-0 max-w-[14rem] rounded font-medium text-sc-fg-secondary hover:text-sc-fg-primary ${CHIP_FOCUS}`}
+        >
+          <ChannelName channel={message.channel} />
+        </Link>
+      )}
+      {showChannel && showThread && (
+        <span aria-hidden="true" className="text-sc-fg-subtle">
+          /
+        </span>
+      )}
+      {showThread && message.thread && (
+        <Link
+          href={netHref(message.channel, message.thread)}
+          title={`Open thread ${message.thread}`}
+          className={`inline-flex min-w-0 max-w-[18rem] rounded font-mono text-[11px] text-sc-cyan hover:underline ${CHIP_FOCUS}`}
+        >
+          <span className="truncate">{message.thread}</span>
+        </Link>
+      )}
+    </div>
+  );
+}
+
 export function NetMessageRow({ message, scope }: { message: NetMessage; scope: NetListScope }) {
   const name = authorName(message.author);
   const decision = message.kind === 'decision';
-  const showChannel = scope === 'all';
-  const showThread = scope !== 'thread' && message.thread !== null;
 
   return (
     <article
@@ -59,48 +112,12 @@ export function NetMessageRow({ message, scope }: { message: NetMessage; scope: 
             <AgentLabel agent={message.author.agent} session={message.author.session} />
           )}
           {decision && <DecisionLabel />}
-          <time
-            dateTime={message.created_at}
-            title={formatDateTime(message.created_at)}
-            className="ml-auto shrink-0 pl-2 text-xs whitespace-nowrap text-sc-fg-muted tabular-nums"
-          >
-            {scope === 'thread'
-              ? clockTime(message.created_at)
-              : formatActivityTime(message.created_at)}
-          </time>
+          <MessageTime iso={message.created_at} scope={scope} />
         </header>
-
-        {(showChannel || showThread) && (
-          <div className="mt-0.5 flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-1 text-xs">
-            {showChannel && (
-              <Link
-                href={netHref(message.channel)}
-                className={`inline-flex min-w-0 max-w-[14rem] rounded font-medium text-sc-fg-secondary hover:text-sc-fg-primary ${CHIP_FOCUS}`}
-              >
-                <ChannelName channel={message.channel} />
-              </Link>
-            )}
-            {showChannel && showThread && (
-              <span aria-hidden="true" className="text-sc-fg-subtle">
-                /
-              </span>
-            )}
-            {showThread && message.thread && (
-              <Link
-                href={netHref(message.channel, message.thread)}
-                title={`Open thread ${message.thread}`}
-                className={`inline-flex min-w-0 max-w-[18rem] rounded font-mono text-[11px] text-sc-cyan hover:underline ${CHIP_FOCUS}`}
-              >
-                <span className="truncate">{message.thread}</span>
-              </Link>
-            )}
-          </div>
-        )}
-
+        <MessageContext message={message} scope={scope} />
         <div className="mt-1">
           <MessageBody body={message.body} />
         </div>
-
         {decision && message.decision_memory_id && (
           <Link
             href={decisionMemoryHref(message.decision_memory_id)}
@@ -115,16 +132,127 @@ export function NetMessageRow({ message, scope }: { message: NetMessage; scope: 
   );
 }
 
+/**
+ * One author's agent saying the same thing again and again, folded into a
+ * row with a count: the shape a loop takes. Yellow, because it asks for a
+ * look, and quiet, because it is not yet a failure.
+ */
+export function NetRunRow({
+  messages,
+  identical,
+  scope,
+}: {
+  messages: NetMessage[];
+  identical: boolean;
+  scope: NetListScope;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const listId = useId();
+  const latest = messages.reduce((newest, message) =>
+    message.created_at > newest.created_at ? message : newest
+  );
+  const name = authorName(latest.author);
+  const count = messages.length;
+  const summary = `${identical ? 'Same message' : 'Near-identical messages'} ${count} times ${runSpanPhrase(messages)}`;
+
+  return (
+    <article
+      aria-label={`${name} repeated ${identical ? 'a message' : 'near-identical messages'} ${count} times`}
+      className="relative grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 px-4 py-2.5"
+    >
+      <span aria-hidden="true" className="absolute inset-y-0 left-0 w-0.5 bg-sc-yellow/70" />
+      <AuthorMark name={name} seed={latest.author.user_id} />
+      <div className="min-w-0">
+        <header className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5">
+          <span className="min-w-0 truncate text-sm font-semibold text-sc-fg-primary">{name}</span>
+          {latest.author.agent && (
+            <AgentLabel agent={latest.author.agent} session={latest.author.session} />
+          )}
+          <span
+            title={summary}
+            className="rounded border border-sc-yellow/40 bg-sc-yellow/10 px-1.5 font-mono text-[11px] leading-[1.125rem] font-semibold text-sc-yellow tabular-nums"
+          >
+            ×{count}
+          </span>
+          <MessageTime iso={latest.created_at} scope={scope} />
+        </header>
+        <MessageContext message={latest} scope={scope} />
+        {!expanded && (
+          <div className="mt-1">
+            <MessageBody body={latest.body} />
+          </div>
+        )}
+        {expanded && (
+          <ol
+            id={listId}
+            aria-label={`${count} messages from ${name}`}
+            className="mt-1.5 space-y-1.5 border-l border-sc-yellow/30 pl-3"
+          >
+            {messages.map(message => (
+              <li
+                key={message.id}
+                className="grid grid-cols-[auto_minmax(0,1fr)] items-baseline gap-x-3"
+              >
+                <time
+                  dateTime={message.created_at}
+                  title={formatDateTime(message.created_at)}
+                  className="text-[11px] whitespace-nowrap text-sc-fg-muted tabular-nums"
+                >
+                  {clockTime(message.created_at)}
+                </time>
+                <MessageBody body={message.body} />
+              </li>
+            ))}
+          </ol>
+        )}
+        <p className="mt-1.5 flex items-start gap-1.5 text-xs text-sc-fg-muted">
+          <RefreshDouble
+            width={12}
+            height={12}
+            aria-hidden="true"
+            className="mt-px shrink-0 text-sc-yellow"
+          />
+          {/* One sentence that wraps as text; the dot stays with the summary. */}
+          <span>
+            {summary}
+            <span aria-hidden="true">{'\u00a0· '}</span>
+            <button
+              type="button"
+              aria-expanded={expanded}
+              aria-controls={expanded ? listId : undefined}
+              onClick={() => setExpanded(open => !open)}
+              className={`rounded font-medium whitespace-nowrap text-sc-cyan hover:underline ${CHIP_FOCUS}`}
+            >
+              {expanded ? 'Fold' : 'Show each'}
+            </button>
+          </span>
+        </p>
+      </div>
+    </article>
+  );
+}
+
 interface DayGroup {
   key: string;
   label: string;
-  messages: NetMessage[];
+  count: number;
+  items: NetListItem[];
+}
+
+// A run is keyed by its oldest message, which stays put while newer repeats
+// join it, so an expanded run stays expanded as the loop goes on.
+function itemKey(item: NetListItem): string {
+  if (item.kind === 'message') return item.message.id;
+  const oldest = item.messages.reduce((first, message) =>
+    message.created_at < first.created_at ? message : first
+  );
+  return `run:${oldest.id}`;
 }
 
 /**
- * Messages under one heading per day. The feed answers oldest first; a
- * stream reads newest first like the rest of the app, a thread reads as the
- * conversation it is.
+ * Messages under one heading per day, with runs of repeats folded. The feed
+ * answers oldest first; a stream reads newest first like the rest of the
+ * app, a thread reads as the conversation it is.
  */
 export function NetMessageList({
   messages,
@@ -133,22 +261,24 @@ export function NetMessageList({
   messages: NetMessage[];
   scope: NetListScope;
 }) {
+  const now = useNow();
   const groups = useMemo(() => {
     const ordered = scope === 'thread' ? messages : [...messages].reverse();
-    const days: DayGroup[] = [];
+    const days: { key: string; label: string; messages: NetMessage[] }[] = [];
     for (const message of ordered) {
       const key = activityDayKey(message.created_at);
       const last = days[days.length - 1];
       if (last && last.key === key) last.messages.push(message);
       else
-        days.push({
-          key,
-          label: formatActivityDay(message.created_at),
-          messages: [message],
-        });
+        days.push({ key, label: formatActivityDay(message.created_at, now), messages: [message] });
     }
-    return days;
-  }, [messages, scope]);
+    return days.map<DayGroup>(day => ({
+      key: day.key,
+      label: day.label,
+      count: day.messages.length,
+      items: foldRuns(day.messages),
+    }));
+  }, [messages, scope, now]);
 
   return (
     <div className="divide-y divide-sc-fg-subtle/10">
@@ -156,12 +286,16 @@ export function NetMessageList({
         <section key={group.key} aria-label={group.label}>
           <h3 className="flex items-center justify-between border-b border-sc-fg-subtle/10 bg-sc-bg-highlight/50 px-4 py-1.5 text-[11px] font-semibold tracking-wider text-sc-fg-muted uppercase">
             <span>{group.label}</span>
-            <span className="font-medium tabular-nums">{group.messages.length}</span>
+            <span className="font-medium tabular-nums">{group.count}</span>
           </h3>
           <ol className="divide-y divide-sc-fg-subtle/10">
-            {group.messages.map(message => (
-              <li key={message.id}>
-                <NetMessageRow message={message} scope={scope} />
+            {group.items.map(item => (
+              <li key={itemKey(item)}>
+                {item.kind === 'message' ? (
+                  <NetMessageRow message={item.message} scope={scope} />
+                ) : (
+                  <NetRunRow messages={item.messages} identical={item.identical} scope={scope} />
+                )}
               </li>
             ))}
           </ol>
