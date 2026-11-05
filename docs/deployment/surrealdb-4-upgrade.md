@@ -113,8 +113,11 @@ For `moon run dev`, stop it, copy `.moon/cache/surreal-dev`, and run
 it bootstraps.
 
 To stay on 3.x for now, set both `SIBYL_SURREAL_IMAGE` to the 3.x image you ran and
-`SIBYL_SURREAL_PATH=rocksdb:///data/sibyl.db`. Never set one without the other: a 3.x server opened
-with `surrealkv://` serves an empty database beside the data.
+`SIBYL_SURREAL_PATH=rocksdb:///data/sibyl.db`. A 3.x server opened with `surrealkv://` serves an
+empty database beside the data, so each compose file's `surreal-init` checks the pairing before the
+server starts and exits with the reason when the image and path would open the data wrong: a 3.x
+image with `surrealkv://` beside a RocksDB store, a 3.x image with `rocksdb://` on a SurrealKV
+store, or 4.0 on a RocksDB store without the opt-in.
 
 ## Ansible
 
@@ -138,10 +141,29 @@ The `charts/surrealdb` wrapper sets `SURREAL_SURREALKV_ENABLE_VLOG=false`, `fsGr
 upstream chart it wraps has no startup probe, so the liveness delay is what keeps the kubelet from
 killing the pod while it converts.
 
-1. Scale the Sibyl backend and worker to zero, and take a VolumeSnapshot of the SurrealDB PVC.
-2. Make sure the PVC has twice the store's size free. For a store over 20 GB, raise
+The commands below use `<release>` for the surrealdb chart's release name, which names its
+Deployment and PVC `<release>-surrealdb`, and `<ns>` for its namespace.
+
+1. Scale the Sibyl backend and worker to zero.
+2. Stop SurrealDB and wait until its pod is gone, so the snapshot is a cold copy:
+
+   ```bash
+   kubectl -n <ns> scale deployment/<release>-surrealdb --replicas=0
+   kubectl -n <ns> wait --for=delete pod --timeout=10m \
+     -l app.kubernetes.io/instance=<release>,app.kubernetes.io/name=surrealdb
+   ```
+
+3. Take a VolumeSnapshot of the `<release>-surrealdb` PVC and wait until it is ready to use. It is
+   your rollback point, so do not go on before it is:
+
+   ```bash
+   kubectl -n <ns> wait --for=jsonpath='{.status.readyToUse}'=true \
+     volumesnapshot/<snapshot> --timeout=30m
+   ```
+
+4. Make sure the PVC has twice the store's size free. For a store over 20 GB, raise
    `surrealdb.livenessProbe.initialDelaySeconds` to 30 s per GB for this rollout.
-3. Add the opt-in to `surrealdb.podExtraEnv` for one rollout. Helm replaces lists, so restate the
+5. Add the opt-in to `surrealdb.podExtraEnv` for one rollout. Helm replaces lists, so restate the
    chart's default entries with it:
 
    ```yaml
@@ -157,15 +179,23 @@ killing the pod while it converts.
          value: "true"
    ```
 
-4. Run `helm upgrade` on the surrealdb chart with a `--timeout` longer than the conversion, such as
-   `--timeout 30m`. The strict-bootstrap hook waits for `/ready` for up to
-   `bootstrap.readyTimeoutSeconds` (1800 by default) before it defines the databases.
-5. Remove the opt-in entry and run `helm upgrade` again.
-6. Scale the backend and worker back up. The backend's startup probe (10 s period) must allow 6
+6. Run `helm upgrade` on the surrealdb chart with `--no-hooks`, then start SurrealDB and wait for it
+   to convert. The strict-bootstrap hook would otherwise wait on a server that is not running yet.
+   Readiness is `/ready`, so the rollout finishes only once the conversion has:
+
+   ```bash
+   kubectl -n <ns> scale deployment/<release>-surrealdb --replicas=1
+   kubectl -n <ns> rollout status deployment/<release>-surrealdb --timeout=30m
+   ```
+
+7. Remove the opt-in entry and run `helm upgrade` again, this time with its hooks. The
+   strict-bootstrap hook waits for `/ready` for up to `bootstrap.readyTimeoutSeconds` (1800 by
+   default) before it defines the databases.
+8. Scale the backend and worker back up. The backend's startup probe (10 s period) must allow 6
    failures per GB of the auth and content databases while it rebuilds their indexes: the default
    `backend.startupProbe.failureThreshold: 60` covers 10 GB. Replicas are safe, since a lease
    serializes the rebuild, but one replica for this start finishes sooner.
-7. Verify, then remove `/data/db/_rocksdb_backup` from the PVC. The image has no shell, so scale
+9. Verify, then remove `/data/db/_rocksdb_backup` from the PVC. The image has no shell, so scale
    SurrealDB to zero and run a one-off `busybox:1.37` pod that mounts the PVC, or wait for the next
    maintenance window.
 
