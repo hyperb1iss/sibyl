@@ -106,8 +106,8 @@ _MESSAGE_FIELDS = (
 )
 _THREAD_FIELDS = (
     "organization_id, channel, thread, project_id, message_count, first_message_at, "
-    "last_message_at, reflected_through, reflection_source_id, reflection_attempts, "
-    "reflection_error, reflection_skipped"
+    "last_message_at, reflected_through, reflected_through_ns, reflected_through_uuid, "
+    "reflection_source_id, reflection_attempts, reflection_error, reflection_skipped"
 )
 # One record per (organization, channel, thread). Concurrent upserts of the
 # same thread then contend for a single key, which the server reports as a
@@ -192,14 +192,15 @@ _THREAD_SCOPE = (
 # uuid), the feed's own order. Rows after it are the rows sharing its instant
 # with a later id plus the rows after its instant, sought the way
 # feed_statement seeks a page.
+#
+# The bounds are client parameters, never values computed inside the block:
+# SurrealDB 4.0 plans an index range only from literals and client
+# parameters, and a LET operand leaves it walking the whole thread from its
+# first message.
 _AT_MARK_AFTER_ID = "created_ns = $mark_ns AND uuid > $mark_uuid"
 _AFTER_MARK_INSTANT = "created_ns > $mark_ns"
 _THREAD_WINDOW = f"""
 RETURN {{
-    LET $key = {_THREAD_RECORD};
-    LET $state = (SELECT reflected_through_ns, reflected_through_uuid FROM $key)[0];
-    LET $mark_ns = $state.reflected_through_ns ?? -1;
-    LET $mark_uuid = $state.reflected_through_uuid ?? '';
     LET $take = $limit + count((SELECT VALUE uuid {_THREAD_SCOPE} AND created_ns = $mark_ns));
     LET $rows = array::flatten([
         (SELECT {_MESSAGE_FIELDS} {_THREAD_SCOPE} AND {_AT_MARK_AFTER_ID}
@@ -213,34 +214,53 @@ RETURN {{
     );
 }};
 """
-# Whether any message, settled or not, sits after the watermark: the pending
-# mark clears only when none does, read in the same statement as the move.
-_LATER_THAN_MARK = (
-    f"count((SELECT VALUE uuid {_THREAD_SCOPE} AND {_AT_MARK_AFTER_ID})) "
-    f"+ count((SELECT VALUE uuid {_THREAD_SCOPE} AND {_AFTER_MARK_INSTANT}))"
+
+
+# Whether any message, settled or not, sits after the new watermark, read
+# with the thread's message count. Reads inside a block that writes plan
+# differently on SurrealDB 4.0 (a compound index ranges on its first column
+# only, so this count would walk the organization's whole history), so the
+# count runs on its own and the write below trusts it only while the thread
+# row still shows the count it was taken against and the watermark it was
+# taken from. A post in between bumps the count, and a post racing the write
+# conflicts with it on the thread record, so a message that lands while the
+# thread is being reflected always leaves it pending.
+_PENDING_AFTER_MARK = f"""
+RETURN {{
+    seen: (SELECT VALUE message_count FROM {_THREAD_RECORD})[0] ?? 0,
+    later: count((SELECT VALUE uuid {_THREAD_SCOPE} AND {_AT_MARK_AFTER_ID}))
+        + count((SELECT VALUE uuid {_THREAD_SCOPE} AND {_AFTER_MARK_INSTANT}))
+}};
+"""
+_COUNTED_AGAINST_THIS_ROW = (
+    "$state.message_count = $seen "
+    "AND ($state.reflected_through_ns ?? -1) = $expected_ns "
+    "AND ($state.reflected_through_uuid ?? '') = $expected_uuid"
 )
 _SETTLE_THROUGH_MESSAGE = f"""
 RETURN {{
     LET $through = (
-        SELECT created_at, created_ns, uuid FROM net_messages
-        WHERE uuid = $through_uuid AND organization_id = $organization_id
+        SELECT created_at, created_ns, organization_id FROM net_messages WHERE uuid = $through_uuid
     )[0];
-    IF $through = NONE {{ THROW 'the last distilled net message is gone'; }};
+    IF $through = NONE OR $through.organization_id != $organization_id
+        OR $through.created_ns != $through_ns {{
+        THROW 'the last distilled net message is gone or has moved';
+    }};
     LET $key = {_THREAD_RECORD};
-    LET $state = (SELECT reflected_through, reflected_through_ns, reflected_through_uuid FROM $key)[0];
+    LET $state = (
+        SELECT message_count, reflected_through, reflected_through_ns, reflected_through_uuid
+        FROM $key
+    )[0];
     LET $advance = $state.reflected_through_ns = NONE
-        OR $through.created_ns > $state.reflected_through_ns
-        OR ($through.created_ns = $state.reflected_through_ns
-            AND $through.uuid > $state.reflected_through_uuid);
-    LET $mark_ns = IF $advance {{ $through.created_ns }} ELSE {{ $state.reflected_through_ns }};
-    LET $mark_uuid = IF $advance {{ $through.uuid }} ELSE {{ $state.reflected_through_uuid }};
-    LET $mark_at = IF $advance {{ $through.created_at }} ELSE {{ $state.reflected_through }};
-    LET $later = {_LATER_THAN_MARK};
+        OR $through_ns > $state.reflected_through_ns
+        OR ($through_ns = $state.reflected_through_ns
+            AND $through_uuid > $state.reflected_through_uuid);
+    LET $counted = {_COUNTED_AGAINST_THIS_ROW};
     UPDATE $key SET
-        reflected_through = $mark_at,
-        reflected_through_ns = $mark_ns,
-        reflected_through_uuid = $mark_uuid,
-        reflection_pending = $later > 0,
+        reflected_through = IF $advance {{ $through.created_at }} ELSE {{ $state.reflected_through }},
+        reflected_through_ns = IF $advance {{ $through_ns }} ELSE {{ $state.reflected_through_ns }},
+        reflected_through_uuid = IF $advance {{ $through_uuid }} ELSE {{ $state.reflected_through_uuid }},
+        reflection_pending = IF $counted {{ $later > 0 }} ELSE {{ true }},
         reflection_source_id = $source_id ?? reflection_source_id,
         reflection_attempts = 0,
         reflection_error = NONE,
@@ -255,12 +275,12 @@ RETURN {{
 _SETTLE_EMPTY_WINDOW = f"""
 RETURN {{
     LET $key = {_THREAD_RECORD};
-    LET $state = (SELECT reflected_through_ns, reflected_through_uuid FROM $key)[0];
-    LET $mark_ns = $state.reflected_through_ns ?? -1;
-    LET $mark_uuid = $state.reflected_through_uuid ?? '';
-    LET $later = {_LATER_THAN_MARK};
+    LET $state = (
+        SELECT message_count, reflected_through_ns, reflected_through_uuid FROM $key
+    )[0];
+    LET $counted = {_COUNTED_AGAINST_THIS_ROW};
     UPDATE $key SET
-        reflection_pending = $later > 0,
+        reflection_pending = IF $counted {{ $later > 0 }} ELSE {{ true }},
         reflection_attempts = 0,
         reflection_error = NONE,
         reflection_skipped = [],
@@ -455,6 +475,8 @@ class NetThreadState:
     reflection_attempts: int
     reflection_error: str | None
     reflection_skipped: tuple[str, ...] = ()
+    reflected_mark: NetCursor | None = None
+    """The last distilled message's position, which the next window starts after."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -782,14 +804,20 @@ async def claim_net_thread(thread: NetThreadState) -> NetThreadState | None:
 async def net_thread_window(thread: NetThreadState) -> list[NetMessageRecord]:
     """The settled messages after the thread's last distilled one, oldest first.
 
-    Capped at ``DISTILL_WINDOW_MESSAGES`` messages and ``DISTILL_WINDOW_CHARS``
+    Starts after ``thread.reflected_mark``, the watermark as the thread was
+    read when claimed; only the claim holder moves it. Capped at
+    ``DISTILL_WINDOW_MESSAGES`` messages and ``DISTILL_WINDOW_CHARS``
     characters of body, keeping the oldest so the next pass continues where
     this one stopped. The first message always fits: a body is far smaller
     than the character cap.
     """
     async with content_client.surreal_content_client() as client:
         rows = await content_client.select_many(
-            client, _THREAD_WINDOW, limit=DISTILL_WINDOW_MESSAGES, **_thread_key(thread)
+            client,
+            _THREAD_WINDOW,
+            limit=DISTILL_WINDOW_MESSAGES,
+            **_thread_key(thread),
+            **_mark_params(thread.reflected_mark),
         )
     window: list[NetMessageRecord] = []
     characters = 0
@@ -805,32 +833,55 @@ async def net_thread_window(thread: NetThreadState) -> list[NetMessageRecord]:
 async def settle_net_thread(
     thread: NetThreadState,
     *,
-    through_message_id: str | None,
+    through: NetCursor | None,
     source_id: str | None = None,
     skipped: Sequence[str] = (),
 ) -> None:
     """Record a finished distillation and release the claim.
 
-    The watermark moves to the named message's own ``(created_ns, uuid)``,
-    never backwards, with ``reflected_through`` its display time; with no
-    message (an empty window) it stays put. The pending mark clears only when
-    no message sits after the watermark, read in the same statement, so a
-    post that lands while the thread is being reflected keeps it pending. The retry budget
-    resets, any earlier error clears, and ``skipped`` records the authors
-    whose lines this pass could not reflect, and why.
+    ``thread`` is the state the pass claimed. The watermark moves to
+    ``through``, the last distilled message's cursor, never backwards, with
+    ``reflected_through`` that message's display time; with no message (an
+    empty window) it stays put. The pending mark clears only when no message
+    sits after the watermark: a post that lands while the thread is being
+    reflected keeps it pending, and so does anything that moved the thread
+    since it was claimed, until a pass that sees the current state clears it.
+    The retry budget resets, any earlier error clears, and ``skipped`` records
+    the authors whose lines this pass could not reflect, and why.
     """
+    expected = thread.reflected_mark
+    mark = expected if through is None else _later_position(expected, through)
+    key = _thread_key(thread)
     async with content_client.surreal_content_client() as client:
-        if through_message_id is None:
-            await content_client.select_many(client, _SETTLE_EMPTY_WINDOW, **_thread_key(thread))
+        rows = await content_client.select_many(
+            client, _PENDING_AFTER_MARK, **key, **_mark_params(mark)
+        )
+        pending = rows[0] if rows else {}
+        counted = {
+            "seen": _as_int(pending.get("seen")),
+            "later": _as_int(pending.get("later")),
+            "expected_ns": expected.created_ns if expected is not None else -1,
+            "expected_uuid": expected.uuid if expected is not None else "",
+        }
+        if through is None:
+            await content_client.select_many(client, _SETTLE_EMPTY_WINDOW, **key, **counted)
             return
         await content_client.select_many(
             client,
             _SETTLE_THROUGH_MESSAGE,
-            through_uuid=through_message_id,
+            through_ns=through.created_ns,
+            through_uuid=through.uuid,
             source_id=source_id,
             skipped=list(skipped),
-            **_thread_key(thread),
+            **key,
+            **counted,
         )
+
+
+def _later_position(first: NetCursor | None, second: NetCursor) -> NetCursor:
+    if first is None:
+        return second
+    return max(first, second, key=lambda cursor: (cursor.created_ns, cursor.uuid))
 
 
 async def fail_net_thread(thread: NetThreadState, *, reason: str) -> None:
@@ -898,6 +949,15 @@ def _thread_key(thread: NetThreadState) -> dict[str, str]:
     }
 
 
+def _mark_params(mark: NetCursor | None) -> dict[str, object]:
+    # Before any distillation the window starts at the thread's beginning:
+    # every created_ns is at least 0.
+    return {
+        "mark_ns": mark.created_ns if mark is not None else -1,
+        "mark_uuid": mark.uuid if mark is not None else "",
+    }
+
+
 async def _settled_end(client: Any) -> NetCursor:
     """A cursor at the settled end of the feed by the database clock, between messages."""
     rows = await content_client.select_many(client, _SETTLED_END)
@@ -952,6 +1012,16 @@ def _thread_from_row(row: Mapping[str, object]) -> NetThreadState:
         reflection_attempts=_as_int(row.get("reflection_attempts")),
         reflection_error=_optional_str(row.get("reflection_error")),
         reflection_skipped=_string_tuple(row.get("reflection_skipped")),
+        reflected_mark=_mark_from_row(row),
+    )
+
+
+def _mark_from_row(row: Mapping[str, object]) -> NetCursor | None:
+    created_ns = row.get("reflected_through_ns")
+    if created_ns is None:
+        return None
+    return NetCursor(
+        created_ns=_as_int(created_ns), uuid=str(row.get("reflected_through_uuid") or "")
     )
 
 

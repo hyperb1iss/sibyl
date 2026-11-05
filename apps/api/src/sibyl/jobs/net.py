@@ -143,7 +143,7 @@ async def distill_net_thread(thread: NetThreadState) -> tuple[str, int]:
     if not window:
         # Nothing settled after the last distillation (the messages it saw
         # are gone, or none ever arrived past it): stop qualifying.
-        await settle_net_thread(thread, through_message_id=None)
+        await settle_net_thread(thread, through=None)
         return "settled_empty", 0
     sources: list[str] = []
     skipped: list[str] = []
@@ -164,7 +164,7 @@ async def distill_net_thread(thread: NetThreadState) -> tuple[str, int]:
             )
     await settle_net_thread(
         thread,
-        through_message_id=window[-1].id,
+        through=window[-1].cursor,
         source_id=sources[-1] if sources else None,
         skipped=skipped,
     )

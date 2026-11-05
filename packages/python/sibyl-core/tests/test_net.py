@@ -584,7 +584,7 @@ async def test_idle_threads_are_claimed_once_and_settled(store: SurrealContentCl
     window = await net_thread_window(claimed)
     assert [m.id for m in window] == [first.id, second.id]
 
-    await settle_net_thread(claimed, through_message_id=second.id, source_id="session_1")
+    await settle_net_thread(claimed, through=window[-1].cursor, source_id="session_1")
     settled = await thread_state("#reviews", "t1")
     assert settled.reflected_through == window[-1].created_at
     assert settled.reflection_source_id == "session_1"
@@ -618,7 +618,7 @@ async def test_only_threads_with_undistilled_messages_stay_pending(
     claimed = await claim_net_thread(await thread_state("#reviews", "done"))
     assert claimed is not None
     window = await net_thread_window(claimed)
-    await settle_net_thread(claimed, through_message_id=window[-1].id)
+    await settle_net_thread(claimed, through=window[-1].cursor)
 
     assert await pending_flags(store) == {"done": False, "waiting": True}
     # An old thread that is fully distilled is no longer a candidate at all,
@@ -637,7 +637,7 @@ async def test_a_post_during_reflection_keeps_the_thread_pending(
 
     # Lands after the window was read and before the pass settles.
     await post(thread="busy", body="second")
-    await settle_net_thread(claimed, through_message_id=window[-1].id)
+    await settle_net_thread(claimed, through=window[-1].cursor)
 
     state = await thread_state("#reviews", "busy")
     assert state.reflected_through == window[-1].created_at
@@ -674,14 +674,15 @@ async def test_failed_attempts_stop_after_the_retry_budget(store: SurrealContent
 
 
 async def test_settling_records_skipped_authors(store: SurrealContentClient) -> None:
-    posted = await post(thread="mixed")
+    await post(thread="mixed")
     await age(store, 120)
     claimed = await claim_net_thread((await idle_net_threads(idle_minutes=1, limit=10))[0])
     assert claimed is not None
+    window = await net_thread_window(claimed)
 
     await settle_net_thread(
         claimed,
-        through_message_id=posted.id,
+        through=window[-1].cursor,
         skipped=[f"{GRACE}: principal_cannot_write"],
     )
 
@@ -730,7 +731,7 @@ async def test_an_empty_window_stops_qualifying_once_nothing_follows(
     assert claimed is not None
 
     assert await net_thread_window(claimed) == []
-    await settle_net_thread(claimed, through_message_id=None)
+    await settle_net_thread(claimed, through=None)
 
     state = await thread_state("#reviews", "vanished")
     assert state.reflected_through is None
@@ -747,7 +748,7 @@ async def test_an_empty_window_keeps_a_thread_pending_while_a_message_settles(
     claimed = await claim_net_thread((await idle_net_threads(idle_minutes=1, limit=10))[0])
     assert claimed is not None
     window = await net_thread_window(claimed)
-    await settle_net_thread(claimed, through_message_id=window[-1].id)
+    await settle_net_thread(claimed, through=window[-1].cursor)
     # A message still inside the settle window is not in the next window,
     # and the watermark must not jump over it.
     await post(thread="settling", body="fresh")
@@ -758,13 +759,72 @@ async def test_an_empty_window_keeps_a_thread_pending_while_a_message_settles(
     again = await claim_net_thread((await idle_net_threads(idle_minutes=1, limit=10))[0])
     assert again is not None
     assert await net_thread_window(again) == []
-    await settle_net_thread(again, through_message_id=None)
+    await settle_net_thread(again, through=None)
 
     assert (await pending_flags(store))["settling"] is True
     await age(store, 120)
     last = await claim_net_thread((await idle_net_threads(idle_minutes=1, limit=10))[0])
     assert last is not None
     assert [m.body for m in await net_thread_window(last)] == ["fresh"]
+
+
+async def test_a_late_settle_never_moves_the_watermark_back(
+    store: SurrealContentClient,
+) -> None:
+    await post(thread="late", body="first")
+    await post(thread="late", body="second")
+    await age(store, 120)
+    claimed = await claim_net_thread(await thread_state("#reviews", "late"))
+    assert claimed is not None
+    assert claimed.reflected_mark is None
+    first, second = await net_thread_window(claimed)
+    await settle_net_thread(claimed, through=second.cursor)
+    assert (await thread_state("#reviews", "late")).reflected_mark == second.cursor
+    assert (await pending_flags(store))["late"] is False
+
+    # Passes that claimed the thread before that settle land afterwards: one
+    # through an older message, one with an empty window from the old mark.
+    # Neither moves the watermark back. What they counted no longer matches
+    # the thread, so it stays pending until a pass that sees it as it is.
+    await settle_net_thread(claimed, through=first.cursor)
+    await settle_net_thread(claimed, through=None)
+    state = await thread_state("#reviews", "late")
+    assert state.reflected_mark == second.cursor
+    assert state.reflected_through == second.created_at
+    assert (await pending_flags(store))["late"] is True
+
+    current = await claim_net_thread(state)
+    assert current is not None
+    assert await net_thread_window(current) == []
+    await settle_net_thread(current, through=None)
+    assert (await pending_flags(store))["late"] is False
+
+
+async def test_a_post_after_the_pending_count_keeps_the_thread_pending(
+    store: SurrealContentClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    await post(thread="racing", body="first")
+    await age(store, 120)
+    claimed = await claim_net_thread(await thread_state("#reviews", "racing"))
+    assert claimed is not None
+    window = await net_thread_window(claimed)
+
+    # The count after the watermark comes back empty, then a post lands
+    # before the settle writes.
+    real = content_client.select_many
+
+    async def post_after_count(client: object, statement: str, **params: object):
+        rows = await real(client, statement, **params)  # type: ignore[arg-type]
+        if statement == net._PENDING_AFTER_MARK:
+            assert rows[0]["later"] == 0
+            await post(thread="racing", body="second")
+        return rows
+
+    monkeypatch.setattr(content_client, "select_many", post_after_count)
+    await settle_net_thread(claimed, through=window[-1].cursor)
+    monkeypatch.setattr(content_client, "select_many", real)
+
+    assert (await pending_flags(store))["racing"] is True
 
 
 # --- concurrency, on a server only ------------------------------------------
