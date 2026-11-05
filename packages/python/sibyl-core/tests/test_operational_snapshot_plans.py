@@ -20,6 +20,7 @@ from uuid import uuid4
 import pytest
 
 from sibyl_core.backends.surreal.in_clumps import clumped
+from sibyl_core.backends.surreal.records import normalize_records
 from sibyl_core.backends.surreal.schema import EMBEDDING_DIM
 from sibyl_core.backends.surreal.url_schemes import is_embedded_surreal_url
 from sibyl_core.models.entities import Entity, EntityType, Relationship, RelationshipType
@@ -404,6 +405,103 @@ async def test_clumped_lookups_are_index_served_on_a_server(
         assert '"index": "memory_derivation_target"' not in text, (name, text[:400])
         assert "TableScan" not in text, (name, text[:400])
         assert "Iterate Table" not in text, (name, text[:400])
+
+
+# The per-uuid closure the metadata snapshot probe replaced, verbatim: on 4.0
+# its `$u` operand is unknown at plan time and every lookup scanned the table.
+_CLOSURE_SNAPSHOT_PROBE = """
+RETURN $uuids.map(|$u|
+    (SELECT uuid, group_id, attributes.metadata AS snapshot FROM entity
+     WHERE uuid = $u LIMIT 1)[0]
+);
+"""
+_CLOSURE_SNAPSHOT_HYDRATE = """
+RETURN $uuids.map(|$u|
+    (SELECT uuid, group_id, attributes FROM entity
+     WHERE uuid = $u LIMIT 1)[0]
+);
+"""
+
+
+async def _closure_snapshot_carriers(
+    client: SurrealGraphClient, uuids: list[str], group_id: str
+) -> dict[str, tuple[object, dict[str, object]]]:
+    probed = normalize_records(
+        await client.execute_query(_CLOSURE_SNAPSHOT_PROBE, uuids=list(dict.fromkeys(uuids)))
+    )
+    carriers = [
+        uuid
+        for row in probed
+        if str(row.get("group_id") or "") == group_id
+        and graph_entity_store._parsed_metadata_snapshot(row.get("snapshot")) is not None
+        and (uuid := str(row.get("uuid") or ""))
+    ]
+    if not carriers:
+        return {}
+    resolved: dict[str, tuple[object, dict[str, object]]] = {}
+    for row in normalize_records(
+        await client.execute_query(_CLOSURE_SNAPSHOT_HYDRATE, uuids=carriers)
+    ):
+        attributes = row.get("attributes")
+        snapshot = (
+            graph_entity_store._parsed_metadata_snapshot(attributes.get("metadata"))
+            if isinstance(attributes, dict)
+            else None
+        )
+        if str(row.get("group_id") or "") == group_id and snapshot is not None:
+            resolved[str(row["uuid"])] = (attributes, snapshot)
+    return resolved
+
+
+async def test_metadata_snapshot_probe_matches_the_per_uuid_closure(
+    snapshot_client: tuple[SurrealGraphClient, bool],
+) -> None:
+    """Clumped client-param lookups find exactly the carriers the closure found."""
+    client, live = snapshot_client
+    manager = EntityManager(client, group_id=client.group_id)
+    ids = [f"probe{index:03d}" for index in range(45)]
+    for entity_id in ids:
+        await manager.create_direct(
+            Entity(id=entity_id, entity_type=EntityType.NOTE, name=entity_id),
+            generate_embedding=False,
+        )
+    # Pre-flattening rows on both sides of the clump boundary, a row whose
+    # snapshot is not JSON, and a row of another group carrying one.
+    legacy = [ids[0], ids[31], ids[32], ids[44]]
+    for entity_id in legacy:
+        await client.execute_query(
+            "UPDATE entity SET attributes.metadata = $snapshot WHERE uuid = $uuid;",
+            uuid=entity_id,
+            snapshot=json.dumps({"legacy": entity_id}),
+        )
+    await client.execute_query(
+        "UPDATE entity SET attributes.metadata = 'not json' WHERE uuid = $uuid;", uuid=ids[7]
+    )
+    await client.execute_query(
+        "CREATE entity CONTENT {uuid: 'foreign-probe', group_id: 'another-group', name: 'foreign',"
+        " entity_type: 'note', attributes: {metadata: $snapshot}};",
+        snapshot=json.dumps({"foreign": True}),
+    )
+    asked = [*reversed(ids), ids[31], "missing-one", "foreign-probe", ids[0]]
+
+    got = await graph_entity_store._rows_with_metadata_snapshots(
+        client, asked, group_id=client.group_id
+    )
+    expected = await _closure_snapshot_carriers(client, asked, client.group_id)
+
+    assert sorted(got) == sorted(legacy)
+    assert got == expected
+    if live:
+        probe, clumps = clumped(
+            "SELECT uuid, group_id, attributes.metadata AS snapshot FROM entity"
+            " WHERE uuid IN $uuids EXPLAIN",
+            "uuids",
+            asked,
+        )
+        text = json.dumps(await client.execute_query(f"RETURN {probe};", **clumps), default=str)
+        assert '"index": "idx_entity_uuid"' in text, text[:400]
+        assert "TableScan" not in text, text[:400]
+        assert "Iterate Table" not in text, text[:400]
 
 
 class _RecordingClient:

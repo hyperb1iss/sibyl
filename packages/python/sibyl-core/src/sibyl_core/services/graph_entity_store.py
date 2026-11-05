@@ -8,6 +8,7 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
 from sibyl_core.backends.surreal.connection import _is_transient_connection_error
+from sibyl_core.backends.surreal.in_clumps import clumped
 from sibyl_core.backends.surreal.schema import EMBEDDING_DIM, render_surreal_compatible_sql
 from sibyl_core.backends.surreal.schema_source_witness import SOURCE_STATE_WRITE_WITNESS
 from sibyl_core.backends.surreal.schema_version import SurrealExecute
@@ -524,42 +525,32 @@ async def _rows_with_metadata_snapshots(
     really is pre-flattening pays for its full attributes bag, and only until it
     is healed.
     """
-    probed = normalize_records(
-        await client.execute_query(
-            # `uuid IN $list` is never index-served, so each uuid gets its own
-            # indexed lookup. The closure body may reference nothing but its own
-            # argument: any other binding silently evaluates to nothing on at
-            # least one engine, so the group guard is applied to the returned
-            # rows instead (uuid is unique table-wide).
-            """
-            RETURN $uuids.map(|$u|
-                (SELECT uuid, group_id, attributes.metadata AS snapshot FROM entity
-                 WHERE uuid = $u LIMIT 1)[0]
-            );
-            """,
-            uuids=list(dict.fromkeys(uuids)),
-        )
+    # Clumps of at most 32 uuids, each a client param, stay on the unique
+    # index on every version; a closure argument as the operand is unknown when
+    # 4.0 plans the statement, so each lookup scanned the table. The group
+    # guard is applied to the returned rows (uuid is unique table-wide).
+    probe, probe_clumps = clumped(
+        "SELECT uuid, group_id, attributes.metadata AS snapshot FROM entity WHERE uuid IN $uuids",
+        "uuids",
+        uuids,
     )
+    probed = {
+        str(row.get("uuid") or ""): row
+        for row in normalize_records(await client.execute_query(f"RETURN {probe};", **probe_clumps))
+    }
     carriers = [
         uuid
-        for row in probed
-        if str(row.get("group_id") or "") == group_id
+        for uuid in dict.fromkeys(uuids)
+        if (row := probed.get(uuid)) is not None
+        and str(row.get("group_id") or "") == group_id
         and _parsed_metadata_snapshot(row.get("snapshot")) is not None
-        and (uuid := str(row.get("uuid") or ""))
     ]
     if not carriers:
         return {}
-    hydrated = normalize_records(
-        await client.execute_query(
-            """
-            RETURN $uuids.map(|$u|
-                (SELECT uuid, group_id, attributes FROM entity
-                 WHERE uuid = $u LIMIT 1)[0]
-            );
-            """,
-            uuids=carriers,
-        )
+    hydrate, hydrate_clumps = clumped(
+        "SELECT uuid, group_id, attributes FROM entity WHERE uuid IN $uuids", "uuids", carriers
     )
+    hydrated = normalize_records(await client.execute_query(f"RETURN {hydrate};", **hydrate_clumps))
     resolved: dict[str, tuple[Mapping[str, object], dict[str, object]]] = {}
     for row in hydrated:
         uuid = str(row.get("uuid") or "")
