@@ -14,9 +14,12 @@ SURREAL_SERVER_IMAGE = f"surrealdb/surrealdb:v{SURREAL_SERVER_VERSION}"
 SURREAL_SERVER_VERSION_STRING = f"surrealdb-{SURREAL_SERVER_VERSION}"
 
 
-# Storage settings every SurrealDB server Sibyl starts carries. The same
-# parity test holds each deployment surface's server environment to this.
-# PENDING-VLOG-DECISION: the 4.0 disk lane confirms or replaces this setting.
+# Storage settings every SurrealDB server Sibyl starts carries, the start that
+# converts a 3.x store included. Value-log separation stays off: every rewrite
+# of a full-text term bitmap would land in value-log files that nothing ever
+# reclaims, and a directory that once holds them keeps the value log on
+# whatever this says. The same parity test holds each deployment surface's
+# server environment to this.
 SURREAL_STORAGE_ENV: dict[str, str] = {"SURREAL_SURREALKV_ENABLE_VLOG": "false"}
 
 

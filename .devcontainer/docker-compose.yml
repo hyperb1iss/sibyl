@@ -35,7 +35,7 @@ services:
     volumes:
       - surreal-data:/data
     environment:
-      # PENDING-VLOG-DECISION: the 4.0 disk lane confirms or replaces this setting.
+      # Off from a directory's first 4.0 start: value-log files are never reclaimed.
       - SURREAL_SURREALKV_ENABLE_VLOG=false
     healthcheck:
       test: ["CMD", "/surreal", "is-ready", "--endpoint", "http://localhost:8000"]

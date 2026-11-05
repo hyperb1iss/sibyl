@@ -100,7 +100,9 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 30s
+      # The first start on a store moved to SurrealDB 4 rebuilds the auth and
+      # content indexes before it serves, about 60 s per GB: 10m covers 10 GB.
+      start_period: 10m
     restart: unless-stopped
 
   # ==========================================================================
@@ -252,14 +254,15 @@ services:
       # Set to true for the one start that converts a 3.x store; see
       # docs/deployment/surrealdb-4-upgrade.md.
       - SURREAL_EXPERIMENTAL_UPGRADE_FROM_3X
-      # PENDING-VLOG-DECISION: the 4.0 disk lane confirms or replaces this setting.
+      # Off from a directory's first 4.0 start: value-log files are never reclaimed.
       - SURREAL_SURREALKV_ENABLE_VLOG=false
     healthcheck:
       test: ["CMD", "/surreal", "is-ready", "--endpoint", "ws://localhost:8000"]
       interval: 10s
       timeout: 5s
       retries: 5
-      # Nothing listens while 4.0 converts a 3.x store in place.
+      # Nothing listens while 4.0 converts a 3.x store in place. Allow 30 s per
+      # GB of the RocksDB store: 10m covers 20 GB.
       start_period: 10m
     restart: unless-stopped
 

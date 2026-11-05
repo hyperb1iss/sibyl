@@ -45,8 +45,8 @@ surrealdb:
   # /ready answers 503 until the datastore serves queries. While 4.0
   # converts a 3.x store in place nothing listens at all, and the upstream
   # chart has no startupProbe value, so liveness waits out the conversion
-  # window instead (about 10 s per 1.4 GB measured; raise it for a larger
-  # store before the conversion rollout).
+  # window instead. Allow 30 s per GB of the RocksDB store: 600 covers 20 GB;
+  # raise it for a larger store before the conversion rollout.
   readinessProbe:
     httpGet:
       path: /ready
@@ -66,7 +66,7 @@ surrealdb:
       value: ""
     - name: OTEL_SERVICE_NAME
       value: sibyl-surrealdb
-    # PENDING-VLOG-DECISION: the 4.0 disk lane confirms or replaces this setting.
+    # Off from a directory's first 4.0 start: value-log files are never reclaimed.
     - name: SURREAL_SURREALKV_ENABLE_VLOG
       value: "false"
 

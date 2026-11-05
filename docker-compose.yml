@@ -57,7 +57,7 @@ services:
     environment:
       - SURREAL_SURREALKV_BLOCK_CACHE_CAPACITY
       - SURREAL_EXPERIMENTAL_UPGRADE_FROM_3X
-      # PENDING-VLOG-DECISION: the 4.0 disk lane confirms or replaces this setting.
+      # Off from a directory's first 4.0 start: value-log files are never reclaimed.
       - SURREAL_SURREALKV_ENABLE_VLOG=false
     restart: unless-stopped
 
@@ -83,7 +83,7 @@ services:
       # same envelope the RocksDB cache and write buffers held on 3.x.
       SURREAL_SURREALKV_BLOCK_CACHE_CAPACITY: "8589934592"
       SURREAL_SURREALKV_MAX_MEMTABLE_SIZE: "536870912"
-      # PENDING-VLOG-DECISION: the 4.0 disk lane confirms or replaces this setting.
+      # Off from a directory's first 4.0 start: value-log files are never reclaimed.
       SURREAL_SURREALKV_ENABLE_VLOG: "false"
     ports:
       - "127.0.0.1:8018:8000"
