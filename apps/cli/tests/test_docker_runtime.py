@@ -11,10 +11,17 @@ import pytest
 import yaml
 from typer.testing import CliRunner
 
-from sibyl_cli import config_store
+from sibyl_cli import config_store, docker_storage
 from sibyl_cli import docker as docker_module
 from sibyl_cli import local as local_module
-from sibyl_cli.docker_storage import SURREAL_IMAGE_REFERENCE
+from sibyl_cli.docker_storage import (
+    SURREAL_IMAGE,
+    SURREAL_IMAGE_REFERENCE,
+    SURREAL_MAJOR_RUNBOOK,
+    SURREAL_STORAGE_ENV,
+    SURREAL_STORE_PATH,
+    shipped_surreal_tag,
+)
 from sibyl_cli.main import app
 
 
@@ -246,7 +253,7 @@ def test_docker_upgrade_tag_updates_pinned_compose_images(
     assert services["api"]["image"] == "ghcr.io/hyperb1iss/sibyl-api-crawler:1.0.0-rc.8"
     assert services["worker"]["image"] == "ghcr.io/hyperb1iss/sibyl-api-crawler:1.0.0-rc.8"
     assert services["web"]["image"] == "ghcr.io/hyperb1iss/sibyl-web:1.0.0-rc.8"
-    assert services["surrealdb"]["image"] == "${SIBYL_SURREAL_IMAGE:-surrealdb/surrealdb:v3.2.4}"
+    assert services["surrealdb"]["image"] == SURREAL_IMAGE_REFERENCE
 
 
 def _as_older_worker_bundle(compose_path: Path) -> None:
@@ -416,7 +423,7 @@ def test_docker_upgrade_moves_older_surreal_default_to_shipped_pin(
     monkeypatch: pytest.MonkeyPatch,
     tag_args: list[str],
 ) -> None:
-    old_pin = "${SIBYL_SURREAL_IMAGE:-surrealdb/surrealdb:v3.2.3}"
+    old_pin = "${SIBYL_SURREAL_IMAGE:-surrealdb/surrealdb:v4.0.0-beta.1}"
     compose_path, calls = _docker_runtime(tmp_path, monkeypatch, surreal_image=old_pin)
 
     result = CliRunner().invoke(app, ["docker", "upgrade", *tag_args])
@@ -424,7 +431,7 @@ def test_docker_upgrade_moves_older_surreal_default_to_shipped_pin(
     assert result.exit_code == 0, result.output
     services = yaml.safe_load(compose_path.read_text())["services"]
     assert services["surrealdb"]["image"] == SURREAL_IMAGE_REFERENCE
-    assert "Upgrading SurrealDB from v3.2.3 to v3.2.4" in result.output
+    assert f"Upgrading SurrealDB from v4.0.0-beta.1 to {shipped_surreal_tag()}" in result.output
     # The pull reads a staged copy with the new pin while the live file still
     # holds the old one; only then does the live file move and `up -d` run.
     assert calls == [
@@ -453,7 +460,7 @@ def test_docker_upgrade_failed_pull_leaves_pins_untouched(
     compose_path, calls = _docker_runtime(
         tmp_path,
         monkeypatch,
-        surreal_image="${SIBYL_SURREAL_IMAGE:-surrealdb/surrealdb:v3.2.3}",
+        surreal_image="${SIBYL_SURREAL_IMAGE:-surrealdb/surrealdb:v4.0.0-beta.1}",
         pull_status=1,
     )
     env_path = compose_path.parent / ".env"
@@ -478,9 +485,11 @@ def test_docker_upgrade_keeps_explicit_surreal_override(
     source: str,
 ) -> None:
     compose_path, calls = _docker_runtime(
-        tmp_path, monkeypatch, surreal_image="${SIBYL_SURREAL_IMAGE:-surrealdb/surrealdb:v3.2.3}"
+        tmp_path,
+        monkeypatch,
+        surreal_image="${SIBYL_SURREAL_IMAGE:-surrealdb/surrealdb:v4.0.0-beta.1}",
     )
-    pinned = "registry.example/surrealdb:v3.2.3-patched"
+    pinned = "registry.example/surrealdb:v4.0.0-patched"
     env_path = compose_path.parent / ".env"
     if source == "shell":
         monkeypatch.setenv("SIBYL_SURREAL_IMAGE", pinned)
@@ -505,7 +514,7 @@ def test_docker_upgrade_keeps_explicit_surreal_override(
         "surrealdb/surrealdb:v3.2.3",
         "registry.example/surrealdb:custom",
         "${SIBYL_SURREAL_IMAGE:-surrealdb/surrealdb:nightly}",
-        "${SIBYL_SURREAL_IMAGE:-surrealdb/surrealdb:v3.3.0}",
+        "${SIBYL_SURREAL_IMAGE:-surrealdb/surrealdb:v4.3.0}",
     ],
 )
 def test_docker_upgrade_leaves_hand_edited_surreal_image(
@@ -521,6 +530,91 @@ def test_docker_upgrade_leaves_hand_edited_surreal_image(
     assert result.exit_code == 0, result.output
     assert compose_path.read_text() == compose_before
     assert "Leaving the SurrealDB image" in result.output
+
+
+def _as_3x_surreal_bundle(compose_path: Path) -> dict[str, object]:
+    """Rewrite the bundle's surrealdb service the way a 3.x CLI wrote it; return it."""
+    config = yaml.safe_load(compose_path.read_text())
+    service = config["services"]["surrealdb"]
+    service["image"] = "${SIBYL_SURREAL_IMAGE:-surrealdb/surrealdb:v3.2.4}"
+    service["command"][-1] = "rocksdb:///data/sibyl.db"
+    del service["environment"]
+    del service["healthcheck"]["start_period"]
+    compose_path.write_text(yaml.dump(config, sort_keys=False))
+    return service
+
+
+def test_docker_upgrade_holds_an_older_major_whole(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The 3.x image keeps its RocksDB path; only `--surreal-major` crosses the major."""
+    compose_path, calls = _docker_runtime(tmp_path, monkeypatch)
+    held = _as_3x_surreal_bundle(compose_path)
+
+    result = CliRunner().invoke(app, ["docker", "upgrade", "--tag", "1.4.0"])
+
+    assert result.exit_code == 0, result.output
+    services = yaml.safe_load(compose_path.read_text())["services"]
+    assert services["surrealdb"] == held
+    assert services["surrealdb"]["command"][-1] == "rocksdb:///data/sibyl.db"
+    assert services["api"]["image"] == "ghcr.io/hyperb1iss/sibyl-api:1.4.0"
+    output = " ".join(result.output.split())
+    assert "SurrealDB stays on v3.2.4" in output
+    assert "cannot be undone" in output
+    assert "sibyl docker upgrade --surreal-major" in output
+    assert [call["args"] for call in calls] == [["pull"], ["up", "-d"]]
+
+
+def test_docker_surreal_major_refuses_before_touching_anything(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Nothing is pulled, stopped, or written, not even a missing settings key."""
+    compose_path, calls = _docker_runtime(tmp_path, monkeypatch)
+    _as_3x_surreal_bundle(compose_path)
+    env_path = compose_path.parent / ".env"
+    env_path.write_text(
+        "".join(
+            f"{line}\n"
+            for line in env_path.read_text().splitlines()
+            if not line.startswith("SIBYL_SETTINGS_KEY=")
+        )
+    )
+    before = {path.name: path.read_bytes() for path in compose_path.parent.iterdir()}
+    monkeypatch.setattr(
+        docker_module,
+        "_existing_api_settings_key",
+        lambda: (_ for _ in ()).throw(AssertionError("the refusal reads no container")),
+    )
+    commands: list[list[str]] = []
+    monkeypatch.setattr(
+        docker_storage.subprocess,
+        "run",
+        lambda cmd, **_kw: commands.append(cmd) or subprocess.CompletedProcess(cmd, 0),
+    )
+
+    result = CliRunner().invoke(app, ["docker", "upgrade", "--surreal-major", "--yes"])
+
+    assert result.exit_code == 1
+    output = " ".join(result.output.split())
+    assert "Moving SurrealDB from v3.2.4 to v4.0.0 is not available in this CLI yet" in output
+    assert "Nothing changed" in output
+    assert SURREAL_MAJOR_RUNBOOK in output
+    assert calls == [] and commands == []
+    assert {path.name: path.read_bytes() for path in compose_path.parent.iterdir()} == before
+
+
+def test_docker_surreal_major_has_nothing_to_do_on_this_major(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    compose_path, calls = _docker_runtime(tmp_path, monkeypatch)
+    compose_before = compose_path.read_bytes()
+
+    result = CliRunner().invoke(app, ["docker", "upgrade", "--surreal-major"])
+
+    assert result.exit_code == 0, result.output
+    assert "nothing to do" in result.output
+    assert calls == []
+    assert compose_path.read_bytes() == compose_before
 
 
 def test_up_starts_local_runtime_without_agent_setup(
@@ -558,6 +652,40 @@ def test_up_starts_local_runtime_without_agent_setup(
     assert (local_dir / "docker-compose.yml").exists()
     assert "sibyl local setup" not in result.output
     assert "Connect page" in result.output
+
+
+def _fresh_config(runtime: str) -> dict:
+    if runtime == "local":
+        return local_module.compose_config_for("test")
+    return docker_module.compose_config(
+        image_tag="test",
+        api_port=3334,
+        web_port=3337,
+        surreal_port=8000,
+        with_worker=True,
+        with_crawler=False,
+    )
+
+
+@pytest.mark.parametrize("runtime", ["local", "docker"])
+def test_fresh_configs_run_surrealdb_4_on_a_surrealkv_store(runtime: str) -> None:
+    surrealdb = _fresh_config(runtime)["services"]["surrealdb"]
+
+    assert SURREAL_IMAGE == "surrealdb/surrealdb:v4.0.0"
+    assert surrealdb["image"] == SURREAL_IMAGE_REFERENCE
+    assert surrealdb["command"][-1] == SURREAL_STORE_PATH == "surrealkv:///data/sibyl.db"
+    assert not any("rocksdb" in part for part in surrealdb["command"])
+    assert surrealdb["environment"] == SURREAL_STORAGE_ENV
+    healthcheck = surrealdb["healthcheck"]
+    assert healthcheck["test"] == [
+        "CMD",
+        "/surreal",
+        "is-ready",
+        "--endpoint",
+        "http://localhost:8000",
+    ]
+    # Nothing listens while 4.0 converts a store; start-period failures do not count.
+    assert healthcheck["start_period"] == "10m"
 
 
 @pytest.mark.parametrize("runtime", ["local", "docker"])

@@ -22,7 +22,7 @@ from dataclasses import dataclass
 from importlib.metadata import PackageNotFoundError
 from importlib.metadata import version as pkg_version
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, Any
 
 import typer
 import yaml
@@ -43,9 +43,14 @@ from sibyl_cli.common import (
     warn,
 )
 from sibyl_cli.docker_storage import (
-    SURREAL_IMAGE,
     SURREAL_IMAGE_REFERENCE,
+    SURREAL_STORAGE_ENV,
+    SURREAL_STORE_PATH,
+    plan_surreal_major_upgrade,
+    run_surreal_major_upgrade,
     surreal_data_mount,
+    surreal_healthcheck,
+    surreal_kept_message,
     surreal_volume_initializer,
     upgraded_surreal_image,
 )
@@ -206,16 +211,12 @@ COMPOSE_CONFIG = {
                 "${SIBYL_SURREAL_USERNAME:-root}",
                 "--pass",
                 "${SIBYL_SURREAL_PASSWORD:-sibyl_local}",
-                "rocksdb:///data/sibyl.db",
+                SURREAL_STORE_PATH,
             ],
+            "environment": dict(SURREAL_STORAGE_ENV),
             "ports": ["127.0.0.1:8000:8000"],
             "volumes": [surreal_data_mount()],
-            "healthcheck": {
-                "test": ["CMD", "/surreal", "is-ready", "--endpoint", "http://localhost:8000"],
-                "interval": "5s",
-                "timeout": "3s",
-                "retries": 5,
-            },
+            "healthcheck": surreal_healthcheck(),
             "restart": "unless-stopped",
         },
     },
@@ -232,25 +233,30 @@ def compose_config_for(image_tag: str, current: dict | None = None) -> dict:
     """The local compose config with the Sibyl images moved to `image_tag`.
 
     SurrealDB follows the same rule as `sibyl docker upgrade`: a CLI-written
-    default moves up to this release's server, and a newer or hand-written
-    image in `current` stays, so the upgrade never takes SurrealDB backwards.
+    default on this release's major moves up to its server, and a newer,
+    hand-written, or older-major image in `current` stays, so the upgrade never
+    takes SurrealDB backwards or across a major. A kept image keeps its whole
+    service, because this release's store path and environment belong to its
+    own server.
     """
-    config = copy.deepcopy(COMPOSE_CONFIG)
+    config: dict[str, Any] = copy.deepcopy(COMPOSE_CONFIG)
     for name in ("api", "web"):
         service = config["services"][name]
         repository = service["image"].rpartition(":")[0]
         service["image"] = f"{repository}:{image_tag}"
 
     try:
-        existing = (current or {})["services"]["surrealdb"]["image"]
+        existing = (current or {})["services"]["surrealdb"]
     except (KeyError, TypeError):
         existing = None
-    if isinstance(existing, str) and upgraded_surreal_image(existing) is None:
-        warn(
-            f"Leaving the SurrealDB image {escape(existing)} as written; "
-            f"this CLI runs {SURREAL_IMAGE}."
-        )
-        config["services"]["surrealdb"]["image"] = existing
+    image = existing.get("image") if isinstance(existing, dict) else None
+    if (
+        isinstance(existing, dict)
+        and isinstance(image, str)
+        and upgraded_surreal_image(image) is None
+    ):
+        warn(surreal_kept_message(image, "local"))
+        config["services"]["surrealdb"] = copy.deepcopy(existing)
     return config
 
 
@@ -258,6 +264,15 @@ def pinned_image(compose_text: str) -> str | None:
     """The API image reference a compose file pins."""
     try:
         image = (yaml.safe_load(compose_text) or {})["services"]["api"]["image"]
+    except (yaml.YAMLError, KeyError, TypeError):
+        return None
+    return image if isinstance(image, str) else None
+
+
+def pinned_surreal_image(compose_text: str) -> str | None:
+    """The SurrealDB image reference a compose file pins."""
+    try:
+        image = (yaml.safe_load(compose_text) or {})["services"]["surrealdb"]["image"]
     except (yaml.YAMLError, KeyError, TypeError):
         return None
     return image if isinstance(image, str) else None
@@ -338,9 +353,10 @@ def is_running() -> bool:
 def write_compose_file(config: dict | None = None, path: Path | None = None) -> None:
     """Write the compose config to disk.
 
-    Without an explicit config this writes the CLI's defaults, but keeps a
-    newer or hand-written SurrealDB image from the file it replaces, so
-    `sibyl up` never takes SurrealDB backwards either.
+    Without an explicit config this writes the CLI's defaults, but keeps the
+    SurrealDB service from the file it replaces whenever its image stays (see
+    `compose_config_for`), so `sibyl up` never takes SurrealDB backwards or
+    across a major either.
     """
     SIBYL_LOCAL_DIR.mkdir(parents=True, exist_ok=True)
     target = path or SIBYL_LOCAL_COMPOSE
@@ -383,14 +399,8 @@ SIBYL_SURREAL_PASSWORD={secrets.token_urlsafe(24)}
     os.chmod(SIBYL_LOCAL_ENV, 0o600)
 
 
-def run_compose(
-    args: list[str],
-    capture: bool = False,
-    compose_file: Path | None = None,
-    timeout: float | None = None,
-) -> subprocess.CompletedProcess:
-    """Run docker compose with the local config."""
-    cmd = [
+def compose_command(args: list[str], compose_file: Path | None = None) -> list[str]:
+    return [
         "docker",
         "compose",
         "-f",
@@ -399,6 +409,16 @@ def run_compose(
         str(SIBYL_LOCAL_ENV),
         *args,
     ]
+
+
+def run_compose(
+    args: list[str],
+    capture: bool = False,
+    compose_file: Path | None = None,
+    timeout: float | None = None,
+) -> subprocess.CompletedProcess:
+    """Run docker compose with the local config."""
+    cmd = compose_command(args, compose_file)
     if capture:
         return subprocess.run(cmd, capture_output=True, text=True, check=False, timeout=timeout)
     return subprocess.run(cmd, check=False, timeout=timeout)
@@ -768,6 +788,16 @@ def upgrade(
         str | None,
         typer.Option("--tag", help="Server image tag to move to (default: this CLI's)"),
     ] = None,
+    surreal_major: Annotated[
+        bool,
+        typer.Option(
+            "--surreal-major",
+            help="Move SurrealDB to this CLI's major version; converts its data one way",
+        ),
+    ] = False,
+    yes: Annotated[
+        bool, typer.Option("--yes", "-y", help="Skip the --surreal-major confirmation")
+    ] = False,
 ) -> None:
     """Move a running local instance to new server images without leaving it down.
 
@@ -775,7 +805,8 @@ def upgrade(
     pull changes nothing. Only then are the pins moved and the services
     recreated. There is no rollback after that point: the new SurrealDB may
     already have opened the data, and an older API must not start against a
-    schema a newer one migrated.
+    schema a newer one migrated. SurrealDB never crosses a major here; that
+    is `--surreal-major` alone.
     """
     if not SIBYL_LOCAL_COMPOSE.exists():
         if container_owner() == "docker":
@@ -786,6 +817,17 @@ def upgrade(
         raise typer.Exit(1)
     if not check_docker() or not check_docker_compose():
         raise typer.Exit(1)
+    if surreal_major:
+        if image_tag:
+            error("--surreal-major moves only SurrealDB; run it without --tag. Nothing changed.")
+            raise typer.Exit(1)
+        planned = plan_surreal_major_upgrade(
+            SIBYL_LOCAL_COMPOSE, SIBYL_LOCAL_ENV, compose_command([])
+        )
+        if planned is not None:
+            with _upgrade_lock():
+                run_surreal_major_upgrade(planned, yes=yes)
+        return
 
     tag = image_tag or DEFAULT_IMAGE_TAG
     with _upgrade_lock():

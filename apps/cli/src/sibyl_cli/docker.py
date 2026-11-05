@@ -21,7 +21,14 @@ from sibyl_cli.docker_storage import (
     MANAGED_SURREAL_IMAGE,
     SURREAL_IMAGE,
     SURREAL_IMAGE_REFERENCE,
+    SURREAL_STORAGE_ENV,
+    SURREAL_STORE_PATH,
+    plan_surreal_major_upgrade,
+    run_surreal_major_upgrade,
     surreal_data_mount,
+    surreal_healthcheck,
+    surreal_image_override,
+    surreal_kept_message,
     surreal_volume_initializer,
     upgraded_surreal_image,
 )
@@ -130,16 +137,12 @@ def compose_config(
                 "${SIBYL_SURREAL_USERNAME:-root}",
                 "--pass",
                 "${SIBYL_SURREAL_PASSWORD}",
-                "rocksdb:///data/sibyl.db",
+                SURREAL_STORE_PATH,
             ],
+            "environment": dict(SURREAL_STORAGE_ENV),
             "ports": [f"127.0.0.1:{surreal_port}:8000"],
             "volumes": [surreal_data_mount()],
-            "healthcheck": {
-                "test": ["CMD", "/surreal", "is-ready", "--endpoint", "http://localhost:8000"],
-                "interval": "5s",
-                "timeout": "3s",
-                "retries": 5,
-            },
+            "healthcheck": surreal_healthcheck(),
             "restart": "unless-stopped",
         },
     }
@@ -236,27 +239,14 @@ def write_env_image_tag(image_tag: str) -> None:
     SIBYL_DOCKER_ENV.write_text("\n".join(lines) + "\n")
 
 
-def _surreal_image_override() -> str | None:
-    """The SIBYL_SURREAL_IMAGE value Compose interpolates, if one is set.
-
-    The shell environment wins over the env file, as it does in Compose.
-    """
-    override = os.environ.get("SIBYL_SURREAL_IMAGE")
-    if override:
-        return override
-    for line in SIBYL_DOCKER_ENV.read_text().splitlines():
-        key, sep, value = line.removeprefix("export ").partition("=")
-        value = value.strip().strip("\"'")
-        if sep and key.strip() == "SIBYL_SURREAL_IMAGE" and value:
-            return value
-    return None
-
-
 def _plan_surreal_image(service: dict[str, Any]) -> None:
     """Move an older CLI-written SurrealDB default up to the server this CLI runs.
 
-    Only the default inside `${SIBYL_SURREAL_IMAGE:-...}` moves, and never
-    backwards, so SIBYL_SURREAL_IMAGE still wins and a hand-written image stays.
+    Only the default inside `${SIBYL_SURREAL_IMAGE:-...}` moves, never backwards
+    and never across a major, so SIBYL_SURREAL_IMAGE still wins and a
+    hand-written image stays. Only the image moves: the command and
+    environment stay as written, so a held service keeps the store path its
+    own server opens.
     """
     image = service.get("image")
     if not isinstance(image, str):
@@ -265,10 +255,7 @@ def _plan_surreal_image(service: dict[str, Any]) -> None:
     if image != SURREAL_IMAGE_REFERENCE:
         moved = upgraded_surreal_image(image)
         if moved is None:
-            warn(
-                f"Leaving the SurrealDB image {escape(image)} as written; "
-                f"this CLI runs {SURREAL_IMAGE}."
-            )
+            warn(surreal_kept_message(image, "docker"))
             return
         service["image"] = moved
         match = MANAGED_SURREAL_IMAGE.fullmatch(image)
@@ -277,7 +264,7 @@ def _plan_surreal_image(service: dict[str, Any]) -> None:
             f"Upgrading SurrealDB from {match['tag'] if match else escape(image)} to {shipped_tag}"
         )
 
-    override = _surreal_image_override()
+    override = surreal_image_override(SIBYL_DOCKER_ENV)
     if override and override != SURREAL_IMAGE:
         warn(
             f"SIBYL_SURREAL_IMAGE keeps SurrealDB on {escape(override)}; "
@@ -571,10 +558,30 @@ def down(
 @app.command("upgrade")
 def upgrade(
     image_tag: Annotated[str | None, typer.Option("--tag", help="Write a new image tag")] = None,
+    surreal_major: Annotated[
+        bool,
+        typer.Option(
+            "--surreal-major",
+            help="Move SurrealDB to this CLI's major version; converts its data one way",
+        ),
+    ] = False,
+    yes: Annotated[
+        bool, typer.Option("--yes", "-y", help="Skip the --surreal-major confirmation")
+    ] = False,
 ) -> None:
     """Pull current images and recreate containers."""
     require_configured()
     require_docker()
+    if surreal_major:
+        if image_tag:
+            error("--surreal-major moves only SurrealDB; run it without --tag. Nothing changed.")
+            raise typer.Exit(1)
+        planned = plan_surreal_major_upgrade(
+            SIBYL_DOCKER_COMPOSE, SIBYL_DOCKER_ENV, compose_command([])
+        )
+        if planned is not None:
+            run_surreal_major_upgrade(planned, yes=yes)
+        return
     # Before anything is recreated: an older bundle's API holds its only copy.
     ensure_env_settings_key()
     current = yaml.safe_load(SIBYL_DOCKER_COMPOSE.read_text()) or {}

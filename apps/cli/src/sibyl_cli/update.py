@@ -35,6 +35,7 @@ from sibyl_cli.common import (
     success,
     warn,
 )
+from sibyl_cli.docker_storage import held_surreal_tag, shipped_surreal_tag
 from sibyl_core.version_contract import server_is_ahead
 
 app = typer.Typer(help="Update Sibyl components")
@@ -178,6 +179,14 @@ class ContainerRuntime:
         except OSError:
             return None
 
+    def surreal_held(self) -> str | None:
+        """The SurrealDB tag the compose file holds on an older major, if it does."""
+        try:
+            image = local_runtime.pinned_surreal_image(self.compose_file.read_text())
+        except OSError:
+            return None
+        return held_surreal_tag(image) if image else None
+
     def is_running(self) -> bool | None:
         """Whether this runtime has running containers, or None when Docker did not answer.
 
@@ -203,7 +212,8 @@ class ContainerRuntime:
         """The runtime's own upgrade command, run through the `sibyl` on PATH.
 
         Both pull before they restart anything, so a missing image leaves the
-        running server alone.
+        running server alone. It never carries `--surreal-major`: crossing a
+        SurrealDB major converts the data one way, so the user runs it.
         """
         return ["sibyl", self.name, "upgrade", "--tag", image_tag]
 
@@ -249,6 +259,8 @@ class ContainerPlan:
     running: bool | None
     pinned_tag: str | None = None
     owner_unknown: bool = False
+    # The SurrealDB tag the compose file holds on an older major, if any.
+    surreal_held: str | None = None
 
     @property
     def api_missing(self) -> bool:
@@ -284,6 +296,12 @@ class ContainerPlan:
             and self.pinned_tag != self.current_tag
         ):
             status += f" [dim](pin says {self.pinned_tag})[/dim]"
+        if self.surreal_held:
+            status += (
+                f" [dim](SurrealDB stays on {escape(self.surreal_held)}; "
+                f"`sibyl {self.runtime.name} upgrade --surreal-major` moves it to "
+                f"{shipped_surreal_tag()}, one way)[/dim]"
+            )
         return status
 
     def _status(self) -> str:
@@ -352,7 +370,8 @@ def plan_container_upgrades(cli_version: str | None) -> list[ContainerPlan]:
                     # A server no label ties to either runtime is still a running
                     # server, so this one must not read as stopped.
                     running, owner_unknown = None, True
-        plans.append(ContainerPlan(runtime, current, target, running, pinned, owner_unknown))
+        held = runtime.surreal_held()
+        plans.append(ContainerPlan(runtime, current, target, running, pinned, owner_unknown, held))
     return plans
 
 
@@ -527,10 +546,14 @@ def update(
     if do_containers:
         installed = cli_current if do_cli else get_current_cli_version()
         container_plans = plan_container_upgrades(cli_latest if cli_has_update else installed)
-    # A runtime that is behind but not upgraded here, or whose tag cannot be
-    # read, is not "up to date" even when nothing is left to apply.
+    # A runtime that is behind but not upgraded here, whose tag cannot be read,
+    # or whose SurrealDB waits on its major upgrade is not "up to date" even
+    # when nothing is left to apply.
     needs_attention = any(
-        (plan.behind and not plan.applies) or plan.current_tag is None or plan.owner_unknown
+        (plan.behind and not plan.applies)
+        or plan.current_tag is None
+        or plan.owner_unknown
+        or plan.surreal_held
         for plan in container_plans
     )
 
