@@ -21,7 +21,7 @@ from starlette.requests import Request
 from sibyl.api.routes import net as net_routes
 from sibyl.coordination import presence as presence_module
 from sibyl.coordination._local.presence import LocalPresenceRegistry
-from sibyl.coordination._redis.presence import RedisPresenceRegistry, _keys
+from sibyl.coordination._redis.presence import RedisPresenceRegistry, presence_keys
 from sibyl.coordination.presence import WATCHING_TTL_SECONDS
 from tests.test_coordination_presence import (
     live_redis_settings as live_redis_settings,  # noqa: PLC0414
@@ -35,20 +35,18 @@ from tests.test_routes_net import (
 )
 
 
+@pytest.fixture
+def clock() -> list[float]:
+    """The presence clock, held still and moved by hand."""
+    return [1_800_000_000.0]
+
+
 @pytest.fixture(autouse=True)
-def fresh_registry(monkeypatch: pytest.MonkeyPatch) -> LocalPresenceRegistry:
-    """A registry of this test's own, so nothing another test noted is listed."""
-    registry = LocalPresenceRegistry()
+def fresh_registry(monkeypatch: pytest.MonkeyPatch, clock: list[float]) -> LocalPresenceRegistry:
+    """A registry of this test's own on the test's clock, so nothing another test noted shows."""
+    registry = LocalPresenceRegistry(clock=lambda: clock[0])
     monkeypatch.setattr(net_routes, "get_presence", lambda: registry)
     return registry
-
-
-@pytest.fixture
-def clock(monkeypatch: pytest.MonkeyPatch) -> list[float]:
-    """The presence clock, held still and moved by hand."""
-    now = [1_800_000_000.0]
-    monkeypatch.setattr(net_routes, "time", SimpleNamespace(time=lambda: now[0]))
-    return now
 
 
 async def presence(org: SimpleNamespace, user: str, **params: object) -> dict[str, Any]:
@@ -223,10 +221,11 @@ def test_only_a_read_by_the_web_session_alone_counts_as_the_web_app() -> None:
 
 async def test_presence_noted_through_one_replica_is_read_through_another(
     org: SimpleNamespace,
-    clock: list[float],
     live_redis_settings: None,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    # Redis keeps the time here, so the window is cut to a second.
+    monkeypatch.setattr(net_routes, "WATCHING_TTL_SECONDS", 1)
     first, second = RedisPresenceRegistry(), RedisPresenceRegistry()
     try:
         monkeypatch.setattr(net_routes, "get_presence", lambda: first)
@@ -237,11 +236,11 @@ async def test_presence_noted_through_one_replica_is_read_through_another(
         assert watchers(await presence(org, org.grace, channel="@ada")) == {
             ("@ada", org.ada, "codex", "s-1")
         }
-        clock[0] += WATCHING_TTL_SECONDS
+        await asyncio.sleep(1.2)
         assert (await presence(org, org.grace, channel="@ada"))["watching"] == []
     finally:
         client = await first._get_redis()
-        await client.delete(*_keys(org.id))
+        await client.delete(*presence_keys(org.id, [org.ada]))
         for registry in (first, second):
             if registry._redis is not None:
                 await registry._redis.aclose()

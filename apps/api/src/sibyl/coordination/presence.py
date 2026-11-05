@@ -1,17 +1,23 @@
 """Who is watching sibylnet channels: protocol, entry shapes and backend resolution.
 
 Presence is derived, never maintained: every feed read notes its reader as
-watching the channels it read until its wait runs out plus
-``WATCHING_TTL_SECONDS``, and nothing else writes here. A dispatcher that peeks
-once a minute therefore stays listed. Entries live in the coordination
-backend, in process memory for a single process and in Redis across replicas,
-so every replica answers with the same watchers; nothing is stored in the
-database.
+watching the channels it read for its wait plus ``WATCHING_TTL_SECONDS``, and
+nothing else writes here. A dispatcher that peeks once a minute therefore
+stays listed. Entries live in the coordination backend, in process memory for
+a single process and in Redis across replicas, so every replica answers with
+the same watchers; nothing is stored in the database.
 
-Every write keeps the later of the stored and the new value for both the
-expiry and ``last_seen``, so writes from different replicas commute and an
-entry never expires earlier because a shorter read came in after a longer
-one.
+A row is one (channel, agent label, session) a user read, and labels are
+whatever a client sends, so each user keeps at most ``MAX_ROWS_PER_READER``
+rows in an organization; a new sighting past that drops that user's oldest.
+Presence then grows with members, not with how many labels anyone invents,
+and a write touches only its own reader's rows.
+
+Every write keeps the later of the stored and the new value for both a row's
+expiry and its sighting, so writes from different replicas commute and a row
+never expires earlier because a shorter read came in after a longer one.
+Windows are measured on the backend's own clock (Redis's, across replicas),
+so clock skew between replicas cannot expire a live watcher.
 """
 
 from __future__ import annotations
@@ -23,6 +29,9 @@ from typing import Protocol
 from sibyl.coordination import CoordinationBackend, get_coordination_backend
 
 WATCHING_TTL_SECONDS = 120
+# Generous for a person running dozens of agent sessions, each reading a
+# channel or two; tight enough that one member can't swell presence.
+MAX_ROWS_PER_READER = 128
 PRESENCE_PREFIX = "sibyl:net:presence:"
 
 
@@ -50,16 +59,18 @@ class PresenceRegistry(Protocol):
     async def note(
         self,
         organization_id: str,
-        watchers: Sequence[Watcher],
         *,
-        now: float,
-        until: float,
+        user_id: str,
+        agent: str | None,
+        session: str | None,
+        channels: Sequence[str | None],
+        window: float,
     ) -> None:
-        """Record ``watchers`` as seen at ``now`` and watching through ``until``."""
+        """Record one read of ``channels``, watching for ``window`` seconds from now."""
         ...
 
-    async def watching(self, organization_id: str, *, now: float) -> list[WatcherSeen]:
-        """Every watcher in the organization whose window is still open at ``now``."""
+    async def watching(self, organization_id: str) -> list[WatcherSeen]:
+        """Every watcher in the organization whose window is still open."""
         ...
 
 
@@ -89,6 +100,7 @@ def get_presence() -> PresenceRegistry:
 
 
 __all__ = [
+    "MAX_ROWS_PER_READER",
     "PRESENCE_PREFIX",
     "WATCHING_TTL_SECONDS",
     "PresenceRegistry",

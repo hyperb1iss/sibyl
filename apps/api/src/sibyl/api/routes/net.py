@@ -33,7 +33,6 @@ runs again on retry, so that decision can be remembered twice.
 from __future__ import annotations
 
 import asyncio
-import time
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -69,7 +68,7 @@ from sibyl.api.schemas.net import (
 from sibyl.auth.authorization import verify_entity_project_access
 from sibyl.auth.context import AuthContext
 from sibyl.auth.dependencies import get_auth_context, get_current_organization, require_org_role
-from sibyl.coordination.presence import WATCHING_TTL_SECONDS, Watcher, get_presence
+from sibyl.coordination.presence import WATCHING_TTL_SECONDS, get_presence
 from sibyl.persistence.auth_runtime import get_users_by_ids
 from sibyl_core.auth import AuthOrganization, ProjectRole
 from sibyl_core.auth.memory_policy import MemoryPolicyAction
@@ -554,18 +553,19 @@ async def note_watching(
 ) -> None:
     """List the reader as watching what it read until its wait plus the watching TTL.
 
-    A read of every channel is one watcher with no channel. Presence is a
-    nicety on top of the read, so a registry that cannot answer is logged and
-    the read goes on.
+    A read naming no channel, including a read of one thread across every
+    channel, is one watcher with no channel. Presence is a nicety on top of
+    the read, so a registry that cannot answer is logged and the read goes on.
     """
-    now = time.time()
     read: list[str | None] = [*channels] or [None]
-    watchers = [
-        Watcher(channel=channel, user_id=user_id, agent=agent, session=session) for channel in read
-    ]
     try:
         await get_presence().note(
-            organization_id, watchers, now=now, until=now + wait + WATCHING_TTL_SECONDS
+            organization_id,
+            user_id=user_id,
+            agent=agent,
+            session=session,
+            channels=read,
+            window=wait + WATCHING_TTL_SECONDS,
         )
     except Exception as exc:
         log.warning("net_presence_note_failed", error=str(exc), organization_id=organization_id)
@@ -719,7 +719,7 @@ async def read_presence(
             raise HTTPException(status_code=422, detail=str(exc)) from exc
     organization_id = str(org.id)
     seen, posters = await asyncio.gather(
-        get_presence().watching(organization_id, now=time.time()),
+        get_presence().watching(organization_id),
         recent_net_authors(organization_id=organization_id, channel=selected),
     )
     if selected is not None:
