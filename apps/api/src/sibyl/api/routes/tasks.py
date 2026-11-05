@@ -5,6 +5,8 @@ Dedicated endpoints for task lifecycle operations with proper event broadcasting
 
 import asyncio
 import uuid
+from collections.abc import AsyncGenerator
+from contextlib import asynccontextmanager
 from typing import Any, cast
 
 import structlog
@@ -1006,55 +1008,63 @@ async def update_task(
         return response
 
     # --- Sync path (?sync=true) — existing inline behaviour ---
+    async with _locked_task_write(group_id, task_id) as runtime:
+        updated, epic_started = await _write_task_update(runtime, task_id, request, update_data)
+
+        await _broadcast_task_update(
+            task_id,
+            "update_task",
+            {"name": updated.name, **update_data},
+            org_id=group_id,
+        )
+
+        updated_revision = getattr(updated, "revision", 1)
+        response = TaskActionResponse(
+            success=True,
+            action="update_task",
+            task_id=task_id,
+            message=f"Task updated: {', '.join(update_data.keys())}",
+            data={
+                **update_data,
+                "revision": updated_revision,
+                **({"epic_started": epic_started} if epic_started else {}),
+            },
+            mutation_receipt=mutation_receipt(
+                http_request,
+                applied=True,
+                revision=updated_revision,
+                affected_records=[f"entity:{task_id}"],
+            ),
+        )
+        await save_idempotent_response(
+            http_request,
+            organization_id=org.id,
+            principal_id=str(user.id),
+            method="PATCH",
+            path=idempotency_path,
+            payload=idempotency_payload,
+            response=response,
+            status_code=200,
+            content_session=None,
+        )
+        return response
+
+
+@asynccontextmanager
+async def _locked_task_write(group_id: str, task_id: str) -> AsyncGenerator[Any]:
+    """The task's entity lock and graph runtime that every synchronous task write runs under.
+
+    A held lock answers with the retryable locked error, a stale
+    ``expected_revision`` with 409, and anything unexpected with a 500 that
+    leaks no internals.
+    """
     from sibyl.locks import LockAcquisitionError
 
     try:
         async with entity_lock(group_id, task_id, blocking=True) as lock_token:
             if not lock_token:
                 raise entity_locked()
-
-            runtime = await get_task_graph_runtime(group_id)
-
-            updated, epic_started = await _write_task_update(runtime, task_id, request, update_data)
-
-            await _broadcast_task_update(
-                task_id,
-                "update_task",
-                {"name": updated.name, **update_data},
-                org_id=group_id,
-            )
-
-            updated_revision = getattr(updated, "revision", 1)
-            response = TaskActionResponse(
-                success=True,
-                action="update_task",
-                task_id=task_id,
-                message=f"Task updated: {', '.join(update_data.keys())}",
-                data={
-                    **update_data,
-                    "revision": updated_revision,
-                    **({"epic_started": epic_started} if epic_started else {}),
-                },
-                mutation_receipt=mutation_receipt(
-                    http_request,
-                    applied=True,
-                    revision=updated_revision,
-                    affected_records=[f"entity:{task_id}"],
-                ),
-            )
-            await save_idempotent_response(
-                http_request,
-                organization_id=org.id,
-                principal_id=str(user.id),
-                method="PATCH",
-                path=idempotency_path,
-                payload=idempotency_payload,
-                response=response,
-                status_code=200,
-                content_session=None,
-            )
-            return response
-
+            yield await get_task_graph_runtime(group_id)
     except LockAcquisitionError as e:
         raise entity_locked() from e
     except HTTPException:
