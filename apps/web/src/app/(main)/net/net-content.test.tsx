@@ -396,10 +396,11 @@ describe('NetContent', () => {
 
     const stream = screen.getByRole('region', { name: '#reviews' });
     const header = stream.querySelector('header') as HTMLElement;
-    const listening = within(header).getByText('Listening').parentElement as HTMLElement;
+    const listening = within(header).getByText('Listening').nextElementSibling as HTMLElement;
     expect(within(listening).getByText('Grace Hopper')).toBeInTheDocument();
     expect(within(listening).getByText('herald')).toBeInTheDocument();
-    const posted = within(header).getByText('Posted in the last hour').parentElement as HTMLElement;
+    const posted = within(header).getByText('Posted in the last hour')
+      .nextElementSibling as HTMLElement;
     expect(within(posted).getByText('claude-code')).toBeInTheDocument();
     expect(screen.getByText('listening', { selector: 'dt' })).toBeInTheDocument();
     // No status vocabulary and no plumbing.

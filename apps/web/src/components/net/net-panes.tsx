@@ -120,27 +120,29 @@ function PeopleRow({
   const shown = people.slice(0, PEOPLE_SHOWN);
   const rest = people.slice(PEOPLE_SHOWN);
   return (
-    <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
-      <span className="text-[10px] font-semibold tracking-wider text-sc-fg-muted uppercase">
+    <>
+      <dt className="pt-0.5 text-[10px] font-semibold tracking-wider text-sc-fg-muted uppercase">
         {label}
-      </span>
-      {shown.map(person => (
-        <span
-          key={person.key}
-          title={person.title}
-          className="inline-flex min-w-0 items-center gap-1.5"
-        >
-          <AuthorMark name={person.name} seed={person.seed} size="sm" />
-          <span className="truncate text-sc-fg-secondary">{person.name}</span>
-          {person.agent && <AgentLabel agent={person.agent} />}
-        </span>
-      ))}
-      {rest.length > 0 && (
-        <span title={rest.map(person => person.title).join('\n')} className="text-sc-fg-muted">
-          +{rest.length} more
-        </span>
-      )}
-    </div>
+      </dt>
+      <dd className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
+        {shown.map(person => (
+          <span
+            key={person.key}
+            title={person.title}
+            className="inline-flex min-w-0 items-center gap-1.5"
+          >
+            <AuthorMark name={person.name} seed={person.seed} size="sm" />
+            <span className="truncate text-sc-fg-secondary">{person.name}</span>
+            {person.agent && <AgentLabel agent={person.agent} />}
+          </span>
+        ))}
+        {rest.length > 0 && (
+          <span title={rest.map(person => person.title).join('\n')} className="text-sc-fg-muted">
+            +{rest.length} more
+          </span>
+        )}
+      </dd>
+    </>
   );
 }
 
@@ -167,14 +169,19 @@ function PresenceLine({ presence }: { presence: ChannelPresence }) {
     title: `${listenerLabel(poster)}, posted ${formatActivityTime(poster.last_post_at, now)}`,
   }));
   return (
-    <div className="mt-2.5 space-y-1.5 text-xs">
+    <dl className="mt-2.5 grid gap-y-1 text-xs sm:grid-cols-[max-content_minmax(0,1fr)] sm:gap-x-3 sm:gap-y-1.5">
       {listening.length > 0 ? (
         <PeopleRow label="Listening" people={listening} />
       ) : (
-        <p className="text-sc-fg-muted">No agent is reading this channel right now.</p>
+        <>
+          <dt className="pt-0.5 text-[10px] font-semibold tracking-wider text-sc-fg-muted uppercase">
+            Listening
+          </dt>
+          <dd className="text-sc-fg-muted">No agent is reading this channel right now.</dd>
+        </>
       )}
       {recent.length > 0 && <PeopleRow label="Posted in the last hour" people={recent} />}
-    </div>
+    </dl>
   );
 }
 
