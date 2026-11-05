@@ -5,7 +5,7 @@ Dedicated endpoints for task lifecycle operations with proper event broadcasting
 
 import asyncio
 import uuid
-from collections.abc import AsyncGenerator, Callable
+from collections.abc import AsyncGenerator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from typing import Any, cast
 
@@ -17,7 +17,9 @@ from sibyl.api.decorators import handle_workflow_errors
 from sibyl.api.errors import entity_locked
 from sibyl.api.event_types import WSEvent
 from sibyl.api.idempotency import (
+    idempotent_progress,
     mutation_receipt,
+    record_idempotent_progress,
     replay_idempotent_response,
     save_idempotent_response,
     serialize_idempotent_request,
@@ -1203,12 +1205,14 @@ async def _change_assignees(
     *,
     user_id: str,
     change: Callable[[list[str]], list[str]],
+    before_write: Callable[[], Awaitable[None]],
 ) -> tuple[Any, bool]:
     """Apply ``change`` to the task's assignees through the synchronous update path.
 
     The assignees are read under the task's lock, so concurrent assigns all
     land. A change that leaves the list as it was writes and broadcasts
-    nothing, and the task comes back as it stands.
+    nothing, and the task comes back as it stands. ``before_write`` runs
+    under the lock once a write is decided and before it is made.
     """
     async with _locked_task_write(group_id, task_id) as runtime:
         current = await runtime.entity_manager.get(task_id)
@@ -1216,6 +1220,7 @@ async def _change_assignees(
         wanted = change(assignees)
         if wanted == assignees:
             return current, False
+        await before_write()
         request = UpdateTaskRequest(assignees=wanted)
         update_data = _build_update_data(request, user_id)
         updated, _ = await _write_task_update(runtime, task_id, request, update_data)
@@ -1243,7 +1248,13 @@ async def _hand_off(
     The caller needs the write access a task update needs, inside the API
     key's project grants, because the notice names the task's project, which
     is the pin of every ``task:<id>`` thread, and so lands its distillation in
-    that project's memory. The task is written first, then the notice posted.
+    that project's memory.
+
+    The task is written first. Under its lock, once a write is decided and
+    before it is made, the run notes on its ``Idempotency-Key`` claim that a
+    notice is owed. A retry that takes over an interrupted run finds the
+    assignees already changed, reads that note, and posts the notice the
+    first run never did.
     """
     entity = await _verify_task_access(task_id, org, auth)
     project_id = _project_id_for_policy(entity)
@@ -1271,9 +1282,17 @@ async def _hand_off(
 
     thread = f"{TASK_THREAD_PREFIX}{task_id}"
     body = notice(_handoff_title(entity))
-    task, changed = await _change_assignees(group_id, task_id, user_id=principal_id, change=change)
+    earlier = idempotent_progress(http_request)
+
+    async def owe_notice() -> None:
+        await record_idempotent_progress(http_request, {"notice_owed": True, "changed": True})
+
+    task, changed = await _change_assignees(
+        group_id, task_id, user_id=principal_id, change=change, before_write=owe_notice
+    )
+    changed = changed or earlier.get("changed") is True
     message: NetMessage | None = None
-    if changed or post_unchanged:
+    if changed or post_unchanged or earlier.get("notice_owed") is True:
         record = await deliver_net_message(
             organization_id=group_id,
             ctx=auth,

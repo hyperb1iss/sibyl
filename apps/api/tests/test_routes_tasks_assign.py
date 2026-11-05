@@ -263,6 +263,63 @@ async def test_a_pin_stored_for_another_project_never_blocks_the_handoff(
     assert len(await stored_messages(world)) == 2
 
 
+def fail_delivery_once(monkeypatch: pytest.MonkeyPatch) -> list[int]:
+    """Make the next handoff post fail after the task was written, as a crash would."""
+    calls = [0]
+    deliver = task_routes.deliver_net_message
+
+    async def flaky(**kwargs: Any) -> Any:
+        calls[0] += 1
+        if calls[0] == 1:
+            raise ConnectionError("content store went away")
+        return await deliver(**kwargs)
+
+    monkeypatch.setattr(task_routes, "deliver_net_message", flaky)
+    return calls
+
+
+async def test_an_interrupted_assign_posts_its_handoff_on_retry(
+    world: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    fail_delivery_once(monkeypatch)
+    key = {"Idempotency-Key": f"assign-{uuid4()}"}
+
+    interrupted = await assign(world, world.ada, headers=key, to="@grace")
+    assert interrupted.status_code == 500
+    assert await assignees(world) == ["@grace"]
+    assert await stored_messages(world) == []
+
+    retried = await assign(world, world.ada, headers=key, to="@grace")
+    assert retried.status_code == 200, retried.text
+    assert retried.json()["changed"] is True
+    assert retried.json()["message"]["thread"] == f"task:{world.task}"
+    assert len(await stored_messages(world)) == 1
+    assert await assignees(world) == ["@grace"]
+
+
+async def test_an_interrupted_unassign_posts_its_notice_on_retry(
+    world: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    assert (await assign(world, world.ada, to="@grace")).status_code == 200
+    fail_delivery_once(monkeypatch)
+    key = {"Idempotency-Key": f"unassign-{uuid4()}"}
+
+    async with client_for(world, world.ada) as client:
+        path = f"/api/tasks/{world.task}/unassign"
+        interrupted = await client.post(path, json={"assignee": "@grace"}, headers=key)
+        assert interrupted.status_code == 500
+        assert await assignees(world) == []
+
+        retried = await client.post(path, json={"assignee": "@grace"}, headers=key)
+    assert retried.status_code == 200, retried.text
+    assert retried.json()["changed"] is True
+    assert retried.json()["message"]["body"] == f"Unassigned: {TITLE} (task {world.task})"
+    bodies = [str(row["body"]) for row in await stored_messages(world)]
+    assert sorted(bodies) == sorted(
+        [f"Assigned: {TITLE}\nTask: {world.task}", f"Unassigned: {TITLE} (task {world.task})"]
+    )
+
+
 @pytest.mark.parametrize(
     "body",
     [
