@@ -1900,6 +1900,33 @@ async def test_live_graph_backup_pages_one_read_transaction(monkeypatch, tmp_pat
 
 
 @pytest.mark.asyncio
+async def test_live_backup_snapshot_does_not_hold_back_an_index_build() -> None:
+    # SurrealDB 4 makes every index build wait, up to a minute, for each older
+    # writer anywhere in the datastore. The snapshot opens read-only, so a
+    # backup is not one; a writer snapshot would hold this DEFINE until it closed.
+    async with _live_graph_manager() as (client, _manager):
+        other = DedicatedSurrealClient(
+            url=_live_surreal_url(),
+            username=_surreal_username(),
+            password=_surreal_password(),
+            namespace=f"snapshot_barrier_{uuid4().hex}",
+            database="graph",
+        )
+        try:
+            await other.execute_query("DEFINE TABLE barrier SCHEMALESS; CREATE barrier SET n = 1;")
+            async with client.read_snapshot() as execute:
+                assert execute is not None
+                await execute("RETURN count((SELECT id FROM entity));")
+                await asyncio.wait_for(
+                    other.execute_query("DEFINE INDEX barrier_n ON barrier FIELDS n;"), timeout=30
+                )
+        finally:
+            await other.close()
+            with suppress(Exception):
+                await _drop_surreal_namespace(other.namespace)
+
+
+@pytest.mark.asyncio
 async def test_live_chunk_sweep_reads_raw_evidence_and_filters_the_chunk_lane(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

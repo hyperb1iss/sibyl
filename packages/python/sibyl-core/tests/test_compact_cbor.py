@@ -216,3 +216,58 @@ def test_values_round_trip_through_the_decoders(fast: bool, monkeypatch) -> None
     # Python datetimes hold microseconds; the server keeps all nine digits.
     assert decoded["nanos"] == datetime(2026, 9, 30, 1, 2, 3, 123456, tzinfo=UTC)
     assert decoded["duration"] == values["duration"]
+
+
+def test_the_sdk_alone_cannot_read_a_zero_duration(monkeypatch) -> None:
+    # Why the decoder is wrapped: the receive loop dies on this and strands the socket.
+    monkeypatch.setattr(sdk_cbor, "tag_decoder", compact_cbor._sdk_tag_decoder)
+    with pytest.raises(IndexError):
+        sdk_cbor.decode(cbor2.dumps(cbor2.CBORTag(14, [])))
+
+
+@pytest.mark.parametrize("fast", [False, True], ids=["sdk-decoder", "c-decoder"])
+def test_durations_with_their_trailing_zero_parts_left_out_decode(fast: bool, monkeypatch) -> None:
+    # SurrealDB 4's answer to a read-only begin, which carries a zero duration.
+    monkeypatch.setattr(sdk_cbor, "loads", sdk_cbor.loads)
+    monkeypatch.setattr(fast_cbor, "_installed", False)
+    if fast:
+        assert fast_cbor.install_fast_cbor() is True
+    compact_cbor.install_compact_cbor()
+    assert sdk_cbor.tag_decoder is compact_cbor.tag_decoder
+    txn = uuid.UUID("01a1aa8d-7d6f-700f-9293-4564f1350f32")
+    reply = cbor2.dumps(
+        {
+            "id": cbor2.CBORTag(37, txn.bytes),
+            "isolation": "snapshot",
+            "snapshot": {"age": cbor2.CBORTag(14, []), "position": cbor2.CBORTag(6, None)},
+            "whole": cbor2.CBORTag(14, [5]),
+            "both": cbor2.CBORTag(14, [5, 7]),
+        }
+    )
+
+    decoded = sdk_cbor.decode(reply)
+
+    assert decoded["id"] == txn
+    assert decoded["snapshot"]["age"] == Duration(0)
+    assert decoded["whole"] == Duration(5 * 10**9)
+    assert decoded["both"] == Duration(5 * 10**9 + 7)
+
+
+@pytest.mark.parametrize("payload", ["", b"", {}], ids=["text", "bytes", "map"])
+@pytest.mark.parametrize("fast", [False, True], ids=["sdk-decoder", "c-decoder"])
+def test_only_an_empty_array_reads_as_a_zero_duration(
+    payload: object, fast: bool, monkeypatch
+) -> None:
+    monkeypatch.setattr(sdk_cbor, "loads", sdk_cbor.loads)
+    monkeypatch.setattr(fast_cbor, "_installed", False)
+    if fast:
+        assert fast_cbor.install_fast_cbor() is True
+    compact_cbor.install_compact_cbor()
+    encoded = cbor2.dumps(cbor2.CBORTag(14, payload))
+    # A malformed empty payload fails exactly as it did without the shim.
+    with monkeypatch.context() as sdk_alone:
+        sdk_alone.setattr(sdk_cbor, "tag_decoder", compact_cbor._sdk_tag_decoder)
+        with pytest.raises(Exception) as before:
+            sdk_cbor.decode(encoded)
+    with pytest.raises(type(before.value)):
+        sdk_cbor.decode(encoded)

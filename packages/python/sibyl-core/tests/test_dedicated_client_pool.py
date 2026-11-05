@@ -2,10 +2,15 @@ from __future__ import annotations
 
 import asyncio
 import time
+import uuid
 from types import SimpleNamespace
 from typing import Any
 
 import pytest
+from surrealdb.connections.async_ws import AsyncWsSurrealConnection
+from surrealdb.data import cbor as sdk_cbor
+from surrealdb.data.types.duration import Duration
+from surrealdb.errors import UnexpectedResponseError
 
 from sibyl_core.backends.surreal import dedicated_client as dedicated_client_module
 from sibyl_core.backends.surreal.dedicated_client import DedicatedSurrealClient, PoolHealth
@@ -1145,3 +1150,52 @@ async def test_sequential_queries_reuse_the_socket_they_warmed(monkeypatch) -> N
         assert len(clients) == 4, "a burst still gets every slot"
     finally:
         await client.close()
+
+
+class _RecordingConnection(AsyncWsSurrealConnection):
+    """The SDK's WebSocket connection with its socket send replaced by a recorder."""
+
+    def __init__(self, result: object) -> None:
+        super().__init__("ws://127.0.0.1:9")
+        self.result = result
+        self.sent: list[dict[str, Any]] = []
+
+    async def _send(self, message: Any, process: str, bypass: bool = False) -> dict[str, Any]:
+        request = sdk_cbor.decode(message.WS_CBOR_DESCRIPTOR)
+        self.sent.append(request)
+        return {"id": request["id"], "result": self.result}
+
+
+TXN = uuid.UUID("01a1aa8d-7d6f-700f-9293-4564f1350f32")
+
+
+@pytest.mark.parametrize(
+    "answer",
+    [
+        pytest.param(TXN, id="3.x-bare-id"),
+        pytest.param(str(TXN), id="bare-id-text"),
+        pytest.param(
+            {
+                "id": TXN,
+                "isolation": "snapshot",
+                "snapshot": {"age": Duration(0), "position": None, "stale": False},
+            },
+            id="4-options-answer",
+        ),
+    ],
+)
+async def test_snapshot_transactions_begin_read_only(answer: object) -> None:
+    connection = _RecordingConnection(answer)
+
+    assert await dedicated_client_module._begin_read_only(connection) == TXN
+
+    [request] = connection.sent
+    assert request["method"] == "begin"
+    assert request["params"] == [{"read_only": True}]
+
+
+async def test_a_read_only_begin_without_a_transaction_id_fails() -> None:
+    connection = _RecordingConnection({"isolation": "snapshot"})
+
+    with pytest.raises(UnexpectedResponseError):
+        await dedicated_client_module._begin_read_only(connection)

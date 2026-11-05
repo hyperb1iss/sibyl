@@ -13,6 +13,7 @@ from collections.abc import AsyncGenerator, AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Protocol, cast
+from uuid import UUID, uuid4
 
 import structlog
 
@@ -45,9 +46,8 @@ from sibyl_core.backends.surreal.url_schemes import (
 )
 
 if TYPE_CHECKING:
-    from uuid import UUID
-
     from surrealdb.connections.async_ws import AsyncWsSurrealConnection
+    from surrealdb.request_message.message import RequestMessage
     from surrealdb.types import Value
 
     from sibyl_core.backends.surreal.schema_version import SurrealExecute
@@ -202,6 +202,50 @@ async def _close_to_completion(client: SurrealClient) -> None:
     open a second engine on the directory while the old one is still closing.
     """
     await _finish_despite_cancellation(client.close())
+
+
+class _ReadOnlyBegin:
+    """An RPC ``begin`` that opens a read-only transaction.
+
+    SurrealDB 4 counts a transaction that a bare ``begin`` opens as a writer
+    for as long as it stays open, and every index build in the datastore
+    waits, up to a minute, for each writer older than itself. A backup's
+    snapshot would hold back every DEFINE INDEX meanwhile, an organization's
+    first graph bootstrap included. The options object makes the transaction a
+    reader over the current state. SDK 2.0.0's ``begin`` sends no params, so
+    this builds the request itself. SurrealDB 3.x reads a ``begin`` without
+    looking at its params and never holds an index build back.
+    """
+
+    __slots__ = ("WS_CBOR_DESCRIPTOR", "id")
+
+    def __init__(self) -> None:
+        from surrealdb.data.cbor import encode
+
+        self.id = str(uuid4())
+        # The SDK's send loop reads only these two attributes of a request.
+        self.WS_CBOR_DESCRIPTOR = encode(
+            {"id": self.id, "method": "begin", "params": [{"read_only": True}]}
+        )
+
+
+async def _begin_read_only(client: AsyncWsSurrealConnection) -> UUID:
+    response = await client._send(cast("RequestMessage", _ReadOnlyBegin()), "begin")
+    client.check_response_for_result(response, "begin")
+    result = response["result"]
+    # SurrealDB 4 answers a begin that carried options with an object, the
+    # transaction under "id"; 3.x answers with the bare id.
+    if isinstance(result, dict):
+        result = result.get("id")
+    if isinstance(result, UUID):
+        return result
+    if isinstance(result, str):
+        return UUID(result)
+    from surrealdb.errors import UnexpectedResponseError
+
+    raise UnexpectedResponseError(
+        f"begin expected a transaction id from the server, got {type(result).__name__}"
+    )
 
 
 def _without_scope_result(response: object) -> object:
@@ -730,10 +774,10 @@ class DedicatedSurrealClient:
 
         Every query the yielded executor sends sees the snapshot the
         transaction opened on, so a namespace read page by page cannot
-        interleave with writers between pages. The transaction is cancelled,
-        never committed. The SDK offers client-side transactions only over
-        WebSocket, so any other URL yields None and the caller reads the
-        snapshot in one statement instead.
+        interleave with writers between pages. The transaction is read-only
+        and cancelled, never committed. The SDK offers client-side
+        transactions only over WebSocket, so any other URL yields None and the
+        caller reads the snapshot in one statement instead.
         """
         if not is_websocket_surreal_url(self._url):
             yield None
@@ -744,7 +788,7 @@ class DedicatedSurrealClient:
         )
         transaction: UUID | None = None
         try:
-            transaction = await _at_boundary(self._url, client.begin())
+            transaction = await _at_boundary(self._url, _begin_read_only(client))
 
             async def execute(query: str, **params: object) -> object:
                 bound = params or None
