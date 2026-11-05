@@ -22,6 +22,7 @@ from sibyl_core.backends.surreal.server_version import (
     SURREAL_SERVER_IMAGE,
     SURREAL_SERVER_VERSION,
     SURREAL_STORAGE_ENV,
+    SURREAL_STORE_GUARD,
 )
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -51,6 +52,9 @@ PIN_PATHSPECS = (
     ":!:docs/architecture/**",
     ":!:benchmarks/**",
 )
+
+# The literal pins the scan finds today; fewer means a pin moved out of its reach.
+KNOWN_IMAGE_LITERALS = 21
 
 IMAGE_LITERAL = re.compile(r"surrealdb/surrealdb:v?(\d+\.\d+\.\d+[^\s\"'`}]*)")
 
@@ -139,13 +143,17 @@ def test_every_literal_surrealdb_image_names_the_supported_release() -> None:
         capture_output=True,
         check=True,
     ).stdout.split()
-    stale = [
-        f"{relative}: {match.group(0)}"
+    matches = [
+        (relative, match)
         for relative in files
         for match in IMAGE_LITERAL.finditer((REPO_ROOT / relative).read_text(encoding="utf-8"))
+    ]
+    stale = [
+        f"{relative}: {match.group(0)}"
+        for relative, match in matches
         if match.group(1) != SURREAL_SERVER_VERSION
     ]
-    assert files
+    assert len(matches) >= KNOWN_IMAGE_LITERALS
     assert stale == []
 
 
@@ -158,10 +166,37 @@ def test_no_server_start_path_opens_rocksdb() -> None:
         "charts/surrealdb/values.yaml",
         *dict.fromkeys(relative for relative, _ in COMPOSE_SERVERS),
     ]
+    # The store guard names rocksdb:// to refuse it, not to open it.
+    guard_lines = {line.strip() for line in SURREAL_STORE_GUARD.replace("$", "$$").splitlines()}
     offenders = [
         f"{relative}: {line.strip()}"
         for relative in paths
         for line in (REPO_ROOT / relative).read_text(encoding="utf-8").splitlines()
-        if re.search(r"rocksdb:(//)?/", line) and not line.lstrip().startswith("#")
+        if re.search(r"rocksdb:(//)?/", line)
+        and not line.lstrip().startswith("#")
+        and line.strip() not in guard_lines
     ]
     assert offenders == []
+
+
+def _store_path(service: dict[str, Any]) -> str:
+    command = service["command"]
+    return str(command[-1] if isinstance(command, list) else command.split()[-1])
+
+
+@pytest.mark.parametrize(("relative", "name"), COMPOSE_SERVERS)
+def test_compose_servers_start_behind_the_store_guard(relative: str, name: str) -> None:
+    """The one-shot ahead of each server refuses an image and path that misread the data."""
+    services = _yaml(relative)["services"]
+    server = services[name]
+    inits = [dep for dep in (server.get("depends_on") or {}) if dep.endswith("init")]
+    if not inits:
+        # Only a server whose image no setting can change may skip the guard.
+        assert "${" not in server["image"], f"{relative} {name} has no guarded init"
+        return
+    (init,) = inits
+    script = services[init]["command"][-1]
+    assert script.startswith(SURREAL_STORE_GUARD.replace("$", "$$")), f"{relative} {init}"
+    environment = _environment(services[init])
+    assert environment["SURREAL_IMAGE"] == server["image"]
+    assert environment["SURREAL_STORE"] == _store_path(server)

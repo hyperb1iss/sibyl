@@ -10,10 +10,65 @@ services:
   # fresh named volume is created root-owned, so SurrealDB cannot create
   # its store directory under /data. This one-shot fixes the volume
   # ownership before SurrealDB starts; the chown is idempotent on reruns.
+  # The one-shot that prepares the data directory also refuses an image and
+  # store path that would open existing data wrong (a 3.x image on surrealkv://
+  # or on a converted store, or 4.0 on a 3.x store without the opt-in), so the
+  # server never starts on them.
   surreal-init:
     image: busybox:1.37
     container_name: sibyl-surreal-init
-    command: ["chown", "-R", "65532:65532", "/data"]
+    command:
+      - sh
+      - -c
+      - |
+        # Refuse a SurrealDB image and store path that would open the data wrong.
+        store="$${SURREAL_STORE#*://}"
+        case "$$store" in /*) ;; *) store="" ;; esac
+        ref="$${SURREAL_IMAGE%%@*}"
+        tag="$${ref##*/}"
+        case "$$tag" in *:*) tag="$${tag##*:}" ;; *) tag="" ;; esac
+        tag="$${tag#v}"
+        major="$${tag%%.*}"
+        case "$$major" in "" | *[!0-9]*) major="" ;; esac
+        convert="$${SURREAL_EXPERIMENTAL_UPGRADE_FROM_3X:-}"
+        refuse() {
+          echo "surreal-init: $$1" >&2
+          echo "surreal-init: nothing was started; see docs/deployment/surrealdb-4-upgrade.md" >&2
+          exit 1
+        }
+        if [ -n "$$store" ] && [ -e "$$store" ] && ! ls "$$store" > /dev/null 2>&1; then
+          refuse "cannot read $$store to check which store it holds"
+        fi
+        if [ -n "$$store" ] && [ -d "$$store/manifest" ]; then
+          case "$$SURREAL_STORE" in
+            rocksdb://*)
+              if [ "$$major" = 3 ]; then
+                refuse "$$store holds a SurrealKV store; a 3.x server opened with rocksdb:// on it serves an empty database and leaves files that stop 4.0 from opening the store"
+              fi
+              ;;
+          esac
+        elif [ -n "$$store" ] && [ -f "$$store/CURRENT" ]; then
+          case "$$SURREAL_STORE" in
+            surrealkv://*)
+              if [ "$$major" = 3 ]; then
+                refuse "a 3.x server opened with surrealkv:// serves an empty database beside the 3.x store in $$store; a 3.x image keeps the rocksdb:// store path"
+              fi
+              if [ "$$convert" != true ]; then
+                refuse "$$store holds a store a SurrealDB 3.x server wrote; 4.0 converts it once and for good: back it up, then start once with SURREAL_EXPERIMENTAL_UPGRADE_FROM_3X=true"
+              fi
+              ;;
+            *)
+              if [ -n "$$major" ] && [ "$$major" -ge 4 ] && [ "$$convert" != true ]; then
+                refuse "$$store holds a store a SurrealDB 3.x server wrote; 4.0 converts it once and for good: back it up, then start once with SURREAL_EXPERIMENTAL_UPGRADE_FROM_3X=true"
+              fi
+              ;;
+          esac
+        fi
+        chown -R 65532:65532 /data
+    environment:
+      SURREAL_IMAGE: ${SIBYL_SURREAL_IMAGE:-surrealdb/surrealdb:v4.0.0}
+      SURREAL_STORE: ${SIBYL_SURREAL_PATH:?set SIBYL_SURREAL_PATH in the role env file}
+      SURREAL_EXPERIMENTAL_UPGRADE_FROM_3X: ${SURREAL_EXPERIMENTAL_UPGRADE_FROM_3X:-}
     volumes:
       - surreal_data:/data
     restart: "no"

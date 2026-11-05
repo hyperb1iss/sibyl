@@ -118,7 +118,9 @@ conversion is one-way. Follow the [SurrealDB 4.0 upgrade](./surrealdb-4-upgrade.
 starts the server once with `SURREAL_EXPERIMENTAL_UPGRADE_FROM_3X=true` in the shell. To stay on a
 3.x server for now, set both `SIBYL_SURREAL_IMAGE` and
 `SIBYL_SURREAL_PATH=rocksdb:///data/sibyl.db`: a 3.x server opened with `surrealkv://` serves an
-empty database beside the data.
+empty database beside the data. The `surreal-init` one-shot checks the image and path against what
+the directory holds before every start, and stops with the reason instead of starting a pairing that
+would open the data wrong.
 
 ## Port Mappings
 
