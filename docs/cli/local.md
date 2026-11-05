@@ -73,19 +73,26 @@ Only then are the pins moved and the services recreated. SurrealDB follows the s
 moves up to its server, and a newer, hand-written, or older-major image keeps its whole SurrealDB
 service. `sibyl up` keeps it the same way.
 
-Neither command moves SurrealDB to a new major version, because moving from `v3` to `v4` converts
-the data in place and cannot be undone. `sibyl local upgrade --surreal-major` does that move: it
-asks first (`--yes` skips the question), runs on its own without `--tag`, and refuses with nothing
-changed while `SIBYL_SURREAL_IMAGE` is set. Until this CLI ships the move, it refuses with nothing
-changed and points at the [SurrealDB 4 upgrade runbook](../deployment/surrealdb-4-upgrade.md).
+Neither command moves SurrealDB to a new major version. `sibyl local upgrade --surreal-major` does
+that move, converting the data in place, one way, the same way
+[`sibyl docker upgrade --surreal-major`](./docker.md#docker-upgrade) does: it asks first (`--yes`
+skips the question), keeps a cold copy in the `sibyl_surreal_3x_backup` volume and the old compose
+file as `docker-compose.yml.surreal3x.bak`, converts the store, and then starts Sibyl, whose API
+rebuilds the auth and content indexes before it serves (each organization's graph rebuilds on its
+first use, so the first requests for each organization can be slow). It runs on its own without
+`--tag`, and refuses with nothing changed while the instance pins a Sibyl release older than this
+CLI's (run `sibyl local upgrade` first), while `SIBYL_SURREAL_IMAGE` is set, or while the
+[`sibyl docker`](./docker.md) runtime still runs `v3` on the volume both runtimes share. It prints
+the cleanup and rollback commands when it finishes. The
+[SurrealDB 4 upgrade runbook](../deployment/surrealdb-4-upgrade.md) covers the move in depth.
 
-There is no rollback once the new services start. The new SurrealDB may already have opened the
-data, and an older API must not run against a schema a newer one migrated. If the services fail to
-start or do not report healthy within two minutes, the command keeps the new pins, says so, and
-points at `sibyl local logs`; a slow migration may still finish, which `sibyl local status` shows.
-Re-running the same `sibyl local upgrade --tag <tag>` retries the start. When nothing is left
-running, it says to start it with `SIBYL_IMAGE_TAG=<tag> sibyl up` instead, which keeps the
-SurrealDB image the pins name.
+Outside `--surreal-major` there is no rollback once the new services start. The new SurrealDB may
+already have opened the data, and an older API must not run against a schema a newer one migrated.
+If the services fail to start or do not report healthy within two minutes, the command keeps the new
+pins, says so, and points at `sibyl local logs`; a slow migration may still finish, which
+`sibyl local status` shows. Re-running the same `sibyl local upgrade --tag <tag>` retries the start.
+When nothing is left running, it says to start it with `SIBYL_IMAGE_TAG=<tag> sibyl up` instead,
+which keeps the SurrealDB image the pins name.
 
 Without `--tag` the target is this CLI's image, and the command refuses with nothing changed when
 the instance already runs, or pins, a newer release than that, since the API must not move backwards

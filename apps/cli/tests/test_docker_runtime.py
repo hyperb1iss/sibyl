@@ -11,13 +11,12 @@ import pytest
 import yaml
 from typer.testing import CliRunner
 
-from sibyl_cli import config_store, docker_storage
+from sibyl_cli import config_store
 from sibyl_cli import docker as docker_module
 from sibyl_cli import local as local_module
 from sibyl_cli.docker_storage import (
     SURREAL_IMAGE,
     SURREAL_IMAGE_REFERENCE,
-    SURREAL_MAJOR_RUNBOOK,
     SURREAL_STORAGE_ENV,
     SURREAL_STORE_PATH,
     shipped_surreal_tag,
@@ -560,61 +559,9 @@ def test_docker_upgrade_holds_an_older_major_whole(
     assert services["api"]["image"] == "ghcr.io/hyperb1iss/sibyl-api:1.4.0"
     output = " ".join(result.output.split())
     assert "SurrealDB stays on v3.2.4" in output
-    assert "cannot be undone" in output
+    assert "converts its data in place" in output
     assert "sibyl docker upgrade --surreal-major" in output
     assert [call["args"] for call in calls] == [["pull"], ["up", "-d"]]
-
-
-def test_docker_surreal_major_refuses_before_touching_anything(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Nothing is pulled, stopped, or written, not even a missing settings key."""
-    compose_path, calls = _docker_runtime(tmp_path, monkeypatch)
-    _as_3x_surreal_bundle(compose_path)
-    env_path = compose_path.parent / ".env"
-    env_path.write_text(
-        "".join(
-            f"{line}\n"
-            for line in env_path.read_text().splitlines()
-            if not line.startswith("SIBYL_SETTINGS_KEY=")
-        )
-    )
-    before = {path.name: path.read_bytes() for path in compose_path.parent.iterdir()}
-    monkeypatch.setattr(
-        docker_module,
-        "_existing_api_settings_key",
-        lambda: (_ for _ in ()).throw(AssertionError("the refusal reads no container")),
-    )
-    commands: list[list[str]] = []
-    monkeypatch.setattr(
-        docker_storage.subprocess,
-        "run",
-        lambda cmd, **_kw: commands.append(cmd) or subprocess.CompletedProcess(cmd, 0),
-    )
-
-    result = CliRunner().invoke(app, ["docker", "upgrade", "--surreal-major", "--yes"])
-
-    assert result.exit_code == 1
-    output = " ".join(result.output.split())
-    assert "Moving SurrealDB from v3.2.4 to v4.0.0 is not available in this CLI yet" in output
-    assert "Nothing changed" in output
-    assert SURREAL_MAJOR_RUNBOOK in output
-    assert calls == [] and commands == []
-    assert {path.name: path.read_bytes() for path in compose_path.parent.iterdir()} == before
-
-
-def test_docker_surreal_major_has_nothing_to_do_on_this_major(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    compose_path, calls = _docker_runtime(tmp_path, monkeypatch)
-    compose_before = compose_path.read_bytes()
-
-    result = CliRunner().invoke(app, ["docker", "upgrade", "--surreal-major"])
-
-    assert result.exit_code == 0, result.output
-    assert "nothing to do" in result.output
-    assert calls == []
-    assert compose_path.read_bytes() == compose_before
 
 
 def test_up_starts_local_runtime_without_agent_setup(

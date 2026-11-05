@@ -223,13 +223,16 @@ def test_sibyl_up_keeps_a_3x_surrealdb_service_whole(
     assert services["api"]["image"].endswith(f":{local.DEFAULT_IMAGE_TAG}")
     output = " ".join(capsys.readouterr().out.split())
     assert "SurrealDB stays on v3.2.4" in output
-    assert "cannot be undone" in output
+    assert "converts its data in place" in output
     assert "sibyl local upgrade --surreal-major" in output
 
 
 def test_local_api_healthcheck_requires_success_status() -> None:
-    command = local.COMPOSE_CONFIG["services"]["api"]["healthcheck"]["test"]
-    assert command[-1].endswith(".raise_for_status()")
+    healthcheck = local.COMPOSE_CONFIG["services"]["api"]["healthcheck"]
+    assert healthcheck["test"][-1].endswith(".raise_for_status()")
+    # The first start on a new SurrealDB major rebuilds every index before it
+    # serves; web waits on this check and must not give up meanwhile.
+    assert healthcheck["start_period"] == "10m"
 
 
 @pytest.mark.parametrize("status", [200, 503])

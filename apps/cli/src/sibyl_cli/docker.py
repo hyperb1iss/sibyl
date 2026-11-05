@@ -32,7 +32,14 @@ from sibyl_cli.docker_storage import (
     surreal_volume_initializer,
     upgraded_surreal_image,
 )
-from sibyl_cli.local import DEFAULT_IMAGE_TAG, check_docker, check_docker_compose
+from sibyl_cli.local import (
+    DEFAULT_IMAGE_TAG,
+    check_docker,
+    check_docker_compose,
+    known_compose_files,
+    release_image_tag,
+    wait_for_healthy,
+)
 
 app = typer.Typer(
     name="docker",
@@ -437,6 +444,16 @@ def run_compose(
     return subprocess.run(compose_command(args, compose_file), text=True, check=False)
 
 
+def wait_for_api(timeout: int) -> bool:
+    """Wait for the API on the host port this bundle publishes to report ready."""
+    try:
+        mapping = yaml.safe_load(SIBYL_DOCKER_COMPOSE.read_text())["services"]["api"]["ports"][0]
+        port = int(str(mapping).split(":")[-2])
+    except (OSError, yaml.YAMLError, KeyError, IndexError, TypeError, ValueError):
+        port = 3334
+    return wait_for_healthy(timeout, url=f"http://localhost:{port}/api/health/ready")
+
+
 def require_configured() -> None:
     if not SIBYL_DOCKER_COMPOSE.exists() or not SIBYL_DOCKER_ENV.exists():
         error("Docker runtime is not initialized.")
@@ -577,10 +594,15 @@ def upgrade(
             error("--surreal-major moves only SurrealDB; run it without --tag. Nothing changed.")
             raise typer.Exit(1)
         planned = plan_surreal_major_upgrade(
-            SIBYL_DOCKER_COMPOSE, SIBYL_DOCKER_ENV, compose_command([])
+            "docker",
+            SIBYL_DOCKER_COMPOSE,
+            SIBYL_DOCKER_ENV,
+            compose_command([]),
+            known_compose_files(),
+            release_tag=release_image_tag(DEFAULT_IMAGE_TAG),
         )
         if planned is not None:
-            run_surreal_major_upgrade(planned, yes=yes)
+            run_surreal_major_upgrade(planned, yes=yes, wait_for_api=wait_for_api)
         return
     # Before anything is recreated: an older bundle's API holds its only copy.
     ensure_env_settings_key()

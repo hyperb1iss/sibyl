@@ -2,18 +2,21 @@
 
 import os
 import re
+import shlex
+import shutil
 import subprocess
-from collections.abc import Sequence
+import time
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, NoReturn
 
 import typer
 import yaml
 from packaging.version import InvalidVersion, Version
 from rich.markup import escape
 
-from sibyl_cli.common import error, info, success
+from sibyl_cli.common import console, error, info, success, warn
 from sibyl_core.backends.surreal.server_version import SURREAL_SERVER_IMAGE
 from sibyl_core.backends.surreal.server_version import (
     SURREAL_STORAGE_ENV as SURREAL_STORAGE_ENV,  # both runtimes' surrealdb environment
@@ -32,6 +35,7 @@ MANAGED_SURREAL_IMAGE = re.compile(r"\$\{SIBYL_SURREAL_IMAGE:-surrealdb/surreald
 # data, and 4.0 refuses a 3.x store it was not told to convert.
 SURREAL_STORE_PATH = "surrealkv:///data/sibyl.db"
 SURREAL_VOLUME = "sibyl_surreal"
+BUSYBOX_IMAGE = "busybox:1.37"
 SURREAL_MAJOR_RUNBOOK = "https://hyperb1iss.github.io/sibyl/deployment/surrealdb-4-upgrade.html"
 
 
@@ -92,8 +96,7 @@ def surreal_kept_message(image: str, runtime: str) -> str:
         return f"Leaving the SurrealDB image {escape(image)} as written; this CLI runs {SURREAL_IMAGE}."
     return (
         f"SurrealDB stays on {escape(held)}. Moving to {shipped_surreal_tag()} converts its data in "
-        f"place and cannot be undone; run sibyl {runtime} upgrade --surreal-major when you "
-        "are ready."
+        f"place, one way; run sibyl {runtime} upgrade --surreal-major when you are ready."
     )
 
 
@@ -146,7 +149,7 @@ def surreal_healthcheck() -> dict[str, Any]:
 def surreal_volume_initializer() -> dict[str, Any]:
     """Initialize only the mount root; preserve existing database file metadata."""
     return {
-        "image": "busybox:1.37",
+        "image": BUSYBOX_IMAGE,
         "container_name": "sibyl-surreal-init",
         "user": "0:0",
         # The official SurrealDB image uses distroless nonroot (65532:65532).
@@ -165,110 +168,86 @@ def surreal_volume_initializer() -> dict[str, Any]:
 # Crossing a SurrealDB major (`upgrade --surreal-major`)
 # ============================================================================
 
-
-@dataclass(frozen=True)
-class UpgradeStep:
-    """One command of a SurrealDB major upgrade, and what it does in words."""
-
-    summary: str
-    command: tuple[str, ...]
-
-
-@dataclass(frozen=True)
-class SurrealMajorSteps:
-    """How an upgrade path moves a held store.
-
-    `before` runs while the compose file still describes the held service,
-    `service` then replaces the surrealdb service in it, and `after` runs on
-    the new service and ends with the stack started.
-    """
-
-    before: tuple[UpgradeStep, ...]
-    service: dict[str, Any]
-    after: tuple[UpgradeStep, ...]
-
-
-def pull_image_step(image: str) -> UpgradeStep:
-    return UpgradeStep(f"Pulling {image}", ("docker", "pull", image))
-
-
-def stop_services_step(compose: Sequence[str], services: Sequence[str]) -> UpgradeStep:
-    return UpgradeStep(f"Stopping {', '.join(services)}", (*compose, "stop", *services))
-
-
-def backup_volume_step(volume: str, backup: str) -> UpgradeStep:
-    """Copy `volume` into `backup`, refusing when `backup` already holds data.
-
-    Run it with SurrealDB stopped so the copy is a consistent store; a copy
-    taken before the move is the only way back across a major.
-    """
-    script = (
-        'if [ -n "$(ls -A /backup)" ]; then echo "$0 already holds data" >&2; exit 1; fi; '
-        "cp -a /data/. /backup/"
-    )
-    return UpgradeStep(
-        f"Copying the {volume} volume to {backup}",
-        (
-            "docker",
-            "run",
-            "--rm",
-            "--network",
-            "none",
-            "-v",
-            f"{volume}:/data:ro",
-            "-v",
-            f"{backup}:/backup",
-            "busybox:1.37",
-            "sh",
-            "-c",
-            script,
-            backup,
-        ),
-    )
-
-
-def surreal_major_upgrade_steps(
-    *, compose: Sequence[str], writers: Sequence[str], service: dict[str, Any]
-) -> SurrealMajorSteps | None:
-    """The upgrade path that moves a held store to this CLI's SurrealDB major.
-
-    `compose` is the runtime's `docker compose -f ... --env-file ...` prefix,
-    `writers` the services that write to SurrealDB, and `service` the held
-    surrealdb service as written. A path starts with
-    `pull_image_step(SURREAL_IMAGE)` and `stop_services_step(compose, writers)`,
-    so the new image is local and nothing writes before the store is touched,
-    and copies the store with `backup_volume_step` before it changes. None
-    means no path is wired, and the command refuses with nothing changed.
-    """
-    # PENDING-UPGRADE-PATH-DECISION: the 4.0 disk lane picks in-place conversion or export/import.
-    return None
+# The store path every 3.x CLI wrote, which 4.0 converts in place.
+SURREAL_3X_STORE_PATH = "rocksdb:///data/sibyl.db"
+SURREAL_BACKUP_VOLUME = "sibyl_surreal_3x_backup"
+# Lets 4.0 open a 3.x store and convert it; only the converting start carries it.
+SURREAL_CONVERT_ENV = {"SURREAL_EXPERIMENTAL_UPGRADE_FROM_3X": "true"}
+_KIB_PER_GIB = 1024 * 1024
+_SURREAL_READY = ("exec", "-T", "surrealdb", "/surreal", "is-ready", "--endpoint")
+_SURREAL_ENDPOINT = "http://localhost:8000"
 
 
 @dataclass(frozen=True)
 class SurrealMajorUpgrade:
-    """A settled `upgrade --surreal-major`: the held tag and the path's steps."""
+    """A settled `upgrade --surreal-major`: the runtime's stack and the major it holds."""
 
+    runtime: str
     held: str
     compose_file: Path
-    steps: SurrealMajorSteps
+    compose: tuple[str, ...]
+    writers: tuple[str, ...]
+
+    @property
+    def held_compose_file(self) -> Path:
+        """The compose file as it ran the held major, saved for a rollback."""
+        return self.compose_file.with_name(f"{self.compose_file.name}.surreal3x.bak")
+
+
+def _image_major(image: object) -> int | None:
+    if not isinstance(image, str):
+        return None
+    version = surreal_version(_managed_tag(image) or image.rpartition(":")[2])
+    return version.major if version else None
+
+
+def _keeps_older_major(compose_file: Path) -> bool:
+    """Whether a compose file still runs an older SurrealDB major than this CLI's."""
+    try:
+        image = yaml.safe_load(compose_file.read_text())["services"]["surrealdb"]["image"]
+    except (OSError, yaml.YAMLError, KeyError, TypeError):
+        return False
+    major, shipped = _image_major(image), _image_major(SURREAL_IMAGE)
+    return major is not None and shipped is not None and major < shipped
+
+
+def _older_release(image: object, release_tag: str | None) -> str | None:
+    """The image's tag when it is a release older than `release_tag`, else None."""
+    tag = image.rpartition(":")[2] if isinstance(image, str) else ""
+    try:
+        return tag if release_tag and Version(tag) < Version(release_tag) else None
+    except InvalidVersion:
+        return None
+
+
+def _refuse(reason: str) -> NoReturn:
+    error(f"{escape(reason)} Nothing changed.")
+    raise typer.Exit(1)
 
 
 def plan_surreal_major_upgrade(
-    compose_file: Path, env_file: Path, compose: Sequence[str]
+    runtime: str,
+    compose_file: Path,
+    env_file: Path,
+    compose: Sequence[str],
+    known_compose_files: Sequence[Path],
+    *,
+    release_tag: str | None,
 ) -> SurrealMajorUpgrade | None:
     """Settle `upgrade --surreal-major` before anything is pulled, stopped, or written.
 
     Returns None when SurrealDB is not held on an older major, so there is
     nothing to do. Exits with nothing changed when the compose file cannot be
-    read, SIBYL_SURREAL_IMAGE would override the move, or no path is wired.
+    read or no longer opens the 3.x store, the API it pins is a release older
+    than `release_tag` (this CLI's), SIBYL_SURREAL_IMAGE would override the
+    move, or another runtime would open the converted volume on 3.x.
     """
     try:
         services = (yaml.safe_load(compose_file.read_text()) or {})["services"]
         service = services["surrealdb"]
         image = service["image"]
     except (OSError, yaml.YAMLError, KeyError, TypeError):
-        error(f"Could not read the SurrealDB service from {compose_file}. Nothing changed.")
-        raise typer.Exit(1) from None
+        _refuse(f"Could not read the SurrealDB service from {compose_file}.")
     held = held_surreal_tag(image) if isinstance(image, str) else None
     if held is None:
         info(
@@ -276,45 +255,246 @@ def plan_surreal_major_upgrade(
             "moves, so there is nothing to do."
         )
         return None
+    command = service.get("command")
+    if not isinstance(command, list) or command[-1:] != [SURREAL_3X_STORE_PATH]:
+        _refuse(
+            f"The SurrealDB command in {compose_file} does not open {SURREAL_3X_STORE_PATH}, "
+            "so this CLI cannot convert it."
+        )
+    api_image = services["api"].get("image") if isinstance(services.get("api"), dict) else None
+    if older := _older_release(api_image, release_tag):
+        # The API that first starts on the new major must be the release that
+        # rebuilds the indexes it needs.
+        _refuse(
+            f"Sibyl runs {older} here, older than this CLI's {release_tag}. Move it first "
+            f"with sibyl {runtime} upgrade, then run this again."
+        )
     if override := surreal_image_override(env_file):
-        error(
-            f"SIBYL_SURREAL_IMAGE pins SurrealDB to {escape(override)}, which would override "
-            f"the move. Nothing changed. Remove it from the shell and {env_file} first."
+        _refuse(
+            f"SIBYL_SURREAL_IMAGE pins SurrealDB to {override}, which would override the "
+            f"move. Remove it from the shell and {env_file} first."
         )
-        raise typer.Exit(1)
-    writers = [name for name in ("api", "worker", "web") if name in services]
-    steps = surreal_major_upgrade_steps(compose=compose, writers=writers, service=service)
-    if steps is None:
-        error(
-            f"Moving SurrealDB from {escape(held)} to {shipped_surreal_tag()} is not available in "
-            "this CLI yet. Nothing changed."
-        )
-        info(f"The operator runbook covers the move: {SURREAL_MAJOR_RUNBOOK}")
-        raise typer.Exit(1)
-    return SurrealMajorUpgrade(held, compose_file, steps)
+    for other in known_compose_files:
+        if other.resolve() != compose_file.resolve() and _keeps_older_major(other):
+            _refuse(
+                f"{other} also runs SurrealDB on the shared {SURREAL_VOLUME} volume, on an "
+                "older major; after the move it would open the converted data as an empty "
+                "database. Move that file aside first (the data lives in the volume, not in it)."
+            )
+    writers = tuple(name for name in ("api", "worker", "web") if name in services)
+    return SurrealMajorUpgrade(runtime, held, compose_file, tuple(compose), writers)
 
 
-def _run_steps(steps: Sequence[UpgradeStep]) -> None:
-    for step in steps:
-        info(step.summary)
-        if subprocess.run(list(step.command), check=False).returncode != 0:
-            error(f"The SurrealDB move stopped: {step.summary} failed.")
-            info(f"The operator runbook covers where to go from here: {SURREAL_MAJOR_RUNBOOK}")
-            raise typer.Exit(1)
+def run_surreal_major_upgrade(
+    upgrade: SurrealMajorUpgrade, *, yes: bool, wait_for_api: Callable[[int], bool]
+) -> None:
+    """Convert the held store in place on this CLI's SurrealDB, then bring Sibyl back on it.
 
-
-def run_surreal_major_upgrade(upgrade: SurrealMajorUpgrade, *, yes: bool) -> None:
-    """Confirm, then run the path's steps in order, stopping at the first failure."""
+    Until the new service is written the store is untouched, so a failure
+    brings the held stack back. From then on a failure says where the move
+    stands and how to roll back from the cold copy. Nothing is ever deleted.
+    """
     target = shipped_surreal_tag()
     if not yes and not typer.confirm(
-        f"Move SurrealDB from {upgrade.held} to {target}? Its data is converted and "
-        "cannot be moved back.",
+        f"Move SurrealDB from {upgrade.held} to {target}? This converts its data in place, "
+        f"one way. A cold copy is kept in {SURREAL_BACKUP_VOLUME}, and about twice the "
+        "store's size must be free.",
         default=False,
     ):
         raise typer.Abort()
-    _run_steps(upgrade.steps.before)
+    gib = _cold_copy(upgrade) / _KIB_PER_GIB
+
+    _write_surreal_service(upgrade, converting=True)
+    info(f"Converting the store on SurrealDB {target}; nothing answers until it finishes")
+    if _run((*upgrade.compose, "up", "-d", "--no-deps", "surrealdb")).returncode != 0:
+        _stranded(upgrade, f"Docker Compose could not start SurrealDB {target}.", "surrealdb")
+    limit = max(600, int(30 * gib) + 300)
+    if not _wait_for_surreal(upgrade.compose, limit):
+        _stranded(
+            upgrade,
+            f"SurrealDB did not finish converting within {_duration(limit)}; it may still be "
+            "converting.",
+            "surrealdb",
+        )
+
+    _write_surreal_service(upgrade, converting=False)
+    info("Starting Sibyl; the API rebuilds the auth and content indexes before it serves")
+    if _run((*upgrade.compose, "up", "-d")).returncode != 0:
+        _stranded(upgrade, "Docker Compose could not start Sibyl on the converted store.", None)
+    limit = max(600, int(60 * gib) + 300)
+    if not wait_for_api(limit):
+        _stranded(
+            upgrade,
+            f"The API did not report ready within {_duration(limit)}; it may still be "
+            "rebuilding the auth and content indexes.",
+            "api",
+        )
+
+    console.print()
+    success(f"SurrealDB now runs {target}, and Sibyl serves on it.")
+    info(
+        "Each organization's graph rebuilds its indexes on its first use, so the first "
+        "requests for each organization can be slow."
+    )
+    info("Once you have checked your data, reclaim the space the 3.x copies hold:")
+    _print_commands(
+        _busybox(f"{SURREAL_VOLUME}:/data", script="rm -rf /data/sibyl.db/_rocksdb_backup"),
+        ("docker", "volume", "rm", SURREAL_BACKUP_VOLUME),
+        ("rm", str(upgrade.held_compose_file)),
+    )
+    _print_rollback(upgrade, "Until then, to go back")
+
+
+def _cold_copy(upgrade: SurrealMajorUpgrade) -> int:
+    """Pull, stop, copy, save, and measure; the KiB the store uses.
+
+    The store is untouched until this returns, so a failure brings the held
+    stack back.
+    """
+    refuse_full = (
+        f'if [ -n "$(ls -A /backup)" ]; then echo "{SURREAL_BACKUP_VOLUME} already holds data" '
+        ">&2; exit 1; fi; cp -a /data/. /backup/"
+    )
+    steps = (
+        (f"Pulling {SURREAL_IMAGE}", ("docker", "pull", SURREAL_IMAGE)),
+        (
+            f"Stopping {', '.join((*upgrade.writers, 'surrealdb'))}",
+            (*upgrade.compose, "stop", *upgrade.writers, "surrealdb"),
+        ),
+        (
+            f"Copying the {SURREAL_VOLUME} volume into {SURREAL_BACKUP_VOLUME}",
+            _busybox(
+                f"{SURREAL_VOLUME}:/data:ro", f"{SURREAL_BACKUP_VOLUME}:/backup", script=refuse_full
+            ),
+        ),
+    )
+    for index, (summary, command) in enumerate(steps):
+        info(summary)
+        if _run(command).returncode != 0:
+            _bring_back(upgrade, f"{summary} failed.", copied=index == 2)
+    shutil.copy2(upgrade.compose_file, upgrade.held_compose_file)
+    info(
+        f"Saved the compose file that runs SurrealDB {upgrade.held} as {upgrade.held_compose_file}"
+    )
+
+    measured = _run(
+        _busybox(
+            f"{SURREAL_VOLUME}:/data:ro",
+            script="du -sk /data | cut -f1; df -Pk /data | awk 'NR==2 {print $4}'",
+        ),
+        capture=True,
+    )
+    try:
+        used, available = (int(value) for value in measured.stdout.split())
+    except ValueError:
+        used = available = -1
+    if measured.returncode != 0 or used < 0:
+        _bring_back(upgrade, f"Could not measure the {SURREAL_VOLUME} volume.", copied=True)
+    if available < 2 * used:
+        _bring_back(
+            upgrade,
+            f"Converting a {_size(used)} store needs about {_size(2 * used)} free beside it, "
+            f"and only {_size(available)} is.",
+            copied=True,
+        )
+    return used
+
+
+def _write_surreal_service(upgrade: SurrealMajorUpgrade, *, converting: bool) -> None:
+    """Point the compose file's surrealdb service at this CLI's server and store."""
     config = yaml.safe_load(upgrade.compose_file.read_text())
-    config["services"]["surrealdb"] = upgrade.steps.service
+    service = config["services"]["surrealdb"]
+    service["image"] = SURREAL_IMAGE_REFERENCE
+    service["command"] = [*service["command"][:-1], SURREAL_STORE_PATH]
+    service["environment"] = {**SURREAL_STORAGE_ENV, **(SURREAL_CONVERT_ENV if converting else {})}
+    service["healthcheck"] = surreal_healthcheck()
     upgrade.compose_file.write_text(yaml.dump(config, default_flow_style=False, sort_keys=False))
-    _run_steps(upgrade.steps.after)
-    success(f"SurrealDB now runs {target}")
+
+
+def _wait_for_surreal(compose: Sequence[str], limit: int) -> bool:
+    """Poll SurrealDB until it answers ready, noting progress every 30 seconds."""
+    started = noted = time.monotonic()
+    while _run((*compose, *_SURREAL_READY, _SURREAL_ENDPOINT), capture=True).returncode != 0:
+        now = time.monotonic()
+        if now - started >= limit:
+            return False
+        if now - noted >= 30:
+            info(f"Still converting after {_duration(now - started)} (allowing {_duration(limit)})")
+            noted = now
+        time.sleep(5)
+    return True
+
+
+def _bring_back(upgrade: SurrealMajorUpgrade, reason: str, *, copied: bool = False) -> NoReturn:
+    error(f"{escape(reason)} The store was not converted.")
+    restart = (*upgrade.compose, "up", "-d")
+    if _run(restart).returncode == 0:
+        info(f"The stack runs SurrealDB {upgrade.held} again, as before. Nothing changed.")
+    else:
+        error("Docker Compose could not start the stack again. Start it with:")
+        _print_commands(restart)
+    if copied:
+        info(f"Remove the copy in {SURREAL_BACKUP_VOLUME} before you run this again:")
+        _print_commands(("docker", "volume", "rm", SURREAL_BACKUP_VOLUME))
+    raise typer.Exit(1)
+
+
+def _stranded(upgrade: SurrealMajorUpgrade, reason: str, service: str | None) -> NoReturn:
+    error(escape(reason))
+    logs = f"sibyl {upgrade.runtime} logs" + (f" {service}" if service else "")
+    info(f"Follow it with: {logs}. The runbook covers what comes next: {SURREAL_MAJOR_RUNBOOK}")
+    _print_rollback(upgrade, "To go back")
+    raise typer.Exit(1)
+
+
+def _print_rollback(upgrade: SurrealMajorUpgrade, lead: str) -> None:
+    info(f"{lead} to SurrealDB {upgrade.held} from the cold copy (later writes are lost):")
+    _print_commands(
+        (*upgrade.compose, "down"),
+        _busybox(
+            f"{SURREAL_VOLUME}:/data",
+            f"{SURREAL_BACKUP_VOLUME}:/backup:ro",
+            script="rm -rf /data/* /data/.[!.]* && cp -a /backup/. /data/",
+        ),
+        ("cp", str(upgrade.held_compose_file), str(upgrade.compose_file)),
+        (*upgrade.compose, "up", "-d"),
+    )
+    warn(
+        f"Never start SurrealDB {upgrade.held} on the converted volume: it opens it as an "
+        "empty database."
+    )
+
+
+def _busybox(*mounts: str, script: str) -> tuple[str, ...]:
+    volumes = [arg for mount in mounts for arg in ("-v", mount)]
+    return (
+        "docker",
+        "run",
+        "--rm",
+        "--network",
+        "none",
+        *volumes,
+        BUSYBOX_IMAGE,
+        "sh",
+        "-c",
+        script,
+    )
+
+
+def _run(command: Sequence[str], *, capture: bool = False) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(list(command), check=False, text=True, capture_output=capture)
+
+
+def _print_commands(*commands: Sequence[str]) -> None:
+    for command in commands:
+        console.print(f"  {shlex.join(command)}", soft_wrap=True, markup=False, highlight=False)
+
+
+def _duration(seconds: float) -> str:
+    return f"{int(seconds)} s" if seconds < 120 else f"{int(seconds // 60)} min"
+
+
+def _size(kib: int) -> str:
+    if kib < _KIB_PER_GIB:
+        return f"{kib / 1024:.0f} MiB"
+    return f"{kib / _KIB_PER_GIB:.1f} GiB"

@@ -171,7 +171,9 @@ COMPOSE_CONFIG = {
                 "interval": "10s",
                 "timeout": "5s",
                 "retries": 5,
-                "start_period": "30s",
+                # The first start on a new SurrealDB major rebuilds every index
+                # before it serves, and dependents must not give up meanwhile.
+                "start_period": "10m",
             },
             "restart": "unless-stopped",
         },
@@ -618,16 +620,16 @@ def get_api_keys_from_env() -> tuple[str, str]:
     return openai_key, anthropic_key
 
 
-def wait_for_healthy(timeout: int = 120) -> bool:
-    """Wait for API to be healthy."""
+def wait_for_healthy(
+    timeout: int = 120, url: str = "http://localhost:3334/api/health/ready"
+) -> bool:
+    """Wait for the API at `url` to report ready."""
     import httpx
 
     start = time.time()
     while time.time() - start < timeout:
         try:
-            response = httpx.get(
-                "http://localhost:3334/api/health/ready", timeout=2, trust_env=False
-            )
+            response = httpx.get(url, timeout=2, trust_env=False)
             if response.status_code == 200:
                 return True
         except Exception:
@@ -822,11 +824,16 @@ def upgrade(
             error("--surreal-major moves only SurrealDB; run it without --tag. Nothing changed.")
             raise typer.Exit(1)
         planned = plan_surreal_major_upgrade(
-            SIBYL_LOCAL_COMPOSE, SIBYL_LOCAL_ENV, compose_command([])
+            "local",
+            SIBYL_LOCAL_COMPOSE,
+            SIBYL_LOCAL_ENV,
+            compose_command([]),
+            known_compose_files(),
+            release_tag=release_image_tag(DEFAULT_IMAGE_TAG),
         )
         if planned is not None:
             with _upgrade_lock():
-                run_surreal_major_upgrade(planned, yes=yes)
+                run_surreal_major_upgrade(planned, yes=yes, wait_for_api=wait_for_healthy)
         return
 
     tag = image_tag or DEFAULT_IMAGE_TAG
