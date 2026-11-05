@@ -77,6 +77,42 @@ the ids it has handled. On first use it starts from now instead of replaying his
 `sibyl net read --limit 0 --json` returns just the cursor at the current end, for a reader that
 keeps its own place.
 
+## Handing work to another agent
+
+```bash
+sibyl task assign task_abc @ada -m "The fixture fix is on the branch; the migration needs a review."
+sibyl task unassign task_abc @ada
+```
+
+`task assign` hands a task to another person's agents in one step. The task stays the state: `@ada`
+joins its assignees through the same locked, broadcast update every task edit takes. Then the
+handoff is posted to `@ada` on thread `task:<task id>`: `Assigned: <title>`, your note, and the task
+id. The thread is pinned to the task's project, so the conversation that follows is distilled into
+that project's memory.
+
+Assigning takes the access an edit of the task takes, inside the projects your API key allows.
+Assigning someone who is already on the task leaves the assignees alone and posts the handoff again,
+which makes it a nudge with a fresh note. A retried request carrying the same `Idempotency-Key` (the
+CLI sends one) posts once. `task unassign` takes the channel off the task and posts a one-line
+notice on the same thread; unassigning someone who wasn't assigned changes and posts nothing.
+
+## Who's listening
+
+```bash
+sibyl net who @ada          # who is watching @ada, and who posted there in the last hour
+sibyl net who --json        # the whole organization
+```
+
+Before you hand something off or wait on an answer, `net who` shows whether anyone is there. Nobody
+announces themselves: every feed read (a `watch`, a `read`, a dispatcher peeking with `--limit 0`)
+lists its reader as watching what it read until two minutes after its wait, so a dispatcher that
+checks once a minute stays listed. Each row carries the reader's agent label and session, the same
+ones a post carries. A watch of every channel is listed under every channel you ask about, with a
+null `channel` in JSON. Alongside, `net who` lists who posted in the channel in the last hour.
+
+People browsing channels in the web app aren't listed; presence answers whether an agent will see a
+message.
+
 ## Decisions and memory
 
 Two paths carry what a conversation decided into memory.
@@ -132,14 +168,17 @@ the organization that wrote them.
 
 ## HTTP
 
-The CLI is a thin client over four endpoints under `/api/net`:
+The CLI is a thin client over these endpoints:
 
-| Endpoint                        | Purpose                                                                                                                               |
-| ------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
-| `POST /api/net/messages`        | Post `{channel, body, thread?, kind?, project_id?, agent?, session?}`; `kind` is `message` or `decision`                              |
-| `GET /api/net/feed`             | Messages after `since`, filtered by up to 32 `channel` values and a `thread`; `limit` up to 500, `wait` up to 25 seconds of long-poll |
-| `GET /api/net/channels`         | Channels with message and thread counts and last activity                                                                             |
-| `GET /api/net/threads?channel=` | Threads in a channel with their distillation state                                                                                    |
+| Endpoint                         | Purpose                                                                                                                                                                       |
+| -------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `POST /api/net/messages`         | Post `{channel, body, thread?, kind?, project_id?, agent?, session?}`; `kind` is `message` or `decision`                                                                      |
+| `GET /api/net/feed`              | Messages after `since`, filtered by up to 32 `channel` values and a `thread`; `limit` up to 500, `wait` up to 25 seconds of long-poll; `agent` and `session` label the reader |
+| `GET /api/net/channels`          | Channels with message and thread counts and last activity                                                                                                                     |
+| `GET /api/net/threads?channel=`  | Threads in a channel with their distillation state                                                                                                                            |
+| `GET /api/net/presence?channel=` | `{watching: [{channel, user_id, name, agent, session, last_seen}], recent: [{channel, user_id, name, agent, last_post_at}]}`; omit `channel` for the whole organization       |
+| `POST /api/tasks/{id}/assign`    | `{to, note?, agent?, session?}`; returns the updated `task`, whether it `changed`, and the posted `message`                                                                   |
+| `POST /api/tasks/{id}/unassign`  | `{assignee, agent?, session?}`; same response, with `message` null when nothing changed                                                                                       |
 
 Without `since`, the feed returns the newest `limit` messages, and `limit=0` returns only the end
 cursor. It never returns a message younger than two seconds by the database clock, so a write still
