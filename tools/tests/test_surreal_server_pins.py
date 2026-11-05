@@ -55,6 +55,8 @@ PIN_PATHSPECS = (
 
 # The literal pins the scan finds today; fewer means a pin moved out of its reach.
 KNOWN_IMAGE_LITERALS = 21
+# The chart starts two SurrealDB servers: the deployment's and the restore drill's.
+CHART_SURREAL_SERVERS = 2
 # The role reads the major with three regex_replace steps.
 ANSIBLE_MAJOR_STEPS = 3
 
@@ -202,6 +204,48 @@ def test_compose_servers_start_behind_the_store_guard(relative: str, name: str) 
     environment = _environment(services[init])
     assert environment["SURREAL_IMAGE"] == server["image"]
     assert environment["SURREAL_STORE"] == _store_path(server)
+
+
+def test_helm_every_surrealdb_server_carries_the_storage_settings() -> None:
+    helm = shutil.which("helm")
+    if helm is None:
+        pytest.skip("helm CLI is not installed")
+    rendered = subprocess.run(  # noqa: S603 - fixed helm arguments
+        [
+            helm,
+            "template",
+            "pins",
+            "charts/surrealdb",
+            "--set",
+            "export.enabled=true",
+            "--set",
+            "restoreDrill.enabled=true",
+            "--set",
+            "snapshot.enabled=true",
+        ],
+        cwd=REPO_ROOT,
+        text=True,
+        capture_output=True,
+        check=True,
+    ).stdout
+    servers = []
+    for document in yaml.safe_load_all(rendered):
+        if not document:
+            continue
+        spec = document.get("spec", {})
+        pod = (
+            spec.get("template", {}).get("spec")
+            or spec.get("jobTemplate", {}).get("spec", {}).get("template", {}).get("spec")
+            or {}
+        )
+        for container in [*pod.get("initContainers", []), *pod.get("containers", [])]:
+            if "surrealdb/surrealdb" in container.get("image", ""):
+                servers.append(container)
+    assert len(servers) == CHART_SURREAL_SERVERS
+    for container in servers:
+        environment = {entry["name"]: entry.get("value") for entry in container.get("env", [])}
+        for key, value in SURREAL_STORAGE_ENV.items():
+            assert environment.get(key) == value, container["name"]
 
 
 def _ansible_major(image: str) -> str:
