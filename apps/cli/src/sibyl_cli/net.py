@@ -17,9 +17,9 @@ import sys
 import tempfile
 import unicodedata
 from collections.abc import Mapping, Sequence
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Annotated, Any
+from typing import Annotated, Any, TypedDict
 
 import typer
 from rich.markup import escape
@@ -97,6 +97,21 @@ def detect_session() -> str | None:
         return session
     harness = _harness()
     return harness[1] if harness else None
+
+
+class ReaderLabels(TypedDict, total=False):
+    agent: str
+    session: str
+
+
+def reader_labels() -> ReaderLabels:
+    """The agent label and session a feed read carries into presence, when there are any."""
+    labels = ReaderLabels()
+    if agent := detect_agent():
+        labels["agent"] = agent
+    if session := detect_session():
+        labels["session"] = session
+    return labels
 
 
 def normalize_channels(channels: Sequence[str] | None) -> list[str]:
@@ -425,6 +440,7 @@ def read_messages(
                     channels=normalize_channels([channel] if channel else None),
                     thread=thread,
                     limit=limit,
+                    **reader_labels(),
                 )
             if json_output:
                 print_json(data)
@@ -447,7 +463,7 @@ async def _end_cursor(
     client: SibylClient, channels: Sequence[str], thread: str | None
 ) -> str | None:
     """The cursor at the current end of the feed, so a new watch starts from now."""
-    page = await client.net_feed(channels=channels, thread=thread, limit=0)
+    page = await client.net_feed(channels=channels, thread=thread, limit=0, **reader_labels())
     cursor = page.get("next_since")
     return cursor if isinstance(cursor, str) and cursor else None
 
@@ -487,7 +503,9 @@ async def watch_feed(
 
     while True:
         try:
-            page = await client.net_feed(since=cursor, channels=channels, thread=thread, wait=wait)
+            page = await client.net_feed(
+                since=cursor, channels=channels, thread=thread, wait=wait, **reader_labels()
+            )
         except SibylClientError as exc:
             # A saved cursor the server no longer accepts would wedge every
             # later watch on the same 422, so start over from now instead.
@@ -615,6 +633,87 @@ def list_channels(
                     escape(_short_time(row.get("last_message_at"))),
                 )
             console.print(table)
+        except SibylClientError as e:
+            handle_client_error(e)
+
+    _run()
+
+
+def _seen_ago(value: object) -> str:
+    parsed = _parse_time(value)
+    if parsed is None:
+        return str(value or "")
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=UTC)
+    seconds = max(int((datetime.now(UTC) - parsed).total_seconds()), 0)
+    if seconds < 60:
+        return f"{seconds}s ago"
+    if seconds < 3600:
+        return f"{seconds // 60}m ago"
+    return f"{seconds // 3600}h ago"
+
+
+def _member(row: Mapping[str, Any]) -> str:
+    """``name(agent)`` for a presence row, as Rich markup."""
+    name = _one_line(row.get("name") or row.get("user_id") or "unknown")
+    who = f"[{NEON_CYAN}]{escape(name)}[/{NEON_CYAN}]"
+    agent = row.get("agent")
+    return f"{who}[dim]({escape(_one_line(agent))})[/dim]" if agent else who
+
+
+@app.command("who")
+def who(
+    channel: Annotated[
+        str | None, typer.Argument(help="Channel to ask about. Default: every channel")
+    ] = None,
+    json_output: Annotated[bool, typer.Option("--json", "-j", help="Output as JSON")] = False,
+) -> None:
+    """Show who is watching a channel and who posted there in the last hour.
+
+    Watching is derived from use: any feed read, a watch or a single read,
+    lists its reader for two minutes after it ends. Nothing needs to announce
+    itself.
+
+    Examples:
+        sibyl net who '@ada'
+        sibyl net who --json
+    """
+
+    @run_async
+    async def _run() -> None:
+        try:
+            async with get_client() as client:
+                data = await client.net_presence(channel.strip().lower() if channel else None)
+            if json_output:
+                print_json(data)
+                return
+            watching = _rows(data, "watching")
+            recent = _rows(data, "recent")
+            where = escape(channel) if channel else "any channel"
+            if not watching and not recent:
+                info(f"Nobody has watched or posted in {where} lately")
+                return
+            if watching:
+                table = create_table("Watching", "Channel", "Who", "Session", "Last read")
+                for row in watching:
+                    table.add_row(
+                        escape(_one_line(row.get("channel") or "")) or "[dim](every channel)[/dim]",
+                        _member(row),
+                        escape(_one_line(row.get("session") or "")),
+                        escape(_seen_ago(row.get("last_seen"))),
+                    )
+                console.print(table)
+            else:
+                info(f"Nobody is watching {where} right now")
+            if recent:
+                table = create_table("Posted in the last hour", "Channel", "Who", "Last post")
+                for row in recent:
+                    table.add_row(
+                        escape(_one_line(row.get("channel") or "")),
+                        _member(row),
+                        escape(_seen_ago(row.get("last_post_at"))),
+                    )
+                console.print(table)
         except SibylClientError as e:
             handle_client_error(e)
 

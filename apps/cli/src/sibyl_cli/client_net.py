@@ -54,8 +54,13 @@ class ClientNetMixin:
         thread: str | None = None,
         limit: int | None = None,
         wait: int = 0,
+        agent: str | None = None,
+        session: str | None = None,
     ) -> dict[str, Any]:
-        """Read messages after a cursor, or the newest ``limit`` without one."""
+        """Read messages after a cursor, or the newest ``limit`` without one.
+
+        ``agent`` and ``session`` label the reader in the channel's presence.
+        """
         params: dict[str, Any] = {}
         if since:
             params["since"] = since
@@ -67,6 +72,10 @@ class ClientNetMixin:
             params["limit"] = limit
         if wait:
             params["wait"] = wait
+        if agent:
+            params["agent"] = agent
+        if session:
+            params["session"] = session
         return await self._request("GET", "/net/feed", params=params)
 
     async def list_net_channels(self) -> dict[str, Any]:
@@ -76,3 +85,8 @@ class ClientNetMixin:
     async def list_net_threads(self, channel: str) -> dict[str, Any]:
         """List a channel's threads by most recent activity."""
         return await self._request("GET", "/net/threads", params={"channel": channel})
+
+    async def net_presence(self, channel: str | None = None) -> dict[str, Any]:
+        """Who is watching and who posted recently, in one channel or the whole organization."""
+        params = {"channel": channel} if channel else None
+        return await self._request("GET", "/net/presence", params=params)

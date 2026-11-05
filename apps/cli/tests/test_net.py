@@ -81,6 +81,7 @@ class FakeNetClient:
         )
         self.list_net_channels = AsyncMock()
         self.list_net_threads = AsyncMock()
+        self.net_presence = AsyncMock()
         self.explore = AsyncMock(return_value={"entities": []})
 
     async def __aenter__(self) -> FakeNetClient:
@@ -191,6 +192,22 @@ async def test_net_read_endpoints_send_contract_params() -> None:
 
     await client.list_net_threads("#reviews")
     request.assert_awaited_once_with("GET", "/net/threads", params={"channel": "#reviews"})
+    request.reset_mock()
+
+    await client.net_feed(since="cursor-1", wait=25, agent="dispatcher", session="s-1")
+    request.assert_awaited_once_with(
+        "GET",
+        "/net/feed",
+        params={"since": "cursor-1", "wait": 25, "agent": "dispatcher", "session": "s-1"},
+    )
+    request.reset_mock()
+
+    await client.net_presence("@ada")
+    request.assert_awaited_once_with("GET", "/net/presence", params={"channel": "@ada"})
+    request.reset_mock()
+
+    await client.net_presence()
+    request.assert_awaited_once_with("GET", "/net/presence", params=None)
 
 
 @pytest.mark.asyncio
@@ -674,3 +691,100 @@ def test_terminal_control_sequences_never_reach_the_terminal() -> None:
     assert "\x1b" not in line and "\x07" not in line
     assert "hi [2Kthere" in line
     assert "Ada[31m" in line
+
+
+# ---------------------------------------------------------------------------
+# Presence
+# ---------------------------------------------------------------------------
+
+
+def test_reads_and_watches_carry_the_agent_label_into_presence(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("SIBYL_AGENT", "dispatcher")
+    monkeypatch.setenv("CLAUDECODE", "1")
+    monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", "session-7")
+    page = {"messages": [], "next_since": "c0", "more": False}
+    client = FakeNetClient(feed=[page, page, page])
+
+    assert _invoke(client, ["read", "@ada"]).exit_code == 0
+    assert _invoke(client, ["watch", "-c", "@ada", "--once", "--wait", "1"]).exit_code == 0
+
+    labels = {"agent": "dispatcher", "session": "session-7"}
+    read, bootstrap, poll = client.net_feed.await_args_list
+    for call in (read, bootstrap, poll):
+        assert {key: call.kwargs.get(key) for key in labels} == labels
+
+
+def _presence() -> dict[str, Any]:
+    return {
+        "watching": [
+            {
+                "channel": "@ada",
+                "user_id": "user-ada",
+                "name": "Ada",
+                "agent": "claude-code",
+                "session": "session-1",
+                "last_seen": "2026-11-02T10:15:00+00:00",
+            },
+            {
+                "channel": None,
+                "user_id": "user-grace",
+                "name": "Grace",
+                "agent": None,
+                "session": None,
+                "last_seen": "2026-11-02T10:14:00+00:00",
+            },
+        ],
+        "recent": [
+            {
+                "channel": "@ada",
+                "user_id": "user-vic",
+                "name": None,
+                "agent": "codex",
+                "last_post_at": "2026-11-02T10:00:00+00:00",
+            }
+        ],
+    }
+
+
+def test_who_shows_watchers_and_recent_posters() -> None:
+    client = FakeNetClient()
+    client.net_presence.return_value = _presence()
+
+    result = _invoke(client, ["who", "@Ada"])
+
+    assert result.exit_code == 0, result.stdout
+    client.net_presence.assert_awaited_once_with("@ada")
+    output = _plain(result.stdout)
+    assert "Watching" in output
+    assert "Ada(claude-code)" in output
+    assert "session-1" in output
+    assert "(every channel)" in output
+    assert "Posted in the last hour" in output
+    assert "user-vic(codex)" in output
+
+
+def test_who_json_prints_the_server_response() -> None:
+    client = FakeNetClient()
+    client.net_presence.return_value = _presence()
+
+    result = _invoke(client, ["who", "--json"])
+
+    assert result.exit_code == 0, result.stdout
+    client.net_presence.assert_awaited_once_with(None)
+    assert json.loads(result.stdout) == _presence()
+
+
+def test_who_says_so_when_nobody_is_around() -> None:
+    client = FakeNetClient()
+    client.net_presence.return_value = {"watching": [], "recent": []}
+
+    result = _invoke(client, ["who", "#reviews"])
+
+    assert result.exit_code == 0, result.stdout
+    assert "Nobody has watched or posted in #reviews lately" in _plain(result.stdout)
+
+    client.net_presence.return_value = {"watching": [], "recent": _presence()["recent"]}
+    result = _invoke(client, ["who", "@ada"])
+    assert "Nobody is watching @ada right now" in _plain(result.stdout)
