@@ -32,6 +32,7 @@ from sibyl_core.backends.surreal.url_schemes import is_embedded_surreal_url
 from sibyl_core.config import settings
 from sibyl_core.services import content_client
 from sibyl_core.services.net import (
+    SETTLE_SECONDS,
     NetCursor,
     claim_net_thread,
     idle_net_threads,
@@ -79,8 +80,19 @@ async def history(org: SimpleNamespace) -> dict[str, str]:
         response = await post(org, user, body=f"{name} message", **body)
         assert response.status_code == 201, response.text
         posted[name] = response.json()["message"]["id"]
-    await settle(org)
+    await settle_history(org)
     return posted
+
+
+async def settle_history(org: SimpleNamespace) -> None:
+    """Age messages past the settle window, and their threads' times with them."""
+    await settle(org)
+    await org.content.execute_query(
+        f"UPDATE net_threads SET first_message_at = first_message_at - {SETTLE_SECONDS + 5}s, "  # noqa: S608
+        f"last_message_at = last_message_at - {SETTLE_SECONDS + 5}s "
+        "WHERE organization_id = $org;",
+        org=org.id,
+    )
 
 
 async def distill_thread(org: SimpleNamespace, thread: str) -> None:
@@ -334,6 +346,140 @@ async def test_deleting_a_user_and_purging_their_memories_keeps_their_messages(
     )
     assert content_client.normalize_records(remaining) == []
     assert await rows(org.content, org.id) == before
+
+
+@pytest.fixture
+def restore_in_place(org: SimpleNamespace, monkeypatch: pytest.MonkeyPatch):
+    """Restore archives into the organization's own store, as a merge or clean restore does."""
+
+    async def restore(archive: dict, *, clean: bool = False) -> None:
+        monkeypatch.setattr(org.content, "close", AsyncMock())
+        monkeypatch.setattr(content_archive, "build_surreal_content_client", lambda: org.content)
+        result = await content_archive.restore_content_archive_payload(archive, clean=clean)
+        assert result.success, result.errors
+
+    return restore
+
+
+def thread_row(snapshot: dict[str, list[dict]], thread: str) -> dict:
+    return next(t for t in snapshot["threads"] if t["thread"] == thread)
+
+
+@pytest.mark.parametrize("clean", [False, True])
+async def test_text_that_reads_like_a_timestamp_stays_text(
+    org: SimpleNamespace,
+    fresh_store: SurrealContentClient,
+    restore_in_place,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    clean: bool,
+) -> None:
+    for body, thread in (
+        ("2026-11-05T10:00:00Z", "2026-11-05T10:00"),
+        ("2026-11-05", "2026-11-05T10:00:00.123456789+02:00"),
+    ):
+        response = await post(org, org.ada, channel="#builds", thread=thread, body=body)
+        assert response.status_code == 201, response.text
+    await settle_history(org)
+    before = await rows(org.content, org.id)
+    archive = await _backup(org, monkeypatch, "payload", tmp_path)
+
+    monkeypatch.setattr(content_archive, "build_surreal_content_client", lambda: fresh_store)
+    result = await content_archive.restore_content_archive_payload(archive)
+    assert result.success, result.errors
+    assert await rows(fresh_store, org.id) == before
+
+    await restore_in_place(archive, clean=clean)
+    assert await rows(org.content, org.id) == before
+
+
+async def test_a_merge_restore_keeps_what_was_posted_after_the_backup(
+    org: SimpleNamespace, restore_in_place, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    await history(org)
+    await distill_thread(org, THREAD)
+    archive = await _backup(org, monkeypatch, "payload", tmp_path)
+    for body in ("fourth", "fifth"):
+        response = await post(org, org.grace, channel="#reviews", thread=THREAD, body=body)
+        assert response.status_code == 201, response.text
+    before = await rows(org.content, org.id)
+    assert thread_row(before, THREAD)["message_count"] == 5
+    assert thread_row(before, THREAD)["reflection_pending"] is True
+
+    await restore_in_place(archive)
+
+    # The two later messages stay, and so does everything the thread row
+    # says about them: five messages, still pending distillation.
+    assert await rows(org.content, org.id) == before
+
+
+async def test_a_merge_restore_never_rolls_distillation_back(
+    org: SimpleNamespace, restore_in_place, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    await history(org)
+    archive = await _backup(org, monkeypatch, "payload", tmp_path)
+    assert thread_row(await rows(org.content, org.id), THREAD)["reflection_pending"] is True
+    await distill_thread(org, THREAD)
+    before = await rows(org.content, org.id)
+
+    await restore_in_place(archive)
+
+    after = await rows(org.content, org.id)
+    assert after == before
+    assert thread_row(after, THREAD)["reflection_pending"] is False
+    settled = next(
+        t
+        for t in await list_net_threads(organization_id=org.id, channel="#reviews")
+        if t.thread == THREAD
+    )
+    assert await net_thread_window(settled) == []
+
+
+async def test_a_merge_restore_takes_the_later_archived_watermark(
+    org: SimpleNamespace, restore_in_place, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    await history(org)
+    await distill_thread(org, THREAD)
+    distilled = await rows(org.content, org.id)
+    archive = await _backup(org, monkeypatch, "payload", tmp_path)
+    # The destination is behind the archive: its thread was never distilled.
+    await org.content.execute_query(
+        "UPDATE net_threads SET reflected_through = NONE, reflected_through_ns = NONE, "
+        "reflected_through_uuid = NONE, reflection_source_id = NONE, reflection_pending = true "
+        "WHERE organization_id = $org AND thread = $thread;",
+        org=org.id,
+        thread=THREAD,
+    )
+
+    await restore_in_place(archive)
+
+    assert await rows(org.content, org.id) == distilled
+
+
+async def test_a_thread_restores_at_its_record_whatever_key_the_archive_holds(
+    org: SimpleNamespace,
+    fresh_store: SurrealContentClient,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    await history(org)
+    before = await rows(org.content, org.id)
+    archive = await _backup(org, monkeypatch, "payload", tmp_path)
+    threads = archive["tables"]["net_threads"]
+    # As an archive from a server whose threads predate thread_key, and one
+    # with a key that does not match its thread.
+    threads[0].pop("thread_key")
+    threads[1]["thread_key"] = "0" * 64
+
+    monkeypatch.setattr(content_archive, "build_surreal_content_client", lambda: fresh_store)
+    result = await content_archive.restore_content_archive_payload(archive)
+    assert result.success, result.errors
+    assert await rows(fresh_store, org.id) == before
+    _serve_from(monkeypatch, fresh_store)
+    response = await post(org, org.ada, channel="#builds", body="after restore")
+    assert response.status_code == 201, response.text
+    builds = [t for t in (await rows(fresh_store, org.id))["threads"] if t["channel"] == "#builds"]
+    assert [t["message_count"] for t in builds] == [3]
 
 
 _DELETES_NET_ROWS = re.compile(

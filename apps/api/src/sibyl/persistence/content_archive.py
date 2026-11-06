@@ -276,10 +276,42 @@ _CONTENT_ARCHIVE_TABLE_SPECS += tuple(
 )
 
 # A thread lives at a record keyed by the hash of its organization, channel
-# and thread, the key every post upserts. The row stores that hash as
-# thread_key, so a restore deletes and recreates the thread at the same key
-# and the next post lands on the restored row.
-_NET_THREAD_RECORD = "type::record(string::concat('net_threads:', $identity))"
+# and thread, the key every post upserts. A restore computes that key from
+# the row's own fields, never from an archived one, so the next post lands on
+# the restored row even when the archive predates the stored thread_key.
+_NET_THREAD_RECORD = (
+    "type::record(string::concat('net_threads:', crypto::sha256("
+    "type::string([$record.organization_id, $record.channel, $record.thread]))))"
+)
+# A thread already in the destination keeps its later watermark and its pin:
+# an older archive never rolls distillation back. Counts, first and last
+# times and the pending mark are recomputed from the messages present once
+# every row has landed (see _reconcile_restored_threads).
+_NET_THREAD_MERGE = f"""
+LET $thread = {_NET_THREAD_RECORD};
+LET $current = (SELECT * FROM $thread)[0];
+IF $current = NONE {{
+    CREATE $thread CONTENT $record;
+}} ELSE {{
+    LET $archived_ns = $record.reflected_through_ns ?? -1;
+    LET $current_ns = $current.reflected_through_ns ?? -1;
+    LET $archived_later = $archived_ns > $current_ns
+        OR ($archived_ns = $current_ns
+            AND ($record.reflected_through_uuid ?? '') > ($current.reflected_through_uuid ?? ''));
+    IF $archived_later {{
+        UPDATE $thread SET
+            reflected_through = $record.reflected_through,
+            reflected_through_ns = $record.reflected_through_ns,
+            reflected_through_uuid = $record.reflected_through_uuid,
+            reflection_source_id = $record.reflection_source_id,
+            reflection_skipped = $record.reflection_skipped ?? [],
+            project_id = project_id ?? $record.project_id
+        RETURN NONE;
+    }} ELSE {{
+        UPDATE $thread SET project_id = project_id ?? $record.project_id RETURN NONE;
+    }};
+}};
+"""  # noqa: S608
 _CONTENT_ARCHIVE_TABLE_SPECS += (
     ContentArchiveTableSpec(
         name="net_messages",
@@ -308,6 +340,10 @@ _GLOBAL_CONTENT_ARCHIVE_TABLES = frozenset({"system_settings", "telemetry_rollup
 _RETAINED_OPERATION_TABLES = _VALIDATION_ARCHIVE_TABLES | frozenset(
     {"eval_attempts", "eval_consolidations", "api_idempotency_records"}
 )
+# Tables whose archived values are restored as they are: a message body or a
+# thread name that reads like a timestamp stays text. Their datetimes are
+# converted by name (see _exact_instants).
+_RAW_VALUE_TABLES = _RETAINED_OPERATION_TABLES | _NET_ARCHIVE_TABLES
 _CONTENT_RELATION_ARCHIVE_TABLES = frozenset(
     {"derived_from", "chunk_of", "supersedes", "extracted_into"}
 )
@@ -1191,6 +1227,8 @@ def _auxiliary_restore_statement(
             f"IF {comparison} {{ "
             "THROW 'archive conflicts with retained operation history'; }; };\n"
         )
+    elif spec.name == "net_threads":
+        write = _NET_THREAD_MERGE
     else:
         write = f"{spec.delete_by_identity_sql}\n{spec.create_sql}\n"
     if spec.name in _VALIDATION_ARCHIVE_TABLES:
@@ -1236,6 +1274,186 @@ def _ordered_validation_history(rows):
     )
 
 
+def _unwrap_return(result: object) -> object:
+    while isinstance(result, dict) and "result" in result and len(result) <= 3:
+        result = result["result"]
+    return result
+
+
+async def _net_thread_keys(client, rows: list[object]) -> list[str | None]:
+    """Each archived thread's record key, computed by the server from its own fields."""
+    keys: list[str | None] = [None] * len(rows)
+    named = [
+        (position, row)
+        for position, row in enumerate(rows)
+        if isinstance(row, dict)
+        and isinstance(row.get("organization_id"), str)
+        and isinstance(row.get("channel"), str)
+        and isinstance(row.get("thread", ""), str)
+    ]
+    for start in range(0, len(named), _THREAD_BATCH):
+        chunk = named[start : start + _THREAD_BATCH]
+        params: dict[str, object] = {}
+        for number, (_, row) in enumerate(chunk):
+            params.update(
+                {
+                    f"organization_{number}": row["organization_id"],
+                    f"channel_{number}": row["channel"],
+                    f"thread_{number}": row.get("thread", ""),
+                }
+            )
+        keys_sql = ", ".join(
+            f"crypto::sha256(type::string([$organization_{n}, $channel_{n}, $thread_{n}]))"
+            for n in range(len(chunk))
+        )
+        computed = _unwrap_return(await client.execute_query(f"RETURN [{keys_sql}];", **params))
+        if not isinstance(computed, list) or len(computed) != len(chunk):
+            raise TypeError("thread key computation returned an invalid shape")
+        for (position, _), key in zip(chunk, computed, strict=True):
+            keys[position] = str(key)
+    return keys
+
+
+_THREAD_BATCH = 50
+_TALLY_SCOPE = (
+    "FROM net_messages WITH INDEX net_message_org_channel_thread_ns "
+    "WHERE organization_id = $organization_{n} AND channel = $channel_{n} "
+    "AND thread = $thread_{n}"
+)
+_TALLY_THREAD = (
+    "type::record(string::concat('net_threads:', crypto::sha256("
+    "type::string([$organization_{n}, $channel_{n}, $thread_{n}]))))"
+)
+
+
+def _tally_sql(number: int) -> tuple[str, str]:
+    """One thread's state and message tally: a LET and the object it returns."""
+    scope = _TALLY_SCOPE.format(n=number)
+    state = f"$state_{number}"
+    mark_ns = f"({state}.reflected_through_ns ?? -1)"
+    mark_uuid = f"({state}.reflected_through_uuid ?? '')"
+    oldest = "ORDER BY created_ns ASC, uuid ASC LIMIT 1"
+    let = (
+        f"LET {state} = (SELECT message_count, reflected_through_ns, reflected_through_uuid "  # noqa: S608
+        f"FROM {_TALLY_THREAD.format(n=number)})[0];"
+    )
+    # Ordered fields stay in the projection: SurrealDB 3 refuses ORDER BY on
+    # a field the SELECT leaves out.
+    tally = (
+        f"{{ state: {state}, count: count((SELECT VALUE uuid {scope})), "
+        f"first: type::string((SELECT created_at, created_ns, uuid {scope} {oldest})[0].created_at), "
+        f"last: type::string((SELECT created_at, created_ns, uuid {scope} "
+        "ORDER BY created_ns DESC, uuid DESC LIMIT 1)[0].created_at), "
+        f"pin: (SELECT project_id, created_ns, uuid {scope} AND project_id != NONE "
+        f"{oldest})[0].project_id, "
+        f"later: count((SELECT VALUE uuid {scope} AND created_ns = {mark_ns} "
+        f"AND uuid > {mark_uuid})) + count((SELECT VALUE uuid {scope} "
+        f"AND created_ns > {mark_ns})) }}"
+    )
+    return let, tally
+
+
+_RECOUNT_THREAD = (
+    f"UPDATE {_TALLY_THREAD.format(n='0')} SET message_count = $count, "  # noqa: S608
+    "first_message_at = $first, last_message_at = $last, reflection_pending = $pending "
+    "WHERE message_count = $seen RETURN VALUE message_count;"
+)
+_CREATE_THREAD = "CREATE " + _TALLY_THREAD.format(n="0") + " CONTENT $row RETURN NONE;"
+
+
+async def _reconcile_restored_threads(client, restores: list[_AuxiliaryRow]) -> None:
+    """Make every thread a restore touched agree with the messages it now holds.
+
+    A merge keeps messages newer than the archive and the later of two
+    watermarks, so the counts, first and last times and the pending mark are
+    recomputed here, after every row landed: a thread with any message past
+    its watermark is pending and offered to distillation again, one without
+    is not. A thread whose messages arrived without a thread row gets one.
+    The tally is read on its own and each write only applies while the row
+    still shows the count the tally saw, so a post racing the restore is
+    never lost; that thread is tallied again.
+    """
+    from surrealdb import Datetime
+
+    threads = sorted(
+        {
+            (
+                str(row.record.get("organization_id")),
+                str(row.record.get("channel")),
+                str(row.record.get("thread") or ""),
+            )
+            for row in restores
+            if row.table in _NET_ARCHIVE_TABLES
+        }
+    )
+    for _attempt in range(3):
+        raced: list[tuple[str, str, str]] = []
+        for start in range(0, len(threads), _THREAD_BATCH):
+            chunk = threads[start : start + _THREAD_BATCH]
+            params: dict[str, object] = {}
+            lets, tallies = [], []
+            for number, (organization, channel, thread) in enumerate(chunk):
+                params.update(
+                    {
+                        f"organization_{number}": organization,
+                        f"channel_{number}": channel,
+                        f"thread_{number}": thread,
+                    }
+                )
+                let, tally = _tally_sql(number)
+                lets.append(let)
+                tallies.append(tally)
+            result = _unwrap_return(
+                await client.execute_query(
+                    f"RETURN {{ {' '.join(lets)} RETURN [{', '.join(tallies)}]; }};", **params
+                )
+            )
+            if not isinstance(result, list) or len(result) != len(chunk):
+                raise TypeError("thread tally returned an invalid shape")
+            for (organization, channel, thread), tally in zip(chunk, result, strict=True):
+                count = int(tally.get("count") or 0)
+                if count == 0:
+                    continue
+                key = {"organization_0": organization, "channel_0": channel, "thread_0": thread}
+                first, last = Datetime(str(tally["first"])), Datetime(str(tally["last"]))
+                state = tally.get("state")
+                if not isinstance(state, dict):
+                    row: dict[str, object] = {
+                        "organization_id": organization,
+                        "channel": channel,
+                        "thread": thread,
+                        "message_count": count,
+                        "first_message_at": first,
+                        "last_message_at": last,
+                        "reflection_pending": True,
+                    }
+                    if thread and tally.get("pin"):
+                        row["project_id"] = tally["pin"]
+                    try:
+                        await client.execute_query(_CREATE_THREAD, row=row, **key)
+                    except Exception:
+                        # A post created the row meanwhile; tally it again.
+                        raced.append((organization, channel, thread))
+                    continue
+                written = _unwrap_return(
+                    await client.execute_query(
+                        _RECOUNT_THREAD,
+                        count=count,
+                        first=first,
+                        last=last,
+                        pending=int(tally.get("later") or 0) > 0,
+                        seen=state.get("message_count"),
+                        **key,
+                    )
+                )
+                if not written:
+                    raced.append((organization, channel, thread))
+        if not raced:
+            return
+        threads = raced
+    log.warning("net_thread_reconcile_raced", threads=len(threads))
+
+
 async def _prepare_auxiliary_content_restore(client, tables, organization_id, *, legacy=False):
     """Validate and compile non-source writes, one checked statement per row."""
     restores: list[_AuxiliaryRow] = []
@@ -1261,8 +1479,9 @@ async def _prepare_auxiliary_content_restore(client, tables, organization_id, *,
                 errors.append(f"{spec.name} invalid archive row ({type(exc).__name__})")
                 continue
         declared = await fetch_declared_fields(client.execute_query, spec.name)
+        thread_keys = await _net_thread_keys(client, rows) if spec.name == "net_threads" else None
         tables_restored += 1
-        for row in rows:
+        for position, row in enumerate(rows):
             if not isinstance(row, dict):
                 errors.append(f"{spec.name} row payload must be an object")
                 continue
@@ -1271,7 +1490,8 @@ async def _prepare_auxiliary_content_restore(client, tables, organization_id, *,
                 {str(key): value for key, value in row.items()},
             )
             identity = str(
-                normalized_row.get(spec.source_identity_field)
+                (thread_keys[position] if thread_keys is not None else None)
+                or normalized_row.get(spec.source_identity_field)
                 or normalized_row.get(spec.target_identity_field)
                 or ""
             ).strip()
@@ -1280,9 +1500,7 @@ async def _prepare_auxiliary_content_restore(client, tables, organization_id, *,
                 continue
 
             record = {
-                key: (
-                    value if spec.name in _RETAINED_OPERATION_TABLES else _deserialize_value(value)
-                )
+                key: (value if spec.name in _RAW_VALUE_TABLES else _deserialize_value(value))
                 for key, value in normalized_row.items()
                 if not (
                     spec.source_identity_field != spec.target_identity_field
@@ -1410,6 +1628,7 @@ async def _restore_content_sources_and_rows(
             await client.execute_query(
                 f"BEGIN TRANSACTION;\n{statements}\nCOMMIT TRANSACTION;", **parameters
             )
+        await _reconcile_restored_threads(client, auxiliary_restores)
     except Exception as exc:
         raise RuntimeError(interrupted_restore(exc)) from exc
     return plan.restored, plan.conflicts
