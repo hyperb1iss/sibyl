@@ -333,6 +333,37 @@ describe('NetContent', () => {
     ]);
   });
 
+  it('draws an emoji joined by a ZWJ in a body, but marks the joiner in a name', async () => {
+    const coder = '\u{1F469}\u200d\u{1F4BB}';
+    fetchMock.mockImplementation(async (input: RequestInfo | URL) => {
+      const url = new URL(String(input), 'http://localhost');
+      if (url.pathname === '/api/net/channels') return json(CHANNELS);
+      if (url.pathname === '/api/net/feed')
+        return json(
+          feed([
+            message(
+              {
+                channel: '@ada',
+                body: `Pairing on it ${coder} now`,
+                created_at: '2026-11-05T10:09:00Z',
+              },
+              { ...GRACE, name: `Grace ${coder}` },
+              'codex'
+            ),
+          ])
+        );
+      if (url.pathname === '/api/net/presence') return json({ watching: [], recent: [] });
+      return json({ threads: [] });
+    });
+    renderNet('channel=%40ada');
+
+    const row = await screen.findByRole('article', { name: /Message from Grace/ });
+    expect(within(row).getByText(`Pairing on it ${coder} now`)).toBeInTheDocument();
+    // The one mark in the row is in the author's name.
+    expect(within(row).getAllByTitle('Hidden character U+200D')).toHaveLength(1);
+    expect(row).toHaveAttribute('aria-label', 'Message from Grace \u{1F469}[ZWJ]\u{1F4BB}');
+  });
+
   it('opens a long body collapsed and expands it on request', async () => {
     const { user } = renderNet('channel=%40ada');
 

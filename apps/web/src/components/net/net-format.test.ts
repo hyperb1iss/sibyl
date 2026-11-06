@@ -46,6 +46,28 @@ describe('bodySegments', () => {
     expect(codes).toEqual(['ZWSP', 'ZWNJ', 'ZWJ', 'WJ', 'BOM', 'LRM', 'RLM', 'ALM', 'TAG', 'TAG']);
   });
 
+  it('lets a joiner inside an emoji sequence through in a body, and marks it anywhere else', () => {
+    const coder = '\u{1F469}\u200d\u{1F4BB}'; // woman, ZWJ, laptop
+    const flag = '\u{1F3F3}\ufe0f\u200d\u{1F308}'; // white flag, VS16, ZWJ, rainbow
+    const toned = '\u{1F469}\u{1F3FD}\u200d\u{1F4BB}'; // with a skin-tone modifier
+    for (const emoji of [coder, flag, toned]) {
+      expect(bodySegments(`shipped ${emoji} done`, { emojiJoins: true })).toEqual([
+        { kind: 'text', text: `shipped ${emoji} done` },
+      ]);
+    }
+    const marked = (text: string) =>
+      bodySegments(text, { emojiJoins: true }).filter(segment => segment.kind === 'control');
+    // Between letters, at either edge of an emoji, or at the ends: still marked.
+    expect(marked('ad\u200dmin')).toHaveLength(1);
+    expect(marked('\u{1F469}\u200dx')).toHaveLength(1);
+    expect(marked('x\u200d\u{1F4BB}')).toHaveLength(1);
+    expect(marked('\u200d\u{1F4BB}')).toHaveLength(1);
+    expect(marked('\u{1F469}\u200d')).toHaveLength(1);
+    // Identity strings never let it through, emoji or not.
+    expect(bodySegments(coder).filter(segment => segment.kind === 'control')).toHaveLength(1);
+    expect(visibleText(`Ada ${coder}`)).toBe('Ada \u{1F469}[ZWJ]\u{1F4BB}');
+  });
+
   it('spells hidden characters out for attributes that cannot hold a mark', () => {
     expect(visibleText('\u202e24#ppa/emca:hg')).toBe('[RLO]24#ppa/emca:hg');
     expect(visibleText('Ada\u200bLovelace')).toBe('Ada[ZWSP]Lovelace');

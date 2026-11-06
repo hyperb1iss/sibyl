@@ -120,19 +120,52 @@ export function controlLabel(code: number): string {
   return `U+${code.toString(16).toUpperCase().padStart(4, '0')}`;
 }
 
+/** Emoji, emoji skin-tone modifiers and the emoji variation selector. */
+const EMOJI_PART = /^(?:\p{Extended_Pictographic}|\p{Emoji_Modifier}|\uFE0F)$/u;
+
+const ZWJ = 0x200d;
+
+/** The code point that ends `text` before `index`, whole even when it is a surrogate pair. */
+function codePointBefore(text: string, index: number): string | undefined {
+  return [...text.slice(Math.max(0, index - 2), index)].pop();
+}
+
 /**
- * Split a body into plain text and the hidden control characters inside it,
- * so they render as visible marks instead of acting on the text. Windows line
- * endings become plain newlines first.
+ * A zero-width joiner between two emoji parts builds one emoji (a person at
+ * a laptop, a flag), so in prose it is the character doing its job.
  */
-export function bodySegments(body: string): BodySegment[] {
+function joinsEmoji(text: string, index: number): boolean {
+  const before = codePointBefore(text, index);
+  const after = text.codePointAt(index + 1);
+  return (
+    before !== undefined &&
+    after !== undefined &&
+    EMOJI_PART.test(before) &&
+    EMOJI_PART.test(String.fromCodePoint(after))
+  );
+}
+
+/**
+ * Split text into plain runs and the hidden characters inside it, so they
+ * render as visible marks instead of acting on the text. Windows line
+ * endings become plain newlines first. With `emojiJoins`, for message
+ * bodies, a zero-width joiner inside an emoji sequence stays part of the
+ * text; identity strings (names, labels, thread keys) leave it off, since
+ * that is where a hidden joiner could make two strings look alike.
+ */
+export function bodySegments(
+  body: string,
+  { emojiJoins = false }: { emojiJoins?: boolean } = {}
+): BodySegment[] {
   const text = body.replace(/\r\n/g, '\n');
   const segments: BodySegment[] = [];
   let last = 0;
   for (const match of text.matchAll(HIDDEN_CONTROL)) {
     const index = match.index ?? 0;
+    const code = match[0].codePointAt(0) ?? 0;
+    if (emojiJoins && code === ZWJ && joinsEmoji(text, index)) continue;
     if (index > last) segments.push({ kind: 'text', text: text.slice(last, index) });
-    segments.push({ kind: 'control', code: match[0].codePointAt(0) ?? 0 });
+    segments.push({ kind: 'control', code });
     last = index + match[0].length;
   }
   if (last < text.length) segments.push({ kind: 'text', text: text.slice(last) });

@@ -101,10 +101,11 @@ export function RelativeTime({ iso, className }: { iso: string; className?: stri
   );
 }
 
-function PlainText({ text }: { text: string }) {
+/** `emojiJoins` lets a joiner inside an emoji sequence through; bodies only. */
+function PlainText({ text, emojiJoins = false }: { text: string; emojiJoins?: boolean }) {
   return (
     <>
-      {bodySegments(text).map((segment, index) =>
+      {bodySegments(text, { emojiJoins }).map((segment, index) =>
         segment.kind === 'text' ? (
           // Segments are positional slices of one string, so the index is stable.
           <span key={index}>{segment.text}</span>
@@ -134,7 +135,7 @@ export function MessageBody({ body }: { body: string }) {
   return (
     <div className="min-w-0">
       <p className="whitespace-pre-wrap text-sm leading-relaxed text-sc-fg-primary [overflow-wrap:anywhere]">
-        <PlainText text={collapsed ? preview.preview : body} />
+        <PlainText text={collapsed ? preview.preview : body} emojiJoins />
         {collapsed && <span className="text-sc-fg-muted">{' …'}</span>}
       </p>
       {preview && (
