@@ -2,9 +2,10 @@
 
 Every member holds one handle, unique in the organization and spelled in the
 channel charset, so ``@<handle>`` is that member's inbox and nothing else's.
-A handle starts as the member's email local part, lowercased, with anything
-outside the charset turned into ``-``; a taken one gets ``-2``, ``-3`` and so
-on, in the order members joined.
+A handle is assigned once, from the member's email local part, lowercased,
+with anything outside the charset turned into ``-``; a taken or reserved one
+gets ``-2``, ``-3`` and so on, in the order members joined. Handles do not
+change afterwards, so an inbox and its threads stay with one person.
 """
 
 from __future__ import annotations
@@ -15,28 +16,12 @@ from collections.abc import Collection, Iterable
 
 MAX_HANDLE_CHARS = 64
 FALLBACK_HANDLE = "member"
-# ``@me`` names the caller's own inbox wherever a channel is accepted, so no
-# member may hold it.
+# ``@me`` names the caller's own inbox wherever a channel is accepted, and the
+# others read as a broadcast to whoever sees them; no member holds any of them.
 SELF_HANDLE = "me"
-RESERVED_HANDLES = frozenset({SELF_HANDLE})
-_HANDLE_PATTERN = re.compile(r"[a-z0-9][a-z0-9._-]{0,63}")
+RESERVED_HANDLES = frozenset({SELF_HANDLE, "all", "everyone", "here"})
 _OUTSIDE_CHARSET = re.compile(r"[^a-z0-9._-]+")
 _LEADING_PUNCTUATION = re.compile(r"^[._-]+")
-
-
-def normalize_handle(value: str) -> str:
-    """A handle as stored: lowercased, without a leading ``@``; ``ValueError`` when invalid."""
-    handle = value.strip().lower().removeprefix("@")
-    if not _HANDLE_PATTERN.fullmatch(handle):
-        msg = (
-            "handle must be 1-64 characters of a-z, 0-9, '.', '_' or '-', "
-            "starting with a letter or digit"
-        )
-        raise ValueError(msg)
-    if handle in RESERVED_HANDLES:
-        msg = f"@{handle} is reserved: it always names the caller's own inbox"
-        raise ValueError(msg)
-    return handle
 
 
 def handle_base(email: str | None, name: str | None = None) -> str:
@@ -50,7 +35,7 @@ def handle_base(email: str | None, name: str | None = None) -> str:
 
 
 def pick_handle(base: str, taken: Collection[str]) -> str:
-    """``base`` if it is free, else the first free ``base-2``, ``base-3``, ... within the limit."""
+    """``base`` if it is free and not reserved, else the first free ``base-2``, ``base-3``, ..."""
     if base not in taken and base not in RESERVED_HANDLES:
         return base
     number = 2
@@ -74,6 +59,5 @@ __all__ = [
     "SELF_HANDLE",
     "closest_handles",
     "handle_base",
-    "normalize_handle",
     "pick_handle",
 ]

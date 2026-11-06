@@ -51,24 +51,6 @@ async def test_the_directory_lists_every_member_with_who_is_listening(
     assert rows["ada"]["last_post_at"] is not None
 
 
-async def test_a_renamed_member_s_old_inbox_is_refused_and_the_new_one_works(
-    world: SimpleNamespace,
-) -> None:
-    async with client_for(world, world.grace) as client:
-        renamed = await client.put(
-            f"/api/orgs/{world.slug}/members/{world.grace}/handle", json={"handle": "gracie"}
-        )
-    assert renamed.status_code == 200, renamed.text
-
-    old = await post(world, world.owen, channel="@grace", body="hi")
-    assert old.status_code == 422, old.text
-    assert old.json()["detail"]["suggestions"] == ["@gracie"]
-    assert (await post(world, world.owen, channel="@gracie", body="hi")).status_code == 201
-
-
-# --- no void ---------------------------------------------------------------
-
-
 async def test_an_inbox_nobody_owns_is_refused_with_the_closest_handles(
     world: SimpleNamespace,
 ) -> None:

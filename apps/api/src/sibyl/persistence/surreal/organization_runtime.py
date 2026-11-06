@@ -27,7 +27,6 @@ from sibyl.persistence.organization_common import (
     InvitationRecord,
     OrgAuthResult,
     OrgMemberChange,
-    OrgMemberHandle,
     OrgRoleResult,
     OrgSummary,
     ProjectMemberChange,
@@ -46,12 +45,7 @@ from sibyl.persistence.surreal.auth_runtime._common import (
 )
 from sibyl.persistence.surreal.auth_runtime.projects import verify_entity_project_access
 from sibyl.persistence.surreal.auth_runtime.sessions import resolve_auth_context
-from sibyl.persistence.surreal.member_handles import (
-    HandleTakenError,
-    create_membership,
-    first_member_handle,
-    rename_member_handle,
-)
+from sibyl.persistence.surreal.member_handles import create_membership, first_member_handle
 from sibyl_core.auth import AuthUser, OrganizationRole, ProjectRole, ProjectVisibility
 from sibyl_core.backends.surreal.records import (
     coerce_datetime as _coerce_datetime,
@@ -1318,71 +1312,6 @@ async def update_org_member_role(
             user_id=_coerce_uuid(membership.get("user_id"), field_name="membership.user_id"),
             role=OrganizationRole(str(membership.get("role") or role.value)),
         )
-
-
-async def update_org_member_handle(
-    *,
-    slug: str,
-    actor_id: UUID,
-    target_user_id: UUID,
-    handle: str,
-    request: Request,
-) -> OrgMemberHandle:
-    """Change a member's handle: an owner or admin for anyone, a member for themselves."""
-    async with _auth_client_scope() as client:
-        (
-            organization,
-            actor_membership,
-            target_membership,
-            _,
-        ) = await _load_org_member_mutation_records(
-            client, slug=slug, actor_id=actor_id, target_user_id=target_user_id
-        )
-        if organization is None or actor_membership is None:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
-        actor_role = OrganizationRole(
-            str(actor_membership.get("role") or OrganizationRole.MEMBER.value)
-        )
-        if actor_id != target_user_id and actor_role not in {
-            OrganizationRole.OWNER,
-            OrganizationRole.ADMIN,
-        }:
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
-        if target_membership is None:
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail="User is not a member of this organization",
-            )
-        organization_id = _coerce_uuid(organization.get("uuid"), field_name="organization.uuid")
-        previous = target_membership.get("handle")
-        try:
-            written = await rename_member_handle(
-                client,
-                organization_id=str(organization_id),
-                user_id=str(target_user_id),
-                handle=handle,
-            )
-        except HandleTakenError as exc:
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail={"error": "handle_taken", "message": str(exc), "handle": exc.handle},
-            ) from exc
-        except ValueError as exc:
-            raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)
-            ) from exc
-        await log_audit_event(
-            action="org.member.update_handle",
-            user_id=actor_id,
-            organization_id=organization_id,
-            request=request,
-            details={
-                "target_user_id": str(target_user_id),
-                "handle": written,
-                "previous_handle": str(previous) if previous else None,
-            },
-        )
-        return OrgMemberHandle(org_id=organization_id, user_id=target_user_id, handle=written)
 
 
 async def remove_org_member(

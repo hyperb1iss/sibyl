@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import asyncio
 from types import SimpleNamespace
-from typing import Any
 from uuid import uuid4
 
 import pytest
@@ -24,19 +23,19 @@ from sibyl.api.routes import (
     tasks as task_routes,
 )
 from sibyl.auth.dependencies import get_current_user
-from sibyl.persistence.surreal.member_handles import create_membership
-from sibyl_core.auth.handles import (
-    closest_handles,
-    handle_base,
-    normalize_handle,
-    pick_handle,
-)
+from sibyl.persistence.surreal import member_handles
+from sibyl.persistence.surreal.member_handles import create_membership, first_member_handle
+from sibyl_core.auth.handles import closest_handles, handle_base, pick_handle
 from sibyl_core.backends.surreal.member_handles import backfill_member_handles
 from sibyl_core.backends.surreal.records import normalize_records
+from tests.test_coordination_presence import (
+    live_redis_settings as live_redis_settings,  # noqa: PLC0414
+)
 from tests.test_routes_net import (
     client_for,
     live_namespace as live_namespace,  # noqa: PLC0414
     org as org,  # noqa: PLC0414
+    post,
 )
 
 # --- the rules -------------------------------------------------------------
@@ -63,15 +62,12 @@ def test_taken_and_reserved_handles_get_the_next_suffix() -> None:
     assert pick_handle("ada", set()) == "ada"
     assert pick_handle("ada", {"ada"}) == "ada-2"
     assert pick_handle("ada", {"ada", "ada-2"}) == "ada-3"
-    assert pick_handle("me", set()) == "me-2"
+    for reserved in ("me", "all", "everyone", "here"):
+        assert pick_handle(reserved, set()) == f"{reserved}-2"
     assert len(pick_handle("x" * 64, {"x" * 64})) == 64
 
 
-def test_handles_are_validated_like_channels() -> None:
-    assert normalize_handle(" @Ada ") == "ada"
-    for bad in ("", "-ada", "a b", "x" * 65, "me", "@me"):
-        with pytest.raises(ValueError):
-            normalize_handle(bad)
+def test_close_handles_are_suggested_best_first() -> None:
     assert closest_handles("adda", ["ada", "grace", "adam", "vic"]) == ["ada", "adam"]
 
 
@@ -236,22 +232,99 @@ async def test_me_and_the_members_list_carry_the_handle(world: SimpleNamespace) 
     }
 
 
-async def test_a_member_renames_themselves_and_owners_rename_anyone(
+async def test_reserved_handles_are_never_assigned_even_to_a_new_org_s_owner(
+    org: SimpleNamespace,
+) -> None:
+    founder = await new_user(org, "me@example.test")
+    assert await first_member_handle(org.auth, founder) == "me-2"
+    joiners = [await new_user(org, f"{name}@example.test") for name in ("all", "everyone", "here")]
+    for joiner in joiners:
+        await join(org, joiner)
+
+    handles = await member_rows(org)
+    assert [handles[joiner] for joiner in joiners] == ["all-2", "everyone-2", "here-2"]
+
+
+async def test_a_member_written_without_a_handle_gets_one_when_it_is_needed(
     world: SimpleNamespace,
 ) -> None:
-    async def rename(actor: str, target: str, handle: str) -> Any:
-        async with client_for(world, actor) as client:
-            return await client.put(
-                f"/api/orgs/{world.slug}/members/{target}/handle", json={"handle": handle}
-            )
+    """A replica from before handles, mid rolling deploy, writes a bare membership."""
+    tag = uuid4().hex[:6]
+    late = await new_user(world, f"rolling{tag}@example.test")
+    await world.auth.execute_query(
+        "CREATE organization_members CONTENT $record;",
+        record={
+            "uuid": str(uuid4()),
+            "organization_id": world.id,
+            "user_id": late,
+            "role": "member",
+        },
+    )
 
-    mine = await rename(world.ada, world.ada, "@Ada.L")
-    assert mine.status_code == 200, mine.text
-    assert mine.json() == {"user_id": world.ada, "handle": "ada.l", "inbox": "@ada.l"}
-    assert (await rename(world.ada, world.grace, "gracie")).status_code == 403
-    assert (await rename(world.owen, world.grace, "gracie")).status_code == 200
-    taken = await rename(world.vic, world.vic, "gracie")
-    assert taken.status_code == 409
-    assert taken.json()["detail"]["error"] == "handle_taken"
-    assert (await rename(world.vic, world.vic, "me")).status_code == 422
-    assert (await rename(world.vic, world.vic, "not valid")).status_code == 422
+    async with client_for(world, late) as client:
+        me = (await client.get("/api/auth/me")).json()
+    assert me["handle"] == f"rolling{tag}"
+    assert me["inbox"] == f"@rolling{tag}"
+    assert (await member_rows(world))[late] == f"rolling{tag}"
+
+
+async def test_the_directory_and_inbox_lookups_heal_bare_memberships(
+    world: SimpleNamespace,
+) -> None:
+    tag = uuid4().hex[:6]
+    bare = await new_user(world, f"bare{tag}@example.test")
+    await world.auth.execute_query(
+        "CREATE organization_members CONTENT $record;",
+        record={
+            "uuid": str(uuid4()),
+            "organization_id": world.id,
+            "user_id": bare,
+            "role": "member",
+        },
+    )
+    posted = await post(world, world.ada, channel=f"@bare{tag}", body="found you")
+    assert posted.status_code == 201, posted.text
+
+    other = await new_user(world, f"dir{tag}@example.test")
+    await world.auth.execute_query(
+        "CREATE organization_members CONTENT $record;",
+        record={
+            "uuid": str(uuid4()),
+            "organization_id": world.id,
+            "user_id": other,
+            "role": "member",
+        },
+    )
+    async with client_for(world, world.vic) as client:
+        directory = (await client.get("/api/net/directory")).json()["members"]
+    assert {row["user_id"]: row["handle"] for row in directory}[other] == f"dir{tag}"
+
+
+async def test_members_joining_through_two_replicas_take_distinct_handles(
+    org: SimpleNamespace,
+    live_redis_settings: None,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The handle lock is the Redis entity lock, so replicas serialize on it."""
+    from sibyl.coordination._redis.locks import EntityLockManager
+
+    replicas = [EntityLockManager(), EntityLockManager()]
+    calls = iter(range(10_000))
+
+    def lock_manager() -> EntityLockManager:
+        return replicas[next(calls) % 2]
+
+    monkeypatch.setattr("sibyl.locks.get_lock_manager", lock_manager)
+    tag = uuid4().hex[:6]
+    racers = [await new_user(org, f"race{tag}@x{index}.test") for index in range(6)]
+    try:
+        await asyncio.gather(*(join(org, racer) for racer in racers))
+    finally:
+        for replica in replicas:
+            await replica.disconnect()
+
+    handles = await member_rows(org)
+    assert sorted(handles[racer] for racer in racers) == sorted(
+        [f"race{tag}", *(f"race{tag}-{number}" for number in range(2, 7))]
+    )
+    assert member_handles.HANDLES_LOCK_ENTITY == "member-handles"
