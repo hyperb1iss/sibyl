@@ -30,6 +30,8 @@ from sibyl.api.routes.net import (
     caller_name,
     deliver_net_message,
     net_message,
+    refuse_unknown_inbox,
+    resolve_inbox,
 )
 from sibyl.api.schemas import EntityResponse, MutationReceipt
 from sibyl.api.schemas.net import NetAgentLabels, NetMessage
@@ -1239,7 +1241,7 @@ async def _hand_off(
     http_request: Request,
     org: AuthOrganization,
     auth: AuthContext,
-    change: Callable[[list[str]], list[str]],
+    change: Callable[[list[str], str], list[str]],
     notice: Callable[[str], str],
     post_unchanged: bool,
 ) -> TaskAssignResponse:
@@ -1264,6 +1266,8 @@ async def _hand_off(
         raise HTTPException(status_code=403, detail="api_key_project_denied")
 
     group_id = str(org.id)
+    channel = await resolve_inbox(group_id, auth, channel)
+    await refuse_unknown_inbox(group_id, channel)
     principal_id = _task_principal_id(auth)
     path = f"/tasks/{task_id}/{route_action}"
     idempotency_payload = {"body": request.model_dump(mode="json")}
@@ -1288,7 +1292,11 @@ async def _hand_off(
         await record_idempotent_progress(http_request, {"notice_owed": True, "changed": True})
 
     task, changed = await _change_assignees(
-        group_id, task_id, user_id=principal_id, change=change, before_write=owe_notice
+        group_id,
+        task_id,
+        user_id=principal_id,
+        change=lambda assignees: change(assignees, channel),
+        before_write=owe_notice,
     )
     changed = changed or earlier.get("changed") is True
     message: NetMessage | None = None
@@ -1363,10 +1371,10 @@ async def assign_task(
         http_request=http_request,
         org=org,
         auth=auth,
-        change=lambda assignees: (
+        change=lambda assignees, inbox: (
             assignees
-            if any(_same_channel(entry, request.to) for entry in assignees)
-            else [*assignees, request.to]
+            if any(_same_channel(entry, inbox) for entry in assignees)
+            else [*assignees, inbox]
         ),
         notice=lambda title: assignment_body(title, task_id, request.note),
         post_unchanged=True,
@@ -1395,8 +1403,8 @@ async def unassign_task(
         http_request=http_request,
         org=org,
         auth=auth,
-        change=lambda assignees: [
-            entry for entry in assignees if not _same_channel(entry, request.assignee)
+        change=lambda assignees, inbox: [
+            entry for entry in assignees if not _same_channel(entry, inbox)
         ],
         notice=lambda title: unassignment_body(title, task_id),
         post_unchanged=False,

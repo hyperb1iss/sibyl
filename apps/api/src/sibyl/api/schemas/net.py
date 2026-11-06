@@ -177,6 +177,25 @@ class NetRecentPoster(BaseModel):
     last_post_at: datetime
 
 
+class NetDirectoryMember(BaseModel):
+    """One organization member and how to reach them."""
+
+    user_id: str
+    name: str | None = None
+    handle: str
+    inbox: str = Field(description="`@<handle>`, the channel that reaches this member's agents")
+    listening: int = Field(
+        description="Agent sessions of this member that read any channel in the last two minutes"
+    )
+    last_post_at: datetime | None = Field(
+        default=None, description="This member's newest post in the last hour, if any"
+    )
+
+
+class NetDirectoryResponse(BaseModel):
+    members: list[NetDirectoryMember] = Field(description="Ordered by handle")
+
+
 class NetPresenceResponse(BaseModel):
     watching: list[NetWatcher] = Field(description="Most recently seen first")
     recent: list[NetRecentPoster] = Field(description="Most recent post first")
@@ -187,6 +206,8 @@ __all__ = [
     "NetAuthor",
     "NetChannel",
     "NetChannelsResponse",
+    "NetDirectoryMember",
+    "NetDirectoryResponse",
     "NetFeedResponse",
     "NetMessage",
     "NetMessageCreateRequest",

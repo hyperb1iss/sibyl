@@ -165,7 +165,7 @@ async def test_presence_stays_inside_its_organization(
 ) -> None:
     assert (await feed(org, org.ozzy, organization=org.other_org, limit=0)).status_code == 200
     async with client_for(org, org.ozzy, org.other_org) as client:
-        posted = await client.post("/api/net/messages", json={"channel": "@ada", "body": "hi"})
+        posted = await client.post("/api/net/messages", json={"channel": "@ozzy", "body": "hi"})
         assert posted.status_code == 201, posted.text
         theirs = (await client.get("/api/net/presence")).json()
     assert (await feed(org, org.ada, limit=0)).status_code == 200

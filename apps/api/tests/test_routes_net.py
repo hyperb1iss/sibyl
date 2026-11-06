@@ -219,7 +219,13 @@ async def seed_auth(org: SimpleNamespace) -> None:
             {"uuid": org.other_org, "name": "Elsewhere", "slug": f"else-{org.other_org[:8]}"},
         ],
         "organization_members": [
-            {"uuid": str(uuid4()), "organization_id": organization, "user_id": user, "role": role}
+            {
+                "uuid": str(uuid4()),
+                "organization_id": organization,
+                "user_id": user,
+                "role": role,
+                "handle": names[user].lower(),
+            }
             for organization, user, role in (
                 (org.id, org.ada, "member"),
                 (org.id, org.grace, "member"),

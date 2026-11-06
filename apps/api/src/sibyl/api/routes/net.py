@@ -57,6 +57,8 @@ from sibyl.api.schemas.net import (
     NetAuthor,
     NetChannel,
     NetChannelsResponse,
+    NetDirectoryMember,
+    NetDirectoryResponse,
     NetFeedResponse,
     NetMessage,
     NetMessageCreateRequest,
@@ -72,8 +74,14 @@ from sibyl.auth.authorization import verify_entity_project_access
 from sibyl.auth.context import AuthContext
 from sibyl.auth.dependencies import get_auth_context, get_current_organization, require_org_role
 from sibyl.coordination.presence import WATCHING_TTL_SECONDS, get_presence
-from sibyl.persistence.auth_runtime import get_users_by_ids
+from sibyl.persistence.auth_runtime import (
+    find_handle_owner,
+    get_member_handle,
+    get_users_by_ids,
+    list_member_handles,
+)
 from sibyl_core.auth import AuthOrganization, ProjectRole
+from sibyl_core.auth.handles import SELF_HANDLE, closest_handles
 from sibyl_core.auth.memory_policy import MemoryPolicyAction
 from sibyl_core.errors import EntityNotFoundError
 from sibyl_core.models.entities import EntityType
@@ -340,6 +348,44 @@ def _pinned_conflict(channel: str, thread: str, pinned: str | None) -> HTTPExcep
 
 
 TASK_THREAD_PREFIX = "task:"
+SELF_INBOX = f"@{SELF_HANDLE}"
+SUGGESTED_HANDLES = 3
+
+
+async def resolve_inbox(organization_id: str, ctx: AuthContext, channel: str) -> str:
+    """``@me`` as the caller's own inbox, ``@<their handle>``; any other channel as given."""
+    if channel != SELF_INBOX:
+        return channel
+    handle = await get_member_handle(organization_id=organization_id, user_id=_caller_id(ctx))
+    if handle is None:
+        raise HTTPException(
+            status_code=422, detail="@me needs a member handle in this organization"
+        )
+    return f"@{handle}"
+
+
+async def refuse_unknown_inbox(organization_id: str, channel: str) -> None:
+    """Refuse an ``@`` channel no member's handle owns, naming the closest handles.
+
+    An ``@name`` is one member's inbox, so a typo would otherwise post into a
+    channel nobody reads. ``#`` rooms and bare names stay free-form.
+    """
+    if not channel.startswith("@"):
+        return
+    wanted = channel.removeprefix("@")
+    if await find_handle_owner(organization_id=organization_id, handle=wanted) is not None:
+        return
+    handles = await list_member_handles(organization_id=organization_id)
+    close = [f"@{handle}" for handle in closest_handles(wanted, handles, SUGGESTED_HANDLES)]
+    hint = f"did you mean {', '.join(close)}?" if close else "see sibyl net who"
+    raise HTTPException(
+        status_code=422,
+        detail={
+            "error": "unknown_inbox",
+            "message": f"no member uses {channel}; {hint}",
+            "suggestions": close,
+        },
+    )
 
 
 async def get_knowledge_read_adapter(group_id: str) -> Any:
@@ -485,6 +531,9 @@ async def post_message(
     )
     if replayed is not None:
         return replayed
+    channel = await resolve_inbox(str(org.id), ctx, request.channel)
+    await refuse_unknown_inbox(str(org.id), channel)
+    request = request.model_copy(update={"channel": channel})
     pin = await task_thread_pin(str(org.id), thread)
     if not decision:
         await refuse_pinned_elsewhere(
@@ -668,7 +717,11 @@ async def read_feed(
     ``GET /presence``), alongside the first read rather than ahead of it.
     """
     cursor = _feed_cursor(since)
-    channels = _feed_channels(channel)
+    channels = list(
+        dict.fromkeys(
+            [await resolve_inbox(str(org.id), ctx, value) for value in _feed_channels(channel)]
+        )
+    )
     thread_filter = _feed_thread(thread)
     reader_agent = _reader_label(agent, field="agent", max_chars=MAX_AGENT_CHARS)
     reader_session = _reader_label(session, field="session", max_chars=MAX_SESSION_CHARS)
@@ -747,9 +800,11 @@ async def list_channels(
 @router.get("/presence", response_model=NetPresenceResponse)
 async def read_presence(
     channel: str | None = Query(
-        default=None, description="Only this channel; omit for the whole organization"
+        default=None,
+        description="Only this channel (`@me` for your own inbox); omit for the whole organization",
     ),
     org: AuthOrganization = Depends(get_current_organization),
+    ctx: AuthContext = Depends(get_auth_context),
 ) -> NetPresenceResponse:
     """Who is listening and who has been talking, derived from use alone.
 
@@ -760,12 +815,13 @@ async def read_presence(
     who posted in the last hour, one row per channel, user and agent label.
     """
     selected = None
+    organization_id = str(org.id)
     if channel is not None:
         try:
             selected = normalize_channel(channel)
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
-    organization_id = str(org.id)
+        selected = await resolve_inbox(organization_id, ctx, selected)
     seen, posters = await asyncio.gather(
         get_presence().watching(organization_id),
         recent_net_authors(organization_id=organization_id, channel=selected),
@@ -806,6 +862,49 @@ async def read_presence(
             )
             for poster in posters
         ],
+    )
+
+
+@router.get("/directory", response_model=NetDirectoryResponse)
+async def read_directory(
+    org: AuthOrganization = Depends(get_current_organization),
+) -> NetDirectoryResponse:
+    """Every member's handle and inbox, with how many of their agent sessions are listening.
+
+    The way to find a person: ``inbox`` is the channel that reaches their
+    agents. ``listening`` counts that member's (agent label, session) pairs
+    that read any channel in the last two minutes, from presence;
+    ``last_post_at`` is their newest post in the last hour.
+    """
+    organization_id = str(org.id)
+    handles, seen, posters = await asyncio.gather(
+        list_member_handles(organization_id=organization_id),
+        get_presence().watching(organization_id),
+        recent_net_authors(organization_id=organization_id),
+    )
+    names = await author_directory(handles.values())
+    sessions: dict[str, set[tuple[str | None, str | None]]] = {}
+    for entry in seen:
+        sessions.setdefault(entry.watcher.user_id, set()).add(
+            (entry.watcher.agent, entry.watcher.session)
+        )
+    last_posts: dict[str, datetime] = {}
+    for poster in posters:
+        newest = last_posts.get(poster.author_user_id)
+        if newest is None or poster.last_post_at > newest:
+            last_posts[poster.author_user_id] = poster.last_post_at
+    return NetDirectoryResponse(
+        members=[
+            NetDirectoryMember(
+                user_id=user_id,
+                name=names[user_id].name if user_id in names else None,
+                handle=handle,
+                inbox=f"@{handle}",
+                listening=len(sessions.get(user_id, ())),
+                last_post_at=last_posts.get(user_id),
+            )
+            for handle, user_id in sorted(handles.items())
+        ]
     )
 
 
@@ -856,6 +955,8 @@ __all__ = [
     "note_watching",
     "read_by_web_session",
     "refuse_pinned_elsewhere",
+    "refuse_unknown_inbox",
+    "resolve_inbox",
     "router",
     "shared_feed_reads",
     "task_thread_pin",
