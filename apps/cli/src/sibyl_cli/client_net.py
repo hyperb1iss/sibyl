@@ -86,6 +86,10 @@ class ClientNetMixin:
         """List a channel's threads by most recent activity."""
         return await self._request("GET", "/net/threads", params={"channel": channel})
 
+    async def net_directory(self) -> dict[str, Any]:
+        """Every member's handle and inbox, and how many of their agent sessions are listening."""
+        return await self._request("GET", "/net/directory")
+
     async def net_presence(self, channel: str | None = None) -> dict[str, Any]:
         """Who is watching and who posted recently, in one channel or the whole organization."""
         params = {"channel": channel} if channel else None

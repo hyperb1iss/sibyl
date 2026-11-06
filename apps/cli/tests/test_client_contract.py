@@ -114,6 +114,7 @@ PUBLIC_METHOD_OWNERS = {
         "list_net_channels",
         "list_net_threads",
         "net_presence",
+        "net_directory",
     },
     ClientSourcesMixin: {
         "source_import_status",
@@ -149,7 +150,7 @@ def test_public_methods_resolve_directly_to_one_canonical_owner() -> None:
         if not name.startswith("_")
     }
 
-    assert len(expected) == 106
+    assert len(expected) == 107
     assert actual == expected
     assert {
         name

@@ -50,6 +50,7 @@ def _response(*, changed: bool = True, posted: bool = True) -> dict[str, Any]:
 
 
 def _invoke(client: MagicMock, args: list[str]) -> Any:
+    client.base_url = "http://example.test/api"
     with patch("sibyl_cli.task.get_client", return_value=client):
         return CliRunner().invoke(app, ["task", *args])
 
@@ -100,6 +101,7 @@ def test_assign_hands_the_task_over_and_says_where_it_posted() -> None:
     output = _plain(result.stdout)
     assert f"Assigned {TASK} to @ada" in output
     assert f"Posted msg-1 to @ada task:{TASK}" in output
+    assert f"http://example.test/net?channel=%40ada&thread=task%3A{TASK}" in output
     assert "Revision: 3" in output
 
 
@@ -133,7 +135,10 @@ def test_assign_json_prints_the_server_response() -> None:
     result = _invoke(client, ["assign", TASK, "@ada", "--json"])
 
     assert result.exit_code == 0, result.stdout
-    assert json.loads(result.stdout) == _response()
+    assert json.loads(result.stdout) == {
+        **_response(),
+        "web_url": f"http://example.test/net?channel=%40ada&thread=task%3A{TASK}",
+    }
 
 
 def test_a_refused_assign_exits_nonzero() -> None:

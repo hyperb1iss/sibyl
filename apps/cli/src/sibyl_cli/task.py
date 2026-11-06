@@ -40,6 +40,7 @@ from sibyl_cli.common import (
 from sibyl_cli.config_store import resolve_project_from_cwd
 from sibyl_cli.id_resolution import resolve_id_prefix
 from sibyl_cli.net import detect_agent, detect_session
+from sibyl_cli.web_links import net_url
 
 app = typer.Typer(
     name="task",
@@ -1192,6 +1193,17 @@ def update_task(
 # =============================================================================
 
 
+def _handoff_url(client: Any, response: dict[str, Any], channel: str) -> str:
+    message = response.get("message")
+    message = message if isinstance(message, dict) else {}
+    thread = message.get("thread")
+    return net_url(
+        client.base_url,
+        str(message.get("channel") or channel.strip().lower()),
+        str(thread) if thread else None,
+    )
+
+
 def _handoff_line(response: dict[str, Any]) -> str | None:
     message = response.get("message")
     if not isinstance(message, dict):
@@ -1239,8 +1251,9 @@ def assign_task(
                 agent=detect_agent(),
                 session=detect_session(),
             )
+            url = _handoff_url(client, response, to)
             if json_out:
-                print_json(response)
+                print_json({**response, "web_url": url})
                 return
             channel = escape(to.strip().lower())
             if response.get("changed"):
@@ -1249,6 +1262,7 @@ def assign_task(
                 info(f"{channel} was already assigned; posted the handoff again")
             if line := _handoff_line(response):
                 console.print(f"  [dim]{line}[/dim]")
+                console.print(f"  [dim]{escape(url)}[/dim]", highlight=False)
             print_mutation_receipt(response)
         except SibylClientError as e:
             handle_client_error(e)
@@ -1278,8 +1292,9 @@ def unassign_task(
             response = await client.unassign_task(
                 resolved_id, assignee, agent=detect_agent(), session=detect_session()
             )
+            url = _handoff_url(client, response, assignee)
             if json_out:
-                print_json(response)
+                print_json({**response, "web_url": url})
                 return
             channel = escape(assignee.strip().lower())
             if not response.get("changed"):
@@ -1288,6 +1303,7 @@ def unassign_task(
             success(f"Unassigned {channel} from {escape(resolved_id)}")
             if line := _handoff_line(response):
                 console.print(f"  [dim]{line}[/dim]")
+                console.print(f"  [dim]{escape(url)}[/dim]", highlight=False)
             print_mutation_receipt(response)
         except SibylClientError as e:
             handle_client_error(e)

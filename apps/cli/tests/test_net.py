@@ -82,6 +82,8 @@ class FakeNetClient:
         self.list_net_channels = AsyncMock()
         self.list_net_threads = AsyncMock()
         self.net_presence = AsyncMock()
+        self.net_directory = AsyncMock()
+        self.get = AsyncMock()
         self.explore = AsyncMock(return_value={"entities": []})
 
     async def __aenter__(self) -> FakeNetClient:
@@ -89,6 +91,9 @@ class FakeNetClient:
 
     async def __aexit__(self, *exc_info: object) -> None:
         return None
+
+
+WEB = "http://example.test/net"
 
 
 def _invoke(client: FakeNetClient, args: list[str], *, stdin: str | None = None) -> Any:
@@ -297,7 +302,8 @@ def test_a_plain_post_names_no_project_and_carries_the_detected_agent(
     )
     output = _plain(result.stdout)
     assert "Posted msg-1 to #reviews gh:acme/app#42" in output
-    assert len(output.strip().splitlines()) == 1
+    _posted, link = output.strip().splitlines()
+    assert link.strip() == f"{WEB}?channel=%23reviews&thread=gh%3Aacme%2Fapp%2342"
     # A plain message never reads the linked project.
     mock_resolve.assert_not_called()
 
@@ -388,7 +394,11 @@ def test_post_json_prints_the_server_response(_mock_resolve: Any) -> None:
     result = _invoke(client, ["post", "#reviews", "hello", "--json"])
 
     assert result.exit_code == 0, result.stdout
-    assert json.loads(result.stdout) == response
+    # The server's response, plus the web page the message is on.
+    assert json.loads(result.stdout) == {
+        **response,
+        "web_url": f"{WEB}?channel=%23reviews&thread=gh%3Aacme%2Fapp%2342",
+    }
 
 
 @patch("sibyl_cli.net.resolve_project_from_cwd", return_value=None)
@@ -436,7 +446,7 @@ def test_read_json_prints_the_page() -> None:
     result = _invoke(client, ["read", "--json"])
 
     assert result.exit_code == 0, result.stdout
-    assert json.loads(result.stdout) == page
+    assert json.loads(result.stdout) == {**page, "web_url": WEB}
     client.net_feed.assert_awaited_once_with(channels=[], thread=None, limit=20)
 
 
@@ -448,7 +458,7 @@ def test_read_limit_zero_returns_the_end_cursor() -> None:
     result = _invoke(client, ["read", "@ada", "--limit", "0", "--json"])
 
     assert result.exit_code == 0, result.stdout
-    assert json.loads(result.stdout) == page
+    assert json.loads(result.stdout) == {**page, "web_url": f"{WEB}?channel=%40ada"}
     client.net_feed.assert_awaited_once_with(channels=["@ada"], thread=None, limit=0)
 
 
@@ -529,8 +539,9 @@ def test_first_watch_starts_from_now_prints_lines_and_saves_the_cursor() -> None
     assert bootstrap.kwargs == {"channels": ["#reviews"], "thread": None, "limit": 0}
     assert poll.kwargs == {"since": "c0", "channels": ["#reviews"], "thread": None, "wait": 25}
     assert _plain(result.stdout).splitlines() == [
-        "#reviews gh:acme/app#42 ada(claude-code): PR is green",
-        "#reviews ada: ◆ Retries stay",
+        "#reviews gh:acme/app#42 ada(claude-code): PR is green · "
+        f"{WEB}?channel=%23reviews&thread=gh%3Aacme%2Fapp%2342",
+        f"#reviews ada: ◆ Retries stay · {WEB}?channel=%23reviews",
     ]
     saved = json.loads(_cursor_file(["#reviews"]).read_text())
     assert saved["cursor"] == "cursor-m2"
@@ -599,7 +610,10 @@ def test_watch_json_prints_one_message_per_line() -> None:
 
     assert result.exit_code == 0, result.stdout
     lines = result.stdout.splitlines()
-    assert [json.loads(line) for line in lines] == messages
+    assert [json.loads(line) for line in lines] == [
+        {**message, "web_url": f"{WEB}?channel=%23reviews&thread=gh%3Aacme%2Fapp%2342"}
+        for message in messages
+    ]
 
 
 def test_watch_saves_the_cursor_only_after_the_batch_is_printed() -> None:
@@ -615,7 +629,7 @@ def test_watch_saves_the_cursor_only_after_the_batch_is_printed() -> None:
     )
     printed: list[str] = []
 
-    def emit(message: dict[str, Any], *, json_output: bool) -> None:
+    def emit(message: dict[str, Any], *, json_output: bool, server: str) -> None:
         if printed:
             raise BrokenPipeError
         printed.append(message["id"])
@@ -769,10 +783,10 @@ def test_who_json_prints_the_server_response() -> None:
     client = FakeNetClient()
     client.net_presence.return_value = _presence()
 
-    result = _invoke(client, ["who", "--json"])
+    result = _invoke(client, ["who", "@ada", "--json"])
 
     assert result.exit_code == 0, result.stdout
-    client.net_presence.assert_awaited_once_with(None)
+    client.net_presence.assert_awaited_once_with("@ada")
     assert json.loads(result.stdout) == _presence()
 
 
@@ -788,3 +802,103 @@ def test_who_says_so_when_nobody_is_around() -> None:
     client.net_presence.return_value = {"watching": [], "recent": _presence()["recent"]}
     result = _invoke(client, ["who", "@ada"])
     assert "Nobody is watching @ada right now" in _plain(result.stdout)
+
+
+# ---------------------------------------------------------------------------
+# Directory, web links, and what's new
+# ---------------------------------------------------------------------------
+
+
+def _directory() -> dict[str, Any]:
+    return {
+        "members": [
+            {
+                "user_id": "user-ada",
+                "name": "Ada",
+                "handle": "ada",
+                "inbox": "@ada",
+                "listening": 2,
+                "last_post_at": "2026-11-02T10:15:00+00:00",
+            },
+            {
+                "user_id": "user-grace",
+                "name": "Grace",
+                "handle": "grace",
+                "inbox": "@grace",
+                "listening": 0,
+                "last_post_at": None,
+            },
+        ]
+    }
+
+
+def test_who_without_a_channel_is_the_directory() -> None:
+    client = FakeNetClient()
+    client.net_directory.return_value = _directory()
+
+    shown = _invoke(client, ["who"])
+    as_json = _invoke(client, ["who", "--json"])
+
+    assert shown.exit_code == 0, shown.stdout
+    output = _plain(shown.stdout)
+    assert "@ada" in output and "@grace" in output and "Grace" in output
+    assert "sibyl net post @<handle>" in output
+    client.net_presence.assert_not_awaited()
+    assert json.loads(as_json.stdout) == _directory()
+
+
+@pytest.mark.parametrize(
+    ("server", "expected"),
+    [
+        ("https://sibyl.acme.test", "https://sibyl.acme.test/net"),
+        ("https://sibyl.acme.test/api", "https://sibyl.acme.test/net"),
+        ("http://localhost:3334/api", "http://localhost:3337/net"),
+        ("http://127.0.0.1:3334", "http://127.0.0.1:3337/net"),
+        ("http://localhost:8080/api", "http://localhost:8080/net"),
+    ],
+)
+def test_web_links_follow_the_server_url(server: str, expected: str) -> None:
+    from sibyl_cli.web_links import net_url
+
+    assert net_url(server) == expected
+    assert net_url(server, "#reviews", "gh:acme/app#42") == (
+        f"{expected}?channel=%23reviews&thread=gh%3Aacme%2Fapp%2342"
+    )
+
+
+def test_open_resolves_me_and_prints_the_link(monkeypatch: pytest.MonkeyPatch) -> None:
+    opened: list[str] = []
+    monkeypatch.setattr(net.webbrowser, "open", lambda url, new=0: opened.append(url) or False)
+    client = FakeNetClient()
+    client.get.return_value = {"inbox": "@ada"}
+
+    result = _invoke(client, ["open", "@me", "-t", "task:t-1"])
+
+    assert result.exit_code == 0, result.stdout
+    url = f"{WEB}?channel=%40ada&thread=task%3At-1"
+    assert result.stdout.strip() == url
+    assert opened == [url]
+    client.get.assert_awaited_once_with("/auth/me")
+
+
+def test_read_new_starts_from_now_then_shows_only_what_arrived() -> None:
+    first = FakeNetClient(feed=[{"messages": [], "next_since": "c0", "more": False}])
+    started = _invoke(first, ["read", "@me", "--new", "--json"])
+    assert json.loads(started.stdout)["messages"] == []
+    assert first.net_feed.await_args.kwargs == {"channels": ["@me"], "thread": None, "limit": 0}
+
+    batch = {"messages": [_message("m1", "hi", channel="@ada")], "next_since": "c1", "more": False}
+    second = FakeNetClient(feed=[batch, {"messages": [], "next_since": "c1", "more": False}])
+    shown = _invoke(second, ["read", "@me", "--new", "--json"])
+    assert [m["id"] for m in json.loads(shown.stdout)["messages"]] == ["m1"]
+    assert json.loads(shown.stdout)["web_url"] == f"{WEB}?channel=%40ada"
+    assert second.net_feed.await_args.kwargs["since"] == "c0"
+    again = _invoke(second, ["read", "@me", "--new"])
+    assert "No new messages" in _plain(again.stdout)
+    assert second.net_feed.await_args.kwargs["since"] == "c1"
+
+    # A differently named mark, like the session-start hook's, has its own place.
+    hook = FakeNetClient(feed=[{"messages": [], "next_since": "c9", "more": False}])
+    _invoke(hook, ["read", "@me", "--new", "--mark", "session-start", "--json"])
+    assert hook.net_feed.await_args.kwargs == {"channels": ["@me"], "thread": None, "limit": 0}
+    assert _invoke(hook, ["read", "@me", "--new", "--mark", "Bad Name"]).exit_code == 1

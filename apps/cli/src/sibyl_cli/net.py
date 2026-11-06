@@ -10,12 +10,15 @@ decision memory, and idle threads are distilled into memory by the server.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import hashlib
 import json
 import os
+import re
 import sys
 import tempfile
 import unicodedata
+import webbrowser
 from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
@@ -46,6 +49,7 @@ from sibyl_cli.common import (
 )
 from sibyl_cli.config_store import config_dir, resolve_project_from_cwd
 from sibyl_cli.project_refs import resolve_project_reference
+from sibyl_cli.web_links import net_url
 
 app = typer.Typer(
     name="net",
@@ -68,6 +72,7 @@ HARNESS_ENV = (
     ("claude-code", "CLAUDECODE", "CLAUDE_CODE_SESSION_ID"),
 )
 
+_MARK_PATTERN = re.compile(r"[a-z0-9_-]{1,32}")
 CHANNEL_HELP = "Channel: '@ada' for one agent's inbox, '#reviews' for a shared room"
 THREAD_HELP = "Thread key, such as gh:acme/app#42, a task id, or a slug"
 
@@ -137,6 +142,7 @@ class WatchCursor:
         server: str,
         channels: Sequence[str],
         thread: str | None,
+        kind: str = "cursors",
     ) -> None:
         self.key = {
             "context": context or "",
@@ -145,7 +151,9 @@ class WatchCursor:
             "thread": thread or "",
         }
         digest = hashlib.sha256(json.dumps(self.key, sort_keys=True).encode()).hexdigest()
-        self.path = config_dir() / "net" / "cursors" / f"{digest[:24]}.json"
+        # ``cursors`` are where watches resume; ``read-marks`` are where
+        # ``net read --new`` last looked, so neither moves the other.
+        self.path = config_dir() / "net" / kind / f"{digest[:24]}.json"
 
     def load(self) -> str | None:
         try:
@@ -256,12 +264,24 @@ def _print(markup: str) -> None:
     console.print(markup, emoji=False, highlight=False, soft_wrap=True)
 
 
-def _emit_watch(message: Mapping[str, Any], *, json_output: bool) -> None:
+def message_url(server: str, message: Mapping[str, Any]) -> str:
+    """The web Net page on a message's channel and thread."""
+    thread = message.get("thread")
+    return net_url(server, str(message.get("channel") or ""), str(thread) if thread else None)
+
+
+def _link(url: str) -> str:
+    return f"[dim]{escape(url)}[/dim]"
+
+
+def _emit_watch(message: Mapping[str, Any], *, json_output: bool, server: str) -> None:
+    url = message_url(server, message)
     if json_output:
-        sys.stdout.write(json.dumps(message, ensure_ascii=False, default=str) + "\n")
+        line = json.dumps({**message, "web_url": url}, ensure_ascii=False, default=str)
+        sys.stdout.write(line + "\n")
         sys.stdout.flush()
         return
-    _print(watch_line(message))
+    _print(f"{watch_line(message)} [dim]·[/dim] {_link(url)}")
 
 
 def _print_message(message: Mapping[str, Any]) -> None:
@@ -386,11 +406,13 @@ def post_message(
                     agent=agent_label,
                     session=session_id,
                 )
-            if json_output:
-                print_json(data)
-                return
+                server = client.base_url
             message = data.get("message")
             message = message if isinstance(message, Mapping) else {}
+            url = message_url(server, {"channel": channel, **message})
+            if json_output:
+                print_json({**data, "web_url": url})
+                return
             where = escape(str(message.get("channel") or channel))
             if posted_thread := message.get("thread"):
                 where += f" {escape(str(posted_thread))}"
@@ -398,6 +420,7 @@ def post_message(
             if memory_id := data.get("decision_memory_id") or message.get("decision_memory_id"):
                 line += f" · decision memory {escape(str(memory_id))}"
             success(line)
+            _print(f"  {_link(url)}")
         except SibylClientError as e:
             handle_client_error(e)
         except ValueError as e:
@@ -423,40 +446,107 @@ def read_messages(
             help="How many of the newest to show; 0 with --json returns just the end cursor",
         ),
     ] = 20,
+    new: Annotated[
+        bool,
+        typer.Option(
+            "--new",
+            help=(
+                "Only messages since the last --new read of the same channel and thread, "
+                "then remember where this one stopped; the first one starts from now"
+            ),
+        ),
+    ] = False,
+    mark: Annotated[
+        str,
+        typer.Option(
+            "--mark",
+            help="Name of the place --new remembers; different names keep separate places",
+        ),
+    ] = "read",
     json_output: Annotated[bool, typer.Option("--json", "-j", help="Output as JSON")] = False,
 ) -> None:
     """Show a channel's newest messages, oldest first.
 
+    '@me' is your own inbox. Start work by checking it: sibyl net read @me --new
+
     Examples:
+        sibyl net read @me
         sibyl net read '#reviews'
         sibyl net read '#reviews' -t gh:acme/app#42 -n 50
     """
+    channels = normalize_channels([channel] if channel else None)
+    mark_name = mark.strip().lower()
+    if new and not _MARK_PATTERN.fullmatch(mark_name):
+        error("--mark is 1-32 characters of a-z, 0-9, '-' or '_'")
+        raise typer.Exit(1)
 
     @run_async
     async def _run() -> None:
         try:
             async with get_client() as client:
-                data = await client.net_feed(
-                    channels=normalize_channels([channel] if channel else None),
-                    thread=thread,
-                    limit=limit,
-                    **reader_labels(),
+                server = client.base_url
+                place = (
+                    WatchCursor(
+                        context=client.context_name,
+                        server=server,
+                        channels=channels,
+                        thread=thread,
+                        kind=f"read-marks/{mark_name}",
+                    )
+                    if new
+                    else None
                 )
-            if json_output:
-                print_json(data)
-                return
+                data = await _read_page(client, channels, thread, limit, place)
             messages = _rows(data, "messages")
-            if not messages:
-                info("No messages yet")
-                return
-            for index, message in enumerate(messages):
-                if index:
-                    console.print()
-                _print_message(message)
+            shown = str(messages[0].get("channel")) if messages and channel else channel
+            url = net_url(server, shown, thread)
+            if json_output:
+                print_json({**data, "web_url": url})
+            elif not messages:
+                info("No new messages" if new else "No messages yet")
+            else:
+                for index, message in enumerate(messages):
+                    if index:
+                        console.print()
+                    _print_message(message)
+                console.print()
+                _print(f"  {_link(url)}")
+            next_since = data.get("next_since")
+            if place is not None and isinstance(next_since, str) and next_since:
+                # Saved only after printing, so a crash shows the batch again.
+                place.save(next_since)
         except SibylClientError as e:
             handle_client_error(e)
 
     _run()
+
+
+async def _read_page(
+    client: SibylClient,
+    channels: Sequence[str],
+    thread: str | None,
+    limit: int,
+    mark: WatchCursor | None,
+) -> dict[str, Any]:
+    """The newest ``limit`` messages, or with a mark the ones after it (none on first use)."""
+    if mark is None:
+        return await client.net_feed(
+            channels=channels, thread=thread, limit=limit, **reader_labels()
+        )
+    since = mark.load()
+    if since is None:
+        page = await client.net_feed(channels=channels, thread=thread, limit=0, **reader_labels())
+        return {**page, "messages": []}
+    try:
+        return await client.net_feed(
+            since=since, channels=channels, thread=thread, limit=limit, **reader_labels()
+        )
+    except SibylClientError as exc:
+        # A mark the server no longer accepts starts over from now.
+        if exc.status_code != 422:
+            raise
+        page = await client.net_feed(channels=channels, thread=thread, limit=0, **reader_labels())
+        return {**page, "messages": []}
 
 
 async def _end_cursor(
@@ -524,7 +614,7 @@ async def watch_feed(
 
         messages = _rows(page, "messages")
         for message in messages:
-            _emit_watch(message, json_output=json_output)
+            _emit_watch(message, json_output=json_output, server=client.base_url)
 
         next_since = page.get("next_since")
         if isinstance(next_since, str) and next_since and next_since != cursor:
@@ -664,32 +754,39 @@ def _member(row: Mapping[str, Any]) -> str:
 @app.command("who")
 def who(
     channel: Annotated[
-        str | None, typer.Argument(help="Channel to ask about. Default: every channel")
+        str | None,
+        typer.Argument(help="Channel to ask about. Default: everyone in the organization"),
     ] = None,
     json_output: Annotated[bool, typer.Option("--json", "-j", help="Output as JSON")] = False,
 ) -> None:
-    """Show who is watching a channel and who posted there in the last hour.
+    """Find people and see who is listening.
 
-    Watching is derived from use: any feed read, a watch or a single read,
-    lists its reader for two minutes after it ends. Nothing needs to announce
-    itself.
+    Without a channel: every member, the inbox that reaches their agents
+    (@<handle>), how many of their agent sessions are listening, and when
+    they last posted. With a channel: who is watching it and who posted there
+    in the last hour. Listening is derived from use: any feed read lists its
+    reader for two minutes after it ends.
 
     Examples:
+        sibyl net who
         sibyl net who '@ada'
         sibyl net who --json
     """
+    if channel is None:
+        _directory(json_output=json_output)
+        return
 
     @run_async
     async def _run() -> None:
         try:
             async with get_client() as client:
-                data = await client.net_presence(channel.strip().lower() if channel else None)
+                data = await client.net_presence(channel.strip().lower())
             if json_output:
                 print_json(data)
                 return
             watching = _rows(data, "watching")
             recent = _rows(data, "recent")
-            where = escape(channel) if channel else "any channel"
+            where = escape(channel)
             if not watching and not recent:
                 info(f"Nobody has watched or posted in {where} lately")
                 return
@@ -718,6 +815,74 @@ def who(
             handle_client_error(e)
 
     _run()
+
+
+def _directory(*, json_output: bool) -> None:
+    @run_async
+    async def _run() -> None:
+        try:
+            async with get_client() as client:
+                data = await client.net_directory()
+            if json_output:
+                print_json(data)
+                return
+            members = _rows(data, "members")
+            if not members:
+                info("No members found")
+                return
+            table = create_table(None, "Inbox", "Name", "Listening", "Last post")
+            for row in members:
+                listening = int(row.get("listening") or 0)
+                table.add_row(
+                    escape(_one_line(row.get("inbox") or "")),
+                    escape(_one_line(row.get("name") or row.get("user_id") or "")),
+                    f"[{SUCCESS_GREEN}]{listening}[/{SUCCESS_GREEN}]"
+                    if listening
+                    else "[dim]0[/dim]",
+                    escape(_seen_ago(row.get("last_post_at"))) if row.get("last_post_at") else "",
+                )
+            console.print(table)
+            info('Reach someone\'s agents: sibyl net post @<handle> "..."')
+        except SibylClientError as e:
+            handle_client_error(e)
+
+    _run()
+
+
+@app.command("open")
+def open_net(
+    channel: Annotated[
+        str | None, typer.Argument(help="Channel to open, '@me' for your inbox")
+    ] = None,
+    thread: Annotated[str | None, typer.Option("--thread", "-t", help=THREAD_HELP)] = None,
+) -> None:
+    """Open the web Net page on a channel and thread, or print its link.
+
+    Examples:
+        sibyl net open
+        sibyl net open @me
+        sibyl net open '#reviews' -t gh:acme/app#42
+    """
+    wanted = normalize_channels([channel])[0] if channel else None
+
+    @run_async
+    async def _run() -> str:
+        async with get_client() as client:
+            resolved = wanted
+            if wanted == "@me":
+                me = await client.get("/auth/me")
+                resolved = str(me.get("inbox") or wanted)
+            return net_url(client.base_url, resolved, (thread or "").strip() or None)
+
+    try:
+        url = _run()
+    except SibylClientError as e:
+        handle_client_error(e)
+        return
+    # The link always prints, so a machine without a browser still gets it.
+    sys.stdout.write(url + "\n")
+    with contextlib.suppress(webbrowser.Error):
+        webbrowser.open(url, new=2)
 
 
 @app.command("threads")
