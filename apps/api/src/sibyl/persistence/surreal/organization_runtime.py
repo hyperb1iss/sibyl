@@ -45,7 +45,11 @@ from sibyl.persistence.surreal.auth_runtime._common import (
 )
 from sibyl.persistence.surreal.auth_runtime.projects import verify_entity_project_access
 from sibyl.persistence.surreal.auth_runtime.sessions import resolve_auth_context
-from sibyl.persistence.surreal.member_handles import create_membership, first_member_handle
+from sibyl.persistence.surreal.member_handles import (
+    create_membership,
+    first_member_handle,
+    retire_member_handles,
+)
 from sibyl_core.auth import AuthUser, OrganizationRole, ProjectRole, ProjectVisibility
 from sibyl_core.backends.surreal.records import (
     coerce_datetime as _coerce_datetime,
@@ -1065,6 +1069,7 @@ async def delete_org(*, request: Request, slug: str, user_id: UUID) -> None:
                 DELETE FROM projects WHERE organization_id = $organization_id;
                 DELETE FROM organization_invitations WHERE organization_id = $organization_id;
                 DELETE FROM organization_members WHERE organization_id = $organization_id;
+                DELETE FROM retired_member_handles WHERE organization_id = $organization_id;
                 DELETE FROM teams WHERE organization_id = $organization_id;
                 DELETE FROM api_keys WHERE organization_id = $organization_id;
                 DELETE FROM user_sessions WHERE organization_id = $organization_id;
@@ -1357,6 +1362,9 @@ async def remove_org_member(
                     status_code=status.HTTP_409_CONFLICT,
                     detail="Cannot remove the last organization owner",
                 )
+            await retire_member_handles(
+                client, user_id=str(target_user_id), organization_id=str(organization_id)
+            )
             delete_result = await client.execute_query(
                 "DELETE FROM organization_members WHERE uuid = $uuid;",
                 uuid=str(_coerce_uuid(target_membership.get("uuid"), field_name="membership.uuid")),

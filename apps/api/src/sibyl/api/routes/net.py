@@ -78,6 +78,7 @@ from sibyl.persistence.auth_runtime import (
     find_handle_owner,
     get_member_handle,
     get_users_by_ids,
+    is_handle_retired,
     list_member_handles,
 )
 from sibyl_core.auth import AuthOrganization, ProjectRole
@@ -381,6 +382,18 @@ async def refuse_unknown_inbox(organization_id: str, channel: str) -> None:
     if await reaches_someone(organization_id, channel):
         return
     wanted = channel.removeprefix("@")
+    if await is_handle_retired(organization_id=organization_id, handle=wanted):
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "error": "inbox_retired",
+                "message": (
+                    f"{channel} is no longer a member; their inbox's history stays readable "
+                    f"with sibyl net read {channel}"
+                ),
+                "suggestions": [],
+            },
+        )
     handles = await list_member_handles(organization_id=organization_id)
     close = [f"@{handle}" for handle in closest_handles(wanted, handles, SUGGESTED_HANDLES)]
     hint = f"did you mean {', '.join(close)}?" if close else "see sibyl net who"

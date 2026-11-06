@@ -13,9 +13,12 @@ import structlog
 
 from sibyl.persistence.surreal.auth import build_surreal_auth_client
 from sibyl.persistence.surreal.auth_runtime import reset_server_instance_id_cache
+from sibyl.persistence.surreal.member_handles import (
+    heal_all_member_handles,
+    heal_member_handles,
+)
 from sibyl_core.backends.surreal import bootstrap_auth_schema
 from sibyl_core.backends.surreal.auth_schema import backfill_api_key_scope_restrictions
-from sibyl_core.backends.surreal.member_handles import backfill_member_handles
 from sibyl_core.backends.surreal.records import (
     normalize_records as _normalize_records,
     query_error as _query_error,
@@ -162,6 +165,12 @@ _AUTH_ARCHIVE_SQL = {
         "delete_by_uuid": "DELETE FROM memory_space_members WHERE uuid = $uuid;",
         "create": "CREATE memory_space_members CONTENT $record;",
     },
+    "retired_member_handles": {
+        "select": "SELECT * FROM retired_member_handles ORDER BY id ASC;",
+        "delete_all": "DELETE FROM retired_member_handles;",
+        "delete_by_uuid": "DELETE FROM retired_member_handles WHERE uuid = $uuid;",
+        "create": "CREATE retired_member_handles CONTENT $record;",
+    },
     "llm_usage_buckets": {
         "select": "SELECT * FROM llm_usage_buckets ORDER BY id ASC;",
         "delete_all": "DELETE FROM llm_usage_buckets;",
@@ -195,6 +204,7 @@ _AUTH_ORG_SCOPED_TABLES = frozenset(
         "team_projects",
         "memory_spaces",
         "memory_space_members",
+        "retired_member_handles",
         "llm_usage_buckets",
     }
 )
@@ -244,6 +254,7 @@ _AUTH_ORG_CLEAN_TABLES = (
     "team_projects",
     "memory_spaces",
     "memory_space_members",
+    "retired_member_handles",
     "llm_usage_buckets",
 )
 
@@ -596,8 +607,13 @@ async def _finalize_auth_restore(
 ) -> None:
     await backfill_api_key_scope_restrictions(client, api_key_ids=api_key_ids)
     # Memberships archived before handles existed, or merged from two teams,
-    # leave the restore without a handle or holding one twice.
-    await backfill_member_handles(client.execute_query, organization_id=organization_id)
+    # leave the restore without a handle or holding one twice. Healed under
+    # each organization's handle lock, so a member joining meanwhile can't
+    # take the same handle.
+    if organization_id is None:
+        await heal_all_member_handles(client)
+    else:
+        await heal_member_handles(client, organization_id=organization_id)
     if source_instance_id is not None:
         identity_result = await client.execute_query(
             "UPSERT server_identity:singleton SET instance_id = $instance_id;",

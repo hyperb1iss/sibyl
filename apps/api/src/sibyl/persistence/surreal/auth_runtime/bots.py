@@ -40,7 +40,7 @@ from sibyl.persistence.surreal.auth_runtime.projects import (
     _resolve_project_for_team_link,
     verify_entity_project_access,
 )
-from sibyl.persistence.surreal.member_handles import create_membership
+from sibyl.persistence.surreal.member_handles import create_membership, retire_member_handles
 from sibyl_core.auth import AuthContext, OrganizationRole, PrincipalKind, ProjectRole
 from sibyl_core.backends.surreal.in_clumps import clumped
 from sibyl_core.backends.surreal.records import (
@@ -612,6 +612,7 @@ async def delete_bot(*, ctx: AuthContext, bot_id: UUID, request) -> dict[str, ob
         await client.execute_query(
             "DELETE FROM project_members WHERE user_id = $bot_id;", bot_id=str(bot_id)
         )
+        await retire_member_handles(client, user_id=str(bot_id))
         await client.execute_query(
             "DELETE FROM organization_members WHERE user_id = $bot_id;", bot_id=str(bot_id)
         )

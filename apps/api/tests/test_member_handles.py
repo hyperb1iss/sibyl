@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import asyncio
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 from uuid import uuid4
 
 import pytest
@@ -33,9 +34,11 @@ from tests.test_coordination_presence import (
 )
 from tests.test_routes_net import (
     client_for,
+    feed,
     live_namespace as live_namespace,  # noqa: PLC0414
     org as org,  # noqa: PLC0414
     post,
+    settle,
 )
 
 # --- the rules -------------------------------------------------------------
@@ -187,16 +190,40 @@ async def test_the_backfill_fills_missing_and_duplicate_handles_once(
     assert await backfill_member_handles(org.auth.execute_query, organization_id=organization) == 0
 
 
-def test_the_handle_migration_backfills_existing_members() -> None:
-    from sibyl_core.backends.surreal.auth_schema import (
-        AUTH_SCHEMA_CURRENT_VERSION,
-        AUTH_SCHEMA_MIGRATIONS,
-    )
+async def test_startup_heals_existing_members_under_each_organization_s_lock(
+    org: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The migration only adds the field; startup gives existing members their handles."""
+    from sibyl import surreal_runtime_startup
 
-    [migration] = [item for item in AUTH_SCHEMA_MIGRATIONS if item.name == "auth_member_handles"]
-    assert migration.version == AUTH_SCHEMA_CURRENT_VERSION
-    assert migration.action is not None
-    assert any("FIELDS organization_id, handle" in stmt for stmt in migration.statements)
+    tag = uuid4().hex[:6]
+    founder = await new_user(org, f"old{tag}@example.test")
+    await org.auth.execute_query(
+        "CREATE organization_members CONTENT $record;",
+        record={
+            "uuid": str(uuid4()),
+            "organization_id": org.id,
+            "user_id": founder,
+            "role": "owner",
+        },
+    )
+    locked: list[str] = []
+    lock = member_handles.handles_locked
+
+    def recording(organization_id: str) -> object:
+        locked.append(organization_id)
+        return lock(organization_id)
+
+    monkeypatch.setattr(member_handles, "handles_locked", recording)
+    monkeypatch.setattr(
+        "sibyl.persistence.surreal.auth.build_surreal_auth_client", lambda: org.auth
+    )
+    monkeypatch.setattr(org.auth, "close", AsyncMock())
+
+    await surreal_runtime_startup.bootstrap_surreal_auth_schema()
+
+    assert (await member_rows(org))[founder] == f"old{tag}"
+    assert locked == [org.id]
 
 
 # --- discovery -------------------------------------------------------------
@@ -328,3 +355,106 @@ async def test_members_joining_through_two_replicas_take_distinct_handles(
         [f"race{tag}", *(f"race{tag}-{number}" for number in range(2, 7))]
     )
     assert member_handles.HANDLES_LOCK_ENTITY == "member-handles"
+
+
+async def test_a_handle_given_up_is_retired_not_handed_to_the_next_joiner(
+    world: SimpleNamespace,
+) -> None:
+    tag = uuid4().hex[:6]
+    leaver = await new_user(world, f"alex{tag}@acme.test")
+    await join(world, leaver)
+    posted = await post(world, world.ada, channel=f"@alex{tag}", body="before they left")
+    assert posted.status_code == 201, posted.text
+
+    async with client_for(world, world.owen) as client:
+        removed = await client.delete(f"/api/orgs/{world.slug}/members/{leaver}")
+    assert removed.status_code == 200, removed.text
+
+    newcomer = await new_user(world, f"alex{tag}@newco.test")
+    await join(world, newcomer)
+    assert (await member_rows(world))[newcomer] == f"alex{tag}-2"
+
+    refused = await post(world, world.ada, channel=f"@alex{tag}", body="are you there?")
+    assert refused.status_code == 422, refused.text
+    assert refused.json()["detail"]["error"] == "inbox_retired"
+    assert "no longer a member" in refused.json()["detail"]["message"]
+    # The history stays readable.
+    await settle(world)
+    history = await feed(world, world.grace, channel=f"@alex{tag}")
+    assert [row["body"] for row in history.json()["messages"]] == ["before they left"]
+
+    # The same person rejoining takes their handle back.
+    await join(world, leaver)
+    assert (await member_rows(world))[leaver] == f"alex{tag}"
+    assert (
+        await post(world, world.ada, channel=f"@alex{tag}", body="welcome back")
+    ).status_code == 201
+
+
+async def test_duplicate_and_reserved_handles_are_healed_for_the_later_joiner(
+    world: SimpleNamespace,
+) -> None:
+    tag = uuid4().hex[:6]
+    first, second, odd = (
+        await new_user(world, f"twin{tag}@a.test"),
+        await new_user(world, f"twin{tag}@b.test"),
+        await new_user(world, f"odd{tag}@a.test"),
+    )
+    for user, handle, at in (
+        (first, f"twin{tag}", "2026-01-01T00:00:00Z"),
+        (second, f"twin{tag}", "2026-01-02T00:00:00Z"),
+        (odd, "here", "2026-01-03T00:00:00Z"),
+    ):
+        await world.auth.execute_query(
+            "CREATE organization_members CONTENT { uuid: $uuid, organization_id: $org, "
+            "user_id: $user, role: 'member', handle: $handle, created_at: <datetime> $at };",
+            uuid=str(uuid4()),
+            org=world.id,
+            user=user,
+            handle=handle,
+            at=at,
+        )
+
+    # Posting to the shared inbox finds one owner, the earlier joiner.
+    assert (await post(world, world.ada, channel=f"@twin{tag}", body="hi")).status_code == 201
+    handles = await member_rows(world)
+    assert handles[first] == f"twin{tag}"
+    assert handles[second] == f"twin{tag}-2"
+    assert handles[odd] == f"odd{tag}"
+
+
+async def test_a_restore_racing_a_join_never_shares_a_handle(
+    org: SimpleNamespace,
+    live_redis_settings: None,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The restore's heal and a join serialize on the Redis lock, trial after trial."""
+    from sibyl.coordination._redis.locks import EntityLockManager
+
+    replicas = [EntityLockManager(), EntityLockManager()]
+    calls = iter(range(10_000))
+    monkeypatch.setattr("sibyl.locks.get_lock_manager", lambda: replicas[next(calls) % 2])
+    try:
+        for trial in range(12):
+            organization = str(uuid4())
+            tag = f"{uuid4().hex[:6]}{trial}"
+            restored = await new_user(org, f"kai{tag}@old.test")
+            joining = await new_user(org, f"kai{tag}@new.test")
+            await org.auth.execute_query(
+                "CREATE organization_members CONTENT $record;",
+                record={
+                    "uuid": str(uuid4()),
+                    "organization_id": organization,
+                    "user_id": restored,
+                    "role": "member",
+                },
+            )
+            await asyncio.gather(
+                member_handles.heal_member_handles(org.auth, organization_id=organization),
+                join(org, joining, organization),
+            )
+            handles = await member_rows(org, organization)
+            assert sorted(handles.values()) == sorted([f"kai{tag}", f"kai{tag}-2"]), trial
+    finally:
+        for replica in replicas:
+            await replica.disconnect()
