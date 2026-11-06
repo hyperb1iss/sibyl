@@ -17,7 +17,8 @@ import {
  */
 export function NetContent() {
   const searchParams = useSearchParams();
-  const channel = searchParams.get('channel')?.trim() || null;
+  // Channel names are lowercase; a hand-typed ?channel=@Ada means @ada.
+  const channel = searchParams.get('channel')?.trim().toLowerCase() || null;
   const thread = channel ? searchParams.get('thread')?.trim() || null : null;
 
   const channels = useNetChannels();
