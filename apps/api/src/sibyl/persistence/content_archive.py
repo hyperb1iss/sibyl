@@ -514,6 +514,10 @@ def _restore_value_types(
         # Archives from before chunk stamps carry vectors of unknown origin.
         mark_unverified_vector(record, has_vector=bool(record.get("embedding")))
     elif spec.name in _NET_ARCHIVE_TABLES:
+        # A missing thread is the threadless one, as the schema defaults it;
+        # the thread's record key is computed from it.
+        if not isinstance(record.get("thread"), str):
+            record["thread"] = ""
         _exact_instants(spec, row, record)
 
 
@@ -678,8 +682,9 @@ async def _plan_auxiliary_cleanup(
         key=lambda spec: spec.name not in _CONTENT_RELATION_ARCHIVE_TABLES,
     )
     pages = []
+    by_table: dict[str, list] = {}
     for spec in wipe_specs:
-        pages += await plan_cleanup(
+        by_table[spec.name] = await plan_cleanup(
             client.execute_query,
             spec.name,
             organization_field="organization_id",
@@ -687,7 +692,30 @@ async def _plan_auxiliary_cleanup(
             keep=lambda _identity: False,
             **({} if organization_id is None else {"organization_id": organization_id}),
         )
+    for spec in wipe_specs:
+        if spec.name not in _NET_ARCHIVE_TABLES:
+            pages += by_table[spec.name]
+    # Channels are wiped last and threads first, in one page: a post or a
+    # distillation pass changes only thread rows (messages never change), so
+    # a clean restore racing one is refused before it deletes any message,
+    # and the channels stay exactly as they were.
+    threads = list(by_table.get("net_threads", []))
+    if threads:
+        pages.append(await _single_cleanup_page(client, threads))
+    pages += by_table.get("net_messages", [])
     return pages
+
+
+async def _single_cleanup_page(client, pages: list):
+    """One cleanup page, deleted in one transaction, holding every row of ``pages``."""
+    from sibyl_core.services.source_archive_store import CleanupPage, cleanup_digest
+
+    records = [record for page in pages for record in page.records]
+    return CleanupPage(
+        records=records,
+        digest=await cleanup_digest(client.execute_query, records),
+        keys=[key for page in pages for key in page.keys],
+    )
 
 
 @dataclass(frozen=True)
@@ -1289,7 +1317,7 @@ async def _net_thread_keys(client, rows: list[object]) -> list[str | None]:
         if isinstance(row, dict)
         and isinstance(row.get("organization_id"), str)
         and isinstance(row.get("channel"), str)
-        and isinstance(row.get("thread", ""), str)
+        and isinstance(row.get("thread") or "", str)
     ]
     for start in range(0, len(named), _THREAD_BATCH):
         chunk = named[start : start + _THREAD_BATCH]
@@ -1299,7 +1327,7 @@ async def _net_thread_keys(client, rows: list[object]) -> list[str | None]:
                 {
                     f"organization_{number}": row["organization_id"],
                     f"channel_{number}": row["channel"],
-                    f"thread_{number}": row.get("thread", ""),
+                    f"thread_{number}": row.get("thread") or "",
                 }
             )
         keys_sql = ", ".join(
@@ -1353,12 +1381,23 @@ def _tally_sql(number: int) -> tuple[str, str]:
     return let, tally
 
 
+# The recount commutes with posts: it adds the difference between the
+# messages the tally counted and the count the row showed in the same read,
+# so a post landing in between keeps its own increment, and a row that moved
+# since the tally stays pending. Assignments apply in order, so the ones that
+# read message_count come before the one that changes it. Only the row itself
+# is read inside the write.
 _RECOUNT_THREAD = (
-    f"UPDATE {_TALLY_THREAD.format(n='0')} SET message_count = $count, "  # noqa: S608
-    "first_message_at = $first, last_message_at = $last, reflection_pending = $pending "
-    "WHERE message_count = $seen RETURN VALUE message_count;"
+    f"UPSERT {_TALLY_THREAD.format(n='0')} SET "
+    "organization_id = $organization_0, channel = $channel_0, thread = $thread_0, "
+    "reflection_pending = $pending OR (message_count ?? 0) != $seen, "
+    "last_message_at = IF (message_count ?? 0) = $seen { $last } "
+    "ELSE { time::max([$last, last_message_at ?? $last]) }, "
+    "first_message_at = $first, "
+    "project_id = project_id ?? $pin, "
+    "message_count = (message_count ?? 0) + $delta "
+    "RETURN NONE;"
 )
-_CREATE_THREAD = "CREATE " + _TALLY_THREAD.format(n="0") + " CONTENT $row RETURN NONE;"
 
 
 async def _reconcile_restored_threads(client, restores: list[_AuxiliaryRow]) -> None:
@@ -1369,9 +1408,9 @@ async def _reconcile_restored_threads(client, restores: list[_AuxiliaryRow]) -> 
     recomputed here, after every row landed: a thread with any message past
     its watermark is pending and offered to distillation again, one without
     is not. A thread whose messages arrived without a thread row gets one.
-    The tally is read on its own and each write only applies while the row
-    still shows the count the tally saw, so a post racing the restore is
-    never lost; that thread is tallied again.
+    Each thread is tallied in one read and written once with a recount that
+    commutes with posts (see _RECOUNT_THREAD), so a post racing the restore
+    never leaves a wrong count behind.
     """
     from surrealdb import Datetime
 
@@ -1386,72 +1425,49 @@ async def _reconcile_restored_threads(client, restores: list[_AuxiliaryRow]) -> 
             if row.table in _NET_ARCHIVE_TABLES
         }
     )
-    for _attempt in range(3):
-        raced: list[tuple[str, str, str]] = []
-        for start in range(0, len(threads), _THREAD_BATCH):
-            chunk = threads[start : start + _THREAD_BATCH]
-            params: dict[str, object] = {}
-            lets, tallies = [], []
-            for number, (organization, channel, thread) in enumerate(chunk):
-                params.update(
-                    {
-                        f"organization_{number}": organization,
-                        f"channel_{number}": channel,
-                        f"thread_{number}": thread,
-                    }
-                )
-                let, tally = _tally_sql(number)
-                lets.append(let)
-                tallies.append(tally)
-            result = _unwrap_return(
-                await client.execute_query(
-                    f"RETURN {{ {' '.join(lets)} RETURN [{', '.join(tallies)}]; }};", **params
-                )
+    for start in range(0, len(threads), _THREAD_BATCH):
+        chunk = threads[start : start + _THREAD_BATCH]
+        params: dict[str, object] = {}
+        lets, tallies = [], []
+        for number, (organization, channel, thread) in enumerate(chunk):
+            params.update(
+                {
+                    f"organization_{number}": organization,
+                    f"channel_{number}": channel,
+                    f"thread_{number}": thread,
+                }
             )
-            if not isinstance(result, list) or len(result) != len(chunk):
-                raise TypeError("thread tally returned an invalid shape")
-            for (organization, channel, thread), tally in zip(chunk, result, strict=True):
-                count = int(tally.get("count") or 0)
-                if count == 0:
-                    continue
-                key = {"organization_0": organization, "channel_0": channel, "thread_0": thread}
-                first, last = Datetime(str(tally["first"])), Datetime(str(tally["last"]))
-                state = tally.get("state")
-                if not isinstance(state, dict):
-                    row: dict[str, object] = {
-                        "organization_id": organization,
-                        "channel": channel,
-                        "thread": thread,
-                        "message_count": count,
-                        "first_message_at": first,
-                        "last_message_at": last,
-                        "reflection_pending": True,
-                    }
-                    if thread and tally.get("pin"):
-                        row["project_id"] = tally["pin"]
-                    try:
-                        await client.execute_query(_CREATE_THREAD, row=row, **key)
-                    except Exception:
-                        # A post created the row meanwhile; tally it again.
-                        raced.append((organization, channel, thread))
-                    continue
-                written = _unwrap_return(
-                    await client.execute_query(
-                        _RECOUNT_THREAD,
-                        count=count,
-                        first=first,
-                        last=last,
-                        pending=int(tally.get("later") or 0) > 0,
-                        seen=state.get("message_count"),
-                        **key,
-                    )
-                )
-                if not written:
-                    raced.append((organization, channel, thread))
-        if not raced:
-            return
-        threads = raced
-    log.warning("net_thread_reconcile_raced", threads=len(threads))
+            let, tally = _tally_sql(number)
+            lets.append(let)
+            tallies.append(tally)
+        result = _unwrap_return(
+            await client.execute_query(
+                f"RETURN {{ {' '.join(lets)} RETURN [{', '.join(tallies)}]; }};", **params
+            )
+        )
+        if not isinstance(result, list) or len(result) != len(chunk):
+            raise TypeError("thread tally returned an invalid shape")
+        for (organization, channel, thread), tally in zip(chunk, result, strict=True):
+            count = int(tally.get("count") or 0)
+            if count == 0:
+                continue
+            state = tally.get("state")
+            seen = int(state.get("message_count") or 0) if isinstance(state, dict) else 0
+            # A pin only applies to a named thread, and only to a row that has none.
+            pin = {"pin": tally["pin"]} if thread and tally.get("pin") else {}
+            await client.execute_query(
+                _RECOUNT_THREAD,
+                organization_0=organization,
+                channel_0=channel,
+                thread_0=thread,
+                first=Datetime(str(tally["first"])),
+                last=Datetime(str(tally["last"])),
+                # A thread row this restore had to create starts pending.
+                pending=int(tally.get("later") or 0) > 0 or not isinstance(state, dict),
+                seen=seen,
+                delta=count - seen,
+                **pin,
+            )
 
 
 async def _prepare_auxiliary_content_restore(client, tables, organization_id, *, legacy=False):

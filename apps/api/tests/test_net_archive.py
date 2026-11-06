@@ -12,6 +12,7 @@ and, with SIBYL_LIVE_SURREAL_TESTS=1, on a live server.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import re
 from collections.abc import AsyncIterator
@@ -30,7 +31,7 @@ from sibyl.persistence.surreal import content as surreal_content
 from sibyl_core.backends.surreal import SurrealContentClient, bootstrap_content_schema
 from sibyl_core.backends.surreal.url_schemes import is_embedded_surreal_url
 from sibyl_core.config import settings
-from sibyl_core.services import content_client
+from sibyl_core.services import content_client, source_archive_store
 from sibyl_core.services.net import (
     SETTLE_SECONDS,
     NetCursor,
@@ -480,6 +481,147 @@ async def test_a_thread_restores_at_its_record_whatever_key_the_archive_holds(
     assert response.status_code == 201, response.text
     builds = [t for t in (await rows(fresh_store, org.id))["threads"] if t["channel"] == "#builds"]
     assert [t["message_count"] for t in builds] == [3]
+
+
+def consistent(snapshot: dict[str, list[dict]]) -> None:
+    """Every thread row agrees with the messages it holds."""
+    for thread in snapshot["threads"]:
+        held = [
+            m
+            for m in snapshot["messages"]
+            if m["channel"] == thread["channel"] and m["thread"] == thread["thread"]
+        ]
+        assert thread["message_count"] == len(held), thread
+        assert thread["first_message_at"] == held[0]["created_at"], thread
+        assert thread["last_message_at"] == held[-1]["created_at"], thread
+
+
+async def test_a_clean_restore_racing_a_post_leaves_the_channels_as_they_were(
+    org: SimpleNamespace, restore_in_place, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    await history(org)
+    archive = await _backup(org, monkeypatch, "payload", tmp_path)
+    real = source_archive_store.apply_cleanup
+
+    async def post_first(execute_query, pages, **kwargs):
+        # A post lands after the wipe was planned and before it runs.
+        response = await post(org, org.grace, channel="#reviews", thread=THREAD, body="racing")
+        assert response.status_code == 201, response.text
+        await real(execute_query, pages, **kwargs)
+
+    monkeypatch.setattr(source_archive_store, "apply_cleanup", post_first)
+    monkeypatch.setattr(org.content, "close", AsyncMock())
+    monkeypatch.setattr(content_archive, "build_surreal_content_client", lambda: org.content)
+
+    result = await content_archive.restore_content_archive_payload(archive, clean=True)
+
+    assert not result.success
+    assert any("destination changed" in error for error in result.errors), result.errors
+    # Refused before a single message went: every message is there, the
+    # racing one included, and every thread row still agrees with them.
+    after = await rows(org.content, org.id)
+    assert len(after["messages"]) == 7
+    assert thread_row(after, THREAD)["message_count"] == 4
+    consistent(after)
+
+
+async def test_a_thread_archived_without_its_thread_restores_as_the_threadless_one(
+    org: SimpleNamespace,
+    fresh_store: SurrealContentClient,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    await history(org)
+    before = await rows(org.content, org.id)
+    archive = await _backup(org, monkeypatch, "payload", tmp_path)
+    threadless = next(t for t in archive["tables"]["net_threads"] if t["thread"] == "")
+    threadless.pop("thread")
+
+    monkeypatch.setattr(content_archive, "build_surreal_content_client", lambda: fresh_store)
+    result = await content_archive.restore_content_archive_payload(archive)
+    assert result.success, result.errors
+    assert await rows(fresh_store, org.id) == before
+    _serve_from(monkeypatch, fresh_store)
+    for body in ("after one", "after two"):
+        response = await post(org, org.ada, channel="#builds", body=body)
+        assert response.status_code == 201, response.text
+    assert thread_row(await rows(fresh_store, org.id), "")["message_count"] == 4
+
+
+async def test_posts_racing_the_recount_are_all_counted(
+    org: SimpleNamespace,
+    fresh_store: SurrealContentClient,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    await history(org)
+    archive = await _backup(org, monkeypatch, "payload", tmp_path)
+    # A thread row that disagrees with its messages, which only the recount
+    # puts right.
+    next(t for t in archive["tables"]["net_threads"] if t["thread"] == THREAD)["message_count"] = 99
+    _serve_from(monkeypatch, fresh_store)
+    execute = fresh_store.execute_query
+    raced: list[str] = []
+
+    async def post_after_each_tally(query: str, *args, **params):
+        result = await execute(query, *args, **params)
+        if "LET $state_0" in query and len(raced) < 12:
+            # Three posters land between every tally and the recount it
+            # feeds, more rounds than a compare-and-set retry would take.
+            responses = await asyncio.gather(
+                *(
+                    post(org, user, channel="#reviews", thread=THREAD, body=f"race {n}")
+                    for n, user in enumerate((org.ada, org.grace, org.ada))
+                )
+            )
+            assert all(response.status_code == 201 for response in responses)
+            raced.extend(response.json()["message"]["id"] for response in responses)
+        return result
+
+    monkeypatch.setattr(fresh_store, "execute_query", post_after_each_tally)
+    monkeypatch.setattr(content_archive, "build_surreal_content_client", lambda: fresh_store)
+    result = await content_archive.restore_content_archive_payload(archive)
+    assert result.success, result.errors
+
+    after = await rows(fresh_store, org.id)
+    assert raced
+    assert thread_row(after, THREAD)["message_count"] == 3 + len(raced)
+    assert thread_row(after, THREAD)["reflection_pending"] is True
+    consistent(after)
+
+
+async def test_a_merge_restore_under_live_posting_ends_consistent(
+    org: SimpleNamespace, restore_in_place, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    await history(org)
+    archive = await _backup(org, monkeypatch, "payload", tmp_path)
+    stop = asyncio.Event()
+
+    async def poster(user: str, channel: str, thread: str | None) -> int:
+        sent = 0
+        while not stop.is_set():
+            body = {"channel": channel, "body": f"live {sent}"}
+            if thread:
+                body["thread"] = thread
+            assert (await post(org, user, **body)).status_code == 201
+            sent += 1
+            await asyncio.sleep(0)
+        return sent
+
+    posters = [
+        asyncio.create_task(poster(org.ada, "#reviews", THREAD)),
+        asyncio.create_task(poster(org.grace, "#reviews", THREAD)),
+        asyncio.create_task(poster(org.grace, "#builds", None)),
+    ]
+    try:
+        await restore_in_place(archive)
+    finally:
+        stop.set()
+        sent = await asyncio.gather(*posters)
+
+    after = await rows(org.content, org.id)
+    assert len(after["messages"]) == 6 + sum(sent)
+    consistent(after)
 
 
 _DELETES_NET_ROWS = re.compile(
