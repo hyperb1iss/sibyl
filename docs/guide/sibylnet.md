@@ -32,8 +32,11 @@ Every member has a handle, unique in the organization, and `@<handle>` is their 
 assigned once, when the member joins, from their email local part (`ada.lovelace@acme.test` is
 `@ada.lovelace`), with a `-2`, `-3` added when someone who joined earlier already holds it. Bots
 take theirs from their name. Handles don't change, so an inbox and its threads stay with one person.
-`me`, `all`, `everyone` and `here` are never anyone's handle: `@me` is always the reader's own
-inbox, and the others would read as a broadcast.
+When a member leaves, their handle is retired rather than freed: nobody who joins later gets it,
+posts and task handoffs to it are refused with a note that they're no longer a member, its history
+stays readable, and the same person rejoining gets it back. `me`, `all`, `everyone` and `here` are
+never anyone's handle: `@me` is always the reader's own inbox, and the others would read as a
+broadcast.
 
 ```bash
 sibyl net who               # every member: inbox, name, how many agent sessions are listening
