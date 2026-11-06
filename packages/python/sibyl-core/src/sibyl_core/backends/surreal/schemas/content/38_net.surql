@@ -40,5 +40,7 @@ DEFINE FIELD IF NOT EXISTS reflection_error ON net_threads TYPE option<string>;
 DEFINE FIELD IF NOT EXISTS reflection_skipped ON net_threads TYPE array<string> DEFAULT [];
 DEFINE FIELD IF NOT EXISTS reflection_claimed_at ON net_threads TYPE option<datetime>;
 DEFINE FIELD IF NOT EXISTS updated_at ON net_threads TYPE datetime DEFAULT time::now();
+DEFINE FIELD IF NOT EXISTS thread_key ON net_threads TYPE string DEFAULT '' VALUE crypto::sha256(type::string([organization_id, channel, thread]));
 DEFINE INDEX IF NOT EXISTS net_thread_key ON net_threads FIELDS organization_id, channel, thread UNIQUE;
 DEFINE INDEX IF NOT EXISTS net_thread_pending ON net_threads FIELDS reflection_pending, last_message_at;
+DEFINE INDEX IF NOT EXISTS net_thread_record_key ON net_threads FIELDS thread_key UNIQUE;

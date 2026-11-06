@@ -43,12 +43,26 @@ from sibyl_core.migrate.archive_stream import (
 
 log = structlog.get_logger()
 
-CONTENT_ARCHIVE_VERSION = "2.3"
-_INTEGRITY_ARCHIVE_VERSIONS = {"2.0", "2.1", "2.2", CONTENT_ARCHIVE_VERSION}
+CONTENT_ARCHIVE_VERSION = "2.4"
+_INTEGRITY_ARCHIVE_VERSIONS = {"2.0", "2.1", "2.2", "2.3", CONTENT_ARCHIVE_VERSION}
 _VALIDATION_ARCHIVE_TABLES = frozenset(
     {"memory_validation_executions", "memory_validation_attempts"}
 )
 _DREAM_ARCHIVE_TABLES = frozenset({"dream_source_checkpoints", "dream_source_cursors"})
+# sibylnet channel history, carried from content archive 2.4 on. Messages are
+# kept forever, so an archive that predates them never wipes them either.
+_NET_ARCHIVE_TABLES = frozenset({"net_messages", "net_threads"})
+_PRE_NET_ARCHIVE_VERSIONS = frozenset({"1.0", "2.0", "2.1", "2.2", "2.3"})
+_NET_DATETIME_FIELDS = {
+    "net_messages": ("created_at",),
+    "net_threads": (
+        "first_message_at",
+        "last_message_at",
+        "reflected_through",
+        "reflection_claimed_at",
+        "updated_at",
+    ),
+}
 
 
 @dataclass(frozen=True)
@@ -261,6 +275,32 @@ _CONTENT_ARCHIVE_TABLE_SPECS += tuple(
     for name in ("memory_validation_executions", "memory_validation_attempts")
 )
 
+# A thread lives at a record keyed by the hash of its organization, channel
+# and thread, the key every post upserts. The row stores that hash as
+# thread_key, so a restore deletes and recreates the thread at the same key
+# and the next post lands on the restored row.
+_NET_THREAD_RECORD = "type::record(string::concat('net_threads:', $identity))"
+_CONTENT_ARCHIVE_TABLE_SPECS += (
+    ContentArchiveTableSpec(
+        name="net_messages",
+        source_identity_field="id",
+        target_identity_field="uuid",
+        select_sql="SELECT * FROM net_messages ORDER BY id ASC;",
+        delete_by_identity_sql="DELETE net_messages WHERE uuid = $identity;",
+        delete_all_sql="DELETE net_messages;",
+        create_sql="CREATE net_messages CONTENT $record;",
+    ),
+    ContentArchiveTableSpec(
+        name="net_threads",
+        source_identity_field="thread_key",
+        target_identity_field="thread_key",
+        select_sql="SELECT * FROM net_threads ORDER BY id ASC;",
+        delete_by_identity_sql=f"DELETE {_NET_THREAD_RECORD};",
+        delete_all_sql="DELETE net_threads;",
+        create_sql=f"CREATE {_NET_THREAD_RECORD} CONTENT $record;",
+    ),
+)
+
 CONTENT_ARCHIVE_TABLES = tuple(spec.name for spec in _CONTENT_ARCHIVE_TABLE_SPECS)
 _CONTENT_ARCHIVE_TABLES_BY_NAME = {spec.name: spec for spec in _CONTENT_ARCHIVE_TABLE_SPECS}
 _BACKUP_ARCHIVE_TABLES = frozenset({"backup_settings", "backups"})
@@ -429,6 +469,39 @@ def _deserialize_value(value: object) -> object:
     return value
 
 
+def _restore_value_types(
+    spec: ContentArchiveTableSpec, row: Mapping[str, object], record: dict[str, object]
+) -> None:
+    """Give the values JSON cannot type their store types back."""
+    if spec.name == "document_chunks":
+        record["embedding"] = _deserialize_vector(record.get("embedding"))
+        # Archives from before chunk stamps carry vectors of unknown origin.
+        mark_unverified_vector(record, has_vector=bool(record.get("embedding")))
+    elif spec.name in _NET_ARCHIVE_TABLES:
+        _exact_instants(spec, row, record)
+
+
+def _exact_instants(
+    spec: ContentArchiveTableSpec, row: Mapping[str, object], record: dict[str, object]
+) -> None:
+    """Put a sibylnet row's datetimes back to the nanosecond.
+
+    They travel as the server's own text (see ``_content_archive_projection``)
+    because a decoded datetime keeps microseconds, and the feed orders and
+    pages on created_ns, which the schema derives from created_at: rebuilt
+    from that text, every cursor issued before the backup still points
+    between the same two messages.
+    """
+    from surrealdb import Datetime
+
+    for name in _NET_DATETIME_FIELDS.get(spec.name, ()):
+        value = row.get(name)
+        if isinstance(value, str) and value:
+            record[name] = Datetime(value)
+        else:
+            record.pop(name, None)
+
+
 def _deserialize_vector(value: object) -> list[float] | object:
     if not isinstance(value, str):
         return value
@@ -516,6 +589,8 @@ def _normalize_content_archive_restore_row(
 
 def _content_archive_projection(spec: ContentArchiveTableSpec) -> str:
     projection = "*"
+    for name in _NET_DATETIME_FIELDS.get(spec.name, ()):
+        projection += f", IF {name} != NONE {{ type::string({name}) }} ELSE {{ NONE }} AS {name}"
     if spec.name in _RETAINED_OPERATION_TABLES:
         projection += ", type::string(created_at) AS created_at"
         if spec.name == "eval_attempts":
@@ -544,8 +619,14 @@ def _content_archive_export_query(
 _AUXILIARY_CHANGED = "archive auxiliary destination changed before restore"
 
 
-async def _plan_auxiliary_cleanup(client, organization_id: str | None) -> list:
-    """Page the auxiliary rows a clean restore wipes; relation tables go first."""
+async def _plan_auxiliary_cleanup(
+    client, organization_id: str | None, *, keep: frozenset[str] = frozenset()
+) -> list:
+    """Page the auxiliary rows a clean restore wipes; relation tables go first.
+
+    Tables in ``keep`` are left alone: the archive did not capture them, so
+    wiping them would lose rows it cannot put back.
+    """
     from sibyl_core.services.source_archive_store import plan_cleanup
 
     wipe_specs = sorted(
@@ -553,6 +634,7 @@ async def _plan_auxiliary_cleanup(client, organization_id: str | None) -> list:
             spec
             for spec in _CONTENT_ARCHIVE_TABLE_SPECS
             if spec.name != "raw_captures"
+            and spec.name not in keep
             and spec.name not in _RETAINED_OPERATION_TABLES
             and spec.name not in _DREAM_ARCHIVE_TABLES
             and (organization_id is None or spec.name not in _GLOBAL_CONTENT_ARCHIVE_TABLES)
@@ -909,16 +991,22 @@ def _prepare_content_source_integrity(payload, tables, organization_id):
         required -= _DREAM_ARCHIVE_TABLES
     if version in {"2.0", "2.1"}:
         required -= _VALIDATION_ARCHIVE_TABLES
+    if version in _PRE_NET_ARCHIVE_VERSIONS:
+        required -= _NET_ARCHIVE_TABLES
     if version in _INTEGRITY_ARCHIVE_VERSIONS and required - set(tables):
         raise ValueError("current content archive is missing required tables")
-    if version not in {"2.1", "2.2", CONTENT_ARCHIVE_VERSION} and any(
+    if version not in {"2.1", "2.2", "2.3", CONTENT_ARCHIVE_VERSION} and any(
         tables.get(name) for name in _DREAM_ARCHIVE_TABLES
     ):
         raise ValueError("dream checkpoints require content archive 2.1")
-    if version not in {"2.2", CONTENT_ARCHIVE_VERSION} and any(
+    if version not in {"2.2", "2.3", CONTENT_ARCHIVE_VERSION} and any(
         tables.get(name) for name in _VALIDATION_ARCHIVE_TABLES
     ):
         raise ValueError("validation history requires content archive 2.2")
+    if version in _PRE_NET_ARCHIVE_VERSIONS and any(
+        tables.get(name) for name in _NET_ARCHIVE_TABLES
+    ):
+        raise ValueError("sibylnet history requires content archive 2.4")
     for table, rows in tables.items():
         if table not in CONTENT_ARCHIVE_TABLES or not isinstance(rows, list):
             raise ValueError("content archive has an unknown or malformed table")
@@ -1205,10 +1293,7 @@ async def _prepare_auxiliary_content_restore(client, tables, organization_id, *,
                 record.setdefault("admission_bindings", [])
             elif legacy and spec.name == "api_idempotency_records":
                 record.setdefault("response_body", {})
-            if spec.name == "document_chunks":
-                record["embedding"] = _deserialize_vector(record.get("embedding"))
-                # Archives from before chunk stamps carry vectors of unknown origin.
-                mark_unverified_vector(record, has_vector=bool(record.get("embedding")))
+            _restore_value_types(spec, normalized_row, record)
             record[spec.target_identity_field] = identity
             record, dropped = _drop_undeclared_fields(record, declared)
             if dropped:
@@ -1262,6 +1347,7 @@ async def _restore_content_sources_and_rows(
     organization_id: str | None,
     clean: bool,
     global_scope: bool,
+    keep: frozenset[str] = frozenset(),
 ) -> tuple[list[str], list[dict[str, str]]]:
     """Plan the content restore, then write it in bounded transactions.
 
@@ -1293,7 +1379,7 @@ async def _restore_content_sources_and_rows(
         await _check_auxiliary_ownership(client, auxiliary_restores, organization_id)
     await _check_auxiliary_history(client, auxiliary_restores)
     _check_revoked_history_sources(plan.conflicts, auxiliary_restores)
-    cleanup = await _plan_auxiliary_cleanup(client, organization_id) if clean else []
+    cleanup = await _plan_auxiliary_cleanup(client, organization_id, keep=keep) if clean else []
     # Each auxiliary row deletes and recreates, or creates beside, the rows
     # sharing its identity; any other row on one of its unique keys collides.
     vacated = plan.vacated | {key for page in cleanup for key in page.keys}
@@ -1398,6 +1484,11 @@ async def restore_content_archive_payload(
                 organization_id=organization_id,
                 clean=clean,
                 global_scope=global_scope,
+                keep=(
+                    _NET_ARCHIVE_TABLES
+                    if payload.get("version", "1.0") in _PRE_NET_ARCHIVE_VERSIONS
+                    else frozenset()
+                ),
             )
         except Exception as exc:
             return ContentArchiveRestoreResult(

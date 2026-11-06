@@ -140,7 +140,9 @@ def seal_archive_lineage(
         (SourceKind.RAW_CAPTURE, content, "2.0"),
     ):
         if payload is None or payload.get("version") not in (
-            {"2.0", "2.1", "2.2", "2.3"} if kind is SourceKind.RAW_CAPTURE else {current_version}
+            {"2.0", "2.1", "2.2", "2.3", "2.4"}
+            if kind is SourceKind.RAW_CAPTURE
+            else {current_version}
         ):
             continue
         section = payload.get("source_integrity")

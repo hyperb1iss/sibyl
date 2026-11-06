@@ -112,7 +112,8 @@ _THREAD_FIELDS = (
 # One record per (organization, channel, thread). Concurrent upserts of the
 # same thread then contend for a single key, which the server reports as a
 # retryable transaction conflict, rather than racing two creates into the
-# unique index.
+# unique index. The schema stores the same hash on the row as ``thread_key``,
+# which is how an archive restore puts a thread back at this record.
 _THREAD_RECORD = (
     "type::record(string::concat('net_threads:', "
     "crypto::sha256(type::string([$organization_id, $channel, $thread]))))"
