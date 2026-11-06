@@ -23,6 +23,8 @@ from sibyl.persistence.surreal.auth_runtime import (
 )
 from sibyl_core.auth import AuthSession, OrganizationRole, ProjectRole
 
+pytestmark = pytest.mark.usefixtures("scripted_membership_writes")
+
 
 class _StaticAuthClientScope:
     def __init__(self, client: object) -> None:

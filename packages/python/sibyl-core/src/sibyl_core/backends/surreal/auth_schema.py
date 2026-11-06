@@ -58,7 +58,7 @@ EXTENDED_AUTH_TABLES = (
     "oauth_authorization_requests",
 )
 AUTH_TABLES = (*CORE_AUTH_TABLES, *EXTENDED_AUTH_TABLES)
-AUTH_SCHEMA_CURRENT_VERSION = 12
+AUTH_SCHEMA_CURRENT_VERSION = 13
 AUTH_SCHEMA_NAME = "auth"
 _AUTH_ORGANIZATION_ROLE_VALUES = tuple(role.value for role in OrganizationRole)
 _AUTH_PROJECT_ROLE_VALUES = tuple(role.value for role in ProjectRole)
@@ -759,6 +759,23 @@ DEFINE FIELD IF NOT EXISTS sponsor_user_id ON users TYPE option<string>;
 DEFINE INDEX IF NOT EXISTS idx_users_sponsor ON users FIELDS sponsor_user_id;
 """
 
+# The name a member's sibylnet inbox goes by, unique in the organization.
+# Uniqueness is held by assigning and renaming under a per-organization lock,
+# not a unique index: the embedded engine counts members still waiting for
+# their handle as duplicates of each other.
+AUTH_MEMBER_HANDLE_DEFINITIONS = """
+DEFINE FIELD IF NOT EXISTS handle ON organization_members TYPE option<string>;
+DEFINE INDEX IF NOT EXISTS idx_organization_members_org_handle
+    ON organization_members FIELDS organization_id, handle;
+"""
+
+
+async def _backfill_member_handles(execute_query: SurrealExecute) -> None:
+    from sibyl_core.backends.surreal.member_handles import backfill_member_handles
+
+    await backfill_member_handles(execute_query)
+
+
 AUTH_SCHEMA_MIGRATIONS = (
     SchemaMigration(
         version=1,
@@ -823,6 +840,12 @@ AUTH_SCHEMA_MIGRATIONS = (
         version=12,
         name="auth_service_accounts",
         statements=tuple(split_statements(AUTH_SERVICE_ACCOUNT_DEFINITIONS)),
+    ),
+    SchemaMigration(
+        version=13,
+        name="auth_member_handles",
+        statements=tuple(split_statements(AUTH_MEMBER_HANDLE_DEFINITIONS)),
+        action=_backfill_member_handles,
     ),
 )
 

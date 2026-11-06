@@ -41,6 +41,11 @@ from sibyl.persistence.surreal.auth_runtime._common import (
     is_service_record,
 )
 from sibyl.persistence.surreal.auth_runtime.audit import log_memory_audit_event
+from sibyl.persistence.surreal.member_handles import (
+    handle_owner,
+    member_handle,
+    organization_handles,
+)
 from sibyl_core.backends.surreal.records import (
     normalize_record as _normalize_record,
     utcnow as _utcnow,
@@ -218,6 +223,24 @@ async def get_users_by_ids(user_ids: Iterable[str]) -> dict[str, SimpleNamespace
                         uuid=user_id, name=record.get("name"), email=record.get("email")
                     )
     return users
+
+
+async def get_member_handle(*, organization_id: str, user_id: str) -> str | None:
+    """The handle a member holds in an organization, or None when they are not a member."""
+    async with _auth_client_scope() as client:
+        return await member_handle(client, organization_id=organization_id, user_id=user_id)
+
+
+async def find_handle_owner(*, organization_id: str, handle: str) -> str | None:
+    """The user whose handle ``handle`` is in the organization, or None."""
+    async with _auth_client_scope() as client:
+        return await handle_owner(client, organization_id=organization_id, handle=handle)
+
+
+async def list_member_handles(*, organization_id: str) -> dict[str, str]:
+    """Every member handle in the organization, with the user holding it."""
+    async with _auth_client_scope() as client:
+        return await organization_handles(client, organization_id=organization_id)
 
 
 async def list_user_organizations(*, user_id: UUID) -> list[SimpleNamespace]:

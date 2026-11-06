@@ -166,6 +166,34 @@ def idempotency_record_pending(record: ApiIdempotencyRecord) -> bool:
     return record.response_status_code == _PENDING_RESPONSE_STATUS
 
 
+def idempotent_progress(request: object) -> dict[str, object]:
+    """What an interrupted earlier run of this request noted before it stopped.
+
+    Empty for a first run and for a request without an ``Idempotency-Key``.
+    A handler that takes over an interrupted claim reads this to finish what
+    the earlier run promised, such as a notice owed for a write it made.
+    """
+    claim = _request_claim(request)
+    if claim is None or not idempotency_record_pending(claim):
+        return {}
+    return dict(claim.response_body)
+
+
+async def record_idempotent_progress(request: object, progress: dict[str, object]) -> None:
+    """Note on the still-pending claim what this run is about to do, before it does it.
+
+    A retry that takes the claim over after this run is interrupted reads it
+    back through ``idempotent_progress``. Without an ``Idempotency-Key`` there
+    is no claim and nothing to note.
+    """
+    claim = _request_claim(request)
+    if claim is None:
+        return
+    noted = replace(claim, response_body=dict(progress))
+    await content_runtime.complete_api_idempotency_record(None, record=noted)
+    _store_request_claim(request, noted)
+
+
 def _store_request_claim(request: object, claim: ApiIdempotencyRecord) -> None:
     state = getattr(request, "state", request)
     setattr(state, _REQUEST_CLAIM_ATTRIBUTE, claim)
