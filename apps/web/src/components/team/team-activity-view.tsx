@@ -44,7 +44,7 @@ export interface TeamActivityViewProps {
   personId: string | null;
   onPersonChange: (userId: string | null) => void;
   currentUserId?: string;
-  /** Members' sibylnet inboxes by user id; empty when the server has none. */
+  /** Members' sibylnet inboxes by user id; empty until the directory loads. */
   inboxes?: Map<string, string>;
   /** Pins relative times, for stories and tests. */
   now?: number;

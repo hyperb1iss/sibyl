@@ -3,7 +3,6 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useCallback, useMemo } from 'react';
 import { type PreferencesResponse, preferencesApi } from '../api/auth';
-import { parseApiError } from '../api/errors';
 import { type NetMember, type NetMessage, netApi } from '../api/net';
 import { TIMING } from '../constants/app';
 import { useMe, usePreferences } from './auth';
@@ -11,37 +10,24 @@ import { useNetFeed } from './net';
 import { queryKeys } from './query-keys';
 
 /*
- * Who the viewer is on sibylnet, and who everyone else is.
- *
- * Member handles are new: until a server sends them, /auth/me has no inbox
- * and GET /net/directory answers 404. This module is the one place that
- * absorbs that. Both read as null and the page behaves as it did before
- * handles (no "Your inbox", no handles beside names). Once every server
- * ships handles, delete the two blocks marked HANDLES-FALLBACK.
+ * Who the viewer is on sibylnet, and who everyone else is: the viewer's own
+ * inbox from /auth/me and every member's handle from GET /net/directory.
  */
 
-/** The viewer's own inbox in the active organization, such as `@ada`. */
+/**
+ * The viewer's own inbox in the active organization, such as `@ada`; null
+ * with no active organization.
+ */
 export function useMyInbox(): string | null {
   const { data } = useMe();
-  // HANDLES-FALLBACK: a server without handles sends no inbox.
   return data?.inbox ?? null;
 }
 
-/** Every member by user id, or null when the server has no directory. */
+/** Every member by user id, or null until the directory has loaded. */
 export function useNetDirectory(): Map<string, NetMember> | null {
   const query = useQuery({
     queryKey: queryKeys.net.directory,
-    queryFn: async ({ signal }) => {
-      try {
-        return await netApi.directory({ signal });
-      } catch (error) {
-        // HANDLES-FALLBACK: a server without handles has no directory route.
-        if ((parseApiError(error) as { detail?: unknown } | null)?.detail === 'Not Found') {
-          return null;
-        }
-        throw error;
-      }
-    },
+    queryFn: ({ signal }) => netApi.directory({ signal }),
     staleTime: TIMING.STALE_TIME,
     refetchInterval: 60_000,
   });
@@ -98,7 +84,7 @@ export function inboxNewCount(
 }
 
 export interface InboxStatus {
-  /** `@<handle>`, or null on a server without handles. */
+  /** `@<handle>`, or null with no active organization. */
   inbox: string | null;
   /** New messages since the viewer last opened the inbox. */
   newCount: number;

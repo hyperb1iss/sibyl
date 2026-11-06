@@ -21,7 +21,7 @@ interface PersonCardProps {
   selected: boolean;
   isYou: boolean;
   onToggle: (userId: string) => void;
-  /** Their sibylnet inbox, such as `@ada`, when the server knows handles. */
+  /** Their sibylnet inbox, such as `@ada`, once the directory has loaded. */
   inbox?: string;
   now?: number;
 }

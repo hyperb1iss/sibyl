@@ -50,7 +50,7 @@ describe('inboxNewCount', () => {
   });
 });
 
-describe('handles, with and without a server that has them', () => {
+describe('handles', () => {
   afterEach(() => vi.unstubAllGlobals());
 
   it('reads the inbox from /auth/me and members from the directory', async () => {
@@ -73,7 +73,7 @@ describe('handles, with and without a server that has them', () => {
               name: 'Grace',
               handle: 'grace',
               inbox: '@grace',
-              listening: true,
+              listening: 1,
               last_post_at: null,
             },
           ],
@@ -87,12 +87,18 @@ describe('handles, with and without a server that has them', () => {
     await waitFor(() => expect(directory.result.current?.get('u-grace')?.inbox).toBe('@grace'));
   });
 
-  it('reads both as absent from a server that predates handles', async () => {
+  it('reads no inbox with no active organization, and no directory when its read fails', async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const path = new URL(String(input), 'http://localhost').pathname;
       if (path === '/api/auth/me')
-        return json({ user: { id: 'u-ada' }, organization: null, org_role: null });
-      return json({ detail: 'Not Found' }, 404);
+        return json({
+          user: { id: 'u-ada' },
+          organization: null,
+          org_role: null,
+          handle: null,
+          inbox: null,
+        });
+      return json({ detail: 'directory unavailable' }, 503);
     });
     vi.stubGlobal('fetch', fetchMock);
     const inbox = renderHook(() => useMyInbox(), { wrapper });

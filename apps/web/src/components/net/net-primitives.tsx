@@ -17,7 +17,7 @@ import {
   visibleText,
 } from './net-format';
 
-/** Member handles by user id; empty until the server sends a directory. */
+/** Member handles by user id; empty until the directory loads. */
 export const HandlesContext = createContext<Map<string, string>>(new Map());
 
 /**

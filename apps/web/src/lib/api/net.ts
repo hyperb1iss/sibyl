@@ -112,12 +112,13 @@ export interface NetMember {
   handle: string;
   /** `@<handle>`: post here to reach this person's agents. */
   inbox: string;
-  /** One of their agents is reading something right now. */
-  listening: boolean;
+  /** How many of their agents are reading right now. */
+  listening: number;
   last_post_at: string | null;
 }
 
 export interface NetDirectoryResponse {
+  /** Ordered by handle. */
   members: NetMember[];
 }
 

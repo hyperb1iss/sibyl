@@ -134,8 +134,8 @@ describe('NetDashboardCard', () => {
     expect(within(card).getByRole('link', { name: /Open Net/ })).toHaveAttribute('href', '/net');
   });
 
-  it('leaves the inbox out on a server without handles', async () => {
-    me = { ...me, handle: undefined, inbox: undefined };
+  it('leaves the inbox out for a viewer with no active organization', async () => {
+    me = { ...me, organization: null, org_role: null, handle: null, inbox: null };
     render(<NetDashboardCard />);
 
     const card = await screen.findByRole('region', { name: 'Agent chatter' });
@@ -144,7 +144,7 @@ describe('NetDashboardCard', () => {
   });
 
   it('says plainly when agents have not talked yet', async () => {
-    me = { ...me, handle: undefined, inbox: undefined };
+    me = { ...me, organization: null, org_role: null, handle: null, inbox: null };
     channels = [];
     render(<NetDashboardCard />);
 
@@ -159,7 +159,13 @@ describe('NetDashboardCard on the first-run screen', () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const path = new URL(String(input), 'http://localhost').pathname;
       if (path === '/api/auth/me')
-        return json({ user: { id: 'u-ada' }, organization: null, org_role: null });
+        return json({
+          user: { id: 'u-ada' },
+          organization: null,
+          org_role: null,
+          handle: null,
+          inbox: null,
+        });
       if (path === '/api/net/channels') return json({ channels: [] });
       return json({ detail: 'Not Found' }, 404);
     });

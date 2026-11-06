@@ -34,7 +34,7 @@ export interface NetViewProps {
   /** Null until presence loads. */
   presence: NetPresenceResponse | null;
   projectNames: Record<string, string>;
-  /** The viewer's own inbox and what is new in it; null without handles. */
+  /** The viewer's own inbox and what is new in it; null with no active organization. */
   inbox?: { channel: string; newCount: number } | null;
   /** Members by user id, for the handles beside their names. */
   directory?: Map<string, NetMember> | null;

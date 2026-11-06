@@ -207,12 +207,24 @@ function feed(messages: NetMessage[]): NetFeedResponse {
 }
 
 let channels: NetChannelsResponse;
-/** What /auth/me says; null answers 404, a server that predates handles. */
-let me: Record<string, unknown> | null;
+/**
+ * A viewer with no active organization: no inbox, so nothing about the
+ * viewer shapes the page. The handles block below signs in as Ada.
+ */
+const NO_ORG_ME = {
+  user: { id: 'u-viewer', github_id: null, email: null, name: 'Viewer', avatar_url: null },
+  organization: null,
+  org_role: null,
+  handle: null,
+  inbox: null,
+};
+
+/** What /auth/me says. */
+let me: Record<string, unknown>;
 let preferences: Record<string, unknown>;
 let preferenceWrites: Record<string, unknown>[];
-/** Null answers 404, a server that predates handles. */
-let directory: NetDirectoryResponse | null;
+/** What GET /net/directory answers. */
+let directory: () => Response;
 let presence: Response | (() => Response);
 let fetchMock: ReturnType<typeof vi.fn>;
 
@@ -231,16 +243,16 @@ describe('NetContent', () => {
   beforeEach(() => {
     channels = CHANNELS;
     presence = () => json({ watching: [], recent: [] });
-    me = null;
+    me = NO_ORG_ME;
     preferences = {};
     preferenceWrites = [];
-    directory = null;
+    directory = () => json({ members: [] });
     navigation.router.replace.mockReset();
     fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = new URL(String(input), 'http://localhost');
       switch (url.pathname) {
         case '/api/auth/me':
-          return me ? json(me) : json({ detail: 'Not Found' }, 404);
+          return json(me);
         case '/api/users/me/preferences': {
           if (init?.method === 'PATCH') {
             const update = (
@@ -252,7 +264,7 @@ describe('NetContent', () => {
           return json({ preferences });
         }
         case '/api/net/directory':
-          return directory ? json(directory) : json({ detail: 'Not Found' }, 404);
+          return directory();
         case '/api/net/channels':
           return json(channels);
         case '/api/net/feed': {
@@ -382,6 +394,7 @@ describe('NetContent', () => {
             ),
           ])
         );
+      if (url.pathname === '/api/auth/me') return json(NO_ORG_ME);
       if (url.pathname === '/api/net/presence') return json({ watching: [], recent: [] });
       if (url.pathname === '/api/net/threads') return json({ threads: [] });
       return json({ detail: 'Not Found' }, 404);
@@ -609,14 +622,14 @@ describe('NetContent', () => {
 
     beforeEach(() => {
       me = ADA_ME;
-      directory = {
+      const members: NetDirectoryResponse = {
         members: [
           {
             user_id: 'u-ada',
             name: 'Ada Lovelace',
             handle: 'ada',
             inbox: '@ada',
-            listening: false,
+            listening: 0,
             last_post_at: null,
           },
           {
@@ -624,11 +637,12 @@ describe('NetContent', () => {
             name: 'Grace Hopper',
             handle: 'grace',
             inbox: '@grace',
-            listening: true,
+            listening: 1,
             last_post_at: '2026-11-05T10:07:00Z',
           },
         ],
       };
+      directory = () => json(members);
     });
 
     it('lands on your inbox when something new is waiting', async () => {
@@ -711,14 +725,31 @@ describe('NetContent', () => {
     });
   });
 
-  it('works as before on a server without handles', async () => {
+  it('gives a viewer with no active organization no inbox, and every channel', async () => {
+    renderNet();
+
+    expect(await screen.findByRole('region', { name: 'All channels' })).toBeInTheDocument();
+    const nav = screen.getByRole('navigation', { name: 'Channels' });
+    expect(within(nav).queryByText('Your inbox')).toBeNull();
+    expect(navigation.router.replace).not.toHaveBeenCalled();
+  });
+
+  it('leaves handles off, and the page whole, when the directory cannot be read', async () => {
+    me = {
+      ...NO_ORG_ME,
+      organization: { id: 'org-1', slug: 'acme', name: 'Acme' },
+      handle: 'hedy',
+      inbox: '@hedy',
+    };
+    directory = () => json({ detail: 'directory unavailable' }, 503);
     renderNet('channel=%23reviews');
 
     const row = await screen.findByRole('article', { name: 'Decision from Ada Lovelace' });
     await waitFor(() => expect(requests('/api/net/directory').length).toBeGreaterThan(0));
     expect(within(row).queryByRole('link', { name: '@ada' })).toBeNull();
+    // The viewer's own inbox comes from /auth/me, so it still leads the list.
     const nav = screen.getByRole('navigation', { name: 'Channels' });
-    expect(within(nav).queryByText('Your inbox')).toBeNull();
+    expect(within(nav).getAllByRole('link')[0]).toHaveTextContent('Your inbox');
   });
 
   it('teaches the CLI when the organization has no traffic', async () => {

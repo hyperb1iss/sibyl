@@ -45,7 +45,7 @@ describe('PersonCard', () => {
     expect(onToggle).toHaveBeenCalledWith('u-grace');
   });
 
-  it('shows no handle when the server has none', () => {
+  it('shows no handle until the directory has one', () => {
     render(
       <PersonCard
         person={PERSON}
