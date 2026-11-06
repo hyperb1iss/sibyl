@@ -1,6 +1,6 @@
 'use client';
 
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { type Query, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
 import type {
   ApiKeyCreateRequest,
@@ -53,18 +53,37 @@ export function useOrgs(options?: { enabled?: boolean; initialData?: OrgListResp
   });
 }
 
+/**
+ * Queries that describe the person rather than the organization they are
+ * in: their identity, sign-in providers, organizations, sessions, API keys
+ * and preferences. Everything else is dropped on an organization switch.
+ */
+const USER_SCOPED_ROOTS = new Set(['auth', 'orgs', 'security', 'preferences']);
+
+export function outlivesOrgSwitch(query: Query): boolean {
+  const root = query.queryKey[0];
+  return typeof root === 'string' && USER_SCOPED_ROOTS.has(root);
+}
+
 export function useSwitchOrg() {
   const queryClient = useQueryClient();
 
   return useMutation({
     mutationFn: (slug: string) => orgsApi.switch(slug),
-    onSuccess: () => {
+    onSuccess: async () => {
+      // Every other cached answer belongs to the organization just left, and
+      // most query keys carry no organization, so a list here would always
+      // miss one (Net and Team activity did). Cancel reads still in flight
+      // for the old organization, then reset every such query: its data is
+      // cleared, so nothing from the old organization can show, and a
+      // mounted screen is told and refetches for the new one. Removing the
+      // queries instead would leave a mounted screen holding the old data
+      // until something else re-rendered it.
+      const orgScoped = (query: Query) => !outlivesOrgSwitch(query);
+      await queryClient.cancelQueries({ predicate: orgScoped });
+      void queryClient.resetQueries({ predicate: orgScoped });
       queryClient.invalidateQueries({ queryKey: queryKeys.auth.me });
       queryClient.invalidateQueries({ queryKey: queryKeys.orgs.list });
-      queryClient.invalidateQueries({ queryKey: queryKeys.entities.all });
-      queryClient.invalidateQueries({ queryKey: queryKeys.tasks.all });
-      queryClient.invalidateQueries({ queryKey: queryKeys.projects.all });
-      queryClient.invalidateQueries({ queryKey: queryKeys.graph.all });
     },
   });
 }
