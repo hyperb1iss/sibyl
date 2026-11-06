@@ -726,11 +726,12 @@ class TestCommand:
         *args: str,
         feedback: str = CLAUDE_FEEDBACK,
         pins: dict[str, str] | None = None,
+        owner: str = OWNER,
     ) -> Any:
         claude_home, _ = _claude_home(tmp_path, feedback=feedback)
         codex_home = _codex_home(tmp_path)
         client.explore = AsyncMock(return_value={"entities": [{"id": "project_1"}]})
-        client._request = AsyncMock(return_value={"user": {"id": OWNER}})
+        client._request = AsyncMock(return_value={"user": {"id": owner}})
         with (
             patch("sibyl_cli.ingest.get_client", return_value=_FakeClientContext(client)),
             patch("sibyl_cli.ingest.resolve_client_context_name", return_value="team"),
@@ -797,7 +798,7 @@ class TestCommand:
     def test_a_dry_run_records_nothing_for_a_sync(self, tmp_path: Path) -> None:
         result = self._run(tmp_path, FakeServer().client(), "--dry-run")
         assert result.exit_code == 0, result.output
-        assert am.load_synced("team") == {}
+        assert am.load_synced("team", "https://sibyl.example.com|").files == {}
 
     def test_a_sync_does_nothing_until_the_context_keeps_memories_in_sync(
         self, tmp_path: Path
@@ -868,6 +869,53 @@ class TestCommand:
         assert payload["outcomes"]["unchanged"] == 1
         client._request.assert_not_awaited()
         client.memory_blame.assert_not_awaited()
+
+    def test_a_failed_write_is_never_recorded_and_the_next_sync_retries_it(
+        self, tmp_path: Path
+    ) -> None:
+        server = FakeServer()
+        client = server.client()
+        store = client.remember_raw_memory.side_effect
+
+        async def refuse_profile(**kwargs: Any) -> dict[str, Any]:
+            if kwargs["title"] == "Codex user profile":
+                raise SibylClientError("boom", status_code=500)
+            return await store(**kwargs)
+
+        client.remember_raw_memory = AsyncMock(side_effect=refuse_profile)
+        first = self._run(tmp_path, client, "--yes", "--keep-synced")
+        assert _payload(first.output)["outcomes"]["failed"] == 1
+        assert server.records == 2
+
+        retry = server.client()
+        again = self._run(tmp_path, retry, "--sync")
+        assert again.exit_code == 0, again.output
+        payload = _payload(again.output)
+        assert payload["outcomes"]["created"] == 1
+        assert payload["outcomes"]["unchanged"] == 2
+        assert server.records == 3
+        assert retry.memory_blame.await_count >= 1
+
+    def test_a_context_moved_to_another_server_checks_every_file_again(
+        self, tmp_path: Path
+    ) -> None:
+        server = FakeServer()
+        assert self._run(tmp_path, server.client(), "--yes", "--keep-synced").exit_code == 0
+        config_store.update_context("team", server_url="https://other.example.com")
+        moved = FakeServer()
+        result = self._run(tmp_path, moved.client(), "--sync")
+        assert result.exit_code == 0, result.output
+        assert _payload(result.output)["outcomes"]["created"] == 3
+        assert moved.records == 3
+
+    def test_another_user_signed_in_checks_every_file_again(self, tmp_path: Path) -> None:
+        server = FakeServer()
+        assert self._run(tmp_path, server.client(), "--yes", "--keep-synced").exit_code == 0
+        edited = CLAUDE_FEEDBACK + "\nAlso the bench.\n"
+        result = self._run(tmp_path, server.client(), "--sync", feedback=edited, owner="user-2")
+        assert result.exit_code == 0, result.output
+        assert _payload(result.output)["outcomes"]["created"] == 3
+        assert server.records == 6
 
 
 class TestFingerprint:

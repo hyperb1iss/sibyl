@@ -269,6 +269,8 @@ async def run_memory_import(
     """
     claude_home, claude_config, codex_home = agent_memory_paths(claude_dir, codex_dir)
     target = context_name or resolve_client_context_name()
+    context = config_store.get_context(target) if target else None
+    server = f"{context.server_url}|{context.org_slug or ''}" if context else ""
     async with get_client(context_name) as client:
         # Clients are cached per context, so restore buffering for whatever
         # else this process sends.
@@ -283,14 +285,21 @@ async def run_memory_import(
                 codex_home=codex_home,
                 target_context=target,
                 share=share,
-                synced=agent_memories.load_synced(target) if sync and target else None,
+                synced=agent_memories.load_synced(context.name, server)
+                if sync and context
+                else None,
             )
             if not job.discovery.memories:
                 return None
             if job.pending and confirm(job):
                 await agent_memories.apply_memory_import(client, job)
-            if record and target:
-                agent_memories.save_synced(target, job.settled_fingerprints())
+            if record and context:
+                agent_memories.save_synced(
+                    context.name,
+                    agent_memories.SyncState(
+                        server=server, owner=job.owner, files=job.settled_fingerprints()
+                    ),
+                )
             return job
         finally:
             client.buffer_writes = buffering
@@ -367,7 +376,7 @@ def ingest_memories(
         raise typer.Exit(1)
 
     context_name = resolve_client_context_name()
-    if keep_synced is not None:
+    if keep_synced is not None and not dry_run:
         if context_name is None:
             error("Keeping agent memories in sync needs a named context: run sibyl init")
             raise typer.Exit(1)
