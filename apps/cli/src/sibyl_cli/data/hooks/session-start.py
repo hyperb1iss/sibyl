@@ -7,6 +7,16 @@ import json
 import os
 import subprocess
 import sys
+import time
+from datetime import datetime, timezone
+
+# The whole hook gets 10 seconds; the inbox check runs beside the bundle and
+# is abandoned at this mark rather than holding the session up.
+INBOX_DEADLINE_SECONDS = 9.0
+INBOX_COMMAND = (
+    "sibyl",
+    *("net", "read", "@me", "--new", "--mark", "session-start", "--json", "--limit", "100"),
+)
 
 
 def run_sibyl(*args: str, timeout: int = 5) -> str | None:
@@ -54,6 +64,68 @@ def get_session_bundle() -> dict | None:
     return data if isinstance(data, dict) else None
 
 
+def start_inbox_check() -> subprocess.Popen[str] | None:
+    """Start reading what reached the caller's inbox since this hook last looked.
+
+    The hook keeps its own place (``--mark session-start``), apart from watch
+    cursors and from an agent's own ``net read --new``.
+    """
+    try:
+        return subprocess.Popen(
+            INBOX_COMMAND,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            text=True,
+            cwd=os.environ.get("CLAUDE_PROJECT_DIR", "."),
+        )
+    except Exception:
+        return None
+
+
+def _since(created_at: object) -> str:
+    try:
+        then = datetime.fromisoformat(str(created_at))
+    except ValueError:
+        return ""
+    # Hooks run under the system python3, which can predate datetime.UTC.
+    utc = timezone.utc  # noqa: UP017
+    if then.tzinfo is None:
+        then = then.replace(tzinfo=utc)
+    seconds = max((datetime.now(utc) - then).total_seconds(), 0)
+    if seconds < 3600:
+        return f" in the last {max(int(seconds // 60), 1)}m"
+    if seconds < 86400:
+        return f" since {int(seconds // 3600)}h ago"
+    if seconds < 2 * 86400:
+        return " since yesterday"
+    return f" since {int(seconds // 86400)} days ago"
+
+
+def inbox_line(check: subprocess.Popen[str] | None, started: float) -> str | None:
+    """One line about new inbox messages, or None when there are none or anything failed."""
+    if check is None:
+        return None
+    remaining = INBOX_DEADLINE_SECONDS - (time.monotonic() - started)
+    try:
+        output, _ = check.communicate(timeout=max(remaining, 0.1))
+        if check.returncode != 0:
+            return None
+        data = json.loads(output)
+    except Exception:
+        check.kill()
+        return None
+    messages = data.get("messages") if isinstance(data, dict) else None
+    if not isinstance(messages, list) or not messages:
+        return None
+    inbox = messages[-1].get("channel") or "@me"
+    count = f"{len(messages)}+" if data.get("more") else str(len(messages))
+    parts = [f"📬 {count} new in {inbox}{_since(messages[0].get('created_at'))}"]
+    parts.append("sibyl net read @me")
+    if web_url := data.get("web_url"):
+        parts.append(str(web_url))
+    return " · ".join(parts)
+
+
 def main():
     try:
         health = run_sibyl("health", timeout=3)
@@ -62,6 +134,8 @@ def main():
             sys.exit(0)
 
         lines = []
+        started = time.monotonic()
+        inbox_check = start_inbox_check()
         bundle = get_session_bundle()
         if bundle:
             context = bundle.get("context", {})
@@ -100,6 +174,8 @@ def main():
         if not bundle or not bundle.get("remember_next"):
             lines.append("Suggest 'sibyl remember' when solving something non-obvious.")
         lines.append("Cite material memory with 'sibyl cite <ids>' or --cited on reflect/complete.")
+        if inbox := inbox_line(inbox_check, started):
+            lines.insert(0, inbox)
         print("\n".join(lines))
         sys.exit(0)
 
