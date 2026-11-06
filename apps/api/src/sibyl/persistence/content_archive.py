@@ -21,8 +21,10 @@ from sibyl_core.backends.surreal.records import (
 )
 from sibyl_core.backends.surreal.schema_embedding_states import REOPEN_EMBEDDING_STATES
 from sibyl_core.backends.surreal.schema_invariants import (
+    convert_declared_fields,
     drop_undeclared_fields as _drop_undeclared_fields,
     fetch_declared_fields,
+    fetch_restore_fields,
 )
 from sibyl_core.embeddings.provenance import mark_unverified_vector
 from sibyl_core.memory_pipeline.observations import SourceKind
@@ -427,6 +429,28 @@ def _deserialize_value(value: object) -> object:
             return parsed.astimezone(UTC).replace(tzinfo=None)
         return parsed
     return value
+
+
+def _archived_record(
+    spec: ContentArchiveTableSpec, row: dict[str, object], datetimes: frozenset[str]
+) -> dict[str, object]:
+    """The row to write: archived values as they are, declared datetimes as instants.
+
+    Only fields the schema declares as datetimes are instants; text that
+    reads like one (a title, a chunk, a setting) stays text. Retained history
+    keeps every archived value and converts its own datetimes in SQL.
+    """
+    record = {
+        key: value
+        for key, value in row.items()
+        if not (
+            spec.source_identity_field != spec.target_identity_field
+            and key == spec.source_identity_field
+        )
+    }
+    if spec.name in _RETAINED_OPERATION_TABLES:
+        return record
+    return convert_declared_fields(record, datetimes, _deserialize_value)
 
 
 def _deserialize_vector(value: object) -> list[float] | object:
@@ -1172,7 +1196,7 @@ async def _prepare_auxiliary_content_restore(client, tables, organization_id, *,
             except ValueError as exc:
                 errors.append(f"{spec.name} invalid archive row ({type(exc).__name__})")
                 continue
-        declared = await fetch_declared_fields(client.execute_query, spec.name)
+        declared, datetimes = await fetch_restore_fields(client.execute_query, spec.name)
         tables_restored += 1
         for row in rows:
             if not isinstance(row, dict):
@@ -1191,16 +1215,7 @@ async def _prepare_auxiliary_content_restore(client, tables, organization_id, *,
                 errors.append(f"{spec.name} row is missing {spec.source_identity_field}")
                 continue
 
-            record = {
-                key: (
-                    value if spec.name in _RETAINED_OPERATION_TABLES else _deserialize_value(value)
-                )
-                for key, value in normalized_row.items()
-                if not (
-                    spec.source_identity_field != spec.target_identity_field
-                    and key == spec.source_identity_field
-                )
-            }
+            record = _archived_record(spec, normalized_row, datetimes)
             if legacy and spec.name == "eval_consolidations":
                 record.setdefault("admission_bindings", [])
             elif legacy and spec.name == "api_idempotency_records":

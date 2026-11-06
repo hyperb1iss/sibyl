@@ -11,7 +11,7 @@ guarantee is reported instead of assumed.
 from __future__ import annotations
 
 import re
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import cast
 
@@ -187,6 +187,76 @@ async def fetch_declared_fields(execute_query: SurrealExecute, table: str) -> fr
     return frozenset(str(name).split(".", 1)[0] for name in typed)
 
 
+_FIELD_TYPE = re.compile(
+    r"\bTYPE\s+(.+?)(?=\s+(?:DEFAULT|VALUE|ASSERT|READONLY|PERMISSIONS|COMMENT|REFERENCE"
+    r"|FLEXIBLE|COMPUTED)\b|;|$)",
+    re.IGNORECASE | re.DOTALL,
+)
+_DATETIME_TYPE = re.compile(r"\bdatetime\b", re.IGNORECASE)
+
+
+async def fetch_datetime_fields(execute_query: SurrealExecute, table: str) -> frozenset[str]:
+    """Return the field paths a table declares as datetimes.
+
+    The schema is the only authority on which archived values are instants:
+    an archive stores every datetime as ISO text, beside text that merely
+    reads like one. ``option<datetime>`` and arrays of datetimes count;
+    nested paths keep their declared form (``a.b``, ``a[*]``, ``a.*``).
+    """
+    _, datetimes = await fetch_restore_fields(execute_query, table)
+    return datetimes
+
+
+async def fetch_restore_fields(
+    execute_query: SurrealExecute, table: str
+) -> tuple[frozenset[str], frozenset[str]]:
+    """A table's top-level declared fields and its datetime paths, from one schema read."""
+    result = await execute_query(f"INFO FOR TABLE {table};")
+    info = _as_mapping(result)
+    fields = info.get("fields") if info else None
+    if not isinstance(fields, Mapping):
+        return frozenset(), frozenset()
+    typed = cast(Mapping[str, object], fields)
+    datetimes: set[str] = set()
+    for name, definition in typed.items():
+        match = _FIELD_TYPE.search(str(definition))
+        if match is not None and _DATETIME_TYPE.search(match.group(1)):
+            datetimes.add(str(name))
+    return frozenset(str(name).split(".", 1)[0] for name in typed), frozenset(datetimes)
+
+
+def convert_declared_fields(
+    record: Mapping[str, object],
+    paths: frozenset[str],
+    convert: Callable[[object], object],
+) -> dict[str, object]:
+    """Apply ``convert`` at each declared path and leave every other value as it is.
+
+    A path segment ``*`` (or ``[*]``) applies to every element of a list or
+    every value of an object; a path missing from the record is skipped.
+    """
+
+    def walk(node: object, segments: tuple[str, ...]) -> object:
+        if not segments:
+            return convert(node)
+        head, rest = segments[0], segments[1:]
+        if head == "*":
+            if isinstance(node, list):
+                return [walk(item, rest) for item in node]
+            if isinstance(node, dict):
+                return {key: walk(item, rest) for key, item in node.items()}
+            return node
+        if isinstance(node, dict) and head in node:
+            return {**node, head: walk(node[head], rest)}
+        return node
+
+    converted: object = dict(record)
+    for path in sorted(paths):
+        segments = tuple(part for part in path.replace("[*]", ".*").split(".") if part)
+        converted = walk(converted, segments)
+    return cast(dict[str, object], converted)
+
+
 _IMPLICIT_FIELDS = frozenset({"id", "in", "out"})
 
 
@@ -315,10 +385,13 @@ __all__ = [
     "SchemaInvariantViolation",
     "UniqueIndexRequirement",
     "check_schema_invariants",
+    "convert_declared_fields",
     "drop_undeclared_fields",
     "ensure_schema_invariants",
     "expected_unique_indexes",
+    "fetch_datetime_fields",
     "fetch_declared_fields",
+    "fetch_restore_fields",
     "fetch_table_definitions",
     "fetch_table_indexes",
 ]
