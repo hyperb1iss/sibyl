@@ -10,7 +10,7 @@ import {
 } from '../api/net';
 import { TIMING } from '../constants/app';
 import { queryKeys } from './query-keys';
-import { type Invalidator, queryClientInvalidator } from './shared';
+import type { Invalidator } from './shared';
 
 /**
  * A post reaches the browser over the websocket at once, but the feed holds
@@ -41,7 +41,12 @@ export function createSettledInvalidationScheduler(
   queryClient: QueryClient,
   delayMs: number = NET_REFETCH_DELAY_MS
 ) {
-  const invalidate = queryClientInvalidator(queryClient);
+  // A refetch already in flight is left to finish. Cancelling it, the
+  // default, would let a slow endpoint under steady traffic restart forever
+  // and never answer: every fire would abort the read before it landed.
+  const invalidate = (queryKey: QueryKey) => {
+    void queryClient.invalidateQueries({ queryKey }, { cancelRefetch: false });
+  };
   const pending = new Map<string, { timer: ReturnType<typeof setTimeout>; dueAt: number }>();
 
   const fire = (id: string, queryKey: QueryKey) => {

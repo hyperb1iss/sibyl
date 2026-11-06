@@ -1,3 +1,4 @@
+import { useQuery } from '@tanstack/react-query';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createTestQueryClient, render, waitFor } from '@/test/utils';
 
@@ -23,8 +24,32 @@ vi.mock('./websocket', () => ({
 }));
 
 import { queryKeys, useRealtimeUpdates } from './hooks';
-import { NET_REFETCH_DELAY_MS } from './hooks/net';
+import { createSettledInvalidationScheduler, NET_REFETCH_DELAY_MS } from './hooks/net';
 import { INVALIDATION_DEBOUNCE_MS } from './hooks/shared';
+
+const SLOW_FEED_KEY = ['net', 'feed', '@ada', null] as const;
+const slowReads = { started: 0, finished: 0, aborted: 0 };
+
+/** A feed whose every read takes four seconds and notes whether it was cut off. */
+function SlowFeed() {
+  const { data } = useQuery({
+    queryKey: SLOW_FEED_KEY,
+    queryFn: ({ signal }) =>
+      new Promise<number>((resolve, reject) => {
+        slowReads.started += 1;
+        const timer = setTimeout(() => {
+          slowReads.finished += 1;
+          resolve(slowReads.finished);
+        }, 4000);
+        signal.addEventListener('abort', () => {
+          clearTimeout(timer);
+          slowReads.aborted += 1;
+          reject(new Error('aborted'));
+        });
+      }),
+  });
+  return <p>{data ?? 'loading'}</p>;
+}
 
 function RealtimeHarness() {
   useRealtimeUpdates(true);
@@ -219,5 +244,31 @@ describe('useRealtimeUpdates', () => {
       await vi.advanceTimersByTimeAsync(NET_REFETCH_DELAY_MS * 3);
       expect(netKeys(invalidateQueries).filter(key => key === streamKey)).toHaveLength(settled);
     });
+  });
+
+  it('lets a slow refetch finish while posts keep arriving', async () => {
+    const queryClient = createTestQueryClient();
+    const reads = slowReads;
+    reads.started = 0;
+    reads.finished = 0;
+    reads.aborted = 0;
+    const key = SLOW_FEED_KEY;
+
+    render(<SlowFeed />, { queryClient });
+    await vi.advanceTimersByTimeAsync(4000);
+    expect(reads.finished).toBe(1);
+
+    // A post every second for twenty seconds, each refetch taking four.
+    const scheduler = createSettledInvalidationScheduler(queryClient);
+    for (let second = 0; second < 20; second++) {
+      scheduler.schedule(key);
+      await vi.advanceTimersByTimeAsync(1000);
+    }
+    await vi.advanceTimersByTimeAsync(NET_REFETCH_DELAY_MS + 4000);
+    scheduler.cancel();
+
+    expect(reads.aborted).toBe(0);
+    expect(reads.finished).toBeGreaterThanOrEqual(4);
+    expect(reads.finished).toBe(reads.started);
   });
 });
