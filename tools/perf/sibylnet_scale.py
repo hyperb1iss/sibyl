@@ -1021,6 +1021,7 @@ async def run(args: argparse.Namespace) -> JsonObject:
     probe = ServerProbe(api, manifest["admin_key"], args.server_pid)
     report: JsonObject = {"run_id": args.run_id, "scenarios": {}}
     try:
+        await _require_replicas(api, manifest["admin_key"])
         for scenario in args.scenarios:
             waited_from = time.perf_counter()
             load = await _quiet_load(args)
@@ -1055,6 +1056,19 @@ async def run(args: argparse.Namespace) -> JsonObject:
         report["client_error_samples"] = api.error_samples
         await api.close()
     return report
+
+
+async def _require_replicas(api: Api, key: str) -> None:
+    """Refuse to measure unless every API replica answers its health check."""
+    down = []
+    for replica in range(api.replicas):
+        _, response, error = await api.request("GET", "/health", key, route=replica)
+        if response is None or not _ok(response, error):
+            status = error or (response.status_code if response is not None else "no response")
+            down.append(f"{api.clients[replica].base_url}: {status}")
+    if down:
+        msg = "API replicas not serving: " + "; ".join(down)
+        raise SystemExit(msg)
 
 
 async def _quiet_load(args: argparse.Namespace) -> float | None:
