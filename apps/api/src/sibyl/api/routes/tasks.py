@@ -30,6 +30,7 @@ from sibyl.api.routes.net import (
     caller_name,
     deliver_net_message,
     net_message,
+    reaches_someone,
     refuse_unknown_inbox,
     resolve_inbox,
 )
@@ -1244,6 +1245,7 @@ async def _hand_off(
     change: Callable[[list[str], str], list[str]],
     notice: Callable[[str], str],
     post_unchanged: bool,
+    require_inbox: bool,
 ) -> TaskAssignResponse:
     """Change a task's assignees, then post the notice on its ``task:<id>`` thread.
 
@@ -1267,7 +1269,11 @@ async def _hand_off(
 
     group_id = str(org.id)
     channel = await resolve_inbox(group_id, auth, channel)
-    await refuse_unknown_inbox(group_id, channel)
+    if require_inbox:
+        await refuse_unknown_inbox(group_id, channel)
+    # Taking off an assignee written before handles existed, an @name nobody
+    # holds, still works; only its notice, which nobody would read, is skipped.
+    reachable = require_inbox or await reaches_someone(group_id, channel)
     principal_id = _task_principal_id(auth)
     path = f"/tasks/{task_id}/{route_action}"
     idempotency_payload = {"body": request.model_dump(mode="json")}
@@ -1300,7 +1306,7 @@ async def _hand_off(
     )
     changed = changed or earlier.get("changed") is True
     message: NetMessage | None = None
-    if changed or post_unchanged or earlier.get("notice_owed") is True:
+    if reachable and (changed or post_unchanged or earlier.get("notice_owed") is True):
         record = await deliver_net_message(
             organization_id=group_id,
             ctx=auth,
@@ -1378,6 +1384,7 @@ async def assign_task(
         ),
         notice=lambda title: assignment_body(title, task_id, request.note),
         post_unchanged=True,
+        require_inbox=True,
     )
 
 
@@ -1394,6 +1401,8 @@ async def unassign_task(
     """Take a channel off a task's assignees and post a one-line notice on its thread.
 
     A channel that was not assigned leaves the task alone and posts nothing.
+    An ``@name`` no member holds, left over from before handles, is still
+    taken off; its notice is skipped, since nobody would read it.
     """
     return await _hand_off(
         task_id=task_id,
@@ -1408,6 +1417,7 @@ async def unassign_task(
         ],
         notice=lambda title: unassignment_body(title, task_id),
         post_unchanged=False,
+        require_inbox=False,
     )
 
 

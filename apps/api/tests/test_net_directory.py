@@ -102,3 +102,22 @@ async def test_at_me_is_the_callers_own_inbox_everywhere(world: SimpleNamespace)
     assert assigned.status_code == 200, assigned.text
     assert assigned.json()["message"]["channel"] == "@grace"
     assert await assignees(world, task) == ["@grace"]
+
+    async with client_for(world, world.grace) as client:
+        threads = (await client.get("/api/net/threads", params={"channel": "@me"})).json()
+    assert {row["thread"] for row in threads["threads"]} >= {f"task:{task}"}
+
+
+async def test_an_assignee_from_before_handles_can_still_be_taken_off(
+    world: SimpleNamespace,
+) -> None:
+    task = await create_task(world, world.shared, assignees=["@legacy", "@grace"])
+    async with client_for(world, world.ada) as client:
+        removed = await client.post(f"/api/tasks/{task}/unassign", json={"assignee": "@legacy"})
+
+    assert removed.status_code == 200, removed.text
+    assert removed.json()["changed"] is True
+    # Nobody holds @legacy, so nobody would read a notice there.
+    assert removed.json()["message"] is None
+    assert await assignees(world, task) == ["@grace"]
+    assert await stored_messages(world) == []

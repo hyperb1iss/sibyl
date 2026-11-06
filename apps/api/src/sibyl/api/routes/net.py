@@ -364,17 +364,23 @@ async def resolve_inbox(organization_id: str, ctx: AuthContext, channel: str) ->
     return f"@{handle}"
 
 
+async def reaches_someone(organization_id: str, channel: str) -> bool:
+    """Whether a post to ``channel`` can be read: any room or bare name, or a member's inbox."""
+    if not channel.startswith("@"):
+        return True
+    wanted = channel.removeprefix("@")
+    return await find_handle_owner(organization_id=organization_id, handle=wanted) is not None
+
+
 async def refuse_unknown_inbox(organization_id: str, channel: str) -> None:
     """Refuse an ``@`` channel no member's handle owns, naming the closest handles.
 
     An ``@name`` is one member's inbox, so a typo would otherwise post into a
     channel nobody reads. ``#`` rooms and bare names stay free-form.
     """
-    if not channel.startswith("@"):
+    if await reaches_someone(organization_id, channel):
         return
     wanted = channel.removeprefix("@")
-    if await find_handle_owner(organization_id=organization_id, handle=wanted) is not None:
-        return
     handles = await list_member_handles(organization_id=organization_id)
     close = [f"@{handle}" for handle in closest_handles(wanted, handles, SUGGESTED_HANDLES)]
     hint = f"did you mean {', '.join(close)}?" if close else "see sibyl net who"
@@ -910,8 +916,9 @@ async def read_directory(
 
 @router.get("/threads", response_model=NetThreadsResponse)
 async def list_threads(
-    channel: str = Query(description="Channel whose threads to list"),
+    channel: str = Query(description="Channel whose threads to list; `@me` for your inbox"),
     org: AuthOrganization = Depends(get_current_organization),
+    ctx: AuthContext = Depends(get_auth_context),
 ) -> NetThreadsResponse:
     """A channel's threads, most recently active first, with distillation state.
 
@@ -922,6 +929,7 @@ async def list_threads(
         normalized = normalize_channel(channel)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+    normalized = await resolve_inbox(str(org.id), ctx, normalized)
     states = await list_net_threads(organization_id=str(org.id), channel=normalized)
     return NetThreadsResponse(
         threads=[
@@ -955,6 +963,7 @@ __all__ = [
     "note_watching",
     "read_by_web_session",
     "refuse_pinned_elsewhere",
+    "reaches_someone",
     "refuse_unknown_inbox",
     "resolve_inbox",
     "router",
