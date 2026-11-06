@@ -14,6 +14,8 @@ from sibyl.persistence.surreal import organization_runtime as surreal_organizati
 from sibyl_core.auth import OrganizationRole, ProjectRole
 from sibyl_core.backends.surreal.records import SurrealQueryError
 
+pytestmark = pytest.mark.usefixtures("scripted_membership_writes")
+
 
 def _request(*, authorization: str | None = "Bearer current-token") -> SimpleNamespace:
     headers: dict[str, str] = {}

@@ -73,11 +73,14 @@ async def test_archive_restore_replacing_the_identity_resets_the_cache(
     store: _IdentityStore, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr(auth_archive, "backfill_api_key_scope_restrictions", AsyncMock())
+    monkeypatch.setattr(auth_archive, "backfill_member_handles", AsyncMock())
     stale = await auth_common.get_server_instance_id()
     restored = str(uuid4())
     store.instance_id = restored
 
-    await auth_archive._finalize_auth_restore(store, source_instance_id=restored, api_key_ids=[])
+    await auth_archive._finalize_auth_restore(
+        store, source_instance_id=restored, api_key_ids=[], organization_id=None
+    )
 
     assert await auth_common.get_server_instance_id() == restored != stale
 

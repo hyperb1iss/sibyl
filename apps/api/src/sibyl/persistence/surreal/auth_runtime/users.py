@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from datetime import timedelta
 from types import SimpleNamespace
 from uuid import UUID
@@ -40,6 +41,11 @@ from sibyl.persistence.surreal.auth_runtime._common import (
     is_service_record,
 )
 from sibyl.persistence.surreal.auth_runtime.audit import log_memory_audit_event
+from sibyl.persistence.surreal.member_handles import (
+    handle_owner,
+    member_handle,
+    organization_handles,
+)
 from sibyl_core.backends.surreal.records import (
     normalize_record as _normalize_record,
     utcnow as _utcnow,
@@ -187,6 +193,54 @@ async def get_user_by_id(user_id: UUID):
             uuid=str(user_id),
         )
         return _auth_user_namespace(record)
+
+
+# SurrealDB 3.x index-unions an IN list only up to 32 values; a longer list
+# plans as a scan of every user.
+_USER_LOOKUP_BATCH = 32
+
+
+async def get_users_by_ids(user_ids: Iterable[str]) -> dict[str, SimpleNamespace]:
+    """Live users by id, ``{id: (uuid, name, email)}``, read through the uuid index.
+
+    Unknown and deleted users are left out, so a caller can fall back to the
+    bare id.
+    """
+    unique = list(dict.fromkeys(str(user_id) for user_id in user_ids if user_id))
+    users: dict[str, SimpleNamespace] = {}
+    if not unique:
+        return users
+    async with _auth_client_scope() as client:
+        repo = _SurrealRepository(client)
+        for start in range(0, len(unique), _USER_LOOKUP_BATCH):
+            for record in await repo.select_many(
+                "SELECT uuid, name, email FROM users WHERE uuid IN $ids AND deleted_at = NONE;",
+                ids=unique[start : start + _USER_LOOKUP_BATCH],
+            ):
+                user_id = str(record.get("uuid") or "")
+                if user_id:
+                    users[user_id] = SimpleNamespace(
+                        uuid=user_id, name=record.get("name"), email=record.get("email")
+                    )
+    return users
+
+
+async def get_member_handle(*, organization_id: str, user_id: str) -> str | None:
+    """The handle a member holds in an organization, or None when they are not a member."""
+    async with _auth_client_scope() as client:
+        return await member_handle(client, organization_id=organization_id, user_id=user_id)
+
+
+async def find_handle_owner(*, organization_id: str, handle: str) -> str | None:
+    """The user whose handle ``handle`` is in the organization, or None."""
+    async with _auth_client_scope() as client:
+        return await handle_owner(client, organization_id=organization_id, handle=handle)
+
+
+async def list_member_handles(*, organization_id: str) -> dict[str, str]:
+    """Every member handle in the organization, with the user holding it."""
+    async with _auth_client_scope() as client:
+        return await organization_handles(client, organization_id=organization_id)
 
 
 async def list_user_organizations(*, user_id: UUID) -> list[SimpleNamespace]:

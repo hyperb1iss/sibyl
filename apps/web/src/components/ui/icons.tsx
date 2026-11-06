@@ -7,6 +7,7 @@
 
 import {
   Activity,
+  AntennaSignal,
   Archive,
   ArrowLeft,
   ArrowRight,
@@ -100,6 +101,7 @@ export type IconComponent = ComponentType<SVGProps<SVGSVGElement>>;
 // Re-export all icons with consistent naming
 export {
   Activity,
+  AntennaSignal,
   Archive,
   ArrowLeft,
   ArrowRight,

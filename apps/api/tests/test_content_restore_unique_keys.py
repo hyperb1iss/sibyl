@@ -27,6 +27,9 @@ IDENTITY: dict[str, tuple[str, ...]] = {
         for spec in content_archive._CONTENT_ARCHIVE_TABLE_SPECS
     },
     "raw_captures": ("organization_id", "uuid"),
+    # A thread's identity is its organization, channel and thread: its record
+    # key and thread_key are both the hash of the three.
+    "net_threads": ("organization_id", "channel", "thread"),
     "source_states": (),
     "memory_derivations": ("organization_id", "target_kind", "target_id"),
 }
@@ -78,6 +81,13 @@ def _source_rows(org: str) -> dict[str, Callable[[], dict]]:
             "attempt_id": "attempt",
             "assignment_sha256": "a" * 64,
             "assignment_json": "{}",
+        },
+        "net_threads": lambda: {
+            "organization_id": org,
+            "channel": "#reviews",
+            "thread": "gh:acme/app#42",
+            "first_message_at": stamp,
+            "last_message_at": stamp,
         },
         "telemetry_rollups": lambda: {
             "uuid": str(uuid4()),
@@ -165,13 +175,12 @@ async def test_merge_refuses_every_unique_index_collision(stores, monkeypatch, u
         factory = _source_rows(org).get(table)
         assert factory is not None, f"add a source row for {table} so {name} is covered"
         row = factory()
-        await source.execute_query(f"CREATE {table} CONTENT $record;", record=row)
-        row = (
-            await source.execute_query(
-                f"SELECT * OMIT id FROM {table} WHERE uuid = $uuid;",  # noqa: S608
-                uuid=row["uuid"],
-            )
-        )[0]
+        created = await source.execute_query(f"CREATE {table} CONTENT $record;", record=row)
+        row = {
+            key: value
+            for key, value in (created[0] if isinstance(created, list) else created).items()
+            if key != "id"
+        }
     # The same unique key under another identity, at another record key.
     colliding = dict(row)
     for column in identity:

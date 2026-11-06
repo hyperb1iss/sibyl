@@ -4,6 +4,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { useEffect, useState } from 'react';
 
 import { type ConnectionStatus, wsClient } from '../websocket';
+import { createSettledInvalidationScheduler, netQueriesForPost } from './net';
 import { queryKeys } from './query-keys';
 import { createInvalidationScheduler, invalidateByEntityType } from './shared';
 import type { CrawlProgressData } from './sources';
@@ -45,6 +46,7 @@ export function useRealtimeUpdates(isAuthenticated?: boolean) {
     // per query key: a burst of events becomes one trailing refetch.
     const scheduler = createInvalidationScheduler(queryClient);
     const invalidate = scheduler.schedule;
+    const netScheduler = createSettledInvalidationScheduler(queryClient);
 
     // Entity created - smart invalidation based on entity type
     const unsubCreate = wsClient.on('entity_created', data => {
@@ -233,6 +235,13 @@ export function useRealtimeUpdates(isAuthenticated?: boolean) {
       }
     });
 
+    // A post carries no body; refetch what it touched once it has settled.
+    const unsubNetMessagePosted = wsClient.on('net_message_posted', data => {
+      for (const queryKey of netQueriesForPost(data.channel, data.thread)) {
+        netScheduler.schedule(queryKey);
+      }
+    });
+
     // Cleanup on unmount
     return () => {
       unsubCreate();
@@ -254,7 +263,9 @@ export function useRealtimeUpdates(isAuthenticated?: boolean) {
       unsubNoteCreated();
       unsubSourceImportUpdated();
       unsubRawCaptureChanged();
+      unsubNetMessagePosted();
       scheduler.cancel();
+      netScheduler.cancel();
       wsClient.disconnect();
     };
   }, [queryClient, isAuthenticated]);

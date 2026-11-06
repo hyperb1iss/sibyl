@@ -32,6 +32,7 @@ from sibyl.persistence.surreal.auth_runtime._common import (
     _SurrealRepository,
     _unique_strings,
 )
+from sibyl.persistence.surreal.member_handles import create_membership
 from sibyl_core.auth import (
     OrganizationRole,
 )
@@ -154,9 +155,9 @@ async def _ensure_oidc_organization_membership_record(
     )
     now = _utcnow()
     if membership is None:
-        write_result = await client.execute_query(
-            "CREATE organization_members CONTENT $record;",
-            record={
+        write_result = await create_membership(
+            client,
+            {
                 "uuid": str(uuid4()),
                 "organization_id": str(organization_id),
                 "user_id": str(user_id),

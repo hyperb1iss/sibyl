@@ -563,6 +563,47 @@ export function TeamSkeleton() {
   );
 }
 
+/** Net page body: channel rail beside stream rows. */
+export function NetBodySkeleton() {
+  return (
+    <div className="grid gap-4 lg:grid-cols-[17rem_minmax(0,1fr)]">
+      <div className="hidden space-y-3 rounded-xl border border-sc-fg-subtle/20 bg-sc-bg-elevated p-4 lg:block">
+        {Array.from({ length: 5 }).map((_, i) => (
+          <div key={i} className="space-y-1.5">
+            <Skeleton className="h-4 w-28" />
+            <Skeleton className="h-3 w-36" />
+          </div>
+        ))}
+      </div>
+      <div className="space-y-4 rounded-xl border border-sc-fg-subtle/20 bg-sc-bg-elevated p-4">
+        <Skeleton className="h-6 w-40" />
+        {Array.from({ length: 4 }).map((_, i) => (
+          <div key={i} className="flex gap-3">
+            <Skeleton className="h-7 w-7 rounded-full" />
+            <div className="flex-1 space-y-2">
+              <Skeleton className="h-3.5 w-40" />
+              <Skeleton className="h-3 w-full max-w-lg" />
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/** Net page skeleton: title over the body. */
+export function NetSkeleton() {
+  return (
+    <div className="space-y-4 animate-fade-in sm:space-y-5">
+      <div className="space-y-2">
+        <Skeleton className="h-7 w-20" />
+        <Skeleton className="h-4 w-72 max-w-full" />
+      </div>
+      <NetBodySkeleton />
+    </div>
+  );
+}
+
 /** Generic page skeleton — header + a list. Used for unknown route fallback. */
 export function GenericPageSkeleton() {
   return (

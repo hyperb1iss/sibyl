@@ -1,7 +1,8 @@
 """Task management CLI commands.
 
 Commands for the full task lifecycle: list, show, create, start, block,
-unblock, review, complete, archive, update.
+unblock, review, complete, archive, update, and handing a task to another
+person's agents with assign and unassign.
 
 All commands communicate with the REST API to ensure proper event broadcasting.
 All commands output table format by default. Use --json for JSON output.
@@ -38,6 +39,8 @@ from sibyl_cli.common import (
 )
 from sibyl_cli.config_store import resolve_project_from_cwd
 from sibyl_cli.id_resolution import resolve_id_prefix
+from sibyl_cli.net import detect_agent, detect_session
+from sibyl_cli.web_links import net_url
 
 app = typer.Typer(
     name="task",
@@ -1188,6 +1191,124 @@ def update_task(
 # =============================================================================
 # Task Notes Commands
 # =============================================================================
+
+
+def _handoff_url(client: Any, response: dict[str, Any], channel: str) -> str:
+    message = response.get("message")
+    message = message if isinstance(message, dict) else {}
+    thread = message.get("thread")
+    return net_url(
+        client.base_url,
+        str(message.get("channel") or channel.strip().lower()),
+        str(thread) if thread else None,
+    )
+
+
+def _handoff_line(response: dict[str, Any]) -> str | None:
+    message = response.get("message")
+    if not isinstance(message, dict):
+        return None
+    where = escape(str(message.get("channel") or ""))
+    if thread := message.get("thread"):
+        where += f" {escape(str(thread))}"
+    return f"Posted {escape(str(message.get('id') or 'unknown'))} to {where}"
+
+
+@app.command("assign")
+def assign_task(
+    task_id: Annotated[str, typer.Argument(help="Task ID or unambiguous prefix")],
+    to: Annotated[
+        str, typer.Argument(help="Channel to hand it to, normally a person's agent inbox: @ada")
+    ],
+    message: Annotated[
+        str | None, typer.Option("--message", "-m", help="Note for whoever picks it up")
+    ] = None,
+    json_out: Annotated[
+        bool, typer.Option("--json", "-j", help="JSON output (for scripting)")
+    ] = False,
+) -> None:
+    """Hand a task to another person's agents.
+
+    Adds the channel to the task's assignees and posts the handoff there on
+    thread task:<id>, pinned to the task's project, so the conversation about
+    it is distilled into that project's memory. Assigning again leaves the
+    assignees alone and posts the handoff again, with the new note.
+
+    Examples:
+        sibyl task assign task_abc @ada
+        sibyl task assign task_abc @ada -m "Fixture fix is on the branch; needs the migration"
+    """
+
+    @run_async
+    async def _assign() -> None:
+        client = get_client()
+        try:
+            resolved_id = await _resolve_task_id(client, task_id)
+            response = await client.assign_task(
+                resolved_id,
+                to,
+                note=message,
+                agent=detect_agent(),
+                session=detect_session(),
+            )
+            url = _handoff_url(client, response, to)
+            if json_out:
+                print_json({**response, "web_url": url})
+                return
+            channel = escape(to.strip().lower())
+            if response.get("changed"):
+                success(f"Assigned {escape(resolved_id)} to {channel}")
+            else:
+                info(f"{channel} was already assigned; posted the handoff again")
+            if line := _handoff_line(response):
+                console.print(f"  [dim]{line}[/dim]")
+                console.print(f"  [dim]{escape(url)}[/dim]", highlight=False)
+            print_mutation_receipt(response)
+        except SibylClientError as e:
+            handle_client_error(e)
+
+    _assign()
+
+
+@app.command("unassign")
+def unassign_task(
+    task_id: Annotated[str, typer.Argument(help="Task ID or unambiguous prefix")],
+    assignee: Annotated[str, typer.Argument(help="Channel to take off the task, such as @ada")],
+    json_out: Annotated[
+        bool, typer.Option("--json", "-j", help="JSON output (for scripting)")
+    ] = False,
+) -> None:
+    """Take a channel off a task and post a one-line notice on its task:<id> thread.
+
+    Examples:
+        sibyl task unassign task_abc @ada
+    """
+
+    @run_async
+    async def _unassign() -> None:
+        client = get_client()
+        try:
+            resolved_id = await _resolve_task_id(client, task_id)
+            response = await client.unassign_task(
+                resolved_id, assignee, agent=detect_agent(), session=detect_session()
+            )
+            url = _handoff_url(client, response, assignee)
+            if json_out:
+                print_json({**response, "web_url": url})
+                return
+            channel = escape(assignee.strip().lower())
+            if not response.get("changed"):
+                info(f"{channel} was not assigned to {escape(resolved_id)}; nothing posted")
+                return
+            success(f"Unassigned {channel} from {escape(resolved_id)}")
+            if line := _handoff_line(response):
+                console.print(f"  [dim]{line}[/dim]")
+                console.print(f"  [dim]{escape(url)}[/dim]", highlight=False)
+            print_mutation_receipt(response)
+        except SibylClientError as e:
+            handle_client_error(e)
+
+    _unassign()
 
 
 @app.command("note")

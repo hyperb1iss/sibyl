@@ -45,6 +45,7 @@ from sibyl.persistence.surreal.auth_runtime._common import (
 )
 from sibyl.persistence.surreal.auth_runtime.projects import verify_entity_project_access
 from sibyl.persistence.surreal.auth_runtime.sessions import resolve_auth_context
+from sibyl.persistence.surreal.member_handles import create_membership, first_member_handle
 from sibyl_core.auth import AuthUser, OrganizationRole, ProjectRole, ProjectVisibility
 from sibyl_core.backends.surreal.records import (
     coerce_datetime as _coerce_datetime,
@@ -723,6 +724,7 @@ async def create_org(
             "organization_id": str(organization_id),
             "user_id": str(user_id),
             "role": OrganizationRole.OWNER.value,
+            "handle": await first_member_handle(client, str(user_id)),
             "created_at": now,
             "updated_at": now,
         }
@@ -1045,6 +1047,8 @@ async def delete_org(*, request: Request, slug: str, user_id: UUID) -> None:
                     DELETE FROM raw_captures WHERE organization_id = $organization_id;
                     DELETE FROM backups WHERE organization_id = $organization_id;
                     DELETE FROM backup_settings WHERE organization_id = $organization_id;
+                    DELETE FROM net_messages WHERE organization_id = $organization_id;
+                    DELETE FROM net_threads WHERE organization_id = $organization_id;
                     COMMIT TRANSACTION;
                 """,
                 organization_id=str(organization_id),
@@ -1104,6 +1108,7 @@ async def list_org_members(*, slug: str, actor_id: UUID) -> list[dict[str, objec
                 {
                     "user": _member_user_payload(user, include_github_id=True),
                     "role": str(membership.get("role") or OrganizationRole.MEMBER.value),
+                    "handle": membership.get("handle"),
                     "created_at": _coerce_datetime(membership.get("created_at")),
                 }
             )
@@ -1185,9 +1190,9 @@ async def add_org_member(
                 updated_at=now,
             )
         else:
-            write_result = await client.execute_query(
-                "CREATE organization_members CONTENT $record;",
-                record={
+            write_result = await create_membership(
+                client,
+                {
                     "uuid": str(uuid4()),
                     "organization_id": str(organization_id),
                     "user_id": str(target_user_id),
@@ -1542,9 +1547,9 @@ async def accept_org_invitation(
             )
         now = _utcnow()
         if membership is None:
-            member_write_result = await client.execute_query(
-                "CREATE organization_members CONTENT $record;",
-                record={
+            member_write_result = await create_membership(
+                client,
+                {
                     "uuid": str(uuid4()),
                     "organization_id": str(organization_id),
                     "user_id": str(user.id),

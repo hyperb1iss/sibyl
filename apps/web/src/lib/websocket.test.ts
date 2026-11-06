@@ -53,6 +53,7 @@ describe('websocket event contract', () => {
         'question_answered',
         'source_import_updated',
         'raw_capture_changed',
+        'net_message_posted',
       ])
     );
   });
@@ -66,6 +67,7 @@ describe('websocket event contract', () => {
 
   it('tracks backend broadcast events separately from local client events', () => {
     expect(WEBSOCKET_BROADCAST_EVENT_TYPES).toContain('raw_capture_changed');
+    expect(WEBSOCKET_BROADCAST_EVENT_TYPES).toContain('net_message_posted');
     expect(WEBSOCKET_BROADCAST_EVENT_TYPES).not.toContain('connection_status');
     expect(WEBSOCKET_BROADCAST_EVENT_TYPES).not.toContain('subscribed');
   });

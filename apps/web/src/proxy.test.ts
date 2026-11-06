@@ -27,6 +27,19 @@ describe('proxy auth refresh', () => {
     );
   });
 
+  it('keeps a Net thread deep link whole through the login redirect', () => {
+    const deepLink = '/net?channel=%40ada&thread=gh%3Aacme%2Fapp%2342';
+    const response = proxy(new NextRequest(`http://web.test${deepLink}`));
+
+    const location = new URL(response.headers.get('location') ?? '');
+    expect(location.pathname).toBe('/login');
+    expect(location.searchParams.get('next')).toBe(deepLink);
+    // And the page reads it back as the same thread.
+    const next = new URL(location.searchParams.get('next') ?? '', 'http://web.test');
+    expect(next.searchParams.get('channel')).toBe('@ada');
+    expect(next.searchParams.get('thread')).toBe('gh:acme/app#42');
+  });
+
   it('does not refresh public login traffic', () => {
     const request = new NextRequest('http://web.test/login', {
       headers: { cookie: 'sibyl_refresh_token=refresh' },

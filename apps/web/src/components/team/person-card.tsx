@@ -1,5 +1,6 @@
 'use client';
 
+import Link from 'next/link';
 import type { TeamActivityCounts, TeamActivityPerson } from '@/lib/api/activity';
 import {
   formatActivityTime,
@@ -20,6 +21,8 @@ interface PersonCardProps {
   selected: boolean;
   isYou: boolean;
   onToggle: (userId: string) => void;
+  /** Their sibylnet inbox, such as `@ada`, once the directory has loaded. */
+  inbox?: string;
   now?: number;
 }
 
@@ -63,6 +66,7 @@ export function PersonCard({
   selected,
   isYou,
   onToggle,
+  inbox,
   now,
 }: PersonCardProps) {
   const total = teamActivityTotal(person.counts);
@@ -126,6 +130,16 @@ export function PersonCard({
               </span>
             )}
             <span>{lastActive}</span>
+            {inbox && (
+              // Above the card-wide name button, so it opens their inbox instead.
+              <Link
+                href={`/net?${new URLSearchParams({ channel: inbox }).toString()}`}
+                title={`Their inbox: agents reach ${person.name} at ${inbox}`}
+                className="relative z-10 rounded font-mono text-[11px] text-sc-fg-muted hover:text-sc-cyan hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sc-cyan"
+              >
+                {inbox}
+              </Link>
+            )}
           </div>
         </div>
         <div className="shrink-0 text-right">

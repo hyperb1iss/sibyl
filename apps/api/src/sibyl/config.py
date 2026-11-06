@@ -938,6 +938,12 @@ class Settings(BaseSettings):
         le=300.0,
         description="Seconds to wait before reconnecting the raw capture live query",
     )
+    net_thread_idle_minutes: int = Field(
+        default=30,
+        ge=1,
+        le=10_080,
+        description="Minutes a sibylnet thread stays quiet before it is distilled into memory",
+    )
 
     # Ingestion configuration
     chunk_max_tokens: int = Field(

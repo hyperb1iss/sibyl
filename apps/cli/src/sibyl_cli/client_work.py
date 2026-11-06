@@ -1,6 +1,7 @@
 """Task and note client operations."""
 
 from typing import Any
+from uuid import uuid4
 
 
 class ClientWorkMixin:
@@ -189,6 +190,58 @@ class ClientWorkMixin:
             data["expected_revision"] = expected_revision
 
         return await self._request("PATCH", f"/tasks/{task_id}", json=data)
+
+    async def assign_task(
+        self,
+        task_id: str,
+        to: str,
+        *,
+        note: str | None = None,
+        agent: str | None = None,
+        session: str | None = None,
+    ) -> dict[str, Any]:
+        """Hand a task to a channel and post the handoff on its ``task:<id>`` thread."""
+        data: dict[str, Any] = {"to": to}
+        if note:
+            data["note"] = note
+        return await self._handoff(task_id, "assign", data, agent=agent, session=session)
+
+    async def unassign_task(
+        self,
+        task_id: str,
+        assignee: str,
+        *,
+        agent: str | None = None,
+        session: str | None = None,
+    ) -> dict[str, Any]:
+        """Take a channel off a task and post a one-line notice on its thread."""
+        data: dict[str, Any] = {"assignee": assignee}
+        return await self._handoff(task_id, "unassign", data, agent=agent, session=session)
+
+    async def _handoff(
+        self,
+        task_id: str,
+        action: str,
+        data: dict[str, Any],
+        *,
+        agent: str | None,
+        session: str | None,
+    ) -> dict[str, Any]:
+        if agent:
+            data["agent"] = agent
+        if session:
+            data["session"] = session
+        # A handoff posts to another agent's inbox, so like a sibylnet post it
+        # is not buffered for a later replay that would land after the
+        # conversation moved on. The key makes the transport's own retry
+        # change the task and post the notice once.
+        return await self._request(
+            "POST",
+            f"/tasks/{task_id}/{action}",
+            json=data,
+            _buffer_pending=False,
+            _idempotency_key=str(uuid4()),
+        )
 
     async def create_note(
         self,

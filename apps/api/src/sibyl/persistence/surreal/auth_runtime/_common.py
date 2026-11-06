@@ -36,6 +36,7 @@ from sibyl.persistence.surreal.auth import (
     SurrealAuthContextResolver,
     surreal_auth_client_scope,
 )
+from sibyl.persistence.surreal.member_handles import create_membership
 from sibyl_core.auth import (
     AuthContext,
     AuthSession,
@@ -1229,9 +1230,9 @@ async def _ensure_personal_org_membership_record(
 
     organization_id = _coerce_uuid(organization.get("uuid"), field_name="organization.uuid")
     if membership is None:
-        membership_result = await client.execute_query(
-            "CREATE organization_members CONTENT $record;",
-            record={
+        membership_result = await create_membership(
+            client,
+            {
                 "uuid": str(uuid4()),
                 "organization_id": str(organization_id),
                 "user_id": str(user.id),

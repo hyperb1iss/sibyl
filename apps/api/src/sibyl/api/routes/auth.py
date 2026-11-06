@@ -47,6 +47,7 @@ from sibyl.persistence.auth_runtime import (
     deny_device_authorization,
     exchange_device_code,
     get_device_request_by_user_code,
+    get_member_handle,
     get_server_instance_id,
     get_user_by_id,
     list_api_keys_for_user,
@@ -1816,6 +1817,11 @@ async def replay_identity(ctx: AuthContext = Depends(get_auth_context)):
 async def me(
     ctx: AuthContext = Depends(get_auth_context),
 ):
+    handle = (
+        await get_member_handle(organization_id=str(ctx.organization.id), user_id=str(ctx.user.id))
+        if ctx.organization
+        else None
+    )
     return {
         "user": {
             "id": str(ctx.user.id),
@@ -1837,6 +1843,8 @@ async def me(
             else None
         ),
         "org_role": ctx.org_role.value if ctx.org_role else None,
+        "handle": handle,
+        "inbox": f"@{handle}" if handle else None,
     }
 
 

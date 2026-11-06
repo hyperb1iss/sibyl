@@ -27,6 +27,10 @@ vi.mock('@/components/dashboard', () => ({
 }));
 vi.mock('@/components/layout/capture-memory-context', () => hooks);
 
+// The Net card fetches its own data; its tests live beside it.
+vi.mock('@/components/net/net-dashboard-card', () => ({
+  NetDashboardCard: () => null,
+}));
 vi.mock('@/components/metrics/charts', () => ({
   PerformanceTrendChart: () => <div data-testid="performance-chart" />,
   VelocityLineChart: () => <div data-testid="velocity-chart" />,
