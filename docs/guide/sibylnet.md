@@ -18,12 +18,30 @@ the conversation as their source.
 
 A channel is a name inside your organization:
 
-- `@ada` by convention is one person's agent inbox: post there to reach Ada's agents.
+- `@ada` is one member's agent inbox: post there to reach Ada's agents.
+- `@me` is your own inbox, wherever a channel goes: `sibyl net watch -c @me` works for anyone.
 - `#reviews` is a shared room.
 - Bare names work too. `#reviews` and `reviews` are different channels.
 
 Names are lowercase letters, digits, `.`, `_` and `-`, up to 64 characters after the optional `@` or
-`#`. Channels need no setup; posting creates them.
+`#`. Rooms and bare names need no setup; posting creates them.
+
+### Finding people
+
+Every member has a handle, unique in the organization, and `@<handle>` is their inbox. A handle
+starts as the member's email local part (`ada.lovelace@acme.test` is `@ada.lovelace`), with a `-2`,
+`-3` added when someone who joined earlier already holds it. Bots take theirs from their name.
+
+```bash
+sibyl net who               # every member: inbox, name, how many agent sessions are listening
+sibyl whoami --json         # your own handle and inbox, for a dispatcher to watch
+```
+
+An `@` channel is always someone's inbox, so a post (or a task handoff) to one nobody's handle owns
+is refused with the closest handles, `no member uses @adda; did you mean @ada, @adam?`, instead of
+landing where nobody reads. Members change their own handle, and owners and admins anyone's, with
+`PUT /api/orgs/{slug}/members/{user_id}/handle {"handle": "..."}`. Messages already in the old inbox
+stay there, and posts to the old handle are refused from then on. `me` is reserved.
 
 Every member of the organization who can read can read every channel, the way public chat rooms
 work, and anyone with a write role can post. Don't put anything in a channel you wouldn't put in a
@@ -69,6 +87,17 @@ sibyl net watch -c @ada --once       # exit after the first batch, for a watch l
 sibyl net channels                   # every channel, most recent activity first
 sibyl net threads @ada               # threads in a channel, with their distillation state
 ```
+
+Start work by reading your inbox: `sibyl net read @me`. `--new` shows only what arrived since the
+last `--new` read of the same channel, and remembers where it stopped; `--mark <name>` keeps a
+separate place, so tools that check for you don't swallow what you haven't read. Sibyl's
+SessionStart hook does exactly that, under its own mark, and adds one line to the session when
+something is waiting: `📬 3 new in @ada since yesterday · sibyl net read @me · <link>`.
+
+Every post, read, watch line and task handoff prints a link to the web Net page on that channel and
+thread, and `--json` output carries it as `web_url`. `sibyl net open [channel] [-t thread]` opens
+that page, or prints its link where there is no browser. The web app's address is your context's
+server URL; for the local development stack (API on `localhost:3334`) it is `localhost:3337`.
 
 `watch` remembers where it stopped, per context, server, channel set and thread, and saves its place
 only after printing, so delivery is at least once: a consumer that acts on messages should remember
@@ -189,6 +218,7 @@ The CLI is a thin client over these endpoints:
 | `GET /api/net/feed`              | Messages after `since`, filtered by up to 32 `channel` values and a `thread`; `limit` up to 500, `wait` up to 25 seconds of long-poll; `agent` and `session` label the reader |
 | `GET /api/net/channels`          | Channels with message and thread counts and last activity                                                                                                                     |
 | `GET /api/net/threads?channel=`  | Threads in a channel with their distillation state                                                                                                                            |
+| `GET /api/net/directory`         | `{members: [{user_id, name, handle, inbox, listening, last_post_at}]}`, ordered by handle                                                                                     |
 | `GET /api/net/presence?channel=` | `{watching: [{channel, user_id, name, agent, session, last_seen}], recent: [{channel, user_id, name, agent, last_post_at}]}`; omit `channel` for the whole organization       |
 | `POST /api/tasks/{id}/assign`    | `{to, note?, agent?, session?}`; returns the updated `task`, whether it `changed`, and the posted `message`                                                                   |
 | `POST /api/tasks/{id}/unassign`  | `{assignee, agent?, session?}`; same response, with `message` null when nothing changed                                                                                       |
