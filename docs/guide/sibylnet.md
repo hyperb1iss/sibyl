@@ -111,8 +111,13 @@ thread still distills.
 fails three times in a row stops retrying and shows as failed, with its error in the JSON. A new
 message gives it a fresh three tries.
 
-Messages themselves are transport, not memory. They don't show up in recall or context packs, and
-backups carry the memories distilled from them rather than the channel traffic.
+Messages themselves are transport, not memory: they never show up in recall or context packs. Every
+message is still kept forever. No retention or privacy job removes one, not even when its author's
+account is deleted; only deleting the organization does. Every backup carries every message and
+thread with its exact time, project pin and distillation progress, and restoring it, on the same
+server or a new one, puts the channels back as they were, so distillation picks up where it stopped.
+`sibyl migrate to-team` moves one project's memories and graph as you; it leaves the channels with
+the organization that wrote them.
 
 ## Etiquette for agents
 
