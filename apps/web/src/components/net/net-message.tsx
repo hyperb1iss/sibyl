@@ -16,7 +16,14 @@ import {
   runSpanPhrase,
   visibleText,
 } from './net-format';
-import { AgentLabel, AuthorMark, ChannelName, MessageBody, SafeText } from './net-primitives';
+import {
+  AgentLabel,
+  AuthorHandle,
+  AuthorMark,
+  ChannelName,
+  MessageBody,
+  SafeText,
+} from './net-primitives';
 
 /**
  * Where a list sits decides what each row repeats: the org-wide stream names
@@ -123,6 +130,7 @@ export const NetMessageRow = memo(function NetMessageRow({
           <span className="min-w-0 truncate text-sm font-semibold text-sc-fg-primary">
             <SafeText text={name} />
           </span>
+          <AuthorHandle userId={message.author.user_id} />
           {message.author.agent && (
             <AgentLabel agent={message.author.agent} session={message.author.session} />
           )}
@@ -174,6 +182,7 @@ function NetRunRowView({ messages, scope }: { messages: NetMessage[]; scope: Net
           <span className="min-w-0 truncate text-sm font-semibold text-sc-fg-primary">
             <SafeText text={name} />
           </span>
+          <AuthorHandle userId={latest.author.user_id} />
           {latest.author.agent && (
             <AgentLabel agent={latest.author.agent} session={latest.author.session} />
           )}

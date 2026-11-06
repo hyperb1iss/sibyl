@@ -139,6 +139,42 @@ function ThreadTree({
   );
 }
 
+function ChannelMeta({ parts }: { parts: ReactNode[] }) {
+  const shown = parts.filter(Boolean);
+  return (
+    <span className="mt-0.5 flex flex-wrap items-center gap-x-1.5 text-[11px] text-sc-fg-muted">
+      {shown.flatMap((part, index) =>
+        index === 0
+          ? [part]
+          : [
+              <span key={`dot-${index}`} aria-hidden="true">
+                ·
+              </span>,
+              part,
+            ]
+      )}
+    </span>
+  );
+}
+
+function channelFacts(channel: NetChannel | undefined, listeners: NetWatcher[]): ReactNode[] {
+  return [
+    channel?.last_message_at && <RelativeTime key="last" iso={channel.last_message_at} />,
+    channel && channel.thread_count > 0 && (
+      <span key="threads">{plural(channel.thread_count, 'thread')}</span>
+    ),
+    listeners.length > 0 && (
+      <span
+        key="listening"
+        title={listeners.map(listener => visibleText(listenerLabel(listener))).join('\n')}
+        className="text-sc-fg-secondary"
+      >
+        {listeners.length} listening
+      </span>
+    ),
+  ];
+}
+
 export interface ChannelListProps {
   channels: NetChannel[];
   selectedChannel: string | null;
@@ -147,23 +183,41 @@ export interface ChannelListProps {
   threads: NetThread[] | undefined;
   /** Who is listening on each channel; empty until presence loads. */
   listening: Map<string, NetWatcher[]>;
+  /** The viewer's own inbox, pinned first even before anyone writes to it. */
+  inbox?: { channel: string; newCount: number } | null;
   /** Called after a row is chosen, so a phone-width drawer can close. */
   onNavigate?: () => void;
   /** The phone-width picker already says "Channel" above the list. */
   showHeading?: boolean;
 }
 
-/** Every channel, most recently active first, with the open one's threads beneath it. */
+/**
+ * The viewer's inbox first, then every channel, most recently active first,
+ * with the open one's threads beneath it.
+ */
 export function ChannelList({
   channels,
   selectedChannel,
   selectedThread,
   threads,
   listening,
+  inbox = null,
   onNavigate,
   showHeading = true,
 }: ChannelListProps) {
   const total = channels.reduce((sum, channel) => sum + channel.message_count, 0);
+  const inboxRow = inbox ? channels.find(channel => channel.channel === inbox.channel) : undefined;
+  const others = inbox ? channels.filter(channel => channel.channel !== inbox.channel) : channels;
+
+  const tree = (channel: string) =>
+    channel === selectedChannel && (
+      <ThreadTree
+        channel={channel}
+        threads={threads}
+        selectedThread={selectedThread}
+        onNavigate={onNavigate}
+      />
+    );
 
   return (
     <nav aria-label="Channels" className="flex flex-col">
@@ -176,6 +230,40 @@ export function ChannelList({
         </div>
       )}
       <ul className={`space-y-0.5 px-2 pb-2 ${showHeading ? '' : 'pt-2'}`}>
+        {inbox && (
+          <li className="mb-1.5 border-b border-sc-fg-subtle/10 pb-1.5">
+            <RailLink
+              href={netHref(inbox.channel)}
+              current={selectedChannel === inbox.channel && selectedThread === null}
+              within={selectedChannel === inbox.channel}
+              onNavigate={onNavigate}
+            >
+              <span className="flex items-baseline justify-between gap-2">
+                <span className="text-sm font-semibold">Your inbox</span>
+                {inbox.newCount > 0 ? (
+                  <span className="shrink-0 rounded-full bg-sc-purple px-1.5 text-[10px] leading-4 font-semibold text-sc-on-accent tabular-nums">
+                    {inbox.newCount > 99 ? '99+' : inbox.newCount} new
+                  </span>
+                ) : (
+                  <span className="shrink-0 text-xs text-sc-fg-muted tabular-nums">
+                    {(inboxRow?.message_count ?? 0).toLocaleString('en-US')}
+                  </span>
+                )}
+              </span>
+              <ChannelMeta
+                parts={[
+                  <span key="address" className="font-mono">
+                    <SafeText text={inbox.channel} />
+                  </span>,
+                  ...(inboxRow
+                    ? channelFacts(inboxRow, listening.get(inbox.channel) ?? [])
+                    : [<span key="empty">nothing yet</span>]),
+                ]}
+              />
+            </RailLink>
+            {tree(inbox.channel)}
+          </li>
+        )}
         <li>
           <RailLink href={netHref()} current={selectedChannel === null} onNavigate={onNavigate}>
             <span className="flex items-baseline justify-between gap-2">
@@ -186,9 +274,8 @@ export function ChannelList({
             </span>
           </RailLink>
         </li>
-        {channels.map(channel => {
+        {others.map(channel => {
           const open = channel.channel === selectedChannel;
-          const listeners = listening.get(channel.channel) ?? [];
           return (
             <li key={channel.channel}>
               <RailLink
@@ -203,47 +290,9 @@ export function ChannelList({
                     {channel.message_count.toLocaleString('en-US')}
                   </span>
                 </span>
-                <span className="mt-0.5 flex flex-wrap items-center gap-x-1.5 text-[11px] text-sc-fg-muted">
-                  {[
-                    channel.last_message_at && (
-                      <RelativeTime key="last" iso={channel.last_message_at} />
-                    ),
-                    channel.thread_count > 0 && (
-                      <span key="threads">{plural(channel.thread_count, 'thread')}</span>
-                    ),
-                    listeners.length > 0 && (
-                      <span
-                        key="listening"
-                        title={listeners
-                          .map(listener => visibleText(listenerLabel(listener)))
-                          .join('\n')}
-                        className="text-sc-fg-secondary"
-                      >
-                        {listeners.length} listening
-                      </span>
-                    ),
-                  ]
-                    .filter(Boolean)
-                    .flatMap((part, index) =>
-                      index === 0
-                        ? [part]
-                        : [
-                            <span key={`dot-${index}`} aria-hidden="true">
-                              ·
-                            </span>,
-                            part,
-                          ]
-                    )}
-                </span>
+                <ChannelMeta parts={channelFacts(channel, listening.get(channel.channel) ?? [])} />
               </RailLink>
-              {open && (
-                <ThreadTree
-                  channel={channel.channel}
-                  threads={threads}
-                  selectedThread={selectedThread}
-                  onNavigate={onNavigate}
-                />
-              )}
+              {tree(channel.channel)}
             </li>
           );
         })}

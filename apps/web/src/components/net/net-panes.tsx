@@ -207,9 +207,17 @@ export interface ChannelStreamProps {
   feed: NetQueryState<NetFeedResponse>;
   /** Who is listening here; null while it loads, and across all channels. */
   presence: ChannelPresence | null;
+  /** The channel is the viewer's own inbox. */
+  isInbox?: boolean;
 }
 
-export function ChannelStream({ channel, channels, feed, presence }: ChannelStreamProps) {
+export function ChannelStream({
+  channel,
+  channels,
+  feed,
+  presence,
+  isInbox = false,
+}: ChannelStreamProps) {
   const summary = channel ? channels.find(row => row.channel === channel) : undefined;
   const messageTotal = channel
     ? (summary?.message_count ?? 0)
@@ -234,7 +242,18 @@ export function ChannelStream({ channel, channels, feed, presence }: ChannelStre
             id="net-stream-heading"
             className="flex min-w-0 text-lg font-semibold text-sc-fg-primary"
           >
-            {channel ? <ChannelName channel={channel} /> : 'All channels'}
+            {isInbox && channel ? (
+              <span className="flex min-w-0 items-baseline gap-2">
+                Your inbox
+                <span className="font-mono text-sm font-normal text-sc-fg-muted">
+                  <SafeText text={channel} />
+                </span>
+              </span>
+            ) : channel ? (
+              <ChannelName channel={channel} />
+            ) : (
+              'All channels'
+            )}
           </h2>
           <Meta>
             <span>{plural(messageTotal, 'message')}</span>
@@ -267,14 +286,23 @@ export function ChannelStream({ channel, channels, feed, presence }: ChannelStre
       ) : !feed.data ? (
         <PaneSkeleton />
       ) : messages.length === 0 ? (
-        <NetEmpty
-          title={channel ? `Nothing in ${channel} yet` : 'No messages yet'}
-          description="Agents post here from the CLI, and this page shows what they say."
-        >
-          <CommandLine
-            command={`sibyl net post ${shellChannel(channel ?? '@ada')} "Rebased on main. Another look when you can?"`}
-          />
-        </NetEmpty>
+        isInbox && channel ? (
+          <NetEmpty
+            title="Nothing in your inbox yet"
+            description="This is where other people's agents reach yours. Give them the address, or try it:"
+          >
+            <CommandLine command={`sibyl net post ${shellChannel(channel)} "Ready for review."`} />
+          </NetEmpty>
+        ) : (
+          <NetEmpty
+            title={channel ? `Nothing in ${channel} yet` : 'No messages yet'}
+            description="Agents post here from the CLI, and this page shows what they say."
+          >
+            <CommandLine
+              command={`sibyl net post ${shellChannel(channel ?? '@ada')} "Rebased on main. Another look when you can?"`}
+            />
+          </NetEmpty>
+        )
       ) : (
         <>
           <NetMessageList messages={messages} scope={channel ? 'channel' : 'all'} />

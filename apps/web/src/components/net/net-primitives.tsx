@@ -1,6 +1,7 @@
 'use client';
 
-import { useState } from 'react';
+import Link from 'next/link';
+import { createContext, useContext, useState } from 'react';
 import { initialsFor, toneIndexFor } from '@/components/team/person-avatar';
 import { formatActivityTime } from '@/lib/constants/activity';
 import { formatDateTime } from '@/lib/constants/formatting';
@@ -12,8 +13,31 @@ import {
   channelParts,
   controlLabel,
   controlName,
+  netHref,
   visibleText,
 } from './net-format';
+
+/** Member handles by user id; empty until the server sends a directory. */
+export const HandlesContext = createContext<Map<string, string>>(new Map());
+
+/**
+ * A person's `@handle`, quiet beside their name: the address their agents
+ * answer to, so a reader can copy it or open that inbox.
+ */
+export function AuthorHandle({ userId }: { userId: string }) {
+  const handle = useContext(HandlesContext).get(userId);
+  if (!handle) return null;
+  const inbox = `@${handle}`;
+  return (
+    <Link
+      href={netHref(inbox)}
+      title={`Their inbox: agents reach them at ${visibleText(inbox)}`}
+      className="min-w-0 truncate rounded font-mono text-[11px] text-sc-fg-muted hover:text-sc-fg-secondary hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sc-cyan"
+    >
+      <SafeText text={inbox} />
+    </Link>
+  );
+}
 
 /** A channel name with its `@` or `#` set back, so the name itself leads. */
 export function ChannelName({ channel, className = '' }: { channel: string; className?: string }) {

@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type {
   NetChannelsResponse,
+  NetDirectoryResponse,
   NetFeedResponse,
   NetMessage,
   NetPresenceResponse,
@@ -8,10 +9,14 @@ import type {
 } from '@/lib/api/net';
 import { render, screen, waitFor, within } from '@/test/utils';
 
-const navigation = vi.hoisted(() => ({ params: new URLSearchParams() }));
+const navigation = vi.hoisted(() => {
+  const router = { replace: vi.fn(), push: vi.fn() };
+  return { params: new URLSearchParams(), router };
+});
 
 vi.mock('next/navigation', () => ({
-  useRouter: () => ({ replace: vi.fn(), push: vi.fn() }),
+  // One router, like Next's: effects that depend on it run once, not per render.
+  useRouter: () => navigation.router,
   usePathname: () => '/net',
   useSearchParams: () => navigation.params,
 }));
@@ -202,6 +207,12 @@ function feed(messages: NetMessage[]): NetFeedResponse {
 }
 
 let channels: NetChannelsResponse;
+/** What /auth/me says; null answers 404, a server that predates handles. */
+let me: Record<string, unknown> | null;
+let preferences: Record<string, unknown>;
+let preferenceWrites: Record<string, unknown>[];
+/** Null answers 404, a server that predates handles. */
+let directory: NetDirectoryResponse | null;
 let presence: Response | (() => Response);
 let fetchMock: ReturnType<typeof vi.fn>;
 
@@ -220,9 +231,28 @@ describe('NetContent', () => {
   beforeEach(() => {
     channels = CHANNELS;
     presence = () => json({ watching: [], recent: [] });
-    fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+    me = null;
+    preferences = {};
+    preferenceWrites = [];
+    directory = null;
+    navigation.router.replace.mockReset();
+    fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = new URL(String(input), 'http://localhost');
       switch (url.pathname) {
+        case '/api/auth/me':
+          return me ? json(me) : json({ detail: 'Not Found' }, 404);
+        case '/api/users/me/preferences': {
+          if (init?.method === 'PATCH') {
+            const update = (
+              JSON.parse(String(init.body)) as { preferences: Record<string, unknown> }
+            ).preferences;
+            preferenceWrites.push(update);
+            preferences = { ...preferences, ...update };
+          }
+          return json({ preferences });
+        }
+        case '/api/net/directory':
+          return directory ? json(directory) : json({ detail: 'Not Found' }, 404);
         case '/api/net/channels':
           return json(channels);
         case '/api/net/feed': {
@@ -353,7 +383,8 @@ describe('NetContent', () => {
           ])
         );
       if (url.pathname === '/api/net/presence') return json({ watching: [], recent: [] });
-      return json({ threads: [] });
+      if (url.pathname === '/api/net/threads') return json({ threads: [] });
+      return json({ detail: 'Not Found' }, 404);
     });
     renderNet('channel=%40ada');
 
@@ -559,6 +590,135 @@ describe('NetContent', () => {
 
     expect(await screen.findByRole('region', { name: '@ada' })).toBeInTheDocument();
     expect(requests('/api/net/feed').at(-1)?.searchParams.get('channel')).toBe('@ada');
+  });
+
+  describe('with member handles', () => {
+    const ADA_ME = {
+      user: {
+        id: 'u-ada',
+        github_id: null,
+        email: 'ada@example.com',
+        name: 'Ada Lovelace',
+        avatar_url: null,
+      },
+      organization: { id: 'org-1', slug: 'acme', name: 'Acme' },
+      org_role: 'owner',
+      handle: 'ada',
+      inbox: '@ada',
+    };
+
+    beforeEach(() => {
+      me = ADA_ME;
+      directory = {
+        members: [
+          {
+            user_id: 'u-ada',
+            name: 'Ada Lovelace',
+            handle: 'ada',
+            inbox: '@ada',
+            listening: false,
+            last_post_at: null,
+          },
+          {
+            user_id: 'u-grace',
+            name: 'Grace Hopper',
+            handle: 'grace',
+            inbox: '@grace',
+            listening: true,
+            last_post_at: '2026-11-05T10:07:00Z',
+          },
+        ],
+      };
+    });
+
+    it('lands on your inbox when something new is waiting', async () => {
+      renderNet();
+
+      await waitFor(() =>
+        expect(navigation.router.replace).toHaveBeenCalledWith('/net?channel=%40ada')
+      );
+    });
+
+    it('lands on every channel once the inbox has been read', async () => {
+      // Seen through the newest message in the inbox fixture.
+      preferences = { net_inbox_seen: { 'org-1:@ada': '2026-11-05T10:08:00Z' } };
+      renderNet();
+
+      expect(await screen.findByRole('region', { name: 'All channels' })).toBeInTheDocument();
+      const nav = screen.getByRole('navigation', { name: 'Channels' });
+      const yours = within(nav).getByRole('link', { name: /Your inbox/ });
+      expect(yours).toHaveAttribute('href', '/net?channel=%40ada');
+      expect(within(yours).queryByText(/new$/)).toBeNull();
+      expect(navigation.router.replace).not.toHaveBeenCalled();
+    });
+
+    it('pins your inbox first even before anyone writes to it', async () => {
+      me = { ...ADA_ME, handle: 'hedy', inbox: '@hedy' };
+      renderNet('channel=%40hedy');
+
+      const nav = await screen.findByRole('navigation', { name: 'Channels' });
+      const links = within(nav).getAllByRole('link');
+      expect(links[0]).toHaveTextContent('Your inbox');
+      expect(links[0]).toHaveTextContent('nothing yet');
+      expect(await screen.findByText('Nothing in your inbox yet')).toBeInTheDocument();
+      expect(screen.getByText(/sibyl net post @hedy/)).toBeInTheDocument();
+    });
+
+    it('counts what is new since your last visit, never your own posts', async () => {
+      // Grace wrote at 10:07, after the last visit; Ada's own 10:08 post does not count.
+      preferences = { net_inbox_seen: { 'org-1:@ada': '2026-11-05T10:06:00Z' } };
+      renderNet('channel=%23reviews');
+
+      const nav = await screen.findByRole('navigation', { name: 'Channels' });
+      expect(await within(nav).findByText('1 new')).toBeInTheDocument();
+    });
+
+    it('marks the inbox seen through its newest message when you open it', async () => {
+      preferences = { theme: 'neon', net_inbox_seen: { 'other-org:@ada': '2026-01-01T00:00:00Z' } };
+      renderNet('channel=%40ada');
+
+      expect(
+        await screen.findByRole('heading', { level: 2, name: /Your inbox/ })
+      ).toBeInTheDocument();
+      await waitFor(() =>
+        expect(preferenceWrites.at(-1)).toEqual({
+          net_inbox_seen: {
+            'other-org:@ada': '2026-01-01T00:00:00Z',
+            'org-1:@ada': '2026-11-05T10:08:00Z',
+          },
+        })
+      );
+    });
+
+    it("shows each author's handle beside their name, linking to their inbox", async () => {
+      renderNet('channel=%23reviews');
+
+      const row = await screen.findByRole('article', { name: 'Decision from Ada Lovelace' });
+      expect(await within(row).findByRole('link', { name: '@ada' })).toHaveAttribute(
+        'href',
+        '/net?channel=%40ada'
+      );
+    });
+
+    it("turns @me in a shared link into the reader's own inbox", async () => {
+      renderNet('channel=%40me&thread=gh%3Aacme%2Fapp%2342');
+
+      await waitFor(() =>
+        expect(navigation.router.replace).toHaveBeenCalledWith(
+          '/net?channel=%40ada&thread=gh%3Aacme%2Fapp%2342'
+        )
+      );
+    });
+  });
+
+  it('works as before on a server without handles', async () => {
+    renderNet('channel=%23reviews');
+
+    const row = await screen.findByRole('article', { name: 'Decision from Ada Lovelace' });
+    await waitFor(() => expect(requests('/api/net/directory').length).toBeGreaterThan(0));
+    expect(within(row).queryByRole('link', { name: '@ada' })).toBeNull();
+    const nav = screen.getByRole('navigation', { name: 'Channels' });
+    expect(within(nav).queryByText('Your inbox')).toBeNull();
   });
 
   it('teaches the CLI when the organization has no traffic', async () => {
