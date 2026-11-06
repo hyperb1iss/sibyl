@@ -93,6 +93,7 @@ export function netQueriesForPost(channel: string, thread: string): QueryKey[] {
     queryKeys.net.feed(channel, null),
     queryKeys.net.threads(channel),
     queryKeys.net.presence,
+    queryKeys.net.directory,
   ];
   if (thread) keys.push(queryKeys.net.feed(channel, thread));
   return keys;
@@ -112,9 +113,14 @@ export function useNetChannels() {
  * The newest messages, oldest first: across the organization when `channel`
  * is null, else one channel, else one thread of it.
  */
-export function useNetFeed(channel: string | null, thread: string | null) {
+export function useNetFeed(
+  channel: string | null,
+  thread: string | null,
+  options?: { enabled?: boolean }
+) {
   const scopedThread = channel ? thread : null;
   return useQuery({
+    enabled: options?.enabled ?? true,
     queryKey: queryKeys.net.feed(channel, scopedThread),
     queryFn: ({ signal }) =>
       netApi.feed(

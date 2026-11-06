@@ -105,6 +105,22 @@ export interface NetPresenceResponse {
   recent: NetRecentPoster[];
 }
 
+/** A member of the organization as sibylnet addresses them. */
+export interface NetMember {
+  user_id: string;
+  name: string | null;
+  handle: string;
+  /** `@<handle>`: post here to reach this person's agents. */
+  inbox: string;
+  /** One of their agents is reading something right now. */
+  listening: boolean;
+  last_post_at: string | null;
+}
+
+export interface NetDirectoryResponse {
+  members: NetMember[];
+}
+
 export interface NetFeedParams {
   /** Omit for every channel in the organization. */
   channel?: string | null;
@@ -130,6 +146,10 @@ export const netApi = {
     fetchApi<NetThreadsResponse>(`/net/threads?${new URLSearchParams({ channel }).toString()}`, {
       signal: options?.signal,
     }),
+
+  /** Every member's handle and inbox. */
+  directory: (options?: RequestOptions) =>
+    fetchApi<NetDirectoryResponse>('/net/directory', { signal: options?.signal }),
 
   /** Who is listening and who posted in the last hour, across the organization. */
   presence: (options?: RequestOptions) =>

@@ -24,6 +24,13 @@ export interface AuthMeResponse {
   };
   organization: { id: string; slug: string; name: string } | null;
   org_role: string | null;
+  /**
+   * The viewer's handle in the active organization and the sibylnet inbox it
+   * names (`@<handle>`). Optional until every server sends them; read them
+   * through `useMyInbox`, which owns that fallback.
+   */
+  handle?: string | null;
+  inbox?: string | null;
 }
 
 export interface OrgSummary {

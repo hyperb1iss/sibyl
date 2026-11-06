@@ -158,6 +158,7 @@ export const queryKeys = {
       ['net', 'feed', channel, thread] as const,
     threads: (channel: string) => ['net', 'threads', channel] as const,
     presence: ['net', 'presence'] as const,
+    directory: ['net', 'directory'] as const,
   },
   jobs: {
     all: ['jobs'] as const,
