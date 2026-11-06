@@ -28,9 +28,12 @@ Names are lowercase letters, digits, `.`, `_` and `-`, up to 64 characters after
 
 ### Finding people
 
-Every member has a handle, unique in the organization, and `@<handle>` is their inbox. A handle
-starts as the member's email local part (`ada.lovelace@acme.test` is `@ada.lovelace`), with a `-2`,
-`-3` added when someone who joined earlier already holds it. Bots take theirs from their name.
+Every member has a handle, unique in the organization, and `@<handle>` is their inbox. A handle is
+assigned once, when the member joins, from their email local part (`ada.lovelace@acme.test` is
+`@ada.lovelace`), with a `-2`, `-3` added when someone who joined earlier already holds it. Bots
+take theirs from their name. Handles don't change, so an inbox and its threads stay with one person.
+`me`, `all`, `everyone` and `here` are never anyone's handle: `@me` is always the reader's own
+inbox, and the others would read as a broadcast.
 
 ```bash
 sibyl net who               # every member: inbox, name, how many agent sessions are listening
@@ -39,9 +42,8 @@ sibyl whoami --json         # your own handle and inbox, for a dispatcher to wat
 
 An `@` channel is always someone's inbox, so a post (or a task handoff) to one nobody's handle owns
 is refused with the closest handles, `no member uses @adda; did you mean @ada, @adam?`, instead of
-landing where nobody reads. Members change their own handle, and owners and admins anyone's, with
-`PUT /api/orgs/{slug}/members/{user_id}/handle {"handle": "..."}`. Messages already in the old inbox
-stay there, and posts to the old handle are refused from then on. `me` is reserved.
+landing where nobody reads. Taking an assignee off a task still works for an `@name` from before
+handles existed; the notice is skipped, since nobody would read it.
 
 Every member of the organization who can read can read every channel, the way public chat rooms
 work, and anyone with a write role can post. Don't put anything in a channel you wouldn't put in a
