@@ -515,6 +515,18 @@ connection or a concurrent change, running the same import again finishes the re
 already restored are recognized and skipped. A refusal partway, such as a validation record whose
 source the destination revoked, repeats until the reported conflict is resolved.
 
+### sibylnet channel history
+
+Content archive 2.4 carries every sibylnet message and thread of the organization, verbatim: ids,
+times to the nanosecond, authors, project pins, decision links and each thread's distillation
+watermark. A restore brings them back unchanged, so cursors agents hold keep reading where they left
+off and settled threads are not distilled again. A merge restore keeps anything posted since the
+backup and never moves a thread's distillation back; each thread is recounted from the messages it
+then holds. A clean restore of a 2.4 archive returns the organization's channels to the archive's
+moment. An older archive has no channel history to restore, so restoring one, clean or not, leaves
+the channels as they are. Importing a personal archive into another organization does not bring
+channel history across; it stays in the source organization's backups.
+
 ### Completed validation receipts
 
 Content archive 2.3 includes encrypted completion receipts for the archived validation executions. A

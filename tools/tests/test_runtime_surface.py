@@ -30,7 +30,7 @@ from tools.trust.enterprise_readiness_evidence import SIBYL_HELM_RENDER_ARGS
 
 from sibyl.config import parse_forwarded_allow_ips
 
-EXPECTED_ROUTER_COUNT = 35
+EXPECTED_ROUTER_COUNT = 36
 EXPECTED_HTTP_ROUTE_COUNT = 3
 EXPECTED_WEBSOCKET_ROUTE_COUNT = 1
 EXPECTED_MCP_TOOL_COUNT = 13

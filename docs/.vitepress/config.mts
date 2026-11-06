@@ -122,6 +122,7 @@ export default defineConfig({
                         { text: 'MCP Configuration', link: '/guide/mcp-configuration' },
                         { text: 'Skills & Hooks', link: '/guide/skills' },
                         { text: 'Agent Collaboration', link: '/guide/agent-collaboration' },
+                        { text: 'sibylnet', link: '/guide/sibylnet' },
                         { text: 'Knowledge Repository', link: '/guide/knowledge-repository' },
                     ],
                 },
