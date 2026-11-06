@@ -15,15 +15,23 @@ project it attached to. A re-run therefore skips an unchanged file, revises
 the memory of a changed one (the server keeps the prior content), and, once a
 repository gets linked, imports a project-attached copy and marks the
 unattached one superseded.
+
+A context can also keep its import in sync: the Claude Code session-start hook
+runs a sweep that only talks to the server about files whose content or
+routing changed since the last run, so a sweep with nothing new sends no
+requests at all.
 """
 
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import hashlib
 import json
+import os
 import re
-from collections.abc import Callable, Iterable, Iterator
+import tempfile
+from collections.abc import Callable, Iterable, Iterator, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Literal
@@ -134,6 +142,7 @@ class ImportPlan:
     imports: list[PlannedImport] = field(default_factory=list)
     # Memories whose repository is pinned to another context, by context name.
     elsewhere: dict[str, int] = field(default_factory=dict)
+    elsewhere_memories: list[AgentMemory] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -368,6 +377,7 @@ def build_plan(
             pinned = context_for_path(memory.repo)
             if pinned and pinned != target_context:
                 plan.elsewhere[pinned] = plan.elsewhere.get(pinned, 0) + 1
+                plan.elsewhere_memories.append(memory)
                 continue
             if not memory.personal:
                 linked = project_for_path(memory.repo)
@@ -661,6 +671,27 @@ def tally(results: Iterable[ImportResult]) -> dict[str, int]:
     return counts
 
 
+def fingerprint(
+    memory: AgentMemory,
+    *,
+    share: bool,
+    project_for_path: Callable[[Path], str | None],
+    context_for_path: Callable[[Path], str | None],
+) -> str:
+    """Everything local that decides what an import of this file would write.
+
+    The file's content plus where its repository routes: an edit, a new link,
+    a new context pin, or a change of visibility each change it.
+    """
+    repo = memory.repo
+    route = [context_for_path(repo), project_for_path(repo)] if repo else [None, None]
+    payload = json.dumps([memory.content.strip(), share, *route])
+    return hashlib.sha256(payload.encode()).hexdigest()[:32]
+
+
+_SETTLED_OUTCOMES = frozenset({"created", "updated", "relinked", "unchanged", "kept"})
+
+
 @dataclass
 class MemoryImport:
     """A planned import: what was found, where it routes, and what would change."""
@@ -669,6 +700,9 @@ class MemoryImport:
     plan: ImportPlan
     preview: list[ImportResult]
     results: list[ImportResult] = field(default_factory=list)
+    # Files a sync skipped because nothing about them changed since it last ran.
+    settled: list[AgentMemory] = field(default_factory=list)
+    fingerprints: dict[str, str] = field(default_factory=dict)
 
     @property
     def pending(self) -> list[PlannedImport]:
@@ -678,6 +712,26 @@ class MemoryImport:
         """Applied results where they exist, the preview for everything else."""
         applied = {result.item.source_id: result for result in self.results}
         return [applied.get(result.item.source_id, result) for result in self.preview]
+
+    def settled_fingerprints(self) -> dict[str, str]:
+        """Fingerprints of every file the server now agrees with, by file key.
+
+        A preview that found a file new or changed proves nothing until the
+        write lands, so only applied results count for those.
+        """
+        applied = {result.item.source_id: result for result in self.results}
+        settled = [*self.settled, *self.plan.elsewhere_memories]
+        for result in self.preview:
+            final = applied.get(result.item.source_id)
+            if final is None and result.outcome in WRITE_OUTCOMES:
+                continue
+            if (final or result).outcome in _SETTLED_OUTCOMES:
+                settled.append(result.item.memory)
+        return {
+            memory.file_key: self.fingerprints[memory.file_key]
+            for memory in settled
+            if memory.file_key in self.fingerprints
+        }
 
 
 async def plan_memory_import(
@@ -689,8 +743,13 @@ async def plan_memory_import(
     codex_home: Path,
     target_context: str | None,
     share: bool,
+    synced: Mapping[str, str] | None = None,
 ) -> MemoryImport:
-    """Discover, route, and preview an import without writing anything."""
+    """Discover, route, and preview an import without writing anything.
+
+    With ``synced`` (fingerprints from an earlier run), files whose
+    fingerprint still matches are settled locally and never reach the server.
+    """
     from sibyl_cli import config_store
     from sibyl_cli.project_refs import list_accessible_projects
 
@@ -700,9 +759,31 @@ async def plan_memory_import(
         claude_config=claude_config,
         codex_home=codex_home,
     )
+    fingerprints = {
+        memory.file_key: fingerprint(
+            memory,
+            share=share,
+            project_for_path=config_store.resolve_project_for_path,
+            context_for_path=config_store.resolve_context_for_path,
+        )
+        for memory in found.memories
+    }
+    settled = [
+        memory
+        for memory in found.memories
+        if synced is not None and synced.get(memory.file_key) == fingerprints[memory.file_key]
+    ]
+    settled_keys = {memory.file_key for memory in settled}
+    changed = [memory for memory in found.memories if memory.file_key not in settled_keys]
     known: set[str] = set()
     owner = ""
-    if found.memories:
+    needs_server = any(
+        memory.repo is None
+        or (config_store.resolve_context_for_path(memory.repo) or target_context)
+        == target_context
+        for memory in changed
+    )
+    if needs_server:
         me = await client._request("GET", "/auth/me", _replay_pending=False)
         user = me.get("user") if isinstance(me, dict) else None
         owner = str(user.get("id") or "") if isinstance(user, dict) else ""
@@ -712,7 +793,7 @@ async def plan_memory_import(
         projects = await list_accessible_projects(client, limit=500)
         known = {str(project["id"]) for project in projects if project.get("id")}
     plan = build_plan(
-        found.memories,
+        changed,
         owner=owner,
         target_context=target_context,
         known_projects=known,
@@ -721,10 +802,55 @@ async def plan_memory_import(
         context_for_path=config_store.resolve_context_for_path,
     )
     preview = await run_imports(client, plan.imports, apply=False)
-    return MemoryImport(discovery=found, plan=plan, preview=preview)
+    return MemoryImport(
+        discovery=found,
+        plan=plan,
+        preview=preview,
+        settled=settled,
+        fingerprints=fingerprints,
+    )
 
 
 async def apply_memory_import(client: Any, job: MemoryImport) -> MemoryImport:
     """Write what the preview found new or changed."""
     job.results = await run_imports(client, job.pending, apply=True)
     return job
+
+
+def sync_state_path(context: str) -> Path:
+    from sibyl_cli import config_store
+
+    name = re.sub(r"[^A-Za-z0-9._-]", "_", context)
+    return config_store.config_dir() / "agent-memories" / f"{name}.json"
+
+
+def load_synced(context: str) -> dict[str, str]:
+    """Fingerprints of the files the last sync into ``context`` settled."""
+    try:
+        data = json.loads(sync_state_path(context).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    files = data.get("files") if isinstance(data, dict) else None
+    if not isinstance(files, dict):
+        return {}
+    return {str(key): str(value) for key, value in files.items()}
+
+
+def save_synced(context: str, files: Mapping[str, str]) -> None:
+    """Merge newly settled fingerprints into the context's sync state.
+
+    Sweeps from parallel sessions can interleave here; one that loses the race
+    only drops fingerprints, which costs the next sweep a server check.
+    """
+    path = sync_state_path(context)
+    merged = {**load_synced(context), **files}
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, temporary = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as file:
+            json.dump({"files": merged}, file, sort_keys=True)
+        os.replace(temporary, path)
+    except BaseException:
+        with contextlib.suppress(FileNotFoundError):
+            os.unlink(temporary)
+        raise

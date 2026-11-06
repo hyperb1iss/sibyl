@@ -9,7 +9,7 @@ from typing import Annotated, Any
 import typer
 from rich.markup import escape
 
-from sibyl_cli import agent_memories
+from sibyl_cli import agent_memories, config_store
 from sibyl_cli.client import SibylClientError, get_client, resolve_client_context_name
 from sibyl_cli.common import (
     console,
@@ -206,9 +206,14 @@ def _memory_summary(job: agent_memories.MemoryImport) -> dict[str, Any]:
     for result in outcomes:
         counts = by_agent.setdefault(result.item.memory.agent, dict.fromkeys(_OUTCOME_LABELS, 0))
         counts[result.outcome] += 1
+    for memory in job.settled:
+        counts = by_agent.setdefault(memory.agent, dict.fromkeys(_OUTCOME_LABELS, 0))
+        counts["unchanged"] += 1
+    totals = agent_memories.tally(outcomes)
+    totals["unchanged"] += len(job.settled)
     return {
         "found": len(job.discovery.memories),
-        "outcomes": agent_memories.tally(outcomes),
+        "outcomes": totals,
         "by_agent": by_agent,
         "elsewhere": dict(job.plan.elsewhere),
         "skipped_files": [
@@ -251,12 +256,16 @@ async def run_memory_import(
     share: bool,
     confirm: Any,
     context_name: str | None = None,
+    sync: bool = False,
+    record: bool = True,
 ) -> agent_memories.MemoryImport | None:
     """Plan an import, ask ``confirm`` (a callable taking the plan), then apply.
 
     Imports into ``context_name``, or the context this CLI talks to here.
     Returns None when nothing was found. ``confirm`` returning False stops
-    after the preview.
+    after the preview. With ``sync``, files unchanged since the last recorded
+    run are settled without asking the server; with ``record``, the files the
+    server now agrees with are recorded for the next sync.
     """
     claude_home, claude_config, codex_home = agent_memory_paths(claude_dir, codex_dir)
     target = context_name or resolve_client_context_name()
@@ -274,11 +283,14 @@ async def run_memory_import(
                 codex_home=codex_home,
                 target_context=target,
                 share=share,
+                synced=agent_memories.load_synced(target) if sync and target else None,
             )
             if not job.discovery.memories:
                 return None
             if job.pending and confirm(job):
                 await agent_memories.apply_memory_import(client, job)
+            if record and target:
+                agent_memories.save_synced(target, job.settled_fingerprints())
             return job
         finally:
             client.buffer_writes = buffering
@@ -307,6 +319,26 @@ def ingest_memories(
         bool, typer.Option("--dry-run", help="Show what would change without writing")
     ] = False,
     yes: Annotated[bool, typer.Option("--yes", "-y", help="Don't ask before writing")] = False,
+    keep_synced: Annotated[
+        bool | None,
+        typer.Option(
+            "--keep-synced/--no-keep-synced",
+            help=(
+                "Keep this context's import in sync at each Claude Code session start, "
+                "or stop syncing (--no-keep-synced changes only the setting)"
+            ),
+        ),
+    ] = None,
+    sync: Annotated[
+        bool,
+        typer.Option(
+            "--sync",
+            help=(
+                "Sync as the session-start hook does: only when this context keeps "
+                "agent memories in sync, quietly, asking the server only about changed files"
+            ),
+        ),
+    ] = False,
     claude_dir: Annotated[
         Path | None,
         typer.Option("--claude-dir", help="Claude Code home (default ~/.claude)"),
@@ -325,7 +357,8 @@ def ingest_memories(
     memory carrying its kind (feedback as a rule, a reference as an artifact,
     a session as a session), private by default. A memory attaches to the
     project its repository is linked to. Re-running revises changed files in
-    place and skips unchanged ones.
+    place and skips unchanged ones. With --keep-synced, the Claude Code
+    session-start hook keeps doing that in the background.
     """
     agents = agent or list(agent_memories.AGENTS)
     unknown = [name for name in agents if name not in agent_memories.AGENTS]
@@ -333,9 +366,26 @@ def ingest_memories(
         error(f"Unknown agent: {escape(', '.join(unknown))} (choose claude-code or codex)")
         raise typer.Exit(1)
 
+    context_name = resolve_client_context_name()
+    if keep_synced is not None:
+        if context_name is None:
+            error("Keeping agent memories in sync needs a named context: run sibyl init")
+            raise typer.Exit(1)
+        config_store.update_context(context_name, sync_agent_memories=keep_synced)
+        if not keep_synced:
+            if not json_out:
+                success(f"Context '{escape(context_name)}' stops syncing agent memories")
+            return
+    if sync:
+        context = config_store.get_context(context_name) if context_name else None
+        if context is None or not context.sync_agent_memories:
+            return
+
     def confirm(job: agent_memories.MemoryImport) -> bool:
         if dry_run:
             return False
+        if sync:
+            return True
         if yes or json_out or not (sys.stdin.isatty() and sys.stdout.isatty()):
             return True
         _print_memory_summary(job, title="Agent Memories (preview)")
@@ -356,6 +406,9 @@ def ingest_memories(
                 codex_dir=codex_dir,
                 share=share,
                 confirm=confirm,
+                context_name=context_name,
+                sync=sync,
+                record=not dry_run,
             )
         except SibylClientError as exc:
             handle_client_error(exc, invalid_request_label="Import rejected")
@@ -370,6 +423,10 @@ def ingest_memories(
                 info("No Claude Code or Codex memory files found on this machine")
             return
         summary = _memory_summary(job)
+        if sync and not json_out:
+            if summary["outcomes"]["failed"]:
+                raise typer.Exit(1)
+            return
         if json_out:
             print_json({**summary, "dry_run": dry_run, "applied": bool(job.results)})
         else:
@@ -379,6 +436,8 @@ def ingest_memories(
                 success("Imported agent memories")
             elif not job.pending:
                 success("Agent memories are already up to date")
+            if keep_synced:
+                info("Claude Code sessions will keep these in sync as they start")
         if summary["outcomes"]["failed"]:
             raise typer.Exit(1)
 

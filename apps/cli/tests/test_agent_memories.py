@@ -3,9 +3,11 @@ from __future__ import annotations
 import asyncio
 import json
 from pathlib import Path
+from collections.abc import Iterator
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import pytest
 from typer.testing import CliRunner
 
 from sibyl_cli import agent_memories as am
@@ -38,11 +40,13 @@ Outcome: success
 """
 
 
-def _claude_home(tmp_path: Path, *, repo: str = REPO) -> tuple[Path, Path]:
+def _claude_home(
+    tmp_path: Path, *, repo: str = REPO, feedback: str = CLAUDE_FEEDBACK
+) -> tuple[Path, Path]:
     home = tmp_path / ".claude"
     memory = home / "projects" / am.claude_slug(repo) / "memory"
     memory.mkdir(parents=True, exist_ok=True)
-    (memory / "devbox.md").write_text(CLAUDE_FEEDBACK)
+    (memory / "devbox.md").write_text(feedback)
     (memory / "MEMORY.md").write_text("- [Devbox](devbox.md) — index line\n")
     (memory / "blank.md").write_text("---\nname: blank\n---\n\n")
     if not (memory / "linked.md").is_symlink():
@@ -709,8 +713,16 @@ class _FakeClientContext:
 
 
 class TestCommand:
-    def _run(self, tmp_path: Path, client: MagicMock, *args: str) -> Any:
-        claude_home, _ = _claude_home(tmp_path)
+    @pytest.fixture(autouse=True)
+    def _config(self, tmp_path: Path) -> Iterator[None]:
+        with patch.object(config_store, "config_dir", return_value=tmp_path / ".sibyl"):
+            config_store.create_context("team", "https://sibyl.example.com")
+            yield
+
+    def _run(
+        self, tmp_path: Path, client: MagicMock, *args: str, feedback: str = CLAUDE_FEEDBACK
+    ) -> Any:
+        claude_home, _ = _claude_home(tmp_path, feedback=feedback)
         codex_home = _codex_home(tmp_path)
         client.explore = AsyncMock(return_value={"entities": [{"id": "project_1"}]})
         client._request = AsyncMock(return_value={"user": {"id": OWNER}})
@@ -776,3 +788,91 @@ class TestCommand:
         result = CliRunner().invoke(app, ["ingest", "memories", "--from", "cursor"])
         assert result.exit_code == 1
         assert "Unknown agent" in result.output
+
+    def test_a_dry_run_records_nothing_for_a_sync(self, tmp_path: Path) -> None:
+        result = self._run(tmp_path, FakeServer().client(), "--dry-run")
+        assert result.exit_code == 0, result.output
+        assert am.load_synced("team") == {}
+
+    def test_a_sync_does_nothing_until_the_context_keeps_memories_in_sync(
+        self, tmp_path: Path
+    ) -> None:
+        server = FakeServer()
+        client = server.client()
+        result = self._run(tmp_path, client, "--sync")
+        assert result.exit_code == 0, result.output
+        assert result.output.strip() == ""
+        client.memory_blame.assert_not_awaited()
+        assert server.records == 0
+
+    def test_keep_synced_turns_the_sync_on_and_a_quiet_sync_sends_no_requests(
+        self, tmp_path: Path
+    ) -> None:
+        server = FakeServer()
+        result = self._run(tmp_path, server.client(), "--yes", "--keep-synced")
+        assert result.exit_code == 0, result.output
+        context = config_store.get_context("team")
+        assert context is not None
+        assert context.sync_agent_memories is True
+
+        client = server.client()
+        again = self._run(tmp_path, client, "--sync")
+        assert again.exit_code == 0, again.output
+        assert _payload(again.output)["outcomes"]["unchanged"] == 3
+        client._request.assert_not_awaited()
+        client.memory_blame.assert_not_awaited()
+        assert server.records == 3
+
+    def test_a_sync_asks_the_server_only_about_the_file_that_changed(
+        self, tmp_path: Path
+    ) -> None:
+        server = FakeServer()
+        assert self._run(tmp_path, server.client(), "--yes", "--keep-synced").exit_code == 0
+        client = server.client()
+        result = self._run(
+            tmp_path, client, "--sync", feedback=CLAUDE_FEEDBACK + "\nAlso the bench.\n"
+        )
+        assert result.exit_code == 0, result.output
+        payload = _payload(result.output)
+        assert payload["outcomes"]["updated"] == 1
+        assert payload["outcomes"]["unchanged"] == 2
+        sources = {call.args[0] for call in client.memory_blame.await_args_list}
+        assert all(":claude-code:" in source for source in sources)
+
+    def test_no_keep_synced_only_changes_the_setting(self, tmp_path: Path) -> None:
+        server = FakeServer()
+        assert self._run(tmp_path, server.client(), "--yes", "--keep-synced").exit_code == 0
+        client = server.client()
+        result = self._run(tmp_path, client, "--no-keep-synced")
+        assert result.exit_code == 0, result.output
+        context = config_store.get_context("team")
+        assert context is not None
+        assert context.sync_agent_memories is False
+        client.memory_blame.assert_not_awaited()
+
+
+class TestFingerprint:
+    def test_a_new_link_or_pin_changes_the_fingerprint(self) -> None:
+        memory = _memory()
+
+        def print_for(project: str | None, context: str | None) -> str:
+            return am.fingerprint(
+                memory,
+                share=False,
+                project_for_path=lambda _: project,
+                context_for_path=lambda _: context,
+            )
+
+        base = print_for(None, None)
+        assert print_for(None, None) == base
+        assert print_for("project_1", None) != base
+        assert print_for(None, "team") != base
+        assert (
+            am.fingerprint(
+                memory,
+                share=True,
+                project_for_path=lambda _: None,
+                context_for_path=lambda _: None,
+            )
+            != base
+        )
