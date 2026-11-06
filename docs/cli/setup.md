@@ -41,8 +41,10 @@ Once the required steps pass, setup looks for the memory files Claude Code and C
 machine and asks whether to import them into your private memory on the server it just connected
 (see [`sibyl ingest memories`](./ingest.md#ingest-memories)). With `--yes` or without a terminal it
 only reports how many it found, because importing them is your call; pass `--import-memories` to
-import without asking. The import is optional: when it fails, setup still succeeds and says how to
-retry.
+import without asking. Accepting the import also keeps it in sync: each Claude Code session start
+imports new and changed files in the background (turn it off with
+`sibyl ingest memories --no-keep-synced`). The import is optional: when it fails, setup still
+succeeds and says how to retry.
 
 Plain `http://` is accepted only for this machine (`localhost`, `127.0.0.0/8`, `::1`), because
 sign-in sends a password or token over the connection. Use the server's https URL, or pass

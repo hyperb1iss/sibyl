@@ -317,7 +317,7 @@ def import_memories(ctx: config_store.Context, *, yes: bool, choice: bool | None
         console.print()
         question = (
             f"  Import {count} memories your coding agents keep on this machine "
-            "(Claude Code, Codex) into your private Sibyl memory?"
+            "(Claude Code, Codex) into your private Sibyl memory, and keep them in sync?"
         )
         if not typer.confirm(question, default=True):
             return Step("Memories", True, f"skipped; {later}")
@@ -344,7 +344,8 @@ def import_memories(ctx: config_store.Context, *, yes: bool, choice: bool | None
     detail = f"{imported} imported, {counts['unchanged']} already there"
     if counts["failed"]:
         return Step("Memories", False, f"{detail}, {counts['failed']} failed; {later}")
-    return Step("Memories", True, detail)
+    config_store.update_context(ctx.name, sync_agent_memories=True)
+    return Step("Memories", True, f"{detail}; kept in sync as Claude Code sessions start")
 
 
 def setup_cmd(
@@ -366,7 +367,10 @@ def setup_cmd(
         bool | None,
         typer.Option(
             "--import-memories/--no-import-memories",
-            help="Import the memories Claude Code and Codex keep on this machine (asks by default)",
+            help=(
+                "Import the memories Claude Code and Codex keep on this machine and keep "
+                "them in sync (asks by default)"
+            ),
         ),
     ] = None,
     insecure: Annotated[

@@ -66,17 +66,32 @@ Each file keeps a stable source ID, so running the import again is safe:
   copies are marked superseded.
 - A memory you retired in Sibyl (deleted, superseded, archived) is left alone.
 
+### Keeping it in sync
+
+Agents keep writing memories after the first import. `--keep-synced` turns on a sync for the
+context: every Claude Code session start runs `sibyl ingest memories --sync` in the background,
+which imports new and changed files from both agents. Each sync records a fingerprint of every file
+it settled (its content and where its repository routes) in `~/.sibyl/agent-memories/`, and only
+asks the server about files whose fingerprint changed, so a sync with nothing new sends no requests.
+`--no-keep-synced` turns it off without importing anything.
+
+The sync follows the context each session's directory resolves to, so a repository pinned to a
+context that does not keep memories in sync never syncs. Using Codex without Claude Code? Add
+`sibyl ingest memories --sync` to a Codex `SessionStart` hook in `~/.codex/hooks.json`.
+
 ### Options
 
-| Option         | Short | Default     | Description                                                     |
-| -------------- | ----- | ----------- | --------------------------------------------------------------- |
-| `--from`       |       | both        | Agent to import from: `claude-code` or `codex` (repeatable)     |
-| `--share`      |       | `false`     | Make memories from linked repositories visible to their project |
-| `--dry-run`    |       | `false`     | Show what would change without writing                          |
-| `--yes`        | `-y`  | `false`     | Don't ask before writing                                        |
-| `--claude-dir` |       | `~/.claude` | Claude Code home                                                |
-| `--codex-dir`  |       | `~/.codex`  | Codex home                                                      |
-| `--json`       | `-j`  | `false`     | JSON summary for scripting                                      |
+| Option          | Short | Default     | Description                                                           |
+| --------------- | ----- | ----------- | --------------------------------------------------------------------- |
+| `--from`        |       | both        | Agent to import from: `claude-code` or `codex` (repeatable)           |
+| `--share`       |       | `false`     | Make memories from linked repositories visible to their project       |
+| `--dry-run`     |       | `false`     | Show what would change without writing                                |
+| `--yes`         | `-y`  | `false`     | Don't ask before writing                                              |
+| `--keep-synced` |       |             | Keep this context in sync at session start; `--no-keep-synced` stops  |
+| `--sync`        |       | `false`     | What the hook runs: quiet, opted-in contexts only, changed files only |
+| `--claude-dir`  |       | `~/.claude` | Claude Code home                                                      |
+| `--codex-dir`   |       | `~/.codex`  | Codex home                                                            |
+| `--json`        | `-j`  | `false`     | JSON summary for scripting                                            |
 
 `--share` applies when a memory is first imported; share or promote an existing memory with the
 memory sharing commands.
@@ -94,7 +109,8 @@ sibyl ingest memories --from claude-code
 sibyl -C team ingest memories --share
 ```
 
-[`sibyl setup`](./setup.md) offers this import once a machine is connected.
+[`sibyl setup`](./setup.md) offers this import once a machine is connected, and keeps it in sync
+when you accept.
 
 ---
 
