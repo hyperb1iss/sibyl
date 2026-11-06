@@ -47,7 +47,7 @@ sibyl docker init [options]
 sibyl docker init
 
 # Pin a tag and add the worker + crawler services
-sibyl docker init --tag 1.4.13 --with-worker --with-crawler
+sibyl docker init --tag 1.5.0-rc.1 --with-worker --with-crawler
 
 # Regenerate over an existing install
 sibyl docker init --force
@@ -165,7 +165,7 @@ sibyl docker upgrade [options]
 ### Examples
 
 ```bash
-sibyl docker upgrade --tag 1.4.13
+sibyl docker upgrade --tag 1.5.0-rc.1
 
 # Move SurrealDB from v3 to v4 by converting its data in place
 sibyl docker upgrade --surreal-major

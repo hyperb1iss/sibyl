@@ -106,7 +106,7 @@ services:
     restart: unless-stopped
 
   backend:
-    image: ghcr.io/hyperb1iss/sibyl-api:${SIBYL_VERSION:-1.4.13}
+    image: ghcr.io/hyperb1iss/sibyl-api:${SIBYL_VERSION:-1.5.0-rc.1}
     container_name: sibyl-backend
     depends_on:
       surrealdb:
@@ -170,7 +170,7 @@ services:
     restart: unless-stopped
 
   frontend:
-    image: ghcr.io/hyperb1iss/sibyl-web:${SIBYL_VERSION:-1.4.13}
+    image: ghcr.io/hyperb1iss/sibyl-web:${SIBYL_VERSION:-1.5.0-rc.1}
     container_name: sibyl-frontend
     depends_on:
       backend:
