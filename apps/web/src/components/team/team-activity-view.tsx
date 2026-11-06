@@ -44,6 +44,8 @@ export interface TeamActivityViewProps {
   personId: string | null;
   onPersonChange: (userId: string | null) => void;
   currentUserId?: string;
+  /** Members' sibylnet inboxes by user id; empty when the server has none. */
+  inboxes?: Map<string, string>;
   /** Pins relative times, for stories and tests. */
   now?: number;
 }
@@ -80,6 +82,7 @@ export function TeamActivityView({
   personId,
   onPersonChange,
   currentUserId,
+  inboxes,
   now,
 }: TeamActivityViewProps) {
   const { data, isLoading, isFetching, isPlaceholderData, isError, refetch } = activity;
@@ -286,6 +289,7 @@ export function TeamActivityView({
                   selected={member.user_id === person?.user_id}
                   isYou={member.user_id === currentUserId}
                   onToggle={togglePerson}
+                  inbox={inboxes?.get(member.user_id)}
                   now={now}
                 />
               ))}
