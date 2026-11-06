@@ -779,8 +779,7 @@ async def plan_memory_import(
     owner = ""
     needs_server = any(
         memory.repo is None
-        or (config_store.resolve_context_for_path(memory.repo) or target_context)
-        == target_context
+        or (config_store.resolve_context_for_path(memory.repo) or target_context) == target_context
         for memory in changed
     )
     if needs_server:

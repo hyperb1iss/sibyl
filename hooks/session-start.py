@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import subprocess
@@ -33,7 +34,7 @@ def sync_agent_memories() -> None:
     The CLI does nothing unless this directory's context keeps agent memories
     in sync, and the hook never waits for it.
     """
-    try:
+    with contextlib.suppress(Exception):
         subprocess.Popen(
             ["sibyl", "ingest", "memories", "--sync"],
             stdin=subprocess.DEVNULL,
@@ -42,8 +43,6 @@ def sync_agent_memories() -> None:
             cwd=os.environ.get("CLAUDE_PROJECT_DIR", "."),
             start_new_session=True,
         )
-    except Exception:
-        pass
 
 
 def get_active_tasks() -> list[dict]:

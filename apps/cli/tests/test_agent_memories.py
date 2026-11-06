@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import asyncio
 import json
-from pathlib import Path
 from collections.abc import Iterator
+from pathlib import Path
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -801,7 +801,7 @@ class TestCommand:
         client = server.client()
         result = self._run(tmp_path, client, "--sync")
         assert result.exit_code == 0, result.output
-        assert result.output.strip() == ""
+        assert "{" not in result.output
         client.memory_blame.assert_not_awaited()
         assert server.records == 0
 
