@@ -380,7 +380,11 @@ def ingest_memories(
         if context_name is None:
             error("Keeping agent memories in sync needs a named context: run sibyl init")
             raise typer.Exit(1)
-        config_store.update_context(context_name, sync_agent_memories=keep_synced)
+        try:
+            config_store.update_context(context_name, sync_agent_memories=keep_synced)
+        except ValueError as exc:
+            error(escape(str(exc)))
+            raise typer.Exit(1) from exc
         if not keep_synced:
             if not json_out:
                 success(f"Context '{escape(context_name)}' stops syncing agent memories")

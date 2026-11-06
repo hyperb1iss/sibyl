@@ -917,6 +917,15 @@ class TestCommand:
         assert _payload(result.output)["outcomes"]["created"] == 3
         assert server.records == 6
 
+    def test_keep_synced_on_a_context_missing_from_the_config_is_an_error(
+        self, tmp_path: Path
+    ) -> None:
+        with patch("sibyl_cli.ingest.resolve_client_context_name", return_value="gone"):
+            result = CliRunner().invoke(app, ["ingest", "memories", "--keep-synced"])
+        assert result.exit_code == 1
+        assert "not found" in result.output
+        assert result.exception is None or isinstance(result.exception, SystemExit)
+
 
 class TestFingerprint:
     def test_a_new_link_or_pin_changes_the_fingerprint(self) -> None:
