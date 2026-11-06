@@ -1417,14 +1417,21 @@ async def test_revoke_api_key_rejects_missing_org(monkeypatch: pytest.MonkeyPatc
 
 
 @pytest.mark.asyncio
-async def test_me_uses_auth_context_payload() -> None:
+async def test_me_uses_auth_context_payload(monkeypatch: pytest.MonkeyPatch) -> None:
     ctx = _ctx()
+    handle = AsyncMock(return_value="nova")
+    monkeypatch.setattr(auth_routes, "get_member_handle", handle)
 
     response = await auth_routes.me(ctx=ctx)
 
     assert response["user"]["email"] == "nova@example.com"
     assert response["organization"]["slug"] == "sibyl"
     assert response["org_role"] == "admin"
+    assert response["handle"] == "nova"
+    assert response["inbox"] == "@nova"
+    handle.assert_awaited_once_with(
+        organization_id=str(ctx.organization.id), user_id=str(ctx.user.id)
+    )
 
 
 @pytest.mark.asyncio

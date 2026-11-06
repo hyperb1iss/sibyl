@@ -45,6 +45,13 @@ class OrgMemberChange:
 
 
 @dataclass
+class OrgMemberHandle:
+    org_id: UUID
+    user_id: UUID
+    handle: str
+
+
+@dataclass
 class InvitationRecord:
     id: UUID
     email: str

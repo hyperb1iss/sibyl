@@ -15,6 +15,7 @@ from sibyl.persistence.surreal.auth import build_surreal_auth_client
 from sibyl.persistence.surreal.auth_runtime import reset_server_instance_id_cache
 from sibyl_core.backends.surreal import bootstrap_auth_schema
 from sibyl_core.backends.surreal.auth_schema import backfill_api_key_scope_restrictions
+from sibyl_core.backends.surreal.member_handles import backfill_member_handles
 from sibyl_core.backends.surreal.records import (
     normalize_records as _normalize_records,
     query_error as _query_error,
@@ -587,9 +588,16 @@ def _restorable_auth_tables(
 
 
 async def _finalize_auth_restore(
-    client: Any, *, source_instance_id: str | None, api_key_ids: list[str]
+    client: Any,
+    *,
+    source_instance_id: str | None,
+    api_key_ids: list[str],
+    organization_id: str | None,
 ) -> None:
     await backfill_api_key_scope_restrictions(client, api_key_ids=api_key_ids)
+    # Memberships archived before handles existed, or merged from two teams,
+    # leave the restore without a handle or holding one twice.
+    await backfill_member_handles(client.execute_query, organization_id=organization_id)
     if source_instance_id is not None:
         identity_result = await client.execute_query(
             "UPSERT server_identity:singleton SET instance_id = $instance_id;",
@@ -683,6 +691,7 @@ async def restore_auth_archive_payload(
             client,
             source_instance_id=source_instance_id if not errors else None,
             api_key_ids=imported_api_key_ids,
+            organization_id=organization_id,
         )
         if dropped_fields:
             log.warning(
