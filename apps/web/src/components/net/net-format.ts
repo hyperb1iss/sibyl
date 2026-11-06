@@ -37,13 +37,19 @@ export function authorName(author: Pick<NetAuthor, 'name' | 'email' | 'user_id'>
 // ---------------------------------------------------------------------------
 
 /**
- * Characters that change how text around them displays without being seen:
- * C0 and C1 controls other than tab and newline, DEL, and the bidi
- * embeddings, overrides and isolates that can make a line read differently
- * than it is written.
+ * Characters that change how text around them displays, or hide text,
+ * without being seen: C0 and C1 controls other than tab and newline, DEL,
+ * zero-width characters (U+200B-U+200D, U+2060-U+2064, U+FEFF), the bidi
+ * marks, embeddings, overrides and isolates that can make a line read
+ * differently than it is written (U+061C, U+200E, U+200F, U+202A-U+202E,
+ * U+2066-U+2069), and Unicode tag characters (U+E0000-U+E007F), which carry
+ * text no font draws. Built from escapes so this source stays readable.
  */
-// biome-ignore lint/suspicious/noControlCharactersInRegex: finding control characters is the point
-const HIDDEN_CONTROL = /[\u0000-\u0008\u000B-\u001F\u007F-\u009F‪-‮⁦-⁩]/g;
+const HIDDEN_CONTROL = new RegExp(
+  '[\\u0000-\\u0008\\u000B-\\u001F\\u007F-\\u009F\\u061C\\u200B-\\u200F' +
+    '\\u202A-\\u202E\\u2060-\\u2064\\u2066-\\u2069\\uFEFF\\u{E0000}-\\u{E007F}]',
+  'gu'
+);
 
 export type BodySegment = { kind: 'text'; text: string } | { kind: 'control'; code: number };
 
@@ -82,23 +88,32 @@ const C0_NAMES = [
   'US',
 ];
 
-const BIDI_NAMES: Record<number, string> = {
-  8234: 'LRE',
-  8235: 'RLE',
-  8236: 'PDF',
-  8237: 'LRO',
-  8238: 'RLO',
-  8294: 'LRI',
-  8295: 'RLI',
-  8296: 'FSI',
-  8297: 'PDI',
-};
+const INVISIBLE_NAMES = new Map<number, string>([
+  [0x061c, 'ALM'],
+  [0x200b, 'ZWSP'],
+  [0x200c, 'ZWNJ'],
+  [0x200d, 'ZWJ'],
+  [0x200e, 'LRM'],
+  [0x200f, 'RLM'],
+  [0x202a, 'LRE'],
+  [0x202b, 'RLE'],
+  [0x202c, 'PDF'],
+  [0x202d, 'LRO'],
+  [0x202e, 'RLO'],
+  [0x2060, 'WJ'],
+  [0x2066, 'LRI'],
+  [0x2067, 'RLI'],
+  [0x2068, 'FSI'],
+  [0x2069, 'PDI'],
+  [0xfeff, 'BOM'],
+]);
 
-/** The short name a control character goes by: ESC, BEL, RLO, or its code point. */
+/** The short name a hidden character goes by: ESC, RLO, ZWSP, TAG, or its code point. */
 export function controlName(code: number): string {
   if (code < 0x20) return C0_NAMES[code];
   if (code === 0x7f) return 'DEL';
-  return BIDI_NAMES[code] ?? controlLabel(code);
+  if (code >= 0xe0000 && code <= 0xe007f) return 'TAG';
+  return INVISIBLE_NAMES.get(code) ?? controlLabel(code);
 }
 
 export function controlLabel(code: number): string {
@@ -117,11 +132,19 @@ export function bodySegments(body: string): BodySegment[] {
   for (const match of text.matchAll(HIDDEN_CONTROL)) {
     const index = match.index ?? 0;
     if (index > last) segments.push({ kind: 'text', text: text.slice(last, index) });
-    segments.push({ kind: 'control', code: match[0].charCodeAt(0) });
+    segments.push({ kind: 'control', code: match[0].codePointAt(0) ?? 0 });
     last = index + match[0].length;
   }
   if (last < text.length) segments.push({ kind: 'text', text: text.slice(last) });
   return segments;
+}
+
+/**
+ * Text for an attribute (a title, an accessible name) that cannot hold a
+ * rendered mark: each hidden character becomes its name in brackets.
+ */
+export function visibleText(text: string): string {
+  return text.replace(HIDDEN_CONTROL, char => `[${controlName(char.codePointAt(0) ?? 0)}]`);
 }
 
 export const BODY_PREVIEW_LINES = 8;
@@ -159,10 +182,12 @@ export function normalizeBody(body: string): string {
 }
 
 /**
- * Two messages belong to one run when the same author's same agent said the
- * same thing in the same place: same channel and thread, and bodies equal
- * once whitespace is collapsed and every number is masked, so "retry 3 of
- * 5" and "retry 4 of 5" match. Decisions never fold.
+ * Two messages belong to one run when one agent session said exactly the
+ * same thing in the same place: same channel, thread, author, agent label
+ * and session, and bodies equal once whitespace is trimmed and collapsed.
+ * Nothing looser: masking numbers would hide "12 failed" among "0 failed",
+ * so a retry counter that moves stays visible as its own rows. Decisions
+ * never fold.
  */
 function runKey(message: NetMessage): string | null {
   if (message.kind !== 'message') return null;
@@ -171,7 +196,8 @@ function runKey(message: NetMessage): string | null {
     message.thread ?? '',
     message.author.user_id,
     message.author.agent ?? '',
-    normalizeBody(message.body).replace(/\d+/g, '#'),
+    message.author.session ?? '',
+    normalizeBody(message.body),
   ].join('\u0000');
 }
 
@@ -181,12 +207,10 @@ export type NetListItem =
       kind: 'run';
       /** In list order. */
       messages: NetMessage[];
-      /** Every body is the same text, not only the same up to numbers. */
-      identical: boolean;
     };
 
 /**
- * Fold runs of `minRun` or more consecutive near-identical messages into one
+ * Fold runs of `minRun` or more consecutive identical messages into one
  * item, keeping list order. Anything that breaks the run (another author, a
  * different body, a decision) ends it.
  */
@@ -201,12 +225,7 @@ export function foldRuns(messages: NetMessage[], minRun = MIN_FOLD_RUN): NetList
     }
     const run = messages.slice(index, end);
     if (run.length >= minRun) {
-      const first = normalizeBody(run[0].body);
-      items.push({
-        kind: 'run',
-        messages: run,
-        identical: run.every(message => normalizeBody(message.body) === first),
-      });
+      items.push({ kind: 'run', messages: run });
     } else {
       for (const message of run) items.push({ kind: 'message', message });
     }

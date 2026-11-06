@@ -2,6 +2,9 @@
 
 import { useState } from 'react';
 import { initialsFor, toneIndexFor } from '@/components/team/person-avatar';
+import { formatActivityTime } from '@/lib/constants/activity';
+import { formatDateTime } from '@/lib/constants/formatting';
+import { useNow } from '@/lib/hooks/now';
 import {
   BODY_PREVIEW_LINES,
   bodyPreview,
@@ -9,6 +12,7 @@ import {
   channelParts,
   controlLabel,
   controlName,
+  visibleText,
 } from './net-format';
 
 /** A channel name with its `@` or `#` set back, so the name itself leads. */
@@ -53,17 +57,47 @@ export function AuthorMark({
   );
 }
 
+/**
+ * Short client-supplied text (a name, an agent label, a thread key) shown
+ * the way bodies are: hidden characters as marks, isolated in <bdi> so a
+ * right-to-left override cannot reorder it or the text around it.
+ */
+export function SafeText({ text }: { text: string }) {
+  return (
+    <bdi>
+      <PlainText text={text} />
+    </bdi>
+  );
+}
+
 /** A client-asserted agent label such as `claude-code`. */
 export function AgentLabel({ agent, session }: { agent: string; session?: string | null }) {
   return (
     <span
       title={
-        session ? `Agent label from the client. Session ${session}` : 'Agent label from the client'
+        session
+          ? `Agent label from the client. Session ${visibleText(session)}`
+          : 'Agent label from the client'
       }
       className="inline-flex max-w-[12rem] items-center rounded border border-sc-fg-subtle/30 bg-sc-bg-highlight px-1.5 font-mono text-[10.5px] leading-[1.125rem] text-sc-fg-secondary"
     >
-      <span className="truncate">{agent}</span>
+      <span className="truncate">
+        <SafeText text={agent} />
+      </span>
     </span>
+  );
+}
+
+/**
+ * "3m ago", kept current by the shared clock. Its own component, so the tick
+ * re-renders only the timestamps, never the rows around them.
+ */
+export function RelativeTime({ iso, className }: { iso: string; className?: string }) {
+  const now = useNow();
+  return (
+    <time dateTime={iso} title={formatDateTime(iso)} className={className}>
+      {formatActivityTime(iso, now)}
+    </time>
   );
 }
 
@@ -77,7 +111,7 @@ function PlainText({ text }: { text: string }) {
         ) : (
           <abbr
             key={index}
-            title={`Control character ${controlLabel(segment.code)}`}
+            title={`Hidden character ${controlLabel(segment.code)}`}
             className="mx-px inline-block rounded-sm border border-sc-yellow/30 bg-sc-yellow/10 px-1 align-[0.1em] font-mono text-[0.68em] leading-normal font-semibold text-sc-yellow no-underline"
           >
             {controlName(segment.code)}

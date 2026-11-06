@@ -2,13 +2,11 @@
 
 import Link from 'next/link';
 import type { ReactNode } from 'react';
-import { useState } from 'react';
+import { useId, useState } from 'react';
 import { Skeleton } from '@/components/ui/spinner';
 import type { NetChannel, NetThread, NetWatcher } from '@/lib/api/net';
-import { formatActivityTime } from '@/lib/constants/activity';
-import { useNow } from '@/lib/hooks/now';
-import { listenerLabel, netHref, plural } from './net-format';
-import { ChannelName } from './net-primitives';
+import { listenerLabel, netHref, plural, visibleText } from './net-format';
+import { ChannelName, RelativeTime, SafeText } from './net-primitives';
 
 /** Threads listed under the open channel before "Show more". */
 export const THREADS_SHOWN = 8;
@@ -67,6 +65,7 @@ function ThreadTree({
   onNavigate?: () => void;
 }) {
   const [showAll, setShowAll] = useState(false);
+  const listId = useId();
   if (threads === undefined) {
     return (
       <div className="mt-1 mb-1.5 ml-4 space-y-2 border-l border-sc-fg-subtle/20 py-1 pl-3">
@@ -88,6 +87,7 @@ function ThreadTree({
 
   return (
     <ul
+      id={listId}
       aria-label={`Threads in ${channel}`}
       className="mt-0.5 mb-1.5 ml-4 space-y-px border-l border-sc-fg-subtle/20 pl-1.5"
     >
@@ -99,7 +99,7 @@ function ThreadTree({
               href={netHref(channel, thread.thread)}
               onClick={onNavigate}
               aria-current={current ? 'page' : undefined}
-              title={thread.thread}
+              title={visibleText(thread.thread)}
               className={`relative flex items-center justify-between gap-2 rounded-md px-2 py-1 transition-colors ${ROW_FOCUS} ${
                 current
                   ? 'bg-sc-bg-highlight text-sc-fg-primary'
@@ -112,7 +112,9 @@ function ThreadTree({
                   className="absolute inset-y-1 left-0 w-0.5 rounded-full bg-sc-purple"
                 />
               )}
-              <span className="min-w-0 truncate font-mono text-[11px]">{thread.thread}</span>
+              <span className="min-w-0 truncate font-mono text-[11px]">
+                <SafeText text={thread.thread} />
+              </span>
               <span className="shrink-0 text-[11px] tabular-nums">
                 {thread.message_count.toLocaleString('en-US')}
               </span>
@@ -124,6 +126,8 @@ function ThreadTree({
         <li>
           <button
             type="button"
+            aria-expanded={showAll}
+            aria-controls={listId}
             onClick={() => setShowAll(value => !value)}
             className={`w-full rounded-md px-2 py-1 text-left text-[11px] font-medium text-sc-cyan hover:bg-sc-bg-highlight/60 ${ROW_FOCUS}`}
           >
@@ -159,7 +163,6 @@ export function ChannelList({
   onNavigate,
   showHeading = true,
 }: ChannelListProps) {
-  const now = useNow();
   const total = channels.reduce((sum, channel) => sum + channel.message_count, 0);
 
   return (
@@ -203,9 +206,7 @@ export function ChannelList({
                 <span className="mt-0.5 flex flex-wrap items-center gap-x-1.5 text-[11px] text-sc-fg-muted">
                   {[
                     channel.last_message_at && (
-                      <time key="last" dateTime={channel.last_message_at}>
-                        {formatActivityTime(channel.last_message_at, now)}
-                      </time>
+                      <RelativeTime key="last" iso={channel.last_message_at} />
                     ),
                     channel.thread_count > 0 && (
                       <span key="threads">{plural(channel.thread_count, 'thread')}</span>
@@ -213,7 +214,9 @@ export function ChannelList({
                     listeners.length > 0 && (
                       <span
                         key="listening"
-                        title={listeners.map(listenerLabel).join('\n')}
+                        title={listeners
+                          .map(listener => visibleText(listenerLabel(listener)))
+                          .join('\n')}
                         className="text-sc-fg-secondary"
                       >
                         {listeners.length} listening

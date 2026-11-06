@@ -91,6 +91,7 @@ const LOOP = [
       thread: 'deploy:staging',
       body: 'Deploy check still red on staging. Retrying.',
       created_at: `2026-11-05T10:10:0${n}Z`,
+      author: { ...ADA, agent: 'claude-code', session: 'ada-deploy-loop' },
     })
   ),
   message(
@@ -121,6 +122,24 @@ const CHANNELS: NetChannelsResponse = {
       last_message_at: '2026-11-05T10:06:00Z',
     },
   ],
+};
+
+/** A thread key written backwards behind a right-to-left override. */
+const SPOOFED_THREAD = '\u202e24#ppa/emca:hg';
+
+const BUSY_THREADS: NetThreadsResponse = {
+  threads: Array.from({ length: 11 }, (_, n) => ({
+    channel: '#busy',
+    thread: n === 10 ? SPOOFED_THREAD : `task:${n + 1}`,
+    project_id: null,
+    message_count: 1,
+    first_message_at: '2026-11-05T10:00:00Z',
+    last_message_at: `2026-11-05T10:${String(59 - n).padStart(2, '0')}:00Z`,
+    reflected_through: null,
+    reflection_source_id: null,
+    reflection_error: null,
+    reflection_skipped: [],
+  })),
 };
 
 const THREADS: NetThreadsResponse = {
@@ -213,10 +232,29 @@ describe('NetContent', () => {
           if (channel === '#reviews') return json(feed(thread ? REVIEW_THREAD : REVIEW_THREAD));
           if (channel === '@ada') return json(feed(INBOX));
           if (channel === '@grace') return json(feed(LOOP));
+          if (channel === '#busy')
+            return json(
+              feed([
+                message(
+                  {
+                    channel: '#busy',
+                    thread: SPOOFED_THREAD,
+                    body: 'Approved.',
+                    created_at: '2026-11-05T10:09:00Z',
+                  },
+                  { ...GRACE, name: 'Grace\u200bHopper' },
+                  'co\u202edex'
+                ),
+              ])
+            );
           return json(feed([]));
         }
-        case '/api/net/threads':
-          return json(url.searchParams.get('channel') === '#reviews' ? THREADS : { threads: [] });
+        case '/api/net/threads': {
+          const asked = url.searchParams.get('channel');
+          if (asked === '#reviews') return json(THREADS);
+          if (asked === '#busy') return json(BUSY_THREADS);
+          return json({ threads: [] });
+        }
         case '/api/net/presence':
           return typeof presence === 'function' ? presence() : presence;
         case '/api/search/explore':
@@ -287,11 +325,11 @@ describe('NetContent', () => {
     expect(hostile?.querySelector('script, img')).toBeNull();
     expect(hostile?.textContent).toContain('<img src=x onerror="window.__pwned = true">');
     expect((window as { __pwned?: boolean }).__pwned).toBeUndefined();
-    const marks = within(hostile as HTMLElement).getAllByTitle(/^Control character/);
+    const marks = within(hostile as HTMLElement).getAllByTitle(/^Hidden character/);
     expect(marks.map(mark => mark.getAttribute('title'))).toEqual([
-      'Control character U+001B',
-      'Control character U+001B',
-      'Control character U+202E',
+      'Hidden character U+001B',
+      'Hidden character U+001B',
+      'Hidden character U+202E',
     ]);
   });
 
@@ -441,6 +479,55 @@ describe('NetContent', () => {
     );
     // The day still counts every message.
     expect(within(stream).getByRole('heading', { name: /8$/ })).toBeInTheDocument();
+  });
+
+  it('shows a spoofed thread key, name and agent as written, marks and all', async () => {
+    channels = {
+      channels: [
+        ...CHANNELS.channels,
+        {
+          channel: '#busy',
+          message_count: 1,
+          thread_count: 11,
+          last_message_at: '2026-11-05T10:59:00Z',
+        },
+      ],
+    };
+    const { user } = renderNet(`channel=%23busy&thread=${encodeURIComponent(SPOOFED_THREAD)}`);
+
+    const heading = await screen.findByRole('heading', { level: 2, name: /emca:hg/ });
+    // Isolated, with the override drawn as a mark instead of reversing the key.
+    const isolate = heading.querySelector('bdi');
+    expect(isolate).not.toBeNull();
+    expect(within(isolate as HTMLElement).getByTitle('Hidden character U+202E')).toHaveTextContent(
+      'RLO'
+    );
+    expect(heading.textContent).toBe('RLO24#ppa/emca:hg');
+
+    const row = await screen.findByRole('article', { name: 'Message from Grace[ZWSP]Hopper' });
+    expect(within(row).getByTitle('Hidden character U+200B')).toBeInTheDocument();
+    expect(row.querySelectorAll('bdi').length).toBeGreaterThanOrEqual(2);
+
+    // The thread list folds past eight; its toggle says whether it is open.
+    const nav = screen.getByRole('navigation', { name: 'Channels' });
+    const more = await within(nav).findByRole('button', { name: /Show .* more thread/ });
+    expect(more).toHaveAttribute('aria-expanded', 'false');
+    expect(within(nav).getByRole('link', { name: /emca:hg/ })).toHaveAttribute(
+      'title',
+      '[RLO]24#ppa/emca:hg'
+    );
+    await user.click(more);
+    expect(within(nav).getByRole('button', { name: 'Show fewer threads' })).toHaveAttribute(
+      'aria-expanded',
+      'true'
+    );
+  });
+
+  it('reads a channel named in any case as the lowercase channel it is', async () => {
+    renderNet('channel=%40ADA');
+
+    expect(await screen.findByRole('region', { name: '@ada' })).toBeInTheDocument();
+    expect(requests('/api/net/feed').at(-1)?.searchParams.get('channel')).toBe('@ada');
   });
 
   it('teaches the CLI when the organization has no traffic', async () => {

@@ -18,9 +18,17 @@ import {
   netHref,
   plural,
   spanPhrase,
+  visibleText,
 } from './net-format';
 import { NetMessageList } from './net-message';
-import { AgentLabel, AuthorMark, ChannelName, CommandLine } from './net-primitives';
+import {
+  AgentLabel,
+  AuthorMark,
+  ChannelName,
+  CommandLine,
+  RelativeTime,
+  SafeText,
+} from './net-primitives';
 
 export interface NetQueryState<T> {
   data: T | undefined;
@@ -132,7 +140,9 @@ function PeopleRow({
             className="inline-flex min-w-0 items-center gap-1.5"
           >
             <AuthorMark name={person.name} seed={person.seed} size="sm" />
-            <span className="truncate text-sc-fg-secondary">{person.name}</span>
+            <span className="truncate text-sc-fg-secondary">
+              <SafeText text={person.name} />
+            </span>
             {person.agent && <AgentLabel agent={person.agent} />}
           </span>
         ))}
@@ -157,7 +167,7 @@ function PresenceLine({ presence }: { presence: ChannelPresence }) {
     name: authorName({ name: watcher.name, email: null, user_id: watcher.user_id }),
     seed: watcher.user_id,
     agent: watcher.agent,
-    title: `${listenerLabel(watcher)}, read ${formatActivityTime(watcher.last_seen, now)}${
+    title: `${visibleText(listenerLabel(watcher))}, read ${formatActivityTime(watcher.last_seen, now)}${
       watcher.channel === null ? ' (reads every channel)' : ''
     }`,
   }));
@@ -166,7 +176,7 @@ function PresenceLine({ presence }: { presence: ChannelPresence }) {
     name: authorName({ name: poster.name, email: null, user_id: poster.user_id }),
     seed: poster.user_id,
     agent: poster.agent,
-    title: `${listenerLabel(poster)}, posted ${formatActivityTime(poster.last_post_at, now)}`,
+    title: `${visibleText(listenerLabel(poster))}, posted ${formatActivityTime(poster.last_post_at, now)}`,
   }));
   return (
     <dl className="mt-2.5 grid gap-y-1 text-xs sm:grid-cols-[max-content_minmax(0,1fr)] sm:gap-x-3 sm:gap-y-1.5">
@@ -200,7 +210,6 @@ export interface ChannelStreamProps {
 }
 
 export function ChannelStream({ channel, channels, feed, presence }: ChannelStreamProps) {
-  const now = useNow();
   const summary = channel ? channels.find(row => row.channel === channel) : undefined;
   const messageTotal = channel
     ? (summary?.message_count ?? 0)
@@ -244,10 +253,7 @@ export function ChannelStream({ channel, channels, feed, presence }: ChannelStre
               <>
                 <Dot />
                 <span>
-                  last post{' '}
-                  <time dateTime={lastAt} title={formatDateTime(lastAt)}>
-                    {formatActivityTime(lastAt, now)}
-                  </time>
+                  last post <RelativeTime iso={lastAt} />
                 </span>
               </>
             )}
@@ -363,7 +369,6 @@ export function ThreadView({
   projectNames,
   presence,
 }: ThreadViewProps) {
-  const now = useNow();
   const [detailsOpen, setDetailsOpen] = useState(false);
   const detailsId = useId();
   const messages = feed.data?.messages ?? [];
@@ -391,7 +396,7 @@ export function ThreadView({
             id="net-thread-heading"
             className="min-w-0 font-mono text-base font-semibold break-all text-sc-fg-primary"
           >
-            {thread}
+            <SafeText text={thread} />
           </h2>
           <div className="flex shrink-0 items-center gap-2">
             {remembered && (
@@ -434,13 +439,7 @@ export function ThreadView({
               <Meta>
                 {info?.last_message_at && (
                   <span>
-                    last post{' '}
-                    <time
-                      dateTime={info.last_message_at}
-                      title={formatDateTime(info.last_message_at)}
-                    >
-                      {formatActivityTime(info.last_message_at, now)}
-                    </time>
+                    last post <RelativeTime iso={info.last_message_at} />
                   </span>
                 )}
                 {projectName && (

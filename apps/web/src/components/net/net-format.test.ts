@@ -14,6 +14,7 @@ import {
   presenceFor,
   runSpanPhrase,
   spanPhrase,
+  visibleText,
 } from './net-format';
 import { shellChannel } from './net-panes';
 
@@ -35,6 +36,20 @@ describe('bodySegments', () => {
     expect(bodySegments('<script>alert(1)</script>')).toEqual([
       { kind: 'text', text: '<script>alert(1)</script>' },
     ]);
+  });
+
+  it('marks zero-width, bidi mark and tag characters too', () => {
+    const tags = String.fromCodePoint(0xe0041, 0xe0042);
+    const codes = bodySegments(`a\u200bb\u200c\u200d\u2060\ufeff\u200e\u200f\u061c${tags}z`)
+      .filter(segment => segment.kind === 'control')
+      .map(segment => (segment.kind === 'control' ? controlName(segment.code) : ''));
+    expect(codes).toEqual(['ZWSP', 'ZWNJ', 'ZWJ', 'WJ', 'BOM', 'LRM', 'RLM', 'ALM', 'TAG', 'TAG']);
+  });
+
+  it('spells hidden characters out for attributes that cannot hold a mark', () => {
+    expect(visibleText('\u202e24#ppa/emca:hg')).toBe('[RLO]24#ppa/emca:hg');
+    expect(visibleText('Ada\u200bLovelace')).toBe('Ada[ZWSP]Lovelace');
+    expect(visibleText('gh:acme/app#42')).toBe('gh:acme/app#42');
   });
 
   it('names controls the way a terminal person reads them', () => {
@@ -217,19 +232,65 @@ describe('foldRuns', () => {
       Array.from({ length: 6 }, () => msg('Deploy check still red on staging. Retrying.'))
     );
     expect(items).toHaveLength(1);
-    expect(items[0]).toMatchObject({ kind: 'run', identical: true });
+    expect(items[0]).toMatchObject({ kind: 'run' });
     expect(shape(items)).toEqual([6]);
   });
 
   it('ignores outer and repeated whitespace', () => {
     expect(normalizeBody('  Retrying.\n\n now  ')).toBe('Retrying. now');
     const items = foldRuns([msg('Retrying now'), msg('Retrying   now\n'), msg(' Retrying\nnow')]);
-    expect(items).toEqual([expect.objectContaining({ kind: 'run', identical: true })]);
+    expect(items).toEqual([expect.objectContaining({ kind: 'run' })]);
   });
 
-  it('folds messages that differ only in their numbers, and says they are not identical', () => {
-    const items = foldRuns([msg('Retry 1 of 5'), msg('Retry 2 of 5'), msg('Retry 13 of 15')]);
-    expect(items).toEqual([expect.objectContaining({ kind: 'run', identical: false })]);
+  it('never folds messages that differ only in their numbers', () => {
+    // Masking digits would bury the one row that matters among the rest.
+    const failures = foldRuns([
+      msg('0 failed'),
+      msg('0 failed'),
+      msg('12 failed'),
+      msg('0 failed'),
+      msg('0 failed'),
+    ]);
+    expect(shape(failures)).toEqual(['0 failed', '0 failed', '12 failed', '0 failed', '0 failed']);
+    const approvals = foldRuns([
+      msg('PR 12 approved'),
+      msg('PR 13 approved'),
+      msg('PR 14 approved'),
+    ]);
+    expect(approvals.every(item => item.kind === 'message')).toBe(true);
+  });
+
+  it('keeps two sessions of one agent apart', () => {
+    const items = foldRuns([
+      msg('Retrying.', {
+        author: {
+          user_id: 'u-ada',
+          name: 'u-ada',
+          email: null,
+          agent: 'claude-code',
+          session: 's1',
+        },
+      }),
+      msg('Retrying.', {
+        author: {
+          user_id: 'u-ada',
+          name: 'u-ada',
+          email: null,
+          agent: 'claude-code',
+          session: 's2',
+        },
+      }),
+      msg('Retrying.', {
+        author: {
+          user_id: 'u-ada',
+          name: 'u-ada',
+          email: null,
+          agent: 'claude-code',
+          session: 's1',
+        },
+      }),
+    ]);
+    expect(items.every(item => item.kind === 'message')).toBe(true);
   });
 
   it('leaves a run shorter than the minimum alone', () => {

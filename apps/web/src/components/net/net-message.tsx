@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useId, useMemo, useState } from 'react';
+import { memo, type ReactNode, useId, useMemo, useState } from 'react';
 import { ArrowRight, RefreshDouble } from '@/components/ui/icons';
 import type { NetMessage } from '@/lib/api/net';
 import { activityDayKey, formatActivityDay, formatActivityTime } from '@/lib/constants/activity';
@@ -14,8 +14,9 @@ import {
   type NetListItem,
   netHref,
   runSpanPhrase,
+  visibleText,
 } from './net-format';
-import { AgentLabel, AuthorMark, ChannelName, MessageBody } from './net-primitives';
+import { AgentLabel, AuthorMark, ChannelName, MessageBody, SafeText } from './net-primitives';
 
 /**
  * Where a list sits decides what each row repeats: the org-wide stream names
@@ -80,23 +81,35 @@ function MessageContext({ message, scope }: { message: NetMessage; scope: NetLis
       {showThread && message.thread && (
         <Link
           href={netHref(message.channel, message.thread)}
-          title={`Open thread ${message.thread}`}
+          title={`Open thread ${visibleText(message.thread)}`}
           className={`inline-flex min-w-0 max-w-[18rem] rounded font-mono text-[11px] text-sc-cyan hover:underline ${CHIP_FOCUS}`}
         >
-          <span className="truncate">{message.thread}</span>
+          <span className="truncate">
+            <SafeText text={message.thread} />
+          </span>
         </Link>
       )}
     </div>
   );
 }
 
-export function NetMessageRow({ message, scope }: { message: NetMessage; scope: NetListScope }) {
+/**
+ * One message. Memoized: rows only re-render when their message changes,
+ * and React Query keeps unchanged messages the same objects across refetches.
+ */
+export const NetMessageRow = memo(function NetMessageRow({
+  message,
+  scope,
+}: {
+  message: NetMessage;
+  scope: NetListScope;
+}) {
   const name = authorName(message.author);
   const decision = message.kind === 'decision';
 
   return (
     <article
-      aria-label={decision ? `Decision from ${name}` : `Message from ${name}`}
+      aria-label={`${decision ? 'Decision' : 'Message'} from ${visibleText(name)}`}
       className={`relative grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 px-4 py-2.5 ${
         decision ? 'bg-sc-purple/[0.045]' : ''
       }`}
@@ -107,7 +120,9 @@ export function NetMessageRow({ message, scope }: { message: NetMessage; scope: 
       <AuthorMark name={name} seed={message.author.user_id} />
       <div className="min-w-0">
         <header className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5">
-          <span className="min-w-0 truncate text-sm font-semibold text-sc-fg-primary">{name}</span>
+          <span className="min-w-0 truncate text-sm font-semibold text-sc-fg-primary">
+            <SafeText text={name} />
+          </span>
           {message.author.agent && (
             <AgentLabel agent={message.author.agent} session={message.author.session} />
           )}
@@ -130,22 +145,14 @@ export function NetMessageRow({ message, scope }: { message: NetMessage; scope: 
       </div>
     </article>
   );
-}
+});
 
 /**
  * One author's agent saying the same thing again and again, folded into a
  * row with a count: the shape a loop takes. Yellow, because it asks for a
  * look, and quiet, because it is not yet a failure.
  */
-export function NetRunRow({
-  messages,
-  identical,
-  scope,
-}: {
-  messages: NetMessage[];
-  identical: boolean;
-  scope: NetListScope;
-}) {
+function NetRunRowView({ messages, scope }: { messages: NetMessage[]; scope: NetListScope }) {
   const [expanded, setExpanded] = useState(false);
   const listId = useId();
   const latest = messages.reduce((newest, message) =>
@@ -153,18 +160,20 @@ export function NetRunRow({
   );
   const name = authorName(latest.author);
   const count = messages.length;
-  const summary = `${identical ? 'Same message' : 'Near-identical messages'} ${count} times ${runSpanPhrase(messages)}`;
+  const summary = `Same message ${count} times ${runSpanPhrase(messages)}`;
 
   return (
     <article
-      aria-label={`${name} repeated ${identical ? 'a message' : 'near-identical messages'} ${count} times`}
+      aria-label={`${visibleText(name)} repeated a message ${count} times`}
       className="relative grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 px-4 py-2.5"
     >
       <span aria-hidden="true" className="absolute inset-y-0 left-0 w-0.5 bg-sc-yellow/70" />
       <AuthorMark name={name} seed={latest.author.user_id} />
       <div className="min-w-0">
         <header className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5">
-          <span className="min-w-0 truncate text-sm font-semibold text-sc-fg-primary">{name}</span>
+          <span className="min-w-0 truncate text-sm font-semibold text-sc-fg-primary">
+            <SafeText text={name} />
+          </span>
           {latest.author.agent && (
             <AgentLabel agent={latest.author.agent} session={latest.author.session} />
           )}
@@ -185,7 +194,7 @@ export function NetRunRow({
         {expanded && (
           <ol
             id={listId}
-            aria-label={`${count} messages from ${name}`}
+            aria-label={`${count} messages from ${visibleText(name)}`}
             className="mt-1.5 space-y-1.5 border-l border-sc-yellow/30 pl-3"
           >
             {messages.map(message => (
@@ -232,11 +241,50 @@ export function NetRunRow({
   );
 }
 
+/**
+ * Memoized on the run's message objects, not the array holding them: the
+ * fold builds a new array on every pass, but the messages inside are the
+ * same objects until one of them changes.
+ */
+export const NetRunRow = memo(
+  NetRunRowView,
+  (previous, next) =>
+    previous.scope === next.scope &&
+    previous.messages.length === next.messages.length &&
+    previous.messages.every((message, index) => message === next.messages[index])
+);
+
 interface DayGroup {
   key: string;
-  label: string;
+  /** A message from the day, to name it by. */
+  sample: string;
   count: number;
   items: NetListItem[];
+}
+
+/**
+ * One day's heading and rows. The heading reads the shared clock itself, so
+ * "Today" turning into "Yesterday" re-renders the heading, not the rows.
+ */
+function DaySection({
+  sample,
+  count,
+  children,
+}: {
+  sample: string;
+  count: number;
+  children: ReactNode;
+}) {
+  const label = formatActivityDay(sample, useNow());
+  return (
+    <section aria-label={label}>
+      <h3 className="flex items-center justify-between border-b border-sc-fg-subtle/10 bg-sc-bg-highlight/50 px-4 py-1.5 text-[11px] font-semibold tracking-wider text-sc-fg-muted uppercase">
+        <span>{label}</span>
+        <span className="font-medium tabular-nums">{count}</span>
+      </h3>
+      {children}
+    </section>
+  );
 }
 
 // A run is keyed by its oldest message, which stays put while newer repeats
@@ -261,45 +309,39 @@ export function NetMessageList({
   messages: NetMessage[];
   scope: NetListScope;
 }) {
-  const now = useNow();
   const groups = useMemo(() => {
     const ordered = scope === 'thread' ? messages : [...messages].reverse();
-    const days: { key: string; label: string; messages: NetMessage[] }[] = [];
+    const days: { key: string; messages: NetMessage[] }[] = [];
     for (const message of ordered) {
       const key = activityDayKey(message.created_at);
       const last = days[days.length - 1];
       if (last && last.key === key) last.messages.push(message);
-      else
-        days.push({ key, label: formatActivityDay(message.created_at, now), messages: [message] });
+      else days.push({ key, messages: [message] });
     }
     return days.map<DayGroup>(day => ({
       key: day.key,
-      label: day.label,
+      sample: day.messages[0].created_at,
       count: day.messages.length,
       items: foldRuns(day.messages),
     }));
-  }, [messages, scope, now]);
+  }, [messages, scope]);
 
   return (
     <div className="divide-y divide-sc-fg-subtle/10">
       {groups.map(group => (
-        <section key={group.key} aria-label={group.label}>
-          <h3 className="flex items-center justify-between border-b border-sc-fg-subtle/10 bg-sc-bg-highlight/50 px-4 py-1.5 text-[11px] font-semibold tracking-wider text-sc-fg-muted uppercase">
-            <span>{group.label}</span>
-            <span className="font-medium tabular-nums">{group.count}</span>
-          </h3>
+        <DaySection key={group.key} sample={group.sample} count={group.count}>
           <ol className="divide-y divide-sc-fg-subtle/10">
             {group.items.map(item => (
               <li key={itemKey(item)}>
                 {item.kind === 'message' ? (
                   <NetMessageRow message={item.message} scope={scope} />
                 ) : (
-                  <NetRunRow messages={item.messages} identical={item.identical} scope={scope} />
+                  <NetRunRow messages={item.messages} scope={scope} />
                 )}
               </li>
             ))}
           </ol>
-        </section>
+        </DaySection>
       ))}
     </div>
   );
