@@ -720,7 +720,12 @@ class TestCommand:
             yield
 
     def _run(
-        self, tmp_path: Path, client: MagicMock, *args: str, feedback: str = CLAUDE_FEEDBACK
+        self,
+        tmp_path: Path,
+        client: MagicMock,
+        *args: str,
+        feedback: str = CLAUDE_FEEDBACK,
+        pins: dict[str, str] | None = None,
     ) -> Any:
         claude_home, _ = _claude_home(tmp_path, feedback=feedback)
         codex_home = _codex_home(tmp_path)
@@ -730,7 +735,7 @@ class TestCommand:
             patch("sibyl_cli.ingest.get_client", return_value=_FakeClientContext(client)),
             patch("sibyl_cli.ingest.resolve_client_context_name", return_value="team"),
             patch.object(config_store, "get_path_mappings", return_value={REPO: "project_1"}),
-            patch.object(config_store, "get_path_context_mappings", return_value={}),
+            patch.object(config_store, "get_path_context_mappings", return_value=pins or {}),
         ):
             return CliRunner().invoke(
                 app,
@@ -823,9 +828,7 @@ class TestCommand:
         client.memory_blame.assert_not_awaited()
         assert server.records == 3
 
-    def test_a_sync_asks_the_server_only_about_the_file_that_changed(
-        self, tmp_path: Path
-    ) -> None:
+    def test_a_sync_asks_the_server_only_about_the_file_that_changed(self, tmp_path: Path) -> None:
         server = FakeServer()
         assert self._run(tmp_path, server.client(), "--yes", "--keep-synced").exit_code == 0
         client = server.client()
@@ -848,6 +851,22 @@ class TestCommand:
         context = config_store.get_context("team")
         assert context is not None
         assert context.sync_agent_memories is False
+        client.memory_blame.assert_not_awaited()
+
+    def test_a_sync_still_counts_memories_pinned_elsewhere_as_elsewhere(
+        self, tmp_path: Path
+    ) -> None:
+        server = FakeServer()
+        pins = {REPO: "other"}
+        first = self._run(tmp_path, server.client(), "--yes", "--keep-synced", pins=pins)
+        assert first.exit_code == 0, first.output
+        client = server.client()
+        again = self._run(tmp_path, client, "--sync", pins=pins)
+        assert again.exit_code == 0, again.output
+        payload = _payload(again.output)
+        assert payload["elsewhere"] == {"other": 2}
+        assert payload["outcomes"]["unchanged"] == 1
+        client._request.assert_not_awaited()
         client.memory_blame.assert_not_awaited()
 
 

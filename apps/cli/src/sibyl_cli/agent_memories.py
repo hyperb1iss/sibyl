@@ -768,21 +768,27 @@ async def plan_memory_import(
         )
         for memory in found.memories
     }
+
+    def routes_here(memory: AgentMemory) -> bool:
+        if memory.repo is None:
+            return True
+        pinned = config_store.resolve_context_for_path(memory.repo)
+        return not pinned or pinned == target_context
+
+    # Memories pinned to another context always go through the plan, which
+    # routes them locally, so the summary keeps counting them as elsewhere.
     settled = [
         memory
         for memory in found.memories
-        if synced is not None and synced.get(memory.file_key) == fingerprints[memory.file_key]
+        if synced is not None
+        and synced.get(memory.file_key) == fingerprints[memory.file_key]
+        and routes_here(memory)
     ]
     settled_keys = {memory.file_key for memory in settled}
     changed = [memory for memory in found.memories if memory.file_key not in settled_keys]
     known: set[str] = set()
     owner = ""
-    needs_server = any(
-        memory.repo is None
-        or (config_store.resolve_context_for_path(memory.repo) or target_context) == target_context
-        for memory in changed
-    )
-    if needs_server:
+    if any(routes_here(memory) for memory in changed):
         me = await client._request("GET", "/auth/me", _replay_pending=False)
         user = me.get("user") if isinstance(me, dict) else None
         owner = str(user.get("id") or "") if isinstance(user, dict) else ""
