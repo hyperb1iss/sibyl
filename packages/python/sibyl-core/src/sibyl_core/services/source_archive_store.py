@@ -8,7 +8,9 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
 
+from sibyl_core.backends.surreal.in_clumps import clumped
 from sibyl_core.backends.surreal.records import normalize_records
+from sibyl_core.backends.surreal.schema_derivations import DERIVATION_TARGET_ID_INDEX
 from sibyl_core.backends.surreal.schema_version import SurrealExecute
 from sibyl_core.embeddings.provenance import mark_unverified_vector
 from sibyl_core.memory_pipeline.observations import SourceKind
@@ -308,11 +310,69 @@ def _archive_record_key(row: dict[str, Any] | None, table: str) -> str | None:
     return record_key
 
 
-def _source_write_statements(org_field: str) -> str:
-    # Each loop binds a row's fields to plain variables before filtering on
-    # them: SurrealDB 3.2 plans `field = $row.field` as a whole-table scan and
-    # `field = $value` as an index lookup.
-    return f"""
+# A restore batch finds destination rows through client parameters and writes
+# to the record ids those reads return. SurrealDB 4.0 plans a statement before
+# it runs and can serve a filter from an index only when its operand is a
+# literal or a client parameter. A filter on a closure argument, a FOR
+# variable or a block LET scans the whole table, once per restored row, so a
+# batch would cost more with every row the destination already holds.
+
+
+def _association_lookup(
+    kind: SourceKind, fields: str, parameter: str, identities: Sequence[tuple[str, str]]
+) -> tuple[str, dict[str, Any]]:
+    """The derivation associations of these (organization, target) pairs, and the read's params.
+
+    The graph store indexes associations by target id alone, so they are read
+    in client-parameter clumps and narrowed to the pairs afterwards. The
+    content store has only the identity index, which serves an `IN` on its
+    last column by walking the organization, so its probes keep one lookup
+    per pair.
+    """
+    if kind is not SourceKind.GRAPH_ENTITY:
+        return (
+            f"array::filter(${parameter}.map(|$probe| (SELECT {fields} FROM memory_derivations "
+            "WHERE organization_id = $probe.organization AND target_kind = $probe.kind "
+            "AND target_id = $probe.target LIMIT 1)[0]), |$row| $row != NONE)",
+            {
+                parameter: [
+                    {"organization": organization, "kind": kind.value, "target": target}
+                    for organization, target in identities
+                ]
+            },
+        )
+    lookup, parameters = clumped(
+        f"SELECT {fields} FROM memory_derivations WITH INDEX {DERIVATION_TARGET_ID_INDEX} "
+        f"WHERE target_id IN ${parameter} AND target_kind = '{kind.value}'",
+        parameter,
+        sorted({target for _, target in identities}),
+    )
+    pairs = f"{parameter}_pairs"
+    return (
+        f"(SELECT * FROM {lookup} WHERE [organization_id, target_id] IN ${pairs})",
+        {**parameters, pairs: [list(identity) for identity in sorted(set(identities))]},
+    )
+
+
+def _source_write_statements(
+    kind: SourceKind, org_field: str, batch: _UnitBatch
+) -> tuple[str, dict[str, Any]]:
+    """One batch's writes and the parameters its association reads name."""
+    written, written_parameters = _association_lookup(
+        kind,
+        "id, organization_id, target_id",
+        "association_targets",
+        [(row["organization_id"], row["target_id"]) for row in batch.association_writes],
+    )
+    retired, retired_parameters = _association_lookup(
+        kind,
+        "id, organization_id, target_id",
+        "retired_targets",
+        [(row["organization"], row["source"]) for row in batch.retired_associations],
+    )
+    by_pair = ".map(|$row| [type::string([$row.organization_id, $row.target_id]), $row.id])"
+    return (
+        f"""
         FOR $key IN $deletes {{ DELETE type::record($key); }};
         FOR $entry IN $writes {{
             LET $existing = (SELECT * FROM type::record($entry.key))[0];
@@ -327,16 +387,22 @@ def _source_write_statements(org_field: str) -> str:
                 crypto::sha256(type::string([$state.organization_id, $kind, $state.source_id]))));
             UPSERT $key CONTENT $state;
         }};
+        LET $written_associations = object::from_entries({written}{by_pair});
         FOR $association IN $association_writes {{
-            LET $organization = $association.organization_id;
-            LET $target = $association.target_id;
-            LET $existing = (SELECT id FROM memory_derivations
-                WHERE organization_id=$organization AND target_kind=$kind
-                    AND target_id=$target LIMIT 1)[0];
+            LET $existing = $written_associations[
+                type::string([$association.organization_id, $association.target_id])];
             IF $existing = NONE {{ CREATE memory_derivations CONTENT $association; }}
-            ELSE {{ UPDATE $existing.id CONTENT $association; }};
+            ELSE {{ UPDATE $existing CONTENT $association; }};
         }};
-    """
+        LET $retired_associations_held = object::from_entries({retired}{by_pair});
+        FOR $retired IN $retired_associations {{
+            LET $existing = $retired_associations_held[
+                type::string([$retired.organization, $retired.source])];
+            IF $existing != NONE {{ UPDATE $existing SET active = false; }};
+        }};
+    """,
+        {**written_parameters, **retired_parameters},
+    )
 
 
 def _conflict(key: tuple[str, str], reason: str) -> dict[str, str]:
@@ -468,6 +534,10 @@ class UniqueWrite:
     identity: tuple[str, ...] = ()
 
 
+# SurrealDB 4.0 charges a statement more than linearly for its subqueries
+# (200 point lookups cost 15 times what 32 do), so probes go a few at a time.
+_PROBES_PER_STATEMENT = 32
+
 _INDEX_FIELDS = re.compile(r"\b(?:FIELDS|COLUMNS)\s+(.+?)\s+UNIQUE\b")
 
 
@@ -501,9 +571,9 @@ async def check_unique_writes(
 
     The indexes come from the destination itself, so a restore checks exactly
     what the database will enforce, including indexes added after this code.
-    Each key is a point lookup a bounded batch at a time; a destination row
-    the restore deletes first or replaces under the same identity is not a
-    collision.
+    Each key is a point lookup whose values are client parameters. A
+    destination row the restore deletes first or replaces under the same
+    identity is not a collision.
     """
     by_table: dict[str, list[UniqueWrite]] = {}
     for write in writes:
@@ -518,19 +588,26 @@ async def check_unique_writes(
                     keyed.append((write, values))
             identity_fields = sorted({column for write, _ in keyed for column in write.identity})
             projection = ", ".join(["type::string(id) AS key", *identity_fields])
-            # Each probe carries its own values: the embedded engine does not
-            # bind query parameters inside a closure.
-            where = " AND ".join(f"{field} = $probe.v{index}" for index, field in enumerate(fields))
-            for batch in restore_batches(keyed):
+            for start in range(0, len(keyed), _PROBES_PER_STATEMENT):
+                batch = keyed[start : start + _PROBES_PER_STATEMENT]
+                probes = [
+                    " AND ".join(
+                        f"{field} = $probe_{position}_{index}" for index, field in enumerate(fields)
+                    )
+                    for position in range(len(batch))
+                ]
                 found = await execute_query(
-                    f"RETURN $probes.map(|$probe| (SELECT {projection} FROM {table} "
-                    f"WHERE {where} LIMIT 4));",
-                    probes=[
-                        native_archive_parameters(
-                            {f"v{index}": value for index, value in enumerate(values)}
-                        )
-                        for _, values in batch
-                    ],
+                    "RETURN ["
+                    + ", ".join(
+                        f"(SELECT {projection} FROM {table} WHERE {where} LIMIT 4)"
+                        for where in probes
+                    )
+                    + "];",
+                    **{
+                        f"probe_{position}_{index}": native_archive_parameters(value)
+                        for position, (_, values) in enumerate(batch)
+                        for index, value in enumerate(values)
+                    },
                 )
                 if not isinstance(found, list) or len(found) != len(batch):
                     raise ValueError("archive uniqueness read returned an invalid shape")
@@ -552,22 +629,58 @@ async def check_unique_writes(
                         )
 
 
-def _unit_state_projection(table: str, org_field: str) -> str:
-    """Everything a source unit's restore decision reads, found by its identity.
+def _unit_state_projection(
+    kind: SourceKind, units: Sequence[Mapping[str, str]]
+) -> tuple[str, dict[str, Any]]:
+    """Everything a batch of source units' restore decisions read, and the read's params.
 
-    Each unit carries its own kind: the embedded engine does not bind query
-    parameters inside a closure.
+    Source rows come through the uuid index in client-parameter clumps. A
+    ledger state is read at the record key every writer gives it, the key the
+    source event and this restore write to, so no planner is involved. Each
+    collection is sorted on its identity, so its digest does not depend on
+    how the lookups were served.
     """
-    return f"""$units.map(|$unit| {{
-        row: (SELECT *, type::string(id) AS archive_record_key OMIT id FROM {table}
-            WHERE {org_field} = $unit.organization AND uuid = $unit.source LIMIT 1)[0],
-        state: (SELECT * OMIT id FROM source_states
-            WHERE organization_id = $unit.organization AND source_kind = $unit.kind
-                AND source_id = $unit.source LIMIT 1)[0],
-        association: (SELECT * OMIT id FROM memory_derivations
-            WHERE organization_id = $unit.organization AND target_kind = $unit.kind
-                AND target_id = $unit.source LIMIT 1)[0]
-    }})"""
+    table, org_field = source_table(kind)
+    identities = [(unit["organization"], unit["source"]) for unit in units]
+    rows, row_parameters = clumped(
+        f"SELECT *, type::string(id) AS archive_record_key OMIT id FROM {table} "
+        "WHERE uuid IN $unit_sources",
+        "unit_sources",
+        sorted({source for _, source in identities}),
+    )
+    associations, association_parameters = _association_lookup(
+        kind, "* OMIT id", "unit_targets", identities
+    )
+    return (
+        f"""{{
+        rows: (SELECT * FROM {rows} WHERE [{org_field}, uuid] IN $unit_pairs
+            ORDER BY {org_field}, uuid),
+        states: (SELECT * FROM (SELECT * OMIT id FROM $unit_identities.map(|$identity|
+            type::record(string::concat('source_states:', crypto::sha256(type::string($identity))))))
+            WHERE source_kind = '{kind.value}' AND [organization_id, source_id] IN $unit_pairs
+            ORDER BY organization_id, source_id),
+        associations: (SELECT * FROM {associations} ORDER BY organization_id, target_id)
+    }}""",
+        {
+            **row_parameters,
+            **association_parameters,
+            "unit_pairs": [list(identity) for identity in identities],
+            "unit_identities": [
+                [organization, kind.value, source] for organization, source in identities
+            ],
+        },
+    )
+
+
+_UNIT_COLLECTIONS = ("rows", "states", "associations")
+
+
+def _by_identity(
+    rows: Sequence[object], organization: str, identity: str
+) -> dict[tuple[object, object], dict[str, Any]]:
+    return {
+        (row.get(organization), row.get(identity)): row for row in rows if isinstance(row, dict)
+    }
 
 
 @dataclass
@@ -638,7 +751,6 @@ async def plan_source_restore(
         payload, kind=kind, organizations=organizations
     )
     table, org_field = source_table(kind)
-    projection = _unit_state_projection(table, org_field)
     incoming_rows = {(row[org_field], row["uuid"]): row for row in rows}
     incoming_states = {(state["organization_id"], state["source_id"]): state for state in states}
     incoming_associations = {
@@ -668,6 +780,7 @@ async def plan_source_restore(
         units = [
             {"organization": key[0], "source": key[1], "kind": kind.value} for key in batch_keys
         ]
+        projection, projection_parameters = _unit_state_projection(kind, units)
         read = normalize_records(
             await execute_query(
                 f"""RETURN {{
@@ -684,6 +797,7 @@ async def plan_source_restore(
                 }};""",
                 units=units,
                 keys=list(record_keys.values()),
+                **projection_parameters,
             )
         )
         found = read[0].get("units") if len(read) == 1 else None
@@ -691,8 +805,8 @@ async def plan_source_restore(
         digest = read[0].get("digest") if len(read) == 1 else None
         state_keys = read[0].get("state_keys") if len(read) == 1 else None
         if (
-            not isinstance(found, list)
-            or len(found) != len(batch_keys)
+            not isinstance(found, dict)
+            or not all(isinstance(found.get(name), list) for name in _UNIT_COLLECTIONS)
             or not isinstance(state_keys, list)
             or len(state_keys) != len(batch_keys)
             or not isinstance(occupants, list)
@@ -701,19 +815,21 @@ async def plan_source_restore(
         ):
             raise ValueError("source archive restore read returned an invalid shape")
         occupant_at = dict(zip(record_keys.values(), occupants, strict=True))
+        held_rows = _by_identity(found["rows"], org_field, "uuid")
+        held_states = _by_identity(found["states"], "organization_id", "source_id")
+        held_associations = _by_identity(found["associations"], "organization_id", "target_id")
         batch = _UnitBatch(units=units, digest=digest)
-        for key, destination, state_key in zip(batch_keys, found, state_keys, strict=True):
-            current = destination if isinstance(destination, dict) else {}
-            previous_row = current.get("row")
+        for key, state_key in zip(batch_keys, state_keys, strict=True):
+            previous_row = held_rows.get(key)
             decision = _decide_unit(
                 kind=kind,
                 record_key=record_keys.get(key),
                 incoming_state=incoming_states[key],
                 row=incoming_rows.get(key),
                 association=incoming_associations.get(key),
-                previous=current.get("state"),
+                previous=held_states.get(key),
                 previous_row=previous_row,
-                prior_association=current.get("association"),
+                prior_association=held_associations.get(key),
                 skip_existing=skip_existing,
             )
             if decision.write is not None:
@@ -800,26 +916,19 @@ async def apply_source_restore(execute_query: SurrealExecute, plan: SourceRestor
     read as unchanged and are skipped.
     """
     await apply_cleanup(execute_query, plan.cleanup)
-    table, org_field = source_table(plan.kind)
-    write = f"""BEGIN TRANSACTION;
-        LET $fenced = {_unit_state_projection(table, org_field)};
-        IF crypto::sha256(type::string($fenced)) != $expected {{
-            THROW '{_DESTINATION_CHANGED}';
-        }};
-        {_source_write_statements(org_field)}
-        FOR $retired IN $retired_associations {{
-            LET $organization = $retired.organization;
-            LET $target = $retired.source;
-            UPDATE memory_derivations SET active = false
-                WHERE organization_id=$organization AND target_kind=$kind
-                    AND target_id=$target;
-        }};
-        COMMIT TRANSACTION;
-    """
+    _, org_field = source_table(plan.kind)
     for batch in plan.batches:
+        projection, projection_parameters = _unit_state_projection(plan.kind, batch.units)
+        writes, write_parameters = _source_write_statements(plan.kind, org_field, batch)
         await execute_query(
-            write,
-            units=batch.units,
+            f"""BEGIN TRANSACTION;
+            LET $fenced = {projection};
+            IF crypto::sha256(type::string($fenced)) != $expected {{
+                THROW '{_DESTINATION_CHANGED}';
+            }};
+            {writes}
+            COMMIT TRANSACTION;
+            """,
             kind=plan.kind.value,
             expected=batch.digest,
             deletes=batch.deletes,
@@ -827,6 +936,8 @@ async def apply_source_restore(execute_query: SurrealExecute, plan: SourceRestor
             ledger_writes=batch.ledger_writes,
             association_writes=batch.association_writes,
             retired_associations=batch.retired_associations,
+            **projection_parameters,
+            **write_parameters,
         )
 
 
