@@ -230,3 +230,31 @@ async def test_restore_filters_tables_on_client_parameters_only(runtime, destina
         plan = str(await target.client.execute_query(read + " EXPLAIN", **params))
         assert "TableScan" not in plan, (read, plan[:400])
         assert "IndexScan" in plan, (read, plan[:400])
+
+
+async def test_ledger_state_off_its_derived_key_refuses_before_any_write(
+    runtime, destination, monkeypatch
+):
+    """A ledger state is read at the record key every writer files it under.
+
+    A state row filed anywhere else is not read, so the uniqueness preflight
+    has to refuse the restore before anything is written.
+    """
+    target, _ = destination
+    await seed(runtime)
+    archive = await archive_of(runtime)
+    organization = runtime.client.group_id
+    await target.client.execute_query(
+        "CREATE source_states:stray CONTENT { organization_id: $organization, "
+        "source_kind: 'graph_entity', source_id: 'entity-00', generation: 7, revision: 1, "
+        "deleted: false, incarnation: 'stray' };",
+        organization=organization,
+    )
+    before = await inventory(target.client)
+    monkeypatch.setattr("sibyl_core.tools.admin.get_graph_runtime", AsyncMock(return_value=target))
+
+    result = await restore_backup(archive, organization_id=organization)
+
+    assert not result.success
+    assert any("source_state_identity" in error for error in result.errors), result.errors
+    assert await inventory(target.client) == before
