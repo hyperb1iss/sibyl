@@ -1,5 +1,11 @@
-"""Older public archives cannot undo newer source visibility decisions."""
+"""Older public archives cannot undo newer source visibility decisions.
 
+Runs on the embedded engine and, with SIBYL_LIVE_SURREAL_TESTS=1, on the
+server SIBYL_SURREAL_URL names. Recall picks its SurrealQL dialect from the
+configured URL, so each case points the settings at the engine it opened.
+"""
+
+import os
 from contextlib import asynccontextmanager
 from unittest.mock import AsyncMock
 from uuid import uuid4
@@ -8,6 +14,8 @@ import pytest
 
 from sibyl.persistence import content_archive
 from sibyl_core.backends.surreal import SurrealContentClient, bootstrap_content_schema
+from sibyl_core.backends.surreal.url_schemes import is_embedded_surreal_url
+from sibyl_core.config import settings
 from sibyl_core.services.graph_client import SurrealGraphClient, prepare_graph_schema
 from sibyl_core.services.graph_entities import EntityManager
 from sibyl_core.services.graph_relationships import RelationshipManager
@@ -16,14 +24,74 @@ from sibyl_core.services.memory_correction import apply_memory_correction
 from sibyl_core.services.surreal_content import recall_raw_memory, remember_raw_memory
 
 
+def engine_url(engine: str) -> str:
+    if engine == "embedded":
+        return "memory://"
+    if os.environ.get("SIBYL_LIVE_SURREAL_TESTS") != "1":
+        pytest.skip("live SurrealDB tests are disabled")
+    url = os.environ.get("SIBYL_SURREAL_URL", "")
+    if not url or is_embedded_surreal_url(url):
+        pytest.skip("live SurrealDB tests require SIBYL_SURREAL_URL to point at a server")
+    return url
+
+
+def _credentials(url: str) -> dict[str, str]:
+    if is_embedded_surreal_url(url):
+        return {}
+    return {
+        "username": os.environ.get("SIBYL_SURREAL_USERNAME", "root"),
+        "password": os.environ.get("SIBYL_SURREAL_PASSWORD", "root"),
+    }
+
+
+@pytest.fixture(params=["embedded", "live"])
+def url(request, monkeypatch):
+    url = engine_url(request.param)
+    monkeypatch.setattr(settings, "surreal_url", url)
+    return url
+
+
 @pytest.fixture
-async def revocation_store(monkeypatch):
-    org = str(uuid4())
-    client = SurrealContentClient(url="memory://")
-    graph = SurrealGraphClient(group_id=org, url="memory://")
-    close = client.close
-    try:
+async def open_store(url, monkeypatch):
+    """Open content stores on the engine under test and make one the active store."""
+    opened = []
+
+    async def open_one():
+        client = SurrealContentClient(
+            url=url, namespace=f"verify_revocation_{uuid4().hex}", **_credentials(url)
+        )
+        opened.append((client, client.close))
         await bootstrap_content_schema(client)
+        monkeypatch.setattr(client, "close", AsyncMock())
+        monkeypatch.setattr(content_archive, "build_surreal_content_client", lambda: client)
+
+        @asynccontextmanager
+        async def session():
+            yield client
+
+        monkeypatch.setattr("sibyl_core.services.content_client.surreal_content_client", session)
+        return client
+
+    try:
+        yield open_one
+    finally:
+        for client, close in opened:
+            if not is_embedded_surreal_url(url):
+                await client.execute_query(f"REMOVE NAMESPACE IF EXISTS {client.namespace};")
+            await close()
+
+
+@pytest.fixture
+async def revocation_store(url, open_store, monkeypatch):
+    org = str(uuid4())
+    graph = SurrealGraphClient(
+        group_id=org,
+        url=url,
+        namespace_prefix=f"verify_revocation_{uuid4().hex}_",
+        **_credentials(url),
+    )
+    try:
+        client = await open_store()
         await prepare_graph_schema(graph)
         runtime = GraphRuntime(
             client=graph,
@@ -35,21 +103,14 @@ async def revocation_store(monkeypatch):
             "sibyl_core.services.memory_lifecycle.get_surreal_graph_runtime",
         ):
             monkeypatch.setattr(path, AsyncMock(return_value=runtime))
-        monkeypatch.setattr(client, "close", AsyncMock())
-        monkeypatch.setattr(content_archive, "build_surreal_content_client", lambda: client)
         monkeypatch.setattr(
             "sibyl_core.services.content_models.configured_raw_memory_embedding_provider",
             lambda: None,
         )
-
-        @asynccontextmanager
-        async def session():
-            yield client
-
-        monkeypatch.setattr("sibyl_core.services.content_client.surreal_content_client", session)
         yield client, org
     finally:
-        await close()
+        if not is_embedded_surreal_url(url):
+            await graph.execute_query(f"REMOVE NAMESPACE IF EXISTS {graph.namespace};")
         await graph.close()
 
 
@@ -137,7 +198,7 @@ async def test_clean_omission_retains_tombstone_before_later_restore(revocation_
     assert any(row["reason"] == "retained_tombstone" for row in result.integrity_conflicts)
 
 
-async def test_forward_archive_restores_explicitly_unhidden_source(revocation_store, monkeypatch):
+async def test_forward_archive_restores_explicitly_unhidden_source(revocation_store, open_store):
     _, org = revocation_store
     source = await capture(org)
     await apply_memory_correction(
@@ -154,27 +215,14 @@ async def test_forward_archive_restores_explicitly_unhidden_source(revocation_st
         action="restore",
     )
     active = await content_archive.export_content_archive_payload(org)
-    destination = SurrealContentClient(url="memory://")
-    close = destination.close
-    try:
-        await bootstrap_content_schema(destination)
-        monkeypatch.setattr(destination, "close", AsyncMock())
-        monkeypatch.setattr(content_archive, "build_surreal_content_client", lambda: destination)
-
-        @asynccontextmanager
-        async def session():
-            yield destination
-
-        monkeypatch.setattr("sibyl_core.services.content_client.surreal_content_client", session)
-        result = await content_archive.restore_content_archive_payload(hidden, clean=True)
-        assert result.success, result.errors
-        assert source.id not in await visible(org)
-        result = await content_archive.restore_content_archive_payload(active, clean=True)
-        assert result.success, result.errors
-        assert not result.integrity_conflicts
-        assert source.id in await visible(org)
-    finally:
-        await close()
+    await open_store()
+    result = await content_archive.restore_content_archive_payload(hidden, clean=True)
+    assert result.success, result.errors
+    assert source.id not in await visible(org)
+    result = await content_archive.restore_content_archive_payload(active, clean=True)
+    assert result.success, result.errors
+    assert not result.integrity_conflicts
+    assert source.id in await visible(org)
 
 
 async def test_older_active_content_remains_restorable_with_same_audience(revocation_store):
