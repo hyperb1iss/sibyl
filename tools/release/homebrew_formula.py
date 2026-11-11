@@ -108,7 +108,6 @@ def validate_requirements(requirements: str) -> None:
 def render_formula(
     *,
     release_version: str,
-    python_version: str,
     artifacts: dict[str, PackageArtifact],
     requirements: str,
 ) -> str:
@@ -131,8 +130,6 @@ class Sibyl < Formula
   sha256 "{cli.sha256}"
   license "Apache-2.0"
   version "{release_version}"
-
-  PYTHON_PACKAGE_VERSION = "{python_version}"
 
   # The CLI's third-party dependencies, pinned with hashes from the release's
   # uv.lock. They install as wheels, so no compiler or Rust toolchain is needed.
@@ -173,7 +170,9 @@ class Sibyl < Formula
   end
 
   test do
-    assert_match PYTHON_PACKAGE_VERSION, shell_output("#{{bin}}/sibyl --version")
+    # The wheel's metadata keeps the release spelling (1.0.0-rc.1), not PyPI's
+    # normalized one (1.0.0rc1), and that is what the CLI prints.
+    assert_match version.to_s, shell_output("#{{bin}}/sibyl --version")
     system Formula["python@3.13"].opt_bin/"python3.13", "-m", "pip",
            "--python=#{{libexec}}/bin/python", "check"
   end
@@ -191,7 +190,6 @@ def main(argv: list[str] | None = None) -> int:
     artifacts = {package: fetch_package_artifact(package, python_version) for package in PACKAGES}
     formula = render_formula(
         release_version=args.version,
-        python_version=python_version,
         artifacts=artifacts,
         requirements=cli_requirements(),
     )
