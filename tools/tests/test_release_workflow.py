@@ -802,7 +802,9 @@ def test_publish_workflow_attaches_docker_and_release_evidence() -> None:
     # so publish is checked for delegating to it rather than for inlining it.
     # test_image_cve_gate_is_shared_by_every_caller owns the configuration.
     assert "uses: ./.github/actions/trivy-image-gate" in workflow
-    assert "sigstore/cosign-installer@v4.1.2" in workflow
+    # Signing must use a released installer, whichever one Dependabot last
+    # moved the workflow to; a version literal here fails every such bump.
+    assert re.search(r"uses: sigstore/cosign-installer@v\d+\.\d+\.\d+\n", workflow)
     assert "cosign sign --yes" in workflow
     assert "Upload Cosign receipt" in workflow
     assert "Download Python distributions" in workflow
