@@ -158,6 +158,26 @@ async def test_graph_restore_bounds_every_request_and_round_trips(
     await restored_as_archived(destination.client, runtime.client)
 
 
+async def test_mentions_without_a_uuid_collapse_to_one_row_instead_of_failing(
+    runtime, destination, monkeypatch
+):
+    await seed(runtime)
+    archive = await backup_of(runtime)
+    archive.mentions = [
+        {key: value for key, value in mention.items() if key != "uuid"}
+        for mention in archive.mentions[:2]
+    ]
+    archive.mention_count = 2
+    monkeypatch.setattr(
+        "sibyl_core.tools.admin.get_graph_runtime", AsyncMock(return_value=destination)
+    )
+
+    result = await restore_backup(archive, organization_id=runtime.client.group_id)
+
+    assert result.success, result.errors
+    assert len(await destination.client.execute_query("SELECT id FROM mentions;")) == 1
+
+
 @pytest.mark.parametrize("clean", [False, True])
 async def test_interrupted_graph_restore_keeps_whole_units_and_resumes(
     runtime, destination, monkeypatch, clean

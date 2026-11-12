@@ -361,8 +361,11 @@ def _episode_parameters(selected: list[dict[str, Any]]) -> tuple[str, dict[str, 
 
 
 def _mention_parameters(selected: list[dict[str, Any]]) -> tuple[str, dict[str, Any]]:
-    statements, parameters = _mention_statements(selected)
-    return statements, {**parameters, "archive_mentions": native_archive_parameters(selected)}
+    # Same single read as episodes. Mentions an old archive carries without a
+    # uuid all share one record id, so they collapse to the last copy too.
+    records = list({str(record.get("uuid") or ""): record for record in selected}.values())
+    statements, parameters = _mention_statements(records)
+    return statements, {**parameters, "archive_mentions": native_archive_parameters(records)}
 
 
 async def plan_companions(
