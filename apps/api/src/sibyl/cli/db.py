@@ -632,7 +632,7 @@ def restore_db(
             if result.success:
                 success("Restore complete!")
             else:
-                warn("Restore completed with errors")
+                error("Restore failed; the counts below are what landed before it stopped")
 
             info(
                 "Restored: "
@@ -666,6 +666,10 @@ def restore_db(
         except Exception as e:
             error(f"Restore failed: {e}")
             print_db_hint()
+            raise typer.Exit(code=1) from e
+
+        if not result.success:
+            raise typer.Exit(code=1)
 
     _restore()
 

@@ -802,7 +802,9 @@ def test_publish_workflow_attaches_docker_and_release_evidence() -> None:
     # so publish is checked for delegating to it rather than for inlining it.
     # test_image_cve_gate_is_shared_by_every_caller owns the configuration.
     assert "uses: ./.github/actions/trivy-image-gate" in workflow
-    assert "sigstore/cosign-installer@v4.1.2" in workflow
+    # Signing must use a released installer, whichever one Dependabot last
+    # moved the workflow to; a version literal here fails every such bump.
+    assert re.search(r"uses: sigstore/cosign-installer@v\d+\.\d+\.\d+\n", workflow)
     assert "cosign sign --yes" in workflow
     assert "Upload Cosign receipt" in workflow
     assert "Download Python distributions" in workflow
@@ -1049,14 +1051,16 @@ HOMEBREW_ARTIFACTS = {
 def test_homebrew_formula_installs_the_cli_with_pinned_hashed_dependencies() -> None:
     formula = render_formula(
         release_version="1.0.0-rc.1",
-        python_version=pep440_version("1.0.0-rc.1"),
         artifacts=HOMEBREW_ARTIFACTS,
         requirements=REQUIREMENTS,
     )
 
     assert "class Sibyl < Formula" in formula
     assert 'version "1.0.0-rc.1"' in formula
-    assert 'PYTHON_PACKAGE_VERSION = "1.0.0rc1"' in formula
+    # An rc wheel reports the release spelling, so the formula's own test must
+    # look for that and not for PyPI's normalized 1.0.0rc1.
+    assert 'assert_match version.to_s, shell_output("#{bin}/sibyl --version")' in formula
+    assert "PYTHON_PACKAGE_VERSION" not in formula
     assert 'resource "sibyl-core"' in formula
     assert 'bin.install_symlink libexec/"bin/sibyl"' in formula
     # Homebrew's pip_install passes --no-deps, so every third-party pin has to
@@ -1096,7 +1100,6 @@ def test_homebrew_formula_refuses_requirements_pip_could_not_install(
     with pytest.raises(RuntimeError, match=problem):
         render_formula(
             release_version="1.0.0",
-            python_version="1.0.0",
             artifacts=HOMEBREW_ARTIFACTS,
             requirements=requirements,
         )
