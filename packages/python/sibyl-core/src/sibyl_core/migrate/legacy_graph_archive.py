@@ -150,8 +150,7 @@ async def mention_exists(client: Any, uuid: str) -> bool:
     return bool(rows)
 
 
-_EPISODE_UPSERT_STATEMENTS = """
-        UPSERT episode SET
+_EPISODE_FIELDS = """
             uuid = $uuid,
             name = $name,
             source = $source,
@@ -161,24 +160,26 @@ _EPISODE_UPSERT_STATEMENTS = """
             group_id = $group_id,
             created_at = $created_at,
             valid_at = $valid_at,
-            entity_edges = $entity_edges
+            entity_edges = $entity_edges"""
+
+_EPISODE_UPSERT_STATEMENTS = f"""
+        UPSERT episode SET{_EPISODE_FIELDS}
         WHERE uuid = $uuid;
         """
 
-_MENTION_UPSERT_STATEMENTS = """
+_MENTION_FIELDS = """
+            uuid = $uuid,
+            group_id = $group_id,
+            created_at = $created_at"""
+
+_MENTION_UPSERT_STATEMENTS = f"""
         DELETE FROM mentions WHERE uuid = $uuid AND (in != $src OR out != $tgt);
         LET $updated = (UPDATE mentions SET
             in = $src,
-            out = $tgt,
-            uuid = $uuid,
-            group_id = $group_id,
-            created_at = $created_at
+            out = $tgt,{_MENTION_FIELDS}
         WHERE uuid = $uuid RETURN id);
         IF array::len($updated) = 0 THEN
-            RELATE $src->$rel->$tgt SET
-                uuid = $uuid,
-                group_id = $group_id,
-                created_at = $created_at;
+            RELATE $src->$rel->$tgt SET{_MENTION_FIELDS};
         END;
         """
 

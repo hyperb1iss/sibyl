@@ -272,7 +272,7 @@ async def test_content_restore_sends_bounded_batches(archive_stores, monkeypatch
     rows = [
         len(parameters[name])
         for parameters in sent
-        for name in ("units", "keys", "writes", "records")
+        for name in ("units", "unit_identities", "unit_pairs", "keys", "writes", "records")
         if isinstance(parameters.get(name), list)
     ] + [sum(name.startswith("archive_record_") for name in parameters) for parameters in sent]
     assert max(rows) <= 2
