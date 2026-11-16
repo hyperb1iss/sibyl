@@ -800,7 +800,7 @@ jobs:
           ref: ${{ inputs.tag }}
 
       - name: "◇ Setup Helm"
-        uses: azure/setup-helm@v5.0.1
+        uses: azure/setup-helm@v5.1.0
         with:
           version: v3.20.2
 
@@ -854,7 +854,7 @@ jobs:
           path: helm-repo
 
       - name: "◇ Setup Helm"
-        uses: azure/setup-helm@v5.0.1
+        uses: azure/setup-helm@v5.1.0
         with:
           version: v3.20.2
 
