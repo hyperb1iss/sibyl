@@ -65,7 +65,7 @@ async def test_local_auth_stays_closed_in_setup_mode_when_sso_only(
     monkeypatch.setattr(auth_routes, "is_setup_mode", AsyncMock(return_value=True))
 
     with pytest.raises(HTTPException) as exc:
-        await auth_routes._require_local_auth_allowed(object())
+        await auth_routes.require_local_auth_allowed(object())
 
     assert exc.value.status_code == 403
 
@@ -77,7 +77,7 @@ async def test_local_auth_opens_in_setup_mode_without_sso(
 ) -> None:
     monkeypatch.setattr(auth_routes, "is_setup_mode", AsyncMock(return_value=True))
 
-    assert await auth_routes._require_local_auth_allowed(object()) is None
+    assert await auth_routes.require_local_auth_allowed(object()) is None
 
 
 @pytest.mark.asyncio
