@@ -114,19 +114,27 @@ When auth is enabled, Sibyl implements OAuth 2.0:
 
 ### OAuth Endpoints
 
-| Endpoint        | Purpose                          |
-| --------------- | -------------------------------- |
-| `/_oauth/login` | Login form                       |
-| `/_oauth/org`   | Organization selection           |
-| `/mcp`          | Token-authenticated MCP endpoint |
+| Endpoint                                  | Purpose                                                |
+| ----------------------------------------- | ------------------------------------------------------ |
+| `/.well-known/oauth-protected-resource/*` | Resource metadata (where the client signs in)          |
+| `/.well-known/oauth-authorization-server` | Authorization server metadata                          |
+| `/authorize`, `/token`, `/register`       | Authorization, token exchange, client signup           |
+| `/_oauth/login`                           | Sign-in (SSO or policy-permitted password) and consent |
+| `/_oauth/org`                             | Organization selection                                 |
+| `/mcp`                                    | Token-authenticated MCP endpoint                       |
+
+The API serves every one of these at the site root, so a reverse proxy in front of Sibyl must send
+them to the API, not only `/api` and `/mcp`.
 
 ### Token Acquisition
 
-1. User visits `/_oauth/login`
-2. Enters credentials
-3. Selects organization
-4. Receives access token
-5. Token used for MCP requests
+1. The MCP client opens `/_oauth/login` in the browser
+2. The user signs in: through an OIDC provider, or with a password where the local-auth policy
+   allows it (local auth enabled, break-glass, or setup on a non-SSO instance). A browser that
+   already has a Sibyl session skips this step
+3. The user approves (or denies) the client by name
+4. The user selects an organization if they belong to more than one
+5. The client exchanges the code for an access token and uses it for MCP requests
 
 ### API Key Authentication
 

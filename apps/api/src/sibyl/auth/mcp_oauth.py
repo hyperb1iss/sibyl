@@ -23,7 +23,7 @@ import secrets
 from datetime import UTC, datetime, timedelta
 from html import escape
 from typing import Protocol, cast
-from urllib.parse import urlencode, urlsplit, urlunsplit
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 from uuid import UUID, uuid4
 
 import jwt
@@ -37,6 +37,7 @@ from mcp.server.auth.provider import (
 )
 from mcp.shared.auth import OAuthClientInformationFull, OAuthToken
 from pydantic import AnyUrl, SkipValidation
+from starlette.exceptions import HTTPException
 from starlette.requests import Request
 from starlette.responses import HTMLResponse, RedirectResponse, Response
 
@@ -44,11 +45,11 @@ from sibyl import config as config_module
 from sibyl.auth.api_key_common import ApiKeyAuth
 from sibyl.auth.jwt import JwtError, create_access_token, verify_access_token
 from sibyl.auth.mcp_auth import effective_api_key_scopes
+from sibyl.auth.oidc import enabled_oidc_providers
 from sibyl.persistence.auth_runtime import (
     OAuthAuthorizationRecord,
     OAuthAuthorizationStore,
     authenticate_api_key,
-    authenticate_local_user,
     create_session_record,
     ensure_personal_organization,
     get_user_by_id,
@@ -60,6 +61,7 @@ from sibyl.persistence.auth_runtime import (
     save_oauth_client_registration,
     validate_access_session,
 )
+from sibyl_core.auth import PrincipalKind
 
 type JwtClaims = dict[str, object]
 
@@ -70,6 +72,57 @@ AUTHORIZATION_REQUEST_TTL = timedelta(minutes=10)
 AUTHENTICATED_LOGIN_TTL = timedelta(minutes=5)
 AUTHORIZATION_CODE_TTL = timedelta(minutes=10)
 _INVALID_LOGIN_REQUEST_HTML = "<h1>OAuth Login</h1><p>Invalid or expired login request.</p>"
+_LOGIN_ERROR_MESSAGES = {
+    "invalid_credentials": "Incorrect email or password.",
+    "local_auth_disabled": "Password sign-in is disabled on this server. Use single sign-on.",
+    "break_glass_reason_required": "Break-glass sign-in requires an incident reason.",
+    "invalid_action": "Invalid action.",
+}
+_LOGIN_PAGE_CSS = """
+    :root { color-scheme: dark; }
+    body { font-family: system-ui, -apple-system, Segoe UI, sans-serif; background: #0b0b10; color: #e8e8f0; margin: 0; }
+    .wrap { max-width: 520px; margin: 8vh auto; padding: 24px; background: #12121a; border: 1px solid #2a2a3a; border-radius: 14px; }
+    h1 { margin: 0 0 8px; font-size: 22px; }
+    .sub { color: #a7a7c7; margin-bottom: 18px; }
+    .error { margin: 12px 0; padding: 10px 12px; border-radius: 10px; border: 1px solid #6a2a3a; background: #2a1018; color: #ffb3c1; }
+    .divider { margin: 18px 0; text-align: center; color: #a7a7c7; }
+    label { display: block; margin: 12px 0 6px; color: #cfcfe9; }
+    input { width: 100%; padding: 10px 12px; border-radius: 10px; border: 1px solid #2a2a3a; background: #0f0f16; color: #fff; box-sizing: border-box; }
+    button, .provider { display: block; box-sizing: border-box; margin-top: 16px; width: 100%; padding: 10px 12px; border-radius: 10px; border: 1px solid #3a2a6a; background: #5b2bff; color: #fff; font-weight: 600; cursor: pointer; text-align: center; text-decoration: none; font-size: 14px; }
+    .secondary { margin-top: 10px; background: transparent; border-color: #2a2a3a; color: #e8e8f0; }
+    code { color: #80ffea; }
+"""
+
+
+def _login_page(title: str, body: str) -> str:
+    return f"""<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>{escape(title)}</title>
+  <style>{_LOGIN_PAGE_CSS}</style>
+</head>
+<body>
+  <div class="wrap">{body}</div>
+</body>
+</html>
+"""
+
+
+def _login_error_html(code: str | None) -> str:
+    code = (code or "").strip()
+    if not code:
+        return ""
+    message = _LOGIN_ERROR_MESSAGES.get(code, f"Sign-in was refused ({code}).")
+    return f'<div class="error">{escape(message)}</div>'
+
+
+def _refusal_code(exc: HTTPException) -> str:
+    detail: object = exc.detail
+    if isinstance(detail, dict) and detail.get("code"):
+        return str(detail["code"])
+    return "local_auth_disabled"
 
 
 class SibylAccessToken(AccessToken):
@@ -125,8 +178,10 @@ def _parse_scopes_from_claims(claims: JwtClaims) -> list[str]:
 
 
 def _add_query_params(url: str, params: dict[str, str]) -> str:
+    # RFC 6749 §3.1.2: a client's redirect_uri keeps its own query parameters.
     parts = urlsplit(url)
-    return urlunsplit((parts.scheme, parts.netloc, parts.path, urlencode(params), parts.fragment))
+    query = urlencode([*parse_qsl(parts.query, keep_blank_values=True), *params.items()])
+    return urlunsplit((parts.scheme, parts.netloc, parts.path, query, parts.fragment))
 
 
 def _create_refresh_token(
@@ -195,6 +250,12 @@ class _OAuthOrg(Protocol):
     id: UUID
     name: str
     is_personal: bool
+
+
+class _IssuedLogin(Protocol):
+    access_token: str
+    refresh_token: str
+    refresh_expires: datetime
 
 
 class _RefreshSessionRecord(Protocol):
@@ -554,10 +615,46 @@ class SibylMcpOAuthProvider(
     async def _authenticate_api_key(self, raw_key: str) -> ApiKeyAuth | None:
         return cast("ApiKeyAuth | None", await authenticate_api_key(raw_key))
 
-    async def _authenticate_local_user(self, *, email: str, password: str) -> _OAuthUser | None:
+    # Browser sign-in reuses the REST auth module so this page answers to the
+    # same local-auth policy, break-glass audit, and session cookies as the web
+    # login and device approval. Imported at call time: the API routes import
+    # the auth package, not the other way round.
+    async def _session_user(self, request: Request) -> _OAuthUser | None:
+        from sibyl.api.routes import auth as auth_routes
+
+        return cast("_OAuthUser | None", await auth_routes.optional_request_user(request))
+
+    async def _local_login_offered(self) -> bool:
+        from sibyl.api.routes import auth as auth_routes
+
+        settings = config_module.settings
+        if settings.local_auth_enabled or settings.break_glass_enabled:
+            return True
+        return await auth_routes.is_setup_mode() and not settings.sso_only_instance
+
+    async def _login_local_user(
+        self, request: Request, *, email: str, password: str, break_glass_reason: str
+    ) -> _IssuedLogin | None:
+        """Sign in with a password, or raise HTTPException when policy refuses it."""
+        from sibyl.api.routes import auth as auth_routes
+
+        await auth_routes.require_local_auth_allowed(request)
+        reason = auth_routes.require_break_glass_reason(break_glass_reason)
         return cast(
-            "_OAuthUser | None",
-            await authenticate_local_user(email=email, password=password),
+            "_IssuedLogin | None",
+            await auth_routes.login_local_user(
+                email=email, password=password, request=request, break_glass_reason=reason
+            ),
+        )
+
+    def _set_login_cookies(self, response: Response, issued: _IssuedLogin) -> None:
+        from sibyl.api.routes import auth as auth_routes
+
+        auth_routes.set_auth_cookies(
+            response,
+            access_token=issued.access_token,
+            refresh_token=issued.refresh_token,
+            refresh_expires=issued.refresh_expires,
         )
 
     async def _list_user_orgs(self, *, user_id: UUID) -> list[_OAuthOrg]:
@@ -577,60 +674,142 @@ class SibylMcpOAuthProvider(
 
         client = await self.get_client(pending.client_id)
         client_name = escape((client.client_name if client else None) or "MCP Client", quote=True)
+        req_attr = escape(request_id, quote=True)
+        error_html = _login_error_html(request.query_params.get("error"))
 
-        html = f"""
-<!doctype html>
-<html lang="en">
-<head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Sibyl Login</title>
-  <style>
-    :root {{ color-scheme: dark; }}
-    body {{ font-family: system-ui, -apple-system, Segoe UI, sans-serif; background: #0b0b10; color: #e8e8f0; margin: 0; }}
-    .wrap {{ max-width: 520px; margin: 8vh auto; padding: 24px; background: #12121a; border: 1px solid #2a2a3a; border-radius: 14px; }}
-    h1 {{ margin: 0 0 8px; font-size: 22px; }}
-    .sub {{ color: #a7a7c7; margin-bottom: 18px; }}
-    label {{ display: block; margin: 12px 0 6px; color: #cfcfe9; }}
-    input {{ width: 100%; padding: 10px 12px; border-radius: 10px; border: 1px solid #2a2a3a; background: #0f0f16; color: #fff; }}
-    button {{ margin-top: 16px; width: 100%; padding: 10px 12px; border-radius: 10px; border: 1px solid #3a2a6a; background: #5b2bff; color: #fff; font-weight: 600; cursor: pointer; }}
-    .hint {{ margin-top: 12px; color: #a7a7c7; font-size: 13px; }}
-    code {{ color: #80ffea; }}
-  </style>
-</head>
-<body>
-  <div class="wrap">
-    <h1>Login to Sibyl</h1>
-    <div class="sub">Authorize <strong>{client_name}</strong> to access your MCP tools.</div>
+        user = await self._session_user(request)
+        if user is not None:
+            identity = escape(
+                str(getattr(user, "email", None) or getattr(user, "name", None) or user.id)
+            )
+            redirect_host = escape(urlsplit(pending.redirect_uri).netloc or pending.redirect_uri)
+            body = f"""
+    <h1>Authorize {client_name}</h1>
+    <div class="sub">Signed in as <strong>{identity}</strong>.</div>
+    {error_html}
+    <p><strong>{client_name}</strong> wants to use your Sibyl MCP tools. Approving sends an
+    authorization code to <code>{redirect_host}</code>.</p>
     <form method="post" action="/_oauth/login">
-      <input type="hidden" name="req" value="{escape(request_id, quote=True)}" />
+      <input type="hidden" name="req" value="{req_attr}" />
+      <input type="hidden" name="action" value="approve" />
+      <button type="submit">Approve</button>
+    </form>
+    <form method="post" action="/_oauth/login">
+      <input type="hidden" name="req" value="{req_attr}" />
+      <input type="hidden" name="action" value="deny" />
+      <button class="secondary" type="submit">Deny</button>
+    </form>
+"""
+            return HTMLResponse(_login_page("Authorize MCP Client", body), status_code=200)
+
+        back_to_login = _add_query_params("/_oauth/login", {"req": request_id})
+        sections: list[str] = []
+        for provider in enabled_oidc_providers():
+            separator = "&" if "?" in provider.login_url else "?"
+            href = escape(
+                f"{provider.login_url}{separator}{urlencode({'redirect': back_to_login})}",
+                quote=True,
+            )
+            label = escape(provider.label or provider.name)
+            sections.append(f'<a class="provider" href="{href}">Continue with {label}</a>')
+
+        if await self._local_login_offered():
+            reason_field = (
+                """
+      <label>Incident reason (break-glass)</label>
+      <input name="break_glass_reason" maxlength="512" required />"""
+                if config_module.settings.break_glass_enabled
+                else ""
+            )
+            sections.append(f"""
+    <form method="post" action="/_oauth/login">
+      <input type="hidden" name="req" value="{req_attr}" />
+      <input type="hidden" name="action" value="login" />
       <label>Email</label>
       <input name="email" type="email" autocomplete="username" required />
       <label>Password</label>
-      <input name="password" type="password" autocomplete="current-password" required />
+      <input name="password" type="password" autocomplete="current-password" required />{reason_field}
       <button type="submit">Continue</button>
-    </form>
-    <div class="hint">No local user yet? Create one at <code>/api/auth/local/signup</code>.</div>
-  </div>
-</body>
-</html>
+    </form>""")
+
+        if not sections:
+            sections.append(
+                '<div class="error">This server has no sign-in method for MCP clients.</div>'
+            )
+
+        body = f"""
+    <h1>Login to Sibyl</h1>
+    <div class="sub">Authorize <strong>{client_name}</strong> to access your MCP tools.</div>
+    {error_html}
+    {'<div class="divider">or</div>'.join(sections)}
 """
-        return HTMLResponse(html, status_code=200)
+        return HTMLResponse(_login_page("Sibyl Login", body), status_code=200)
 
     async def ui_login_post(self, request: Request) -> Response:
         form = await request.form()
         request_id = str(form.get("req", "")).strip()
-        email = str(form.get("email", "")).strip()
-        password = str(form.get("password", "")).strip()
+        action = str(form.get("action", "")).strip()
 
         pending = await self._get_pending(request_id)
         if pending is None:
             return HTMLResponse(_INVALID_LOGIN_REQUEST_HTML, status_code=400)
 
-        user = await self._authenticate_local_user(email=email, password=password)
+        login_url = _add_query_params("/_oauth/login", {"req": request_id})
+
+        if action == "login":
+            try:
+                issued = await self._login_local_user(
+                    request,
+                    email=str(form.get("email", "")).strip(),
+                    password=str(form.get("password", "")).strip(),
+                    break_glass_reason=str(form.get("break_glass_reason", "")),
+                )
+            except HTTPException as exc:
+                return RedirectResponse(
+                    url=_add_query_params(
+                        "/_oauth/login", {"req": request_id, "error": _refusal_code(exc)}
+                    ),
+                    status_code=302,
+                )
+            if issued is None:
+                return RedirectResponse(
+                    url=_add_query_params(
+                        "/_oauth/login", {"req": request_id, "error": "invalid_credentials"}
+                    ),
+                    status_code=302,
+                )
+            # Signing in only starts a session; the client is authorized by
+            # the explicit Approve on the page this redirects back to.
+            response = RedirectResponse(url=login_url, status_code=302)
+            self._set_login_cookies(response, issued)
+            return response
+
+        user = await self._session_user(request)
         if user is None:
+            return RedirectResponse(url=login_url, status_code=302)
+        if getattr(user, "kind", None) == PrincipalKind.SERVICE:
+            # Authorizing a client signs its holder in, and a bot never signs in.
+            return HTMLResponse(
+                "<h1>OAuth Login</h1><p>Bot accounts cannot authorize MCP clients.</p>",
+                status_code=403,
+            )
+
+        if action == "deny":
+            # Close the flow so a stale org picker from an earlier approve cannot issue a code.
+            if not await self._authorizations.close_request(request_id):
+                return HTMLResponse(_INVALID_LOGIN_REQUEST_HTML, status_code=400)
+            params = {"error": "access_denied"}
+            if pending.state:
+                params["state"] = pending.state
             return RedirectResponse(
-                url=_add_query_params("/_oauth/login", {"req": request_id}), status_code=302
+                url=_add_query_params(pending.redirect_uri, params), status_code=302
+            )
+        if action != "approve":
+            return RedirectResponse(
+                url=_add_query_params(
+                    "/_oauth/login", {"req": request_id, "error": "invalid_action"}
+                ),
+                status_code=302,
             )
 
         orgs = await self._list_user_orgs(user_id=user.id)

@@ -919,7 +919,7 @@ async def test_device_verify_get_uses_active_session_helper(
     monkeypatch.setattr(
         auth_routes, "_require_jwt_secret", lambda: "test-jwt-secret-key-for-api-tests"
     )
-    monkeypatch.setattr(auth_routes, "_optional_request_user", resolve_user)
+    monkeypatch.setattr(auth_routes, "optional_request_user", resolve_user)
     monkeypatch.setattr(auth_routes, "get_device_request_by_user_code", get_request)
 
     response = await _call_route(auth_routes.device_verify_get, request=request)
@@ -952,7 +952,7 @@ async def test_device_verify_get_offers_oidc_provider_login(
     monkeypatch.setattr(
         auth_routes, "_require_jwt_secret", lambda: "test-jwt-secret-key-for-api-tests"
     )
-    monkeypatch.setattr(auth_routes, "_optional_request_user", AsyncMock(return_value=None))
+    monkeypatch.setattr(auth_routes, "optional_request_user", AsyncMock(return_value=None))
     monkeypatch.setattr(auth_routes, "get_device_request_by_user_code", get_request)
     monkeypatch.setattr(auth_routes, "enabled_oidc_providers", lambda: [provider])
 

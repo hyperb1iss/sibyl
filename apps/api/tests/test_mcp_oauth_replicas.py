@@ -132,7 +132,7 @@ def _build_replica(client: SurrealAuthClient, *, user: object, orgs: list[object
         authorization_store=SurrealOAuthAuthorizationStore(_scope_for(client))
     )
     sessions_created = AsyncMock()
-    provider._authenticate_local_user = AsyncMock(return_value=user)  # type: ignore[method-assign]
+    provider._session_user = AsyncMock(return_value=user)  # type: ignore[method-assign]
     provider._list_user_orgs = AsyncMock(return_value=orgs)  # type: ignore[method-assign]
     provider._create_session_record = sessions_created  # type: ignore[method-assign]
     routes = [
@@ -235,12 +235,9 @@ async def test_one_authorization_completes_with_every_step_on_a_different_replic
         assert login_page.status_code == 200
         assert "Replica Proof" in login_page.text
 
-        logged_in = await d.post(
-            "/_oauth/login",
-            data={"req": request_id, "email": "proof@example.com", "password": "pw"},
-        )
-        assert logged_in.status_code == 302
-        assert logged_in.headers["location"] == f"/_oauth/org?{urlencode({'req': request_id})}"
+        approved = await d.post("/_oauth/login", data={"req": request_id, "action": "approve"})
+        assert approved.status_code == 302
+        assert approved.headers["location"] == f"/_oauth/org?{urlencode({'req': request_id})}"
 
         org_page = await a.get("/_oauth/org", params={"req": request_id})
         assert org_page.status_code == 200
@@ -309,7 +306,7 @@ async def _issue_code(replicas: list[Replica], client: OAuthClientInformationFul
     url = await replicas[0].provider.authorize(client, _authorization_params())
     request_id = _query(url)["req"]
     response = await replicas[-1].provider.ui_login_post(
-        _form_request("/_oauth/login", {"req": request_id, "email": "e", "password": "p"})
+        _form_request("/_oauth/login", {"req": request_id, "action": "approve"})
     )
     assert response.status_code == 302
     return _query(response.headers["location"])["code"]
@@ -361,9 +358,7 @@ async def test_concurrent_logins_for_one_request_issue_one_code(
         responses = await asyncio.gather(
             *(
                 replica.provider.ui_login_post(
-                    _form_request(
-                        "/_oauth/login", {"req": request_id, "email": "e", "password": "p"}
-                    )
+                    _form_request("/_oauth/login", {"req": request_id, "action": "approve"})
                 )
                 for replica in replicas
             )
@@ -449,7 +444,7 @@ async def test_codes_and_request_keys_are_stored_only_as_hashes(
         url = await replicas[0].provider.authorize(client, _authorization_params())
         request_id = _query(url)["req"]
         response = await replicas[1].provider.ui_login_post(
-            _form_request("/_oauth/login", {"req": request_id, "email": "e", "password": "p"})
+            _form_request("/_oauth/login", {"req": request_id, "action": "approve"})
         )
         code = _query(response.headers["location"])["code"]
         rows = await store_clients[0].execute_query("SELECT * FROM oauth_authorization_requests;")
