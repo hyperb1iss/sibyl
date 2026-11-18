@@ -240,6 +240,21 @@ class SurrealOAuthAuthorizationStore:
                 )
             )
 
+    async def close_request(self, request_key: str, *, now: datetime | None = None) -> bool:
+        """Delete an open flow, so no later step of it can issue a code."""
+        async with self._client_scope() as client:
+            deleted = _normalize_records(
+                await client.execute_query(
+                    "DELETE oauth_authorization_requests "
+                    "WHERE request_key_hash = $request_key_hash "
+                    "AND status IN $open_statuses AND expires_at > $now RETURN BEFORE;",
+                    request_key_hash=_key_hash(request_key),
+                    open_statuses=list(_OPEN_STATUSES),
+                    now=now or _utcnow(),
+                )
+            )
+        return bool(deleted)
+
     async def load_code(
         self, code: str, *, now: datetime | None = None
     ) -> OAuthAuthorizationRecord | None:

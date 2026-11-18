@@ -23,7 +23,7 @@ import secrets
 from datetime import UTC, datetime, timedelta
 from html import escape
 from typing import Protocol, cast
-from urllib.parse import urlencode, urlsplit, urlunsplit
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 from uuid import UUID, uuid4
 
 import jwt
@@ -178,8 +178,10 @@ def _parse_scopes_from_claims(claims: JwtClaims) -> list[str]:
 
 
 def _add_query_params(url: str, params: dict[str, str]) -> str:
+    # RFC 6749 §3.1.2: a client's redirect_uri keeps its own query parameters.
     parts = urlsplit(url)
-    return urlunsplit((parts.scheme, parts.netloc, parts.path, urlencode(params), parts.fragment))
+    query = urlencode([*parse_qsl(parts.query, keep_blank_values=True), *params.items()])
+    return urlunsplit((parts.scheme, parts.netloc, parts.path, query, parts.fragment))
 
 
 def _create_refresh_token(
@@ -793,6 +795,9 @@ class SibylMcpOAuthProvider(
             )
 
         if action == "deny":
+            # Close the flow so a stale org picker from an earlier approve cannot issue a code.
+            if not await self._authorizations.close_request(request_id):
+                return HTMLResponse(_INVALID_LOGIN_REQUEST_HTML, status_code=400)
             params = {"error": "access_denied"}
             if pending.state:
                 params["state"] = pending.state

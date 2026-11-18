@@ -361,7 +361,21 @@ async def test_mcp_oauth_deny_returns_access_denied_to_the_client(
     monkeypatch.setattr(provider, "_session_user", AsyncMock(return_value=user))
     issue = AsyncMock()
     monkeypatch.setattr(provider, "_issue_code", issue)
-    await _pending(store, "req123")
+    await store.create_request(
+        request_key="req123",
+        client_id="client1",
+        state="state123",
+        scopes=["mcp"],
+        code_challenge="challenge",
+        redirect_uri="http://client.local/cb?channel=desktop",
+        redirect_uri_provided_explicitly=True,
+        resource="http://localhost:3334/mcp",
+        expires_at=utcnow() + timedelta(minutes=10),
+    )
+    # An earlier approve left the flow at the org picker, e.g. in another tab.
+    assert await store.mark_authenticated(
+        "req123", user_id=user.id, authenticated_expires_at=utcnow() + timedelta(minutes=5)
+    )
 
     resp = await provider.ui_login_post(
         _make_form_post_request(path="/_oauth/login", data={"req": "req123", "action": "deny"})
@@ -370,8 +384,18 @@ async def test_mcp_oauth_deny_returns_access_denied_to_the_client(
     assert resp.status_code == 302
     location = urlsplit(resp.headers["location"])
     assert location.netloc == "client.local"
-    assert parse_qs(location.query) == {"error": ["access_denied"], "state": ["state123"]}
+    assert parse_qs(location.query) == {
+        "channel": ["desktop"],
+        "error": ["access_denied"],
+        "state": ["state123"],
+    }
     issue.assert_not_awaited()
+    # The denied flow is closed, so the stale org picker cannot issue a code.
+    stale_org_post = await provider.ui_org_post(
+        _make_form_post_request(path="/_oauth/org", data={"req": "req123", "org_id": "x"})
+    )
+    assert stale_org_post.status_code == 400
+    assert await store.load_request("req123") is None
 
 
 @pytest.mark.asyncio
