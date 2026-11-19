@@ -256,6 +256,40 @@ def test_surreal_auth_runtime_exports_neutral_surface() -> None:
     assert "request_user_deletion" in surreal_auth_runtime.__all__
 
 
+def test_deleting_a_patched_seam_restores_every_submodule() -> None:
+    name = "_ensure_personal_org_membership_record"
+    submodules = (auth_common, auth_login, auth_users)
+    original = getattr(auth_common, name)
+    fake = object()
+
+    setattr(surreal_auth_runtime, name, fake)
+    try:
+        assert [getattr(module, name) for module in submodules] == [fake] * 3
+    finally:
+        delattr(surreal_auth_runtime, name)
+
+    assert [getattr(module, name) for module in submodules] == [original] * 3
+    assert name not in vars(surreal_auth_runtime)
+    assert getattr(surreal_auth_runtime, name) is original
+
+
+def test_assigning_a_seam_back_leaves_nothing_for_a_delete_to_undo(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    name = "_ensure_personal_org_membership_record"
+    original = getattr(auth_common, name)
+    rebound = object()
+
+    setattr(surreal_auth_runtime, name, object())
+    setattr(surreal_auth_runtime, name, original)
+    assert getattr(auth_login, name) is original
+
+    monkeypatch.setattr(auth_login, name, rebound)
+    delattr(surreal_auth_runtime, name)
+
+    assert getattr(auth_login, name) is rebound
+
+
 def test_coerce_datetime_normalizes_aware_datetime_instances() -> None:
     aware = datetime(2026, 4, 23, 16, 0, tzinfo=UTC)
 
