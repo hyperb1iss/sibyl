@@ -17,6 +17,7 @@ Each dispatch runs these gates on the candidate:
 | Job or step                 | What it proves                                                                                                                         |
 | --------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
 | Preflight                   | A real cut runs only on `main`, and only on the commit its dry run proved (`expected_sha`). A dry run may rehearse any branch.         |
+| Release notes key           | The provider accepts the release notes key and still serves its model. The notes step itself runs only on the real cut.                |
 | Image CVE gate              | The `api` and `web` images, built for `amd64` and `arm64`, carry no fixable high or critical advisory.                                 |
 | E2E gate                    | The API, CLI and browser end-to-end suites pass against a production-shaped fixture (SurrealDB, API, worker, seeded corpus, frontend). |
 | Nightly Regression evidence | A Nightly Regression run on the candidate finished with every job green. The job finds one, or dispatches one and waits for it.        |
