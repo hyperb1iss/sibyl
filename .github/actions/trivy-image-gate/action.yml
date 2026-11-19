@@ -54,6 +54,10 @@ runs:
     # committed file carries the exception policy, CI rescans whenever it
     # changes, and the action fails outright if the path is missing, so
     # deleting it cannot quietly restore the implicit behaviour.
+    #
+    # scanners is narrowed to vuln because Trivy otherwise also runs its
+    # secret scanner over every file in the image, where example credentials
+    # in a dependency's docstrings read as CRITICAL findings no fix can clear.
     - name: "◆ Trivy CVE gate"
       uses: aquasecurity/trivy-action@v0.36.0
       env:
@@ -61,6 +65,7 @@ runs:
       with:
         image-ref: ${{ inputs.image-ref }}
         format: table
+        scanners: vuln
         exit-code: "1"
         vuln-type: os,library
         severity: HIGH,CRITICAL

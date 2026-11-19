@@ -577,6 +577,10 @@ def test_image_cve_gate_is_shared_by_every_caller() -> None:
     assert 'exit-code: "1"' in action
     assert "vuln-type: os,library" in action
     assert "ignore-unfixed: true" in action
+    # Both steps scan for vulnerabilities only. Left unset, Trivy also runs
+    # its secret scanner, and the gate then fails on sample credentials in
+    # third-party packages rather than on an advisory.
+    assert action.count("scanners: vuln") == 2
     # Trivy reads a .trivyignore from the working directory unless told
     # otherwise, so the suppression file is named explicitly. Without this an
     # untracked file could silence every gate with nobody accountable.
