@@ -293,6 +293,22 @@ def test_real_cut_refuses_any_ref_but_main() -> None:
     assert preflight["permissions"] == {}
 
 
+def test_dry_run_proves_the_release_notes_key() -> None:
+    # The release notes step runs only on a real cut, so without this probe a
+    # dead key or a retired model surfaces after every gate has passed.
+    jobs = _release_jobs()
+    probe = _steps_by_name(jobs["preflight"])["△ Verify the release notes key"]
+    notes = _steps_by_name(jobs["release"])["◈ Generate AI release notes"]
+
+    assert "if" not in probe
+    assert probe["env"] == {
+        "ANTHROPIC_API_KEY": notes["with"]["api-key"],
+        "RELEASE_NOTES_MODEL": notes["with"]["model"],
+    }
+    assert "https://api.anthropic.com/v1/models/$RELEASE_NOTES_MODEL" in probe["run"]
+    assert probe["run"].count("exit 1") == len(("empty", "refused"))
+
+
 def test_real_cut_releases_only_the_commit_its_dry_run_proved() -> None:
     # gh workflow run --ref main takes main's head at dispatch time, so the
     # approval is pinned to a SHA and a moved main is refused, not released.
