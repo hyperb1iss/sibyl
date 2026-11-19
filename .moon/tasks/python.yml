@@ -6,3 +6,5 @@ implicitInputs:
   - project://^?filter=pyproject.toml
   - /pyproject.toml
   - /uv.lock
+  # hooks and apps/e2e resolve their tools from a lockfile of their own.
+  - uv.lock
