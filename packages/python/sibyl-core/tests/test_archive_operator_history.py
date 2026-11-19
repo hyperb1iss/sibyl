@@ -615,7 +615,14 @@ def test_history_rejects_membership_native_type_pair_and_affinity_drift(dataset,
 
 
 @pytest.mark.parametrize(
-    "server_version", ["surrealdb-3.2.4", "surrealdb-4.0.1", "surrealdb-4.1.0"]
+    "server_version",
+    # An older major, then a pre-release and a later patch of the supported
+    # release: both share its prefix and neither is it.
+    [
+        "surrealdb-3.2.4",
+        f"{SURREAL_SERVER_VERSION_STRING}-rc.1",
+        f"{SURREAL_SERVER_VERSION_STRING}0",
+    ],
 )
 def test_history_rejects_a_root_captured_on_another_backend(dataset, server_version):
     data, scopes, _, _ = dataset
