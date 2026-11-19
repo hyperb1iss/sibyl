@@ -571,7 +571,9 @@ def test_image_cve_gate_is_shared_by_every_caller() -> None:
     # lives in one composite action and every caller delegates to it.
     action = (REPO_ROOT / ".github/actions/trivy-image-gate/action.yml").read_text(encoding="utf-8")
 
-    assert "aquasecurity/trivy-action@v0.36.0" in action
+    # An exact Trivy action release, whichever one Dependabot last moved the
+    # gate to; a version literal here fails every such bump.
+    assert re.search(r"uses: aquasecurity/trivy-action@v\d+\.\d+\.\d+\n", action)
     assert "format: cyclonedx" in action
     assert "severity: HIGH,CRITICAL" in action
     assert 'exit-code: "1"' in action
@@ -855,7 +857,9 @@ def test_publish_workflow_packages_and_publishes_immutable_helm_charts() -> None
 
     assert "helm-package:" in workflow
     assert "helm-publish:" in workflow
-    assert "azure/setup-helm@v5.0.1" in workflow
+    # An exact release of the setup action, not a floating tag and not a
+    # version named here, which would fail every Dependabot bump of it.
+    assert re.search(r"uses: azure/setup-helm@v\d+\.\d+\.\d+\n", workflow)
     assert "version: v3.20.2" in workflow
     assert "helm dependency list charts/surrealdb" in workflow
     assert "helm package charts/sibyl" in workflow
