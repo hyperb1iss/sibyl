@@ -627,10 +627,10 @@ class TestSurrealMajorHold:
         assert plan.applies is False
         status = " ".join(plan.status().split())
         assert "SurrealDB stays on v3.2.4" in status
-        assert "`sibyl local upgrade --surreal-major` moves it to v4.0.0" in status
+        assert "`sibyl local upgrade --surreal-major` moves it to v4.0.1" in status
 
     @pytest.mark.parametrize(
-        "tag", ["v4.0.0", "v4.9.0", None], ids=["shipped", "newer", "no-surreal"]
+        "tag", ["v4.0.1", "v4.9.0", None], ids=["shipped", "newer", "no-surreal"]
     )
     def test_nothing_is_held_on_this_major(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, tag: str | None

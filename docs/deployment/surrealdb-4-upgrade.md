@@ -5,7 +5,7 @@ description: Move a store a SurrealDB 3.x server wrote to SurrealDB 4.0, once an
 
 # SurrealDB 4.0 Upgrade
 
-Sibyl supports one SurrealDB server release, `surrealdb/surrealdb:v4.0.0`. A fresh install starts on
+Sibyl supports one SurrealDB server release, `surrealdb/surrealdb:v4.0.1`. A fresh install starts on
 it and needs nothing from this page. A store a 3.x server wrote has to be converted once before 4.0
 will open it, and that conversion is one-way. This page is the runbook for that move on every
 surface Sibyl ships: the compose files, the Ansible role, the Helm chart, and the CLI runtimes.
@@ -15,7 +15,7 @@ surface Sibyl ships: the compose files, the Ansible role, the Helm chart, and th
 - **4.0 converts the store in place.** 4.0 has no RocksDB engine. Started once with
   `SURREAL_EXPERIMENTAL_UPGRADE_FROM_3X=true` on the same directory, it converts the RocksDB files
   to SurrealKV, keeps the originals in `_rocksdb_backup/` inside the directory, and records version
-  4.0.0. Without that setting it refuses the store ("holds a RocksDB database written by SurrealDB
+  4.0.1. Without that setting it refuses the store ("holds a RocksDB database written by SurrealDB
   3.x"), leaves every file untouched, and a container restarts in a loop until you act.
 - **The value log stays off.** Every SurrealDB service Sibyl ships sets
   `SURREAL_SURREALKV_ENABLE_VLOG=false`, the converting start included, so the converted store
@@ -61,7 +61,7 @@ Every surface below follows the same sequence:
    of the directory itself. The directory peaks at 2.4 times its size while it converts and at 2.75
    times while Sibyl rebuilds indexes with `_rocksdb_backup/` still in it.
 5. **Start 4.0 once with the opt-in** on the `surrealkv://` path, same directory, and wait for it to
-   answer `/ready`. Its log shows `Datastore version recorded version=4.0.0`.
+   answer `/ready`. Its log shows `Datastore version recorded version=4.0.1`.
 6. **Remove the opt-in and start Sibyl** on a `ws://` URL. The API rebuilds the auth and content
    indexes before it answers `/api/health/ready`; each organization's graph rebuilds on its first
    access.

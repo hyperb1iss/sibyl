@@ -221,7 +221,7 @@ ingress:
 
 ### SurrealDB Requirements (default)
 
-- SurrealDB 4.0.0 (`surrealdb/surrealdb:v4.0.0`), the one server release Sibyl supports. Pin that
+- SurrealDB 4.0.1 (`surrealdb/surrealdb:v4.0.1`), the one server release Sibyl supports. Pin that
   tag for production instead of floating on `latest`.
 - A single SurrealDB pod on a SurrealKV-backed PVC (`surrealkv:/data/db`)
 - Root credentials set at start (`--user` / `--pass`)

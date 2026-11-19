@@ -107,7 +107,7 @@ sibyl docker down [options]
 Move the deployment to new images: pull them, then write the new pins and recreate the containers.
 With `--tag` it moves the Sibyl images to that tag; without it, it re-pulls the current pins.
 
-Upgrade also moves the SurrealDB image up to the server this CLI release runs (`v4.0.0`), so upgrade
+Upgrade also moves the SurrealDB image up to the server this CLI release runs (`v4.0.1`), so upgrade
 the CLI before you upgrade the deployment. It pulls every new image before it touches the compose
 file, so a failed pull exits non-zero and leaves the deployment and its pins as they were. Compose
 then recreates SurrealDB and waits for it to report healthy before it starts the new API. If that

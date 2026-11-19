@@ -627,7 +627,7 @@ def _fresh_config(runtime: str) -> dict:
 def test_fresh_configs_run_surrealdb_4_on_a_surrealkv_store(runtime: str) -> None:
     surrealdb = _fresh_config(runtime)["services"]["surrealdb"]
 
-    assert SURREAL_IMAGE == "surrealdb/surrealdb:v4.0.0"
+    assert SURREAL_IMAGE == "surrealdb/surrealdb:v4.0.1"
     assert surrealdb["image"] == SURREAL_IMAGE_REFERENCE
     assert surrealdb["command"][-1] == SURREAL_STORE_PATH == "surrealkv:///data/sibyl.db"
     assert not any("rocksdb" in part for part in surrealdb["command"])

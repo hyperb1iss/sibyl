@@ -61,14 +61,14 @@ service started without it can open existing data as an empty database.
 
 - `surreal-init` checks the image and store path, then hands the data directory to uid 65532.
   `surrealdb` starts only after it exits cleanly.
-- `surrealdb` runs `${SIBYL_SURREAL_IMAGE:-surrealdb/surrealdb:v4.0.0}` on
+- `surrealdb` runs `${SIBYL_SURREAL_IMAGE:-surrealdb/surrealdb:v4.0.1}` on
   `${SIBYL_SURREAL_PATH:-surrealkv:///data/sibyl.db}`, published on `${SIBYL_SURREAL_PORT:-8000}`,
   with its data in `${SURREAL_DATA_DIR:-./.moon/cache/surreal-dev}` and the value log off.
 - `surrealdb-eval` (the `eval` profile) runs the same pinned image behind its own guarded init, on
   `127.0.0.1:8018`, with data under `${SIBYL_RELEASE_ROOT:-./.moon/cache/surreal-eval}`.
 - `redis` (the `redis` profile) runs Valkey 8 on `${SIBYL_REDIS_PORT:-6381}` without persistence.
 
-The default image is pinned to SurrealDB server `v4.0.0` for reproducible local and CI behavior, and
+The default image is pinned to SurrealDB server `v4.0.1` for reproducible local and CI behavior, and
 it stores data with SurrealKV. Override `SIBYL_SURREAL_IMAGE` when rehearsing a newer server patch.
 The root compose stores SurrealDB data in a bind mount under `.moon/cache/surreal-dev` so it
 survives container churn and is easy to inspect.
@@ -237,7 +237,7 @@ services:
         condition: service_healthy
 
   surrealdb:
-    image: ${SIBYL_SURREAL_IMAGE:-surrealdb/surrealdb:v4.0.0}
+    image: ${SIBYL_SURREAL_IMAGE:-surrealdb/surrealdb:v4.0.1}
     ports:
       - "${SIBYL_SURREAL_PORT:-8000}:8000"
     volumes:

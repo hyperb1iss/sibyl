@@ -10,7 +10,7 @@ Four long-running containers plus a one-shot volume initializer (`surreal-init`)
 
 | Container   | Source                                              | Purpose                        |
 | ----------- | --------------------------------------------------- | ------------------------------ |
-| `surrealdb` | `surrealdb/surrealdb:v4.0.0`                        | Graph, content, and auth store |
+| `surrealdb` | `surrealdb/surrealdb:v4.0.1`                        | Graph, content, and auth store |
 | `backend`   | `ghcr.io/hyperb1iss/sibyl-api`                      | FastAPI + MCP server           |
 | `frontend`  | `ghcr.io/hyperb1iss/sibyl-web`                      | Next.js web UI                 |
 | `caddy`     | built from `caddy:2` with the Cloudflare DNS module | TLS + path routing             |
@@ -45,7 +45,7 @@ provisions a host end to end:
 | `sibyl_mcp_auth_mode`           | `auto`                       | MCP bearer-token enforcement                           |
 | `sibyl_network_prefix`          | `10.47.213`                  | First three octets of the compose network's /24        |
 | `sibyl_forwarded_allow_ips`     | `10.47.213.10/32` (Caddy)    | Proxies trusted to name the client                     |
-| `sibyl_surreal_image`           | `surrealdb/surrealdb:v4.0.0` | SurrealDB server image                                 |
+| `sibyl_surreal_image`           | `surrealdb/surrealdb:v4.0.1` | SurrealDB server image                                 |
 | `sibyl_surreal_path`            | `surrealkv:///data/sibyl.db` | Store path; `rocksdb:///data/sibyl.db` for a 3.x image |
 | `sibyl_surreal_upgrade_from_3x` | `false`                      | Set `true` for the one run that converts a 3.x store   |
 
