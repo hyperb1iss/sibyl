@@ -768,9 +768,9 @@ def test_publish_workflow_uploads_python_homebrew_and_aur_artifacts() -> None:
     assert "HOMEBREW_TAP_TOKEN cannot authenticate" in workflow
     assert "HOMEBREW_TAP_TOKEN cannot push to hyperb1iss/homebrew-tap" in workflow
     assert "persist-credentials: true" in workflow
-    assert (
-        "KSXGitHub/github-actions-deploy-aur@084b0d9b15415bf9cdb65d44dad1efe37a354050" in workflow
-    )
+    # The AUR deploy action is held to a full commit, whichever one Dependabot
+    # last moved the workflow to; naming the commit here fails every such bump.
+    assert re.search(r"uses: KSXGitHub/github-actions-deploy-aur@[0-9a-f]{40}\b", workflow)
     assert all(
         fragment in workflow
         for fragment in (

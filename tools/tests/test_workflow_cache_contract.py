@@ -13,9 +13,13 @@ WORKFLOWS_DIR = REPO_ROOT / ".github" / "workflows"
 TOOLCHAIN_SELECTORS = frozenset((".prototools", ".python-version"))
 HASH_FILES_PATTERN = re.compile(r"hashFiles\s*\(([^)]*)\)")
 QUOTED_ARGUMENT_PATTERN = re.compile(r"(['\"])([^'\"]+)\1")
-SETUP_TOOLCHAIN_ACTION = "moonrepo/setup-toolchain@v0.6.4"
-SETUP_NODE_ACTION = "actions/setup-node@v7"
-SETUP_PYTHON_ACTION = "actions/setup-python@v7"
+# Each action is held to a release tag, never a branch, without naming the
+# number: Dependabot moves the workflows and cannot edit this file. The
+# workflows follow the two first-party setup actions by major version, so
+# those accept a major tag as well as an exact release.
+SETUP_TOOLCHAIN_ACTION = re.compile(r"moonrepo/setup-toolchain@v\d+\.\d+\.\d+")
+SETUP_NODE_ACTION = re.compile(r"actions/setup-node@v\d+(\.\d+){0,2}")
+SETUP_PYTHON_ACTION = re.compile(r"actions/setup-python@v\d+(\.\d+){0,2}")
 PROTO_VERSION = "0.61.1"
 NODE_VERSION = "24.19.0"
 PYTHON_VERSION = "3.13.15"
@@ -111,8 +115,11 @@ def test_every_moon_setup_uses_the_repo_proto_version() -> None:
     setup_steps = list(_action_steps(_workflow_paths(WORKFLOWS_DIR), "moonrepo/setup-toolchain@"))
 
     assert setup_steps, "no moon setup-toolchain steps found"
+    assert len({step.get("uses") for _, step in setup_steps}) == 1, "mixed setup action releases"
     for label, step in setup_steps:
-        assert step.get("uses") == SETUP_TOOLCHAIN_ACTION, f"unpinned setup action in {label}"
+        assert SETUP_TOOLCHAIN_ACTION.fullmatch(str(step.get("uses"))), (
+            f"unpinned setup action in {label}"
+        )
         inputs = step.get("with", {})
         assert isinstance(inputs, dict), f"invalid setup inputs in {label}"
         assert inputs.get("proto-version") == PROTO_VERSION, f"unpinned proto version in {label}"
@@ -133,7 +140,9 @@ def test_direct_workflow_toolchains_use_exact_repo_versions() -> None:
     docs_setups = list(_action_steps((docs_path,), "actions/setup-node@"))
     assert len(docs_setups) == 1, "expected exactly one docs setup-node step"
     docs_label, docs_setup = docs_setups[0]
-    assert docs_setup.get("uses") == SETUP_NODE_ACTION, f"unpinned Node action in {docs_label}"
+    assert SETUP_NODE_ACTION.fullmatch(str(docs_setup.get("uses"))), (
+        f"unpinned Node action in {docs_label}"
+    )
     docs_inputs = docs_setup.get("with", {})
     assert isinstance(docs_inputs, dict), f"invalid Node setup inputs in {docs_label}"
     assert docs_inputs.get("node-version") == NODE_VERSION
@@ -141,7 +150,9 @@ def test_direct_workflow_toolchains_use_exact_repo_versions() -> None:
     python_setups = list(_action_steps((publish_path,), "actions/setup-python@"))
     assert python_setups
     for label, python_setup in python_setups:
-        assert python_setup.get("uses") == SETUP_PYTHON_ACTION, f"unpinned Python action in {label}"
+        assert SETUP_PYTHON_ACTION.fullmatch(str(python_setup.get("uses"))), (
+            f"unpinned Python action in {label}"
+        )
         python_inputs = python_setup.get("with", {})
         assert isinstance(python_inputs, dict), f"invalid Python setup inputs in {label}"
         assert python_inputs.get("python-version") == PYTHON_VERSION, (
