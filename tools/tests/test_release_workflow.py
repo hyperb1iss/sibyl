@@ -571,12 +571,20 @@ def test_image_cve_gate_is_shared_by_every_caller() -> None:
     # lives in one composite action and every caller delegates to it.
     action = (REPO_ROOT / ".github/actions/trivy-image-gate/action.yml").read_text(encoding="utf-8")
 
-    assert "aquasecurity/trivy-action@v0.36.0" in action
+    # An exact Trivy action release, whichever one Dependabot last moved the
+    # gate to; a version literal here fails every such bump.
+    assert re.search(r"uses: aquasecurity/trivy-action@v\d+\.\d+\.\d+\n", action)
     assert "format: cyclonedx" in action
     assert "severity: HIGH,CRITICAL" in action
     assert 'exit-code: "1"' in action
     assert "vuln-type: os,library" in action
     assert "ignore-unfixed: true" in action
+    # Every Trivy step scans for vulnerabilities only. Left unset, Trivy also
+    # runs its secret scanner, and the gate then fails on sample credentials
+    # in third-party packages rather than on an advisory.
+    trivy_steps = action.count("uses: aquasecurity/trivy-action@")
+    assert trivy_steps
+    assert action.count("scanners: vuln") == trivy_steps
     # Trivy reads a .trivyignore from the working directory unless told
     # otherwise, so the suppression file is named explicitly. Without this an
     # untracked file could silence every gate with nobody accountable.
@@ -762,9 +770,9 @@ def test_publish_workflow_uploads_python_homebrew_and_aur_artifacts() -> None:
     assert "HOMEBREW_TAP_TOKEN cannot authenticate" in workflow
     assert "HOMEBREW_TAP_TOKEN cannot push to hyperb1iss/homebrew-tap" in workflow
     assert "persist-credentials: true" in workflow
-    assert (
-        "KSXGitHub/github-actions-deploy-aur@084b0d9b15415bf9cdb65d44dad1efe37a354050" in workflow
-    )
+    # The AUR deploy action is held to a full commit, whichever one Dependabot
+    # last moved the workflow to; naming the commit here fails every such bump.
+    assert re.search(r"uses: KSXGitHub/github-actions-deploy-aur@[0-9a-f]{40}\b", workflow)
     assert all(
         fragment in workflow
         for fragment in (
@@ -851,7 +859,9 @@ def test_publish_workflow_packages_and_publishes_immutable_helm_charts() -> None
 
     assert "helm-package:" in workflow
     assert "helm-publish:" in workflow
-    assert "azure/setup-helm@v5.0.1" in workflow
+    # An exact release of the setup action, not a floating tag and not a
+    # version named here, which would fail every Dependabot bump of it.
+    assert re.search(r"uses: azure/setup-helm@v\d+\.\d+\.\d+\n", workflow)
     assert "version: v3.20.2" in workflow
     assert "helm dependency list charts/surrealdb" in workflow
     assert "helm package charts/sibyl" in workflow
