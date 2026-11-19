@@ -805,6 +805,41 @@ def test_publish_workflow_uploads_python_homebrew_and_aur_artifacts() -> None:
     assert workflow.index("gh-action-pypi-publish") < workflow.index("aur_pkgbuild.py")
 
 
+def test_release_candidate_moves_no_channel_default() -> None:
+    # A candidate is installable by version on every channel and is nobody's
+    # current release. With one path for every version, a candidate replaced
+    # the tap formula, the latest image tag and the release marked latest.
+    workflow = cast("dict[str, Any]", yaml.safe_load(_publish_workflow()))
+    jobs = workflow["jobs"]
+    held = "env.RELEASE_CANDIDATE != 'true'"
+    shell_gate = 'if [[ "$RELEASE_CANDIDATE" != "true" ]]; then'
+
+    assert workflow["env"]["RELEASE_CANDIDATE"] == "${{ contains(inputs.tag, '-rc.') }}"
+
+    for job, step in (
+        ("homebrew", "► Commit tap update"),
+        ("aur", "► Publish to AUR"),
+        ("release", "◆ Promote release to latest"),
+    ):
+        assert held in _steps_by_name(jobs[job])[step]["if"], step
+
+    # The formula and the PKGBUILD are release evidence for a candidate too,
+    # so their jobs run and only the pushes are held back.
+    assert jobs["homebrew"]["if"] == "${{ !inputs.dry_run }}"
+    assert jobs["aur"]["if"] == "${{ !inputs.dry_run }}"
+
+    merge = _steps_by_name(jobs["docker-merge"])["► Create manifest list"]["run"]
+    assert 'tags=(-t "${repo}:${VERSION}")' in merge
+    assert f'{shell_gate}\n    tags+=(-t "${{repo}}:latest")\n  fi' in merge
+    assert merge.count(":latest") == 1
+
+    body = _steps_by_name(jobs["release"])["◇ Prepare release body"]["run"]
+    gate = body.index(shell_gate)
+    tap = body.index("brew install hyperb1iss/tap/sibyl")
+    aur = body.index("paru -S sibyl")
+    assert gate < tap < aur < body.index("\nfi\n", gate)
+
+
 def test_publish_workflow_keeps_install_instructions_current() -> None:
     workflow = _publish_workflow()
 
