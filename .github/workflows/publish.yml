@@ -21,7 +21,9 @@ env:
   # default: no Homebrew tap formula, no AUR package, no `latest` image tag
   # and no promotion of the GitHub release. Someone who asks for the candidate
   # by version gets it, and nobody who asked for the current release does.
-  RELEASE_CANDIDATE: ${{ contains(inputs.tag, '-rc.') }}
+  # A final tag is vX.Y.Z and has no hyphen, so any suffixed tag counts as a
+  # candidate: a tag this pipeline did not expect moves nothing either.
+  RELEASE_CANDIDATE: ${{ contains(inputs.tag, '-') }}
 
 concurrency:
   group: publish

@@ -58,9 +58,9 @@ input) from `VERSION`.
 A release candidate publishes every versioned artifact: the Python packages, the versioned image
 tags, the Helm charts and a GitHub prerelease with its evidence assets. It moves no channel default.
 The Homebrew tap and the AUR keep the current final release, the `latest` image tag stays where it
-is, and the GitHub release stays a prerelease that is not marked latest. The formula and the
-PKGBUILD are still generated, tested and attached to the release, so a candidate can be installed
-from them on purpose.
+is, and the GitHub release stays a prerelease that is not marked latest. The formula is still
+generated and install-tested and the PKGBUILD is still generated, and both are attached to the
+release. Publish treats any tag with a suffix as a candidate.
 
 ## Check live project state
 

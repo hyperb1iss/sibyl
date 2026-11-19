@@ -814,14 +814,20 @@ def test_release_candidate_moves_no_channel_default() -> None:
     held = "env.RELEASE_CANDIDATE != 'true'"
     shell_gate = 'if [[ "$RELEASE_CANDIDATE" != "true" ]]; then'
 
-    assert workflow["env"]["RELEASE_CANDIDATE"] == "${{ contains(inputs.tag, '-rc.') }}"
+    # A final tag has no hyphen, so a suffix nobody planned for (rc1, beta.1)
+    # is held back like a candidate instead of being published as current.
+    assert workflow["env"]["RELEASE_CANDIDATE"] == "${{ contains(inputs.tag, '-') }}"
 
-    for job, step in (
-        ("homebrew", "► Commit tap update"),
-        ("aur", "► Publish to AUR"),
-        ("release", "◆ Promote release to latest"),
+    for job, step, condition in (
+        ("homebrew", "► Commit tap update", f"${{{{ {held} }}}}"),
+        (
+            "aur",
+            "► Publish to AUR",
+            f"${{{{ steps.aur_state.outputs.publish == 'true' && {held} }}}}",
+        ),
+        ("release", "◆ Promote release to latest", f"${{{{ {held} }}}}"),
     ):
-        assert held in _steps_by_name(jobs[job])[step]["if"], step
+        assert _steps_by_name(jobs[job])[step]["if"] == condition, step
 
     # The formula and the PKGBUILD are release evidence for a candidate too,
     # so their jobs run and only the pushes are held back.
@@ -837,7 +843,10 @@ def test_release_candidate_moves_no_channel_default() -> None:
     gate = body.index(shell_gate)
     tap = body.index("brew install hyperb1iss/tap/sibyl")
     aur = body.index("paru -S sibyl")
-    assert gate < tap < aur < body.index("\nfi\n", gate)
+    # The gate has to be shell, not text inside a heredoc: the heredoc before
+    # it is closed, and the one it guards closes right before its `fi`.
+    assert body[:gate].endswith("EOF\n")
+    assert gate < tap < aur < body.index("EOF\nfi\n", aur)
 
 
 def test_publish_workflow_keeps_install_instructions_current() -> None:
