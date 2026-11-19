@@ -18,7 +18,7 @@ authentication required.
 ```json
 {
   "status": "healthy",
-  "version": "1.5.0-rc.1"
+  "version": "1.5.0-rc.2"
 }
 ```
 
