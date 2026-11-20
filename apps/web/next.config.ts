@@ -97,6 +97,11 @@ const nextConfig: NextConfig = {
         source: '/api/:path*',
         destination: `${BACKEND_URL}/api/:path*`,
       },
+      // The MCP OAuth sign-in pages: an SSO sign-in returns to them on this origin.
+      {
+        source: '/_oauth/:path*',
+        destination: `${BACKEND_URL}/_oauth/:path*`,
+      },
     ];
   },
 };
