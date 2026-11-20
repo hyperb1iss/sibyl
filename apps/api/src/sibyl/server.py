@@ -54,12 +54,16 @@ def create_mcp_server() -> MCPServer:
     )
 
     if auth_server_provider is not None:
+        from sibyl.api.rate_limit import limiter
 
         @mcp.custom_route("/_oauth/login", methods=["GET"])
         async def _oauth_login_get(request):
             return await auth_server_provider.ui_login_get(request)
 
         @mcp.custom_route("/_oauth/login", methods=["POST"])
+        @limiter.limit(
+            "10/minute"
+        )  # Same as the device approval page; this one takes passwords too
         async def _oauth_login_post(request):
             return await auth_server_provider.ui_login_post(request)
 
