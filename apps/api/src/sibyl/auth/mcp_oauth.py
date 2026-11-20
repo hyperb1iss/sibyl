@@ -184,6 +184,17 @@ def _add_query_params(url: str, params: dict[str, str]) -> str:
     return urlunsplit((parts.scheme, parts.netloc, parts.path, query, parts.fragment))
 
 
+def _redirect_host(redirect_uri: str) -> str:
+    """Host and port of a redirect URI, without the userinfo a client could use to spoof it."""
+    parts = urlsplit(redirect_uri)
+    host = parts.hostname
+    if not host:
+        return redirect_uri
+    if ":" in host:
+        host = f"[{host}]"
+    return f"{host}:{parts.port}" if parts.port else host
+
+
 def _create_refresh_token(
     *,
     user_id: UUID,
@@ -620,9 +631,24 @@ class SibylMcpOAuthProvider(
     # login and device approval. Imported at call time: the API routes import
     # the auth package, not the other way round.
     async def _session_user(self, request: Request) -> _OAuthUser | None:
+        """The user of the browser session cookie, and nothing else.
+
+        Approving issues a code that exchanges for a full session, so a bearer
+        header (an API key or another client's token) must never count here.
+        """
         from sibyl.api.routes import auth as auth_routes
 
-        return cast("_OAuthUser | None", await auth_routes.optional_request_user(request))
+        token = (request.cookies.get(auth_routes.ACCESS_TOKEN_COOKIE) or "").strip()
+        if not token or token.startswith("sk_"):
+            return None
+        try:
+            claims = verify_access_token(token)
+            user_id = UUID(str(claims.get("sub", "")))
+        except (JwtError, ValueError):
+            return None
+        if not await validate_access_session(token):
+            return None
+        return await self._get_user(user_id)
 
     async def _local_login_offered(self) -> bool:
         from sibyl.api.routes import auth as auth_routes
@@ -682,7 +708,7 @@ class SibylMcpOAuthProvider(
             identity = escape(
                 str(getattr(user, "email", None) or getattr(user, "name", None) or user.id)
             )
-            redirect_host = escape(urlsplit(pending.redirect_uri).netloc or pending.redirect_uri)
+            redirect_host = escape(_redirect_host(pending.redirect_uri))
             body = f"""
     <h1>Authorize {client_name}</h1>
     <div class="sub">Signed in as <strong>{identity}</strong>.</div>

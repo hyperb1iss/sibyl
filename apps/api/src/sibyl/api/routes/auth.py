@@ -106,7 +106,7 @@ BREAK_GLASS_IP_DENIED_DETAIL = {
 }
 
 
-async def optional_request_user(request: Request) -> AuthUser | None:
+async def _optional_request_user(request: Request) -> AuthUser | None:
     """Resolve an active request session to a user when one is present."""
     claims = await resolve_claims(request)
     if not claims:
@@ -1449,7 +1449,7 @@ async def device_verify_get(request: Request) -> Response:
     user_code = normalize_user_code(raw_code)
     error_code = (request.query_params.get("error") or "").strip() or None
 
-    user = await optional_request_user(request)
+    user = await _optional_request_user(request)
 
     pending: dict[str, object] | None = None
     if user_code:

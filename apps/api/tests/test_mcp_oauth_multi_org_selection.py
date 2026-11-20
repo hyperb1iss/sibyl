@@ -10,10 +10,13 @@ from uuid import UUID, uuid4
 
 import pytest
 from mcp.shared.auth import OAuthClientInformationFull
+from pydantic import SecretStr
 from starlette.requests import Request
 
 from sibyl import config as config_module
 from sibyl.api.routes import auth as auth_routes
+from sibyl.auth.api_key_common import ApiKeyAuth
+from sibyl.auth.jwt import create_access_token
 from sibyl.auth.mcp_oauth import SibylMcpOAuthProvider
 from sibyl.auth.oidc import EnabledOIDCProvider
 from sibyl.persistence.surreal.auth_runtime.oauth_authorization import (
@@ -75,7 +78,9 @@ def _make_get_request(*, path: str, query: dict[str, str]) -> Request:
     return Request(scope)
 
 
-def _make_form_post_request(*, path: str, data: dict[str, str]) -> Request:
+def _make_form_post_request(
+    *, path: str, data: dict[str, str], headers: dict[str, str] | None = None
+) -> Request:
     body = urlencode(data).encode("utf-8")
 
     async def receive():  # type: ignore[no-untyped-def]
@@ -89,6 +94,7 @@ def _make_form_post_request(*, path: str, data: dict[str, str]) -> Request:
         "headers": [
             (b"host", b"testserver"),
             (b"content-type", b"application/x-www-form-urlencoded"),
+            *((k.lower().encode(), v.encode()) for k, v in (headers or {}).items()),
         ],
         "scheme": "http",
         "server": ("testserver", 80),
@@ -434,3 +440,145 @@ async def test_mcp_oauth_bot_session_cannot_authorize(
 
     assert resp.status_code == 403
     issue.assert_not_awaited()
+
+
+@pytest.fixture
+def single_org_approve(monkeypatch) -> tuple[SimpleNamespace, AsyncMock]:
+    """A user with one org, and the code issuance an approve would reach."""
+    monkeypatch.setattr(
+        config_module.settings, "jwt_secret", SecretStr("mcp-oauth-session-test-secret-" * 2)
+    )
+    user = SimpleNamespace(id=uuid4(), email="user@example.com")
+    org = SimpleNamespace(id=uuid4(), name="Org", slug="org", is_personal=True)
+    issue = AsyncMock(return_value=SimpleNamespace(status_code=302))
+    return SimpleNamespace(user=user, org=org), issue
+
+
+@pytest.mark.asyncio
+async def test_mcp_oauth_api_key_bearer_cannot_approve(
+    monkeypatch, store: SurrealOAuthAuthorizationStore, single_org_approve
+) -> None:
+    who, issue = single_org_approve
+    provider = SibylMcpOAuthProvider(authorization_store=store)
+    key = ApiKeyAuth(
+        api_key_id=uuid4(), user_id=who.user.id, organization_id=who.org.id, scopes=["mcp"]
+    )
+    monkeypatch.setattr("sibyl.auth.dependencies.authenticate_api_key", AsyncMock(return_value=key))
+    monkeypatch.setattr(auth_routes, "get_user_by_id", AsyncMock(return_value=who.user))
+    monkeypatch.setattr(provider, "_get_user", AsyncMock(return_value=who.user))
+    monkeypatch.setattr(provider, "_list_user_orgs", AsyncMock(return_value=[who.org]))
+    monkeypatch.setattr(provider, "_issue_code", issue)
+    await _pending(store, "req123")
+
+    resp = await provider.ui_login_post(
+        _make_form_post_request(
+            path="/_oauth/login",
+            data={"req": "req123", "action": "approve"},
+            headers={"Authorization": "Bearer sk_live_key"},
+        )
+    )
+
+    # A key is not a browser session: it would otherwise trade itself for a
+    # full user session through the code exchange.
+    assert resp.status_code == 302
+    assert resp.headers["location"] == "/_oauth/login?req=req123"
+    issue.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_mcp_oauth_session_cookie_can_approve(
+    monkeypatch, store: SurrealOAuthAuthorizationStore, single_org_approve
+) -> None:
+    who, issue = single_org_approve
+    provider = SibylMcpOAuthProvider(authorization_store=store)
+    monkeypatch.setattr(
+        "sibyl.auth.mcp_oauth.validate_access_session", AsyncMock(return_value=True)
+    )
+    monkeypatch.setattr(provider, "_get_user", AsyncMock(return_value=who.user))
+    monkeypatch.setattr(provider, "_list_user_orgs", AsyncMock(return_value=[who.org]))
+    monkeypatch.setattr(provider, "_issue_code", issue)
+    await _pending(store, "req123")
+    session = create_access_token(user_id=who.user.id, session_id=uuid4())
+
+    await provider.ui_login_post(
+        _make_form_post_request(
+            path="/_oauth/login",
+            data={"req": "req123", "action": "approve"},
+            headers={"Cookie": f"sibyl_access_token={session}"},
+        )
+    )
+
+    issue.assert_awaited_once()
+    assert issue.await_args.kwargs["user_id"] == who.user.id
+
+
+@pytest.mark.asyncio
+async def test_mcp_oauth_consent_shows_host_without_userinfo(
+    monkeypatch, store: SurrealOAuthAuthorizationStore
+) -> None:
+    provider = SibylMcpOAuthProvider(authorization_store=store)
+    user = SimpleNamespace(id=uuid4(), email="user@example.com")
+    monkeypatch.setattr(provider, "_session_user", AsyncMock(return_value=user))
+    await store.create_request(
+        request_key="req123",
+        client_id="client1",
+        state="state123",
+        scopes=["mcp"],
+        code_challenge="challenge",
+        redirect_uri="https://localhost:8976@evil.example:8443/cb",
+        redirect_uri_provided_explicitly=True,
+        resource="http://localhost:3334/mcp",
+        expires_at=utcnow() + timedelta(minutes=10),
+    )
+
+    resp = await provider.ui_login_get(
+        _make_get_request(path="/_oauth/login", query={"req": "req123"})
+    )
+
+    body = resp.body.decode("utf-8")
+    assert "<code>evil.example:8443</code>" in body
+    assert "localhost:8976" not in body
+
+
+@pytest.mark.asyncio
+async def test_mcp_oauth_break_glass_password_needs_an_incident_reason(
+    monkeypatch, store: SurrealOAuthAuthorizationStore
+) -> None:
+    provider = SibylMcpOAuthProvider(authorization_store=store)
+    settings = config_module.settings
+    monkeypatch.setattr(settings, "local_auth_enabled", False)
+    monkeypatch.setattr(settings, "break_glass_enabled", True)
+    monkeypatch.setattr(settings, "break_glass_allowed_ips", ["127.0.0.0/8"])
+    monkeypatch.setattr(settings, "break_glass_expires_at", datetime.now(UTC) + timedelta(hours=1))
+    monkeypatch.setattr(auth_routes, "is_setup_mode", AsyncMock(return_value=False))
+    monkeypatch.setattr(provider, "_session_user", AsyncMock(return_value=None))
+    issued = SimpleNamespace(
+        access_token="access-jwt",
+        refresh_token="refresh-jwt",
+        refresh_expires=datetime.now(UTC) + timedelta(days=30),
+    )
+    login = AsyncMock(return_value=issued)
+    monkeypatch.setattr(auth_routes, "login_local_user", login)
+    await _pending(store, "req123")
+
+    page = await provider.ui_login_get(
+        _make_get_request(path="/_oauth/login", query={"req": "req123"})
+    )
+    assert 'name="break_glass_reason"' in page.body.decode("utf-8")
+
+    form = {"req": "req123", "action": "login", "email": "a@b.c", "password": "pw"}
+    refused = await provider.ui_login_post(_make_form_post_request(path="/_oauth/login", data=form))
+    assert refused.headers["location"] == (
+        "/_oauth/login?req=req123&error=break_glass_reason_required"
+    )
+    assert "set-cookie" not in refused.headers
+    login.assert_not_awaited()
+
+    allowed = await provider.ui_login_post(
+        _make_form_post_request(
+            path="/_oauth/login", data={**form, "break_glass_reason": "  INC-42  "}
+        )
+    )
+    assert allowed.headers["location"] == "/_oauth/login?req=req123"
+    assert "sibyl_access_token=access-jwt" in allowed.headers["set-cookie"]
+    assert login.await_args.kwargs["break_glass_reason"] == "INC-42"
