@@ -55,15 +55,20 @@ class Context:
     org_slug: str | None = None  # None = auto-pick first/only org
     default_project: str | None = None
     insecure: bool = False  # Skip SSL verification (for self-signed certs)
+    # Session-start hooks import new and changed agent memory files.
+    sync_agent_memories: bool = False
 
     def to_dict(self) -> dict[str, Any]:
         """Convert to dict for TOML storage."""
-        return {
+        data: dict[str, Any] = {
             "server_url": self.server_url,
             "org_slug": self.org_slug or "",
             "default_project": self.default_project or "",
             "insecure": self.insecure,
         }
+        if self.sync_agent_memories:
+            data["sync_agent_memories"] = True
+        return data
 
     @classmethod
     def from_dict(cls, name: str, data: dict[str, Any]) -> Context:
@@ -74,6 +79,7 @@ class Context:
             org_slug=data.get("org_slug") or None,
             default_project=data.get("default_project") or None,
             insecure=bool(data.get("insecure", False)),
+            sync_agent_memories=bool(data.get("sync_agent_memories", False)),
         )
 
 
@@ -231,9 +237,10 @@ def _validate_config_schema(config: dict[str, Any], path: Path) -> None:
             value = context.get(field)
             if value is not None and not isinstance(value, str):
                 _schema_failure(path, f"contexts.{name}.{field}", "a string", value)
-        insecure = context.get("insecure")
-        if insecure is not None and not isinstance(insecure, bool):
-            _schema_failure(path, f"contexts.{name}.insecure", "a boolean", insecure)
+        for field in ("insecure", "sync_agent_memories"):
+            value = context.get(field)
+            if value is not None and not isinstance(value, bool):
+                _schema_failure(path, f"contexts.{name}.{field}", "a boolean", value)
 
 
 def load_config() -> dict[str, Any]:
@@ -1027,6 +1034,7 @@ def update_context(
     org_slug: str | _Unset | None = _UNSET,
     default_project: str | _Unset | None = _UNSET,
     insecure: bool | None = None,
+    sync_agent_memories: bool | None = None,
 ) -> Context:
     """Update an existing context.
 
@@ -1036,6 +1044,7 @@ def update_context(
         org_slug: New org slug (_UNSET = keep existing, None = clear).
         default_project: New default project (_UNSET = keep existing, None = clear).
         insecure: SSL verification setting (None = keep existing).
+        sync_agent_memories: Agent memory sync setting (None = keep existing).
 
     Returns:
         The updated Context.
@@ -1057,6 +1066,8 @@ def update_context(
             ctx_data["default_project"] = default_project or ""
         if insecure is not None:
             ctx_data["insecure"] = insecure
+        if sync_agent_memories is not None:
+            ctx_data["sync_agent_memories"] = sync_agent_memories
         return Context.from_dict(name, ctx_data)
 
     return update_config(mutation)

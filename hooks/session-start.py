@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import subprocess
@@ -25,6 +26,23 @@ def run_sibyl(*args: str, timeout: int = 5) -> str | None:
     except Exception:
         pass
     return None
+
+
+def sync_agent_memories() -> None:
+    """Import new and changed agent memory files in the background.
+
+    The CLI does nothing unless this directory's context keeps agent memories
+    in sync, and the hook never waits for it.
+    """
+    with contextlib.suppress(Exception):
+        subprocess.Popen(
+            ["sibyl", "ingest", "memories", "--sync"],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            cwd=os.environ.get("CLAUDE_PROJECT_DIR", "."),
+            start_new_session=True,
+        )
 
 
 def get_active_tasks() -> list[dict]:
@@ -61,6 +79,7 @@ def main():
             print("Sibyl server unreachable — skip sibyl commands this session.")
             sys.exit(0)
 
+        sync_agent_memories()
         lines = []
         bundle = get_session_bundle()
         if bundle:

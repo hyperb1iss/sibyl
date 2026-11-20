@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import asyncio
 import json
+from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import pytest
 from typer.testing import CliRunner
 
 from sibyl_cli import agent_memories as am
@@ -38,11 +40,13 @@ Outcome: success
 """
 
 
-def _claude_home(tmp_path: Path, *, repo: str = REPO) -> tuple[Path, Path]:
+def _claude_home(
+    tmp_path: Path, *, repo: str = REPO, feedback: str = CLAUDE_FEEDBACK
+) -> tuple[Path, Path]:
     home = tmp_path / ".claude"
     memory = home / "projects" / am.claude_slug(repo) / "memory"
     memory.mkdir(parents=True, exist_ok=True)
-    (memory / "devbox.md").write_text(CLAUDE_FEEDBACK)
+    (memory / "devbox.md").write_text(feedback)
     (memory / "MEMORY.md").write_text("- [Devbox](devbox.md) — index line\n")
     (memory / "blank.md").write_text("---\nname: blank\n---\n\n")
     if not (memory / "linked.md").is_symlink():
@@ -709,16 +713,30 @@ class _FakeClientContext:
 
 
 class TestCommand:
-    def _run(self, tmp_path: Path, client: MagicMock, *args: str) -> Any:
-        claude_home, _ = _claude_home(tmp_path)
+    @pytest.fixture(autouse=True)
+    def _config(self, tmp_path: Path) -> Iterator[None]:
+        with patch.object(config_store, "config_dir", return_value=tmp_path / ".sibyl"):
+            config_store.create_context("team", "https://sibyl.example.com")
+            yield
+
+    def _run(
+        self,
+        tmp_path: Path,
+        client: MagicMock,
+        *args: str,
+        feedback: str = CLAUDE_FEEDBACK,
+        pins: dict[str, str] | None = None,
+        owner: str = OWNER,
+    ) -> Any:
+        claude_home, _ = _claude_home(tmp_path, feedback=feedback)
         codex_home = _codex_home(tmp_path)
         client.explore = AsyncMock(return_value={"entities": [{"id": "project_1"}]})
-        client._request = AsyncMock(return_value={"user": {"id": OWNER}})
+        client._request = AsyncMock(return_value={"user": {"id": owner}})
         with (
             patch("sibyl_cli.ingest.get_client", return_value=_FakeClientContext(client)),
             patch("sibyl_cli.ingest.resolve_client_context_name", return_value="team"),
             patch.object(config_store, "get_path_mappings", return_value={REPO: "project_1"}),
-            patch.object(config_store, "get_path_context_mappings", return_value={}),
+            patch.object(config_store, "get_path_context_mappings", return_value=pins or {}),
         ):
             return CliRunner().invoke(
                 app,
@@ -776,3 +794,161 @@ class TestCommand:
         result = CliRunner().invoke(app, ["ingest", "memories", "--from", "cursor"])
         assert result.exit_code == 1
         assert "Unknown agent" in result.output
+
+    def test_a_dry_run_records_nothing_for_a_sync(self, tmp_path: Path) -> None:
+        result = self._run(tmp_path, FakeServer().client(), "--dry-run")
+        assert result.exit_code == 0, result.output
+        assert am.load_synced("team", "https://sibyl.example.com|").files == {}
+
+    def test_a_sync_does_nothing_until_the_context_keeps_memories_in_sync(
+        self, tmp_path: Path
+    ) -> None:
+        server = FakeServer()
+        client = server.client()
+        result = self._run(tmp_path, client, "--sync")
+        assert result.exit_code == 0, result.output
+        assert "{" not in result.output
+        client.memory_blame.assert_not_awaited()
+        assert server.records == 0
+
+    def test_keep_synced_turns_the_sync_on_and_a_quiet_sync_sends_no_requests(
+        self, tmp_path: Path
+    ) -> None:
+        server = FakeServer()
+        result = self._run(tmp_path, server.client(), "--yes", "--keep-synced")
+        assert result.exit_code == 0, result.output
+        context = config_store.get_context("team")
+        assert context is not None
+        assert context.sync_agent_memories is True
+
+        client = server.client()
+        again = self._run(tmp_path, client, "--sync")
+        assert again.exit_code == 0, again.output
+        assert _payload(again.output)["outcomes"]["unchanged"] == 3
+        client._request.assert_not_awaited()
+        client.memory_blame.assert_not_awaited()
+        assert server.records == 3
+
+    def test_a_sync_asks_the_server_only_about_the_file_that_changed(self, tmp_path: Path) -> None:
+        server = FakeServer()
+        assert self._run(tmp_path, server.client(), "--yes", "--keep-synced").exit_code == 0
+        client = server.client()
+        result = self._run(
+            tmp_path, client, "--sync", feedback=CLAUDE_FEEDBACK + "\nAlso the bench.\n"
+        )
+        assert result.exit_code == 0, result.output
+        payload = _payload(result.output)
+        assert payload["outcomes"]["updated"] == 1
+        assert payload["outcomes"]["unchanged"] == 2
+        sources = {call.args[0] for call in client.memory_blame.await_args_list}
+        assert all(":claude-code:" in source for source in sources)
+
+    def test_no_keep_synced_only_changes_the_setting(self, tmp_path: Path) -> None:
+        server = FakeServer()
+        assert self._run(tmp_path, server.client(), "--yes", "--keep-synced").exit_code == 0
+        client = server.client()
+        result = self._run(tmp_path, client, "--no-keep-synced")
+        assert result.exit_code == 0, result.output
+        context = config_store.get_context("team")
+        assert context is not None
+        assert context.sync_agent_memories is False
+        client.memory_blame.assert_not_awaited()
+
+    def test_a_sync_still_counts_memories_pinned_elsewhere_as_elsewhere(
+        self, tmp_path: Path
+    ) -> None:
+        server = FakeServer()
+        pins = {REPO: "other"}
+        first = self._run(tmp_path, server.client(), "--yes", "--keep-synced", pins=pins)
+        assert first.exit_code == 0, first.output
+        client = server.client()
+        again = self._run(tmp_path, client, "--sync", pins=pins)
+        assert again.exit_code == 0, again.output
+        payload = _payload(again.output)
+        assert payload["elsewhere"] == {"other": 2}
+        assert payload["outcomes"]["unchanged"] == 1
+        client._request.assert_not_awaited()
+        client.memory_blame.assert_not_awaited()
+
+    def test_a_failed_write_is_never_recorded_and_the_next_sync_retries_it(
+        self, tmp_path: Path
+    ) -> None:
+        server = FakeServer()
+        client = server.client()
+        store = client.remember_raw_memory.side_effect
+
+        async def refuse_profile(**kwargs: Any) -> dict[str, Any]:
+            if kwargs["title"] == "Codex user profile":
+                raise SibylClientError("boom", status_code=500)
+            return await store(**kwargs)
+
+        client.remember_raw_memory = AsyncMock(side_effect=refuse_profile)
+        first = self._run(tmp_path, client, "--yes", "--keep-synced")
+        assert _payload(first.output)["outcomes"]["failed"] == 1
+        assert server.records == 2
+
+        retry = server.client()
+        again = self._run(tmp_path, retry, "--sync")
+        assert again.exit_code == 0, again.output
+        payload = _payload(again.output)
+        assert payload["outcomes"]["created"] == 1
+        assert payload["outcomes"]["unchanged"] == 2
+        assert server.records == 3
+        assert retry.memory_blame.await_count >= 1
+
+    def test_a_context_moved_to_another_server_checks_every_file_again(
+        self, tmp_path: Path
+    ) -> None:
+        server = FakeServer()
+        assert self._run(tmp_path, server.client(), "--yes", "--keep-synced").exit_code == 0
+        config_store.update_context("team", server_url="https://other.example.com")
+        moved = FakeServer()
+        result = self._run(tmp_path, moved.client(), "--sync")
+        assert result.exit_code == 0, result.output
+        assert _payload(result.output)["outcomes"]["created"] == 3
+        assert moved.records == 3
+
+    def test_another_user_signed_in_checks_every_file_again(self, tmp_path: Path) -> None:
+        server = FakeServer()
+        assert self._run(tmp_path, server.client(), "--yes", "--keep-synced").exit_code == 0
+        edited = CLAUDE_FEEDBACK + "\nAlso the bench.\n"
+        result = self._run(tmp_path, server.client(), "--sync", feedback=edited, owner="user-2")
+        assert result.exit_code == 0, result.output
+        assert _payload(result.output)["outcomes"]["created"] == 3
+        assert server.records == 6
+
+    def test_keep_synced_on_a_context_missing_from_the_config_is_an_error(
+        self, tmp_path: Path
+    ) -> None:
+        with patch("sibyl_cli.ingest.resolve_client_context_name", return_value="gone"):
+            result = CliRunner().invoke(app, ["ingest", "memories", "--keep-synced"])
+        assert result.exit_code == 1
+        assert "not found" in result.output
+        assert result.exception is None or isinstance(result.exception, SystemExit)
+
+
+class TestFingerprint:
+    def test_a_new_link_or_pin_changes_the_fingerprint(self) -> None:
+        memory = _memory()
+
+        def print_for(project: str | None, context: str | None) -> str:
+            return am.fingerprint(
+                memory,
+                share=False,
+                project_for_path=lambda _: project,
+                context_for_path=lambda _: context,
+            )
+
+        base = print_for(None, None)
+        assert print_for(None, None) == base
+        assert print_for("project_1", None) != base
+        assert print_for(None, "team") != base
+        assert (
+            am.fingerprint(
+                memory,
+                share=True,
+                project_for_path=lambda _: None,
+                context_for_path=lambda _: None,
+            )
+            != base
+        )
