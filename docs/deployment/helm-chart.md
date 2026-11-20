@@ -644,6 +644,9 @@ ingress:
         - path: /mcp
           pathType: Prefix
           service: backend
+        - path: /_oauth
+          pathType: Prefix
+          service: backend
         - path: /
           pathType: Prefix
           service: frontend
