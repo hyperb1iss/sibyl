@@ -10,6 +10,7 @@ from typing import Any
 
 import structlog
 
+from sibyl_core.backends.surreal.in_clumps import IN_CLUMP, clumped
 from sibyl_core.memory_pipeline.lifecycle import graph_metadata_recallable
 from sibyl_core.retrieval._search_candidates import (
     _candidate_allowed,
@@ -31,7 +32,9 @@ from sibyl_core.services.graph_relationships import RelationshipManager
 from sibyl_core.services.graph_runtime import GraphRuntime
 
 _SUPERSEDES_PREDICATE = "SUPERSEDES"
-_SUPERSESSION_LOOKUP_BATCH_SIZE = 512
+# One `IN` clump per lookup: past it neither planner serves `target_id IN` from
+# idx_relates_target_created, and each statement below scans relates_to.
+_SUPERSESSION_LOOKUP_BATCH_SIZE = IN_CLUMP
 _SUPERSESSION_EDGE_PAGE_SIZE = 512
 _NON_ENTITY_CANDIDATE_TYPES = frozenset({"claim", "relationship", "raw_memory"})
 log = structlog.get_logger()
@@ -252,12 +255,15 @@ async def _edge_rows_by_uuid(
 ) -> dict[str, dict[str, object]]:
     rows: list[dict[str, object]] = []
     for offset in range(0, len(edge_ids), 512):
+        # Clumps of 32 stay on idx_relates_uuid; one longer `IN` scans the table.
+        lookup, id_clumps = clumped(
+            "SELECT *, in.uuid AS source_uuid, out.uuid AS target_uuid, in.uuid AS source_node_uuid, out.uuid AS target_node_uuid OMIT fact_embedding FROM relates_to WHERE group_id=$group_id AND uuid IN $ids",
+            "ids",
+            edge_ids[offset : offset + 512],
+        )
         rows.extend(
             await _execute_query_records(
-                client,
-                "SELECT *, in.uuid AS source_uuid, out.uuid AS target_uuid, in.uuid AS source_node_uuid, out.uuid AS target_node_uuid OMIT fact_embedding FROM relates_to WHERE group_id=$group_id AND uuid IN $ids;",
-                group_id=group_id,
-                ids=edge_ids[offset : offset + 512],
+                client, f"RETURN {lookup};", group_id=group_id, **id_clumps
             )
         )
     return {uuid: row for row in rows if (uuid := _string_value(row.get("uuid")))}

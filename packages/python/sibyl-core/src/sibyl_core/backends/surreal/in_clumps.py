@@ -7,6 +7,9 @@ before it runs, so a list bound by a block `LET`, a `FOR` variable or a
 closure argument is not known then, and the read scans the table. A client
 parameter is known. So lists are split here, in Python, into client
 parameters of at most 32 values, one statement copy per clump.
+
+An empty list names no lookup: 4.0 answers `field IN []` by reading the
+table (3.x read nothing), so it becomes the literal `[]` and binds nothing.
 """
 
 from __future__ import annotations
@@ -22,11 +25,12 @@ def clumped(template: str, param: str, values: Sequence[Hashable]) -> tuple[str,
 
     `template` is a statement that names `$<param>` once as an `IN` list.
     Duplicates go first: a value split across two clumps would answer twice.
+    No values give `[]` and no parameters.
     """
     distinct = list(dict.fromkeys(values))
+    if not distinct:
+        return "[]", {}
     clumps = [distinct[start : start + IN_CLUMP] for start in range(0, len(distinct), IN_CLUMP)]
-    if not clumps:
-        clumps = [[]]
     names = [f"{param}_{index}" for index in range(len(clumps))]
     pattern = re.compile(rf"\${re.escape(param)}\b")
     copies = ", ".join(f"({pattern.sub('$' + name, template)})" for name in names)

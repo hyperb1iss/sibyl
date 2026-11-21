@@ -780,7 +780,8 @@ async def test_the_edge_lookup_is_not_fed_ids_that_cannot_be_edge_endpoints() ->
             if "uuids" in params:
                 seen_uuids.append(list(params["uuids"]))
             elif "snapshot_relationship_ids_0" in params:
-                assert params["snapshot_ids_0"] == []
+                # An empty id list names no lookup and binds no parameter.
+                assert "snapshot_ids_0" not in params
                 assert params["snapshot_relationship_ids_0"] == ["rel-1"]
                 assert "snapshot_relationship_ids_1" not in params
                 return [{"targets": [], "states": [], "associations": [], "relationships": []}]

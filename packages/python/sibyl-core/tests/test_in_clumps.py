@@ -38,8 +38,9 @@ def test_duplicates_collapse_before_the_split_so_no_value_answers_twice() -> Non
     assert len(flattened) == len(set(flattened)) == IN_CLUMP + 1
 
 
-def test_an_empty_list_still_renders_one_empty_clump() -> None:
+def test_an_empty_list_reads_nothing() -> None:
+    """SurrealDB 4.0 answers `field IN []` by reading the table, so no lookup is rendered."""
     expression, params = clumped(_TEMPLATE, "ids", [])
 
-    assert params == {"ids_0": []}
-    assert expression.startswith("array::flatten([(")
+    assert expression == "[]"
+    assert params == {}

@@ -3817,10 +3817,18 @@ async def test_native_relationship_bulk_writes_in_one_surreal_query() -> None:
     assert "$uuids.map" in lookup_query
 
     write_query, write_params = write_calls[0]
-    # The endpoint-move cleanup iterates the batch through the unique index
-    # instead of scanning the table with an IN-list DELETE.
-    assert "$edges.map" in write_query
-    assert "WHERE uuid=$edge.uuid LIMIT 1" in write_query
+    # Stored edges are read through client-parameter IN lists, which SurrealDB
+    # 4.0 serves from the uuid index in every statement shape. A lookup inside
+    # a closure scanned relates_to once per edge.
+    assert "FROM relates_to WHERE uuid IN $edge_uuids_0" in write_query
+    assert write_params["edge_uuids_0"] == [relationship.id for relationship in relationships]
+    assert "$edges.map" not in write_query
+    assert "uuid=$edge.uuid" not in write_query
+    # The protected-edge guard reads the rows the lookup already holds.
+    assert "$entry.stored.source_bound = true" in write_query
+    assert "relationship_ids" not in write_params
+    # The endpoint-move cleanup addresses stored rows by record id instead of
+    # scanning the table with an IN-list DELETE.
     assert (
         "$entry.stored.in = $entry.edge.src AND $entry.stored.out = $entry.edge.tgt" in write_query
     )
@@ -3961,6 +3969,66 @@ async def test_native_relationship_bulk_replaces_changed_endpoints() -> None:
             "out_uuid": "beta",
         }
     ]
+
+
+@pytest.mark.asyncio
+async def test_native_relationship_bulk_upserts_past_one_lookup_clump() -> None:
+    """A batch past 32 edges reads its stored rows in two clumps and still upserts by uuid."""
+    client = SurrealGraphClient(group_id="org-native-bulk-rel-clumps", url="memory://")
+    try:
+        await prepare_graph_schema(client)
+        entity_manager = EntityManager(client, group_id=client.group_id)
+        relationship_manager = RelationshipManager(client, group_id=client.group_id)
+        entity_ids = ("alpha", "beta", "gamma")
+        for entity_id in entity_ids:
+            await entity_manager.create_direct(
+                Entity(
+                    id=entity_id,
+                    entity_type=EntityType.TOPIC,
+                    name=entity_id.title(),
+                    organization_id=client.group_id,
+                )
+            )
+
+        def batch(target_shift: int, relationship_type: RelationshipType) -> list[Relationship]:
+            return [
+                Relationship(
+                    id=f"rel_clump_{index:02d}",
+                    source_id=entity_ids[index % 3],
+                    target_id=entity_ids[(index + target_shift) % 3],
+                    relationship_type=relationship_type,
+                )
+                for index in range(40)
+            ]
+
+        first = await relationship_manager.create_direct_bulk(batch(1, RelationshipType.RELATED_TO))
+        # The same uuids again: every edge is found, and its endpoint moves.
+        second = await relationship_manager.create_direct_bulk(batch(2, RelationshipType.BLOCKS))
+        rows = normalize_records(
+            await client.execute_query(
+                "SELECT uuid, name, target_id, out.uuid AS out_uuid FROM relates_to ORDER BY uuid;"
+            )
+        )
+
+        await client.execute_query(
+            "UPDATE relates_to SET operational_derivation_required = true"
+            " WHERE uuid = 'rel_clump_35';"
+        )
+        with pytest.raises(Exception, match="protected operational relationship"):
+            await relationship_manager.create_direct_bulk(batch(1, RelationshipType.RELATED_TO))
+        after_refusal = normalize_records(
+            await client.execute_query("SELECT uuid, name FROM relates_to ORDER BY uuid;")
+        )
+    finally:
+        await client.close()
+
+    assert first == second == [f"rel_clump_{index:02d}" for index in range(40)]
+    assert [row["uuid"] for row in rows] == first
+    assert {row["name"] for row in rows} == {"BLOCKS"}
+    assert all(row["out_uuid"] == row["target_id"] for row in rows)
+    assert [row["target_id"] for row in rows[:3]] == ["gamma", "alpha", "beta"]
+    # The refused batch wrote nothing.
+    assert [row["name"] for row in after_refusal] == ["BLOCKS"] * 40
 
 
 @pytest.mark.asyncio
