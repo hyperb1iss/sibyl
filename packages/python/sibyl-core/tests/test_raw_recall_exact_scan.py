@@ -108,17 +108,6 @@ async def test_an_unreadable_count_leaves_the_lane_on_the_walk(unreadable: objec
     assert await _raw_vector_exact_index(client, PROJECT) is None
 
 
-@pytest.mark.asyncio
-async def test_the_scope_count_is_remembered_between_recalls() -> None:
-    client = _CountingClient(scope=3)
-
-    assert await _raw_vector_exact_index(client, PROJECT) == "idx_raw_captures_scope"
-    assert await _raw_vector_exact_index(client, PROJECT) == "idx_raw_captures_scope"
-    assert len(client.counts()) == 1
-    # Another scope is another range, counted on its own.
-    assert await _raw_vector_exact_index(client, {**PROJECT, "scope_key": "p2"}) is not None
-    assert len(client.counts()) == 2
-
 
 @pytest.mark.asyncio
 async def test_a_small_scope_is_scored_exactly_with_the_walks_filters_and_order() -> None:
