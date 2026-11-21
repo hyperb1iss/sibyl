@@ -178,8 +178,11 @@ async def test_dedup_lanes_read_the_whole_candidate_pool_on_the_embedded_engine(
     finally:
         await client.close()
 
-    assert batch_lane == ("<|100, 100|>", 100)
-    assert per_seed_lanes == [("<|100, 100|>", 100), ("<|100, 100|>", 100)]
+    # A typed seed walks twice its 100 candidates deep, and the table's
+    # 150 rows all come back: fewer than the pool's depth, so nothing is read
+    # again. At the configured effort of 40 the walk would return 40.
+    assert batch_lane == ("<|200, 200|>", 150)
+    assert per_seed_lanes == [("<|200, 200|>", 150), ("<|200, 200|>", 150)]
 
 
 @pytest.mark.asyncio

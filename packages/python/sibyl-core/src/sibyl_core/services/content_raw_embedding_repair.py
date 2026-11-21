@@ -52,6 +52,7 @@ from sibyl_core.services.embedding_sweep import (
     STATE_PROJECTION,
     page_after_cursor,
     plane_current,
+    scan_projection,
     scan_saw_everything,
 )
 
@@ -190,10 +191,11 @@ def _raw_walk_query(expected_metadata: Mapping[str, object], *, scan: bool = Fal
 
 # Any ``$limit`` rows a scan of the table cannot pass over for this
 # organization: its owed captures, and every other organization's capture
-# (see ``scan_saw_everything``).
+# (see ``scan_saw_everything``), of which it returns only that it is one.
 def _raw_owed_scan_query(expected_metadata: Mapping[str, object]) -> str:
     return (
-        "SELECT uuid, organization_id AS row_scope FROM raw_captures WITH NOINDEX "
+        f"SELECT {scan_projection('organization_id', 'organization_id')} "
+        "FROM raw_captures WITH NOINDEX "
         "WHERE organization_id != $organization_id "
         f"OR (deleted_at = NONE AND {_raw_owed_predicate(expected_metadata)}) "
         "LIMIT $limit;"
@@ -606,7 +608,7 @@ async def _run_pass(
         )
         walk_query = _raw_walk_query(
             run.expected_metadata,
-            scan=scan_saw_everything(scanned, run.organization_id, page_size),
+            scan=scan_saw_everything(scanned, page_size),
         )
         # Resume after the saved cursor, then wrap round to the rows before it.
         segments: list[tuple[str, str | None]] = (

@@ -18,7 +18,7 @@ import numpy as np
 import structlog
 
 from sibyl_core.backends.surreal.in_clumps import clumped
-from sibyl_core.backends.surreal.knn import knn_search_effort
+from sibyl_core.backends.surreal.knn import knn_overfetch_pool, knn_search_effort
 from sibyl_core.config import settings
 from sibyl_core.embeddings.provenance import (
     UNVERIFIED_EMBEDDING_PROVIDER,
@@ -144,6 +144,11 @@ def jaccard_similarity(s1: str, s2: str) -> float:
 _UNSTAMPED = object()
 
 
+# How many times the candidate limit the unfiltered candidate walk goes deep
+# (see ``_hnsw_candidate_statement``).
+_POOL_OVERFETCH = 2
+
+
 def _hnsw_candidate_statement(
     walked: Sequence[str],
     filters: Sequence[str],
@@ -154,20 +159,32 @@ def _hnsw_candidate_statement(
     embedding_param: str,
     limit_param: str,
 ) -> str:
-    """One seed's nearest candidates at or above ``$threshold``, each with ``admitted``.
+    """One seed's walked rows at or above ``$threshold``, nearest first, each with ``admitted``.
 
     SurrealDB 4 walks the vector index until ``k`` rows pass the WHERE and
     reads a full row at every step. A predicate few rows pass, a rare entity
     type or one memory's scope, keeps it walking: 2 s a seed over 14,000
-    vectors for a type with 30 rows, against 35 ms when the type is left out.
-    So the walk tests only ``walked``, which nearly every row passes, and the
-    ``filters`` are evaluated on the ``k`` rows it returns, as ``admitted``.
+    vectors for a type with 30 rows. So the walk tests only ``walked``, which
+    nearly every row passes, and the ``filters`` are evaluated on the rows it
+    returns, as ``admitted``.
 
-    The admitted rows are the filtered walk's whenever the pool has room
-    left: every row at or above the threshold is then in it, whatever its
-    type or scope. A pool that comes back full may have cut some off, and the
-    caller reads that seed again with ``walk_filters``, which is the filtered
-    walk and admits every row it returns.
+    The walk is approximate, and how far it explores grows with its depth.
+    The filtered walk went deep exactly when its filters were selective, so
+    an unfiltered walk of only the candidate limit could miss a near
+    neighbour the filtered one reached. The caller therefore walks
+    ``_POOL_OVERFETCH`` times the candidate limit and keeps the nearest
+    admitted rows up to that limit.
+
+    The statement returns every walked row at or above the threshold,
+    admitted or not, up to the pool's depth, and that count decides whether
+    the result can be trusted. Fewer rows than the depth means the pool's
+    farthest members are below the threshold: every row at or above it that
+    the walk reached is in the result, whatever its type or scope, so the
+    nearest admitted rows are the ones the filtered walk returns. A pool
+    that comes back full at or above the threshold says nothing about the
+    rows past it, which may include admitted ones; the caller reads that
+    seed again with ``walk_filters``, which is the filtered walk at the
+    candidate limit and admits every row it returns.
     """
     in_walk = " AND ".join([*walked, *(filters if walk_filters else ())])
     admitted = "true" if walk_filters or not filters else "(" + " AND ".join(filters) + ")"
@@ -187,6 +204,15 @@ def _hnsw_candidate_statement(
         ORDER BY score DESC, created_at DESC, uuid DESC
         LIMIT ${limit_param};
         """
+
+
+def _admitted(rows: Sequence[dict[str, Any]], limit: int) -> list[dict[str, Any]]:
+    """The nearest ``limit`` rows the filters admit, from rows that arrive nearest first.
+
+    Only a row the statement marked ``admitted`` counts. A row without the
+    mark comes from a statement that tests its filters in the walk.
+    """
+    return [row for row in rows if row.get("admitted", True) is True][:limit]
 
 
 def _float_list(value: object) -> list[float]:
@@ -541,7 +567,16 @@ class EntityDeduplicator:
                 )
             return pairs
 
-        knn_effort = knn_search_effort(candidate_limit, settings.graph_knn_ef)
+        # One result bucket per seed id. Callers pass each entity once; an id
+        # given twice is read once, at its first position, as its last entry.
+        unique: dict[str, tuple[str, str, str, list[float]]] = {}
+        for seed in seeds:
+            unique[seed[0]] = seed
+        seeds = list(unique.values())
+        pool = knn_overfetch_pool(candidate_limit, _POOL_OVERFETCH)
+
+        def filtered(seed_id: str) -> bool:
+            return self._filters_candidates(entity_types, (scope_constraints or {}).get(seed_id))
 
         async def read(
             batch: Sequence[tuple[str, str, str, list[float]]], *, walk_filters: bool
@@ -566,17 +601,20 @@ class EntityDeduplicator:
                     space=(seed_spaces or {}).get(seed_id),
                     space_param=f"seed_space_{index}",
                 )
+                # Without filters the walk is the filtered walk already.
+                depth = candidate_limit if walk_filters or not filters else pool
+                depth_knn_effort = knn_search_effort(depth, settings.graph_knn_ef)
                 params[seed_id_param] = seed_id
                 params[f"seed_type_{index}"] = seed_type
                 params[seed_embedding_param] = seed_embedding
-                params[limit_param] = candidate_limit
+                params[limit_param] = depth
                 statements.append(
                     _hnsw_candidate_statement(
                         walked,
                         filters,
                         walk_filters=walk_filters,
                         seed_column=f"${seed_id_param} AS seed_id, ",
-                        bracket=f"<|{candidate_limit}, {knn_effort}|>",
+                        bracket=f"<|{depth}, {depth_knn_effort}|>",
                         embedding_param=seed_embedding_param,
                         limit_param=limit_param,
                     )
@@ -593,19 +631,22 @@ class EntityDeduplicator:
             return found
 
         found = await read(seeds, walk_filters=False)
-        # A pool with no room left may have cut off rows its filters admit;
-        # those seeds take the filtered walk (see ``_hnsw_candidate_statement``).
-        full = [seed for seed in seeds if len(found.get(seed[0], ())) >= candidate_limit]
-        if full and self._filters_candidates(entity_types, scope_constraints):
-            filtered = await read(full, walk_filters=True)
+        # A pool that came back full at or above the threshold may have cut
+        # off admitted rows; those seeds take the filtered walk (see
+        # ``_hnsw_candidate_statement``).
+        full = [
+            seed for seed in seeds if filtered(seed[0]) and len(found.get(seed[0], ())) >= pool
+        ]
+        if full:
+            reread = await read(full, walk_filters=True)
             for seed in full:
-                found[seed[0]] = filtered.get(seed[0], [])
+                found[seed[0]] = reread.get(seed[0], [])
 
         pairs: list[DuplicatePair] = []
         for seed_id, seed_name, seed_type, _seed_embedding in seeds:
-            for row in found.get(seed_id, ()):
+            for row in _admitted(found.get(seed_id, ()), candidate_limit):
                 candidate = _dedup_candidate_from_row(row)
-                if candidate is None or row.get("admitted", True) is not True:
+                if candidate is None:
                     continue
                 candidate_id, candidate_name, candidate_type, similarity = candidate
                 pair = self._candidate_pair(
@@ -625,12 +666,10 @@ class EntityDeduplicator:
     def _filters_candidates(
         self,
         entity_types: list[str],
-        scope_constraints: dict[str, dict[str, object | None]] | None,
+        scope: dict[str, object | None] | None,
     ) -> bool:
-        """Whether any candidate predicate is kept out of the HNSW walk."""
-        return bool(
-            self.config.same_type_only or entity_types or any((scope_constraints or {}).values())
-        )
+        """Whether a seed has candidate predicates that are kept out of the HNSW walk."""
+        return bool(self.config.same_type_only or entity_types or scope)
 
     def _candidate_clauses(
         self,
@@ -687,7 +726,6 @@ class EntityDeduplicator:
             "seed_id": seed_id,
             "seed_embedding": seed_embedding,
             "threshold": threshold,
-            "limit": candidate_limit,
             "entity_types": entity_types,
         }
         if self.config.same_type_only:
@@ -702,9 +740,12 @@ class EntityDeduplicator:
             space=seed_space,
             space_param="seed_space",
         )
-        knn_effort = knn_search_effort(candidate_limit, settings.graph_knn_ef)
+        pool = knn_overfetch_pool(candidate_limit, _POOL_OVERFETCH)
 
         async def read(*, walk_filters: bool) -> list[dict[str, Any]]:
+            # Without filters the walk is the filtered walk already.
+            depth = candidate_limit if walk_filters or not filters else pool
+            depth_knn_effort = knn_search_effort(depth, settings.graph_knn_ef)
             return normalize_records(
                 await execute_query(
                     _hnsw_candidate_statement(
@@ -712,24 +753,26 @@ class EntityDeduplicator:
                         filters,
                         walk_filters=walk_filters,
                         seed_column="",
-                        bracket=f"<|{candidate_limit}, {knn_effort}|>",
+                        bracket=f"<|{depth}, {depth_knn_effort}|>",
                         embedding_param="seed_embedding",
                         limit_param="limit",
                     ),
                     **params,
+                    limit=depth,
                     _query_label="dedup.candidates",
                 )
             )
 
         rows = await read(walk_filters=False)
-        # A pool with no room left may have cut off rows the filters admit.
-        if filters and len(rows) >= candidate_limit:
+        # A pool that came back full at or above the threshold may have cut
+        # off admitted rows (see ``_hnsw_candidate_statement``).
+        if filters and len(rows) >= pool:
             rows = await read(walk_filters=True)
 
         pairs: list[DuplicatePair] = []
-        for row in rows:
+        for row in _admitted(rows, candidate_limit):
             candidate = _dedup_candidate_from_row(row)
-            if candidate is None or row.get("admitted", True) is not True:
+            if candidate is None:
                 continue
             candidate_id, candidate_name, candidate_type, similarity = candidate
             pair = self._candidate_pair(

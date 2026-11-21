@@ -344,7 +344,8 @@ class TestEntityDeduplicator:
         assert len(queries) == 4
         assert "START" not in queries[0]
         assert "uuid IN $seed_uuids_0" in queries[1]
-        assert any("name_embedding <|10, 40|> $seed_embedding" in query for query in queries)
+        # Candidate limit 10; a seed with filters walks four times that deep.
+        assert any("name_embedding <|20, 40|> $seed_embedding" in query for query in queries)
 
     @pytest.mark.asyncio
     async def test_find_duplicates_same_type_only(

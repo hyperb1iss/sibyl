@@ -449,6 +449,56 @@ async def test_walk_leaves_text_and_vectors_on_the_server(content_store, monkeyp
     assert "raw_content" in fetches[0]
 
 
+def test_the_owed_scan_projects_nothing_of_another_organizations_capture():
+    """The scan matches foreign captures to stop early; it returns only that they are foreign."""
+    scan = repair_module._raw_owed_scan_query(
+        raw_memory_embedding_metadata(provider("scan").metadata)
+    )
+
+    projection, rest = scan.split(" FROM ", 1)
+    assert projection == (
+        "SELECT IF organization_id = $organization_id THEN uuid ELSE NONE END AS uuid, "
+        "(organization_id = $organization_id) AS in_scope"
+    )
+    assert rest.startswith(
+        "raw_captures WITH NOINDEX WHERE organization_id != $organization_id OR ("
+    )
+    assert "??" not in scan
+
+
+async def test_a_repair_is_handed_nothing_of_another_organizations_captures(
+    content_store, monkeypatch
+):
+    mine, theirs = str(uuid4()), str(uuid4())
+    current = provider("isolated")
+    own = await remember(mine, "mine")
+    foreign = await remember(theirs, "theirs")
+    scans: list[list[dict[str, object]]] = []
+    select_many = content_client.select_many
+
+    async def recording(client, query, **params):
+        rows = await select_many(client, query, **params)
+        if " AS in_scope " in query:
+            scans.append(rows)
+        return rows
+
+    monkeypatch.setattr(content_client, "select_many", recording)
+
+    result = await repair_raw_capture_embeddings(mine, embedding_provider=current)
+
+    assert (result.checked, result.recovered) == (1, 1)
+    assert (await stored(foreign.id))["embedding"] is None
+    assert len(scans) == 1
+    rows = scans[0]
+    # The scan saw both captures and says which is whose, and no more.
+    assert sorted(row.get("in_scope") for row in rows) == [False, True]
+    assert [row.get("uuid") for row in rows if row.get("in_scope")] == [own.id]
+    assert [row.get("uuid") for row in rows if not row.get("in_scope")] == [None]
+    assert foreign.id not in repr(rows)
+    assert theirs not in repr(rows)
+    assert not repair_module.scan_saw_everything(rows, 256)
+
+
 async def test_fully_current_org_issues_no_embed_call(content_store, monkeypatch):
     org = str(uuid4())
     current = provider("settled")

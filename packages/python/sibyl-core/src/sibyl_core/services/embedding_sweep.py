@@ -290,10 +290,12 @@ class SweepTable:
     # Any ``$limit`` rows a scan of the table cannot pass over for this
     # scope: its owed rows, and every row of another scope. The scan stops as
     # soon as it has them and reads the whole table only when it holds fewer
-    # (see ``scan_saw_everything``).
+    # (see ``scan_saw_everything``). Of another scope's row it returns only
+    # that it is one (see ``scan_projection``).
     def owed_scan_query(self, stamp: Mapping[str, Any]) -> str:
         return (
-            f"SELECT uuid, {self.scope_field} AS row_scope FROM {self.name}{_NOINDEX} "
+            f"SELECT {scan_projection(self.scope_field, 'scope')} "
+            f"FROM {self.name}{_NOINDEX} "
             f"WHERE {self.scope_field} != $scope OR ({self._candidate_predicate(stamp)}) "
             "LIMIT $limit;"
         )
@@ -347,7 +349,8 @@ class SweepTable:
     # ``owed_scan_query`` for the rows the plane's verdict stamps.
     def legacy_scan_query(self, *, reopened: bool = False) -> str:
         return (
-            f"SELECT uuid, {self.scope_field} AS row_scope FROM {self.name}{_NOINDEX} "
+            f"SELECT {scan_projection(self.scope_field, 'scope')} "
+            f"FROM {self.name}{_NOINDEX} "
             f"WHERE {self.scope_field} != $scope "
             f"OR ({self.vector_field} != NONE AND {self._legacy_rows(reopened=reopened)}) "
             "LIMIT $limit;"
@@ -1065,20 +1068,33 @@ class _TableWalk:
         self.started_at_beginning = self.cursor == ""
 
 
-def scan_saw_everything(rows: Sequence[Mapping[str, Any]], scope: str, limit: int) -> bool:
+def scan_projection(scope_field: str, scope_param: str) -> str:
+    """What a scan returns of a row: whether it is this scope's, and its uuid only if it is.
+
+    The scans match other scopes' rows on purpose (see
+    ``scan_saw_everything``), and tenants are kept apart by the application
+    in the tables organizations share. So nothing that identifies another
+    scope's row leaves the database: not its uuid, not its scope.
+    """
+    in_scope = f"{scope_field} = ${scope_param}"
+    return f"IF {in_scope} THEN uuid ELSE NONE END AS uuid, ({in_scope}) AS in_scope"
+
+
+def scan_saw_everything(rows: Sequence[Mapping[str, Any]], limit: int) -> bool:
     """Whether a scan for ``limit + 1`` rows returned every row a scope is owed.
 
     The scans (``SweepTable.owed_scan_query``) skip a settled row before
     decoding it, so one that comes back short has read the whole table for a
-    few microseconds a row and its rows are all there are. They also return
-    every row of another scope, each as ``row_scope``. In a table one scope
-    owns, a graph namespace or the content store of a deployment with one
-    organization, there are none. In a table organizations share they fill
-    the limit at once, so the scan stops after a few hundred rows and the
-    caller reads through its scope's index as before: a scan there would
-    pay for every organization's rows on each one's behalf.
+    few microseconds a row and its rows are all there are. They also match
+    every row of another scope, which comes back with ``in_scope`` false and
+    nothing else. In a table one scope owns, a graph namespace or the content
+    store of a deployment with one organization, there are none. In a table
+    organizations share they fill the limit at once, so the scan stops after
+    a few hundred rows and the caller reads through its scope's index as
+    before: a scan there would pay for every organization's rows on each
+    one's behalf. A row that does not say it is in scope counts as foreign.
     """
-    return len(rows) <= limit and all(row.get("row_scope") == scope for row in rows)
+    return len(rows) <= limit and all(row.get("in_scope") is True for row in rows)
 
 
 def page_after_cursor(
@@ -1121,7 +1137,7 @@ async def _advance(
     scan = walk.scan
     if scan is None:
         owed = await _rows(plane, walk.table.owed_scan_query(plane.stamp), limit=page + 1)
-        scan = walk.scan = scan_saw_everything(owed, plane.organization_id, page)
+        scan = walk.scan = scan_saw_everything(owed, page)
         if scan and not owed:
             walk.cursor = ""
             return True
@@ -1503,7 +1519,7 @@ async def _stamp_legacy_rows(
         # costs each pass; walking the uuid index for them decoded every row
         # of the table to say so.
         scanned = await _rows(plane, table.legacy_scan_query(reopened=reopened), limit=limit + 1)
-        if scan_saw_everything(scanned, plane.organization_id, limit):
+        if scan_saw_everything(scanned, limit):
             found = sorted(str(row["uuid"]) for row in scanned if row.get("uuid"))
             if found:
                 await stamp(table, found)
@@ -1907,5 +1923,6 @@ __all__ = [
     "plane_current",
     "read_embedding_sweep_state",
     "run_embedding_sweep",
+    "scan_projection",
     "scan_saw_everything",
 ]
