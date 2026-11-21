@@ -98,7 +98,10 @@ async def test_node_lanes_project_candidate_columns_without_vectors_or_bodies() 
 
 
 @pytest.mark.asyncio
-async def test_edge_lanes_leave_the_fact_vector_in_the_database() -> None:
+async def test_edge_lanes_leave_the_fact_vector_in_the_database(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(source_module, "EDGE_PROJECT_SCAN_ENTITY_LIMIT", -1)
     client = _RecordingClient()
     plan = _plan()
     search_filter = SearchFilter(project_ids=("project_123",))

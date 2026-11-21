@@ -14,7 +14,7 @@ from sibyl_core.backends.surreal.fulltext import (
     build_fulltext_terms,
     build_match_disjunction,
 )
-from sibyl_core.backends.surreal.in_clumps import clumped
+from sibyl_core.backends.surreal.in_clumps import IN_CLUMP, clumped
 from sibyl_core.backends.surreal.knn import knn_overfetch_pool, knn_search_effort
 from sibyl_core.config import core_config
 from sibyl_core.embeddings.provenance import vector_space_predicate
@@ -838,6 +838,35 @@ async def _edge_vector_candidates(
         return []
     filter_clauses, filter_params = _edge_filter_clause(search_filter)
     candidate_limit = max(int(limit), 1)
+    if await _projects_small_enough_to_scan(client, search_filter):
+        rows = await _execute_query_records(
+            client,
+            _edge_project_scan(
+                _where_clause(
+                    [
+                        "group_id = $group_id",
+                        "fact_embedding != NONE",
+                        _stamp_in_query_space(admit_unstamped=admit_unstamped),
+                        *_edge_filter_clause(replace(search_filter, project_ids=()))[0],
+                    ]
+                )
+            ),
+            group_id=plan.organization_id,
+            query_embedding=list(query_embedding),
+            min_score=plan.vector_min_score,
+            limit=candidate_limit,
+            embedding_metadata=embedding_metadata.to_dict(),
+            **filter_params,
+        )
+        return [
+            _candidate_from_edge_record(
+                row,
+                signal=RetrievalSignal.EDGE_VECTOR,
+                score=_record_score(row),
+                embedding_metadata=embedding_metadata,
+            )
+            for row in rows
+        ]
     knn_effort = knn_search_effort(candidate_limit, core_config.graph_knn_ef)
     overfetch = search_filter.knn_type_overfetch
     if search_filter.edge_types and overfetch > 0:
@@ -917,6 +946,73 @@ async def _edge_vector_candidates(
         )
         for row in rows
     ]
+
+
+# A project filter beside the HNSW bracket makes SurrealDB 4.0 walk the vector
+# graph until enough edges pass it, reading both endpoints of every edge it
+# visits. For a project holding a small share of the graph that is the whole
+# graph: 7.9 s for a 40-entity project among 22,000 edges. Below this many
+# entities the lane reads the projects' own edges instead and scores each one
+# exactly, which cost 0.2 to 0.5 s on that graph and returned the same rows in
+# the same order. Above it the index is faster (0.1 to 0.2 s at 4,500
+# entities, against 2.9 s for the scan), so larger projects keep the bracket.
+EDGE_PROJECT_SCAN_ENTITY_LIMIT = 512
+
+
+async def _projects_small_enough_to_scan(client: Any, search_filter: SearchFilter) -> bool:
+    """Whether the filter's projects hold few enough entities to read their edges directly.
+
+    The count is served by idx_entity_project alone. A list past one `IN`
+    clump is not, and names enough of the graph that the bracket fills fast.
+    """
+    if not search_filter.project_ids or len(search_filter.project_ids) > IN_CLUMP:
+        return False
+    rows = await _execute_query_records(
+        client,
+        "SELECT count() AS count FROM entity WHERE project_id IN $project_ids GROUP ALL;",
+        project_ids=list(search_filter.project_ids),
+    )
+    count = rows[0].get("count") if rows else 0
+    return isinstance(count, int) and count <= EDGE_PROJECT_SCAN_ENTITY_LIMIT
+
+
+def _edge_project_scan(where: str) -> str:
+    """Every edge of the projects, scored against the query vector, best first.
+
+    The edges are the ones `_edge_filter_clause` admits for a project: those
+    ending on an entity in it, by column or by attribute bag, reached through
+    the entities' own links, and those stamped with it themselves. One
+    statement reads the membership and the edges, so an entity that changes
+    project takes its edges with it on the next search. Endpoint projects are
+    read only for the rows that survive the cut.
+    """
+    return f"""
+        SELECT * OMIT in, out FROM (
+            SELECT *,
+                   in.project_id AS source_node_project_id,
+                   out.project_id AS target_node_project_id
+            FROM (
+                SELECT uuid, name, fact, group_id, episodes, attributes,
+                       created_at, expired_at, valid_at, invalid_at,
+                       source_id AS source_node_uuid,
+                       target_id AS target_node_uuid,
+                       in, out,
+                       vector::similarity::cosine(fact_embedding, $query_embedding) AS score
+                FROM array::distinct(array::concat(
+                    array::flatten((
+                        SELECT VALUE array::concat(->relates_to, <-relates_to) FROM entity
+                        WHERE project_id IN $project_ids
+                           OR attributes.project_id IN $project_ids
+                    )),
+                    (SELECT VALUE id FROM relates_to WHERE attributes.project_id IN $project_ids)
+                ))
+                WHERE {where}
+            )
+            WHERE score >= $min_score
+            ORDER BY score DESC, created_at DESC, uuid DESC
+            LIMIT $limit
+        );
+    """
 
 
 async def _hydrate_candidate_bodies(
