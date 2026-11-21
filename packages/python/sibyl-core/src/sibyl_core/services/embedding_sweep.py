@@ -55,7 +55,7 @@ from sibyl_core.embeddings.provenance import (
     is_transient_provider_error,
     same_vector_identity,
     unverified_embedding_metadata,
-    vector_identity_differs_predicate,
+    vector_identity_differs_from,
     vector_space,
     vector_space_predicate,
 )
@@ -78,6 +78,9 @@ SWEEP_LEASE_LOST = "lease_lost"
 _LEASE_MARGIN_SECONDS = 120.0
 # Rows per adoption statement; ``slots`` statements run at once.
 _ADOPT_BATCH_ROWS = 1000
+# Keeps a read a table scan, which filters rows before decoding them, where
+# the planner would otherwise walk the uuid index and decode every row.
+_NOINDEX = " WITH NOINDEX"
 # In a row write's WHERE: the pass still holds the plane's lease, re-read in
 # the same statement, so a pass that lost it (or was granted it twice by an
 # engine race) writes nothing.
@@ -246,48 +249,79 @@ class SweepTable:
     fence: str
     dimensions: int
 
+    # The predicates below are plain comparisons of a field with a value, and
+    # each query keeps them in one WHERE. SurrealDB 4 tests such a WHERE on a
+    # table scan before it decodes a row, at a few microseconds a row; a `??`
+    # or a function in it makes the scan decode every row, vector included,
+    # which is what a settled plane's hourly check used to cost three times
+    # per table (about 2 s each at 20,000 rows).
+    #
     # A stored NULL counts as no stamp: the previous release could keep a
     # client's null, and NULL never equals NONE in SurrealQL.
     def _unstamped(self) -> str:
-        return f"({self.metadata_path} ?? NONE) = NONE"
+        return f"{self.metadata_path} IN [NONE, NULL]"
 
-    def _candidate_predicate(self) -> str:
-        differs = vector_identity_differs_predicate(self.metadata_path, "stamp")
+    def _candidate_predicate(self, stamp: Mapping[str, Any]) -> str:
+        """Rows owed a vector for ``stamp``, the mapping ``$stamp`` is bound to."""
+        differs = vector_identity_differs_from(self.metadata_path, "stamp", stamp)
         return (
-            f"({self.metadata_path} ?? NONE) != NONE AND ({self.vector_field} = NONE OR {differs})"
+            f"{self.metadata_path} != NONE AND {self.metadata_path} != NULL "
+            f"AND ({self.vector_field} = NONE OR {differs})"
         )
 
     # Pages start at their cursor inclusively and callers drop the cursor
     # row: the embedded engine's index range scan for ``uuid > $cursor``
     # skips a row, where ``>=`` returns every one on both engines.
-    def walk_query(self) -> str:
+    #
+    # The same page two ways. By default the uuid index hands the rows over
+    # in order and the read stops at a full page, which is what a table full
+    # of owed rows needs: a page costs the rows it returns. With ``scan`` the
+    # table is scanned and only owed rows are decoded and sorted, which is
+    # what a table with at most a page of them needs: through the index that
+    # read decodes every row to find the few. ``owed_scan_query`` tells which.
+    def walk_query(self, stamp: Mapping[str, Any], *, scan: bool = False) -> str:
         return (
-            f"SELECT uuid, {self.projection} FROM {self.name} "
+            f"SELECT uuid, {self.projection} FROM {self.name}{_NOINDEX if scan else ''} "
             f"WHERE {self.scope_field} = $scope AND uuid >= $cursor "
-            f"AND {self._candidate_predicate()} "
+            f"AND {self._candidate_predicate(stamp)} "
             "ORDER BY uuid ASC LIMIT $limit;"
         )
 
-    def probe_query(self) -> str:
+    # Any ``$limit`` rows a scan of the table cannot pass over for this
+    # scope: its owed rows, and every row of another scope. The scan stops as
+    # soon as it has them and reads the whole table only when it holds fewer
+    # (see ``scan_saw_everything``). Of another scope's row it returns only
+    # that it is one (see ``scan_projection``).
+    def owed_scan_query(self, stamp: Mapping[str, Any]) -> str:
         return (
-            f"SELECT uuid FROM {self.name} "
-            f"WHERE {self.scope_field} = $scope AND {self._candidate_predicate()} "
-            "ORDER BY uuid ASC LIMIT $limit;"
+            f"SELECT {scan_projection(self.scope_field, 'scope')} "
+            f"FROM {self.name}{_NOINDEX} "
+            f"WHERE {self.scope_field} != $scope OR ({self._candidate_predicate(stamp)}) "
+            "LIMIT $limit;"
         )
 
-    def pending_query(self) -> str:
+    # With ``scan`` the rows come in no order, so nothing is sorted: the
+    # caller only asks whether each is a remembered refusal.
+    def probe_query(self, stamp: Mapping[str, Any], *, scan: bool = False) -> str:
+        return (
+            f"SELECT uuid FROM {self.name}{_NOINDEX if scan else ''} "
+            f"WHERE {self.scope_field} = $scope AND {self._candidate_predicate(stamp)} "
+            f"{'' if scan else 'ORDER BY uuid ASC '}LIMIT $limit;"
+        )
+
+    def pending_query(self, stamp: Mapping[str, Any]) -> str:
         return (
             f"SELECT count() AS count FROM {self.name} "
             f"WHERE {self.scope_field} = $scope AND $remembered CONTAINSNOT uuid AND ("
             f"({self.vector_field} != NONE AND {self._unstamped()}) "
-            f"OR ({self._candidate_predicate()})) GROUP ALL;"
+            f"OR ({self._candidate_predicate(stamp)})) GROUP ALL;"
         )
 
-    def remembered_query(self) -> str:
+    def remembered_query(self, stamp: Mapping[str, Any]) -> str:
         return (
             f"SELECT uuid FROM {self.name} "
             f"WHERE {self.scope_field} = $scope AND $remembered CONTAINS uuid "
-            f"AND {self._candidate_predicate()};"
+            f"AND {self._candidate_predicate(stamp)};"
         )
 
     def legacy_probe_query(self) -> str:
@@ -310,6 +344,16 @@ class SweepTable:
             f"WHERE {self.scope_field} = $scope AND uuid >= $cursor "
             f"AND {self.vector_field} != NONE AND {self._legacy_rows(reopened=reopened)} "
             "ORDER BY uuid ASC LIMIT $limit;"
+        )
+
+    # ``owed_scan_query`` for the rows the plane's verdict stamps.
+    def legacy_scan_query(self, *, reopened: bool = False) -> str:
+        return (
+            f"SELECT {scan_projection(self.scope_field, 'scope')} "
+            f"FROM {self.name}{_NOINDEX} "
+            f"WHERE {self.scope_field} != $scope "
+            f"OR ({self.vector_field} != NONE AND {self._legacy_rows(reopened=reopened)}) "
+            "LIMIT $limit;"
         )
 
     # Row writes find their rows by uuid alone and check the scope and every
@@ -1016,9 +1060,41 @@ class _TableWalk:
     cursor: str
     started_at_beginning: bool = field(init=False)
     wrapped: bool = False
+    # Whether the table held at most a page of owed rows when this pass first
+    # read it, so its pages scan the table instead of walking the uuid index.
+    scan: bool | None = None
 
     def __post_init__(self) -> None:
         self.started_at_beginning = self.cursor == ""
+
+
+def scan_projection(scope_field: str, scope_param: str) -> str:
+    """What a scan returns of a row: whether it is this scope's, and its uuid only if it is.
+
+    The scans match other scopes' rows on purpose (see
+    ``scan_saw_everything``), and tenants are kept apart by the application
+    in the tables organizations share. So nothing that identifies another
+    scope's row leaves the database: not its uuid, not its scope.
+    """
+    in_scope = f"{scope_field} = ${scope_param}"
+    return f"IF {in_scope} THEN uuid ELSE NONE END AS uuid, ({in_scope}) AS in_scope"
+
+
+def scan_saw_everything(rows: Sequence[Mapping[str, Any]], limit: int) -> bool:
+    """Whether a scan for ``limit + 1`` rows returned every row a scope is owed.
+
+    The scans (``SweepTable.owed_scan_query``) skip a settled row before
+    decoding it, so one that comes back short has read the whole table for a
+    few microseconds a row and its rows are all there are. They also match
+    every row of another scope, which comes back with ``in_scope`` false and
+    nothing else. In a table one scope owns, a graph namespace or the content
+    store of a deployment with one organization, there are none. In a table
+    organizations share they fill the limit at once, so the scan stops after
+    a few hundred rows and the caller reads through its scope's index as
+    before: a scan there would pay for every organization's rows on each
+    one's behalf. A row that does not say it is in scope counts as foreign.
+    """
+    return len(rows) <= limit and all(row.get("in_scope") is True for row in rows)
 
 
 def page_after_cursor(
@@ -1050,9 +1126,28 @@ async def _advance(
     A table is clean only when a probe from the start of the key space finds
     nothing left, so a pass that resumed mid-table never declares victory for
     rows behind its cursor.
+
+    The first read of a table in a pass scans it for up to a page of owed
+    rows. A settled table has none, and is clean for that one scan, which
+    decodes no row. Otherwise the scan says how the pages should be read: by
+    scan while a page holds everything owed, through the uuid index when
+    there is more or the table is shared (see ``SweepTable.walk_query`` and
+    ``scan_saw_everything``).
     """
+    scan = walk.scan
+    if scan is None:
+        owed = await _rows(plane, walk.table.owed_scan_query(plane.stamp), limit=page + 1)
+        scan = walk.scan = scan_saw_everything(owed, page)
+        if scan and not owed:
+            walk.cursor = ""
+            return True
     rows, more = page_after_cursor(
-        await _rows(plane, walk.table.walk_query(), cursor=walk.cursor, limit=page + 1),
+        await _rows(
+            plane,
+            walk.table.walk_query(plane.stamp, scan=scan),
+            cursor=walk.cursor,
+            limit=page + 1,
+        ),
         walk.cursor,
         page,
     )
@@ -1071,7 +1166,9 @@ async def _advance(
     # Remembered rejections stay candidates; one more row than there are of
     # them is enough to prove whether anything else is left.
     remembered = counts.rejections_for(walk.table)
-    leftover = await _rows(plane, walk.table.probe_query(), limit=remembered + 1)
+    leftover = await _rows(
+        plane, walk.table.probe_query(plane.stamp, scan=scan), limit=remembered + 1
+    )
     return all(counts.remembered(walk.table, row.get("uuid")) for row in leftover)
 
 
@@ -1406,7 +1503,31 @@ async def _stamp_legacy_rows(
                 counts.lease_lost = True
             return stamped
 
+    async def stamp(table: SweepTable, uuids: Sequence[str]) -> None:
+        stamped = await asyncio.gather(
+            *(
+                adopt(table, uuids[start : start + _ADOPT_BATCH_ROWS])
+                for start in range(0, len(uuids), _ADOPT_BATCH_ROWS)
+            )
+        )
+        if legacy.get("provider") != UNVERIFIED_EMBEDDING_PROVIDER:
+            counts.adopted += sum(len(rows) for rows in stamped)
+
     for table in plane.tables:
+        # One scan that decodes only legacy rows, for up to a round of them.
+        # A plane stamped long ago has none, and this read is all its verdict
+        # costs each pass; walking the uuid index for them decoded every row
+        # of the table to say so.
+        scanned = await _rows(plane, table.legacy_scan_query(reopened=reopened), limit=limit + 1)
+        if scan_saw_everything(scanned, limit):
+            found = sorted(str(row["uuid"]) for row in scanned if row.get("uuid"))
+            if found:
+                await stamp(table, found)
+                if counts.lease_lost:
+                    return False
+            continue
+        # More than a round, or a table organizations share: page through
+        # them in uuid order, where a page costs the rows it returns.
         cursor = ""
         while True:
             rows, more = page_after_cursor(
@@ -1422,14 +1543,7 @@ async def _stamp_legacy_rows(
             uuids = [str(row["uuid"]) for row in rows]
             if not uuids:
                 break
-            stamped = await asyncio.gather(
-                *(
-                    adopt(table, uuids[start : start + _ADOPT_BATCH_ROWS])
-                    for start in range(0, len(uuids), _ADOPT_BATCH_ROWS)
-                )
-            )
-            if legacy.get("provider") != UNVERIFIED_EMBEDDING_PROVIDER:
-                counts.adopted += sum(len(rows) for rows in stamped)
+            await stamp(table, uuids)
             if counts.lease_lost:
                 return False
             if not more:
@@ -1455,7 +1569,9 @@ async def _pending(plane: SweepPlane, counts: _Counts) -> int:
     """Rows still owed a vector, not counting rows the provider refused."""
     total = 0
     for table in plane.tables:
-        rows = await _rows(plane, table.pending_query(), remembered=counts.remembered_uuids(table))
+        rows = await _rows(
+            plane, table.pending_query(plane.stamp), remembered=counts.remembered_uuids(table)
+        )
         total += int(rows[0].get("count") or 0) if rows else 0
     return total
 
@@ -1491,7 +1607,7 @@ async def _forget_settled_rejections(plane: SweepPlane, counts: _Counts) -> None
         remembered = counts.remembered_uuids(table)
         if not remembered:
             continue
-        rows = await _rows(plane, table.remembered_query(), remembered=remembered)
+        rows = await _rows(plane, table.remembered_query(plane.stamp), remembered=remembered)
         counts.keep_rejections(table, {str(row.get("uuid")) for row in rows})
 
 
@@ -1807,4 +1923,6 @@ __all__ = [
     "plane_current",
     "read_embedding_sweep_state",
     "run_embedding_sweep",
+    "scan_projection",
+    "scan_saw_everything",
 ]
