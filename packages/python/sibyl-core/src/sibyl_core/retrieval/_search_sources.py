@@ -964,16 +964,27 @@ async def _projects_small_enough_to_scan(client: Any, search_filter: SearchFilte
 
     The count is served by idx_entity_project alone. A list past one `IN`
     clump is not, and names enough of the graph that the bracket fills fast.
+    Choosing is an optimization: a count that fails or reads as anything but
+    a row count leaves the lane on the bracket it has always used.
     """
     if not search_filter.project_ids or len(search_filter.project_ids) > IN_CLUMP:
         return False
-    rows = await _execute_query_records(
-        client,
-        "SELECT count() AS count FROM entity WHERE project_id IN $project_ids GROUP ALL;",
-        project_ids=list(search_filter.project_ids),
-    )
+    try:
+        rows = await _execute_query_records(
+            client,
+            "SELECT count() AS count FROM entity WHERE project_id IN $project_ids GROUP ALL;",
+            project_ids=list(search_filter.project_ids),
+        )
+    except Exception as exc:
+        log.warning("edge_project_count_failed", error_type=type(exc).__name__)
+        return False
+    # No entity in the projects comes back as no row at all.
     count = rows[0].get("count") if rows else 0
-    return isinstance(count, int) and count <= EDGE_PROJECT_SCAN_ENTITY_LIMIT
+    return (
+        isinstance(count, int)
+        and not isinstance(count, bool)
+        and 0 <= count <= EDGE_PROJECT_SCAN_ENTITY_LIMIT
+    )
 
 
 def _edge_project_scan(where: str) -> str:

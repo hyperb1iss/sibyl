@@ -464,9 +464,9 @@ async def _correction_projected_row_ids(
     # statement walked the uuid index instead and decoded every entity in the
     # organization for each page: 1.7 s at 17,700 entities against 13 ms.
     # The rest of the predicate and the sort apply to the rows the lookups
-    # return. A span names its parent in both columns and so comes back
-    # twice; a page asks for twice its size and still holds a full page of
-    # distinct rows.
+    # return. A span names its parent in both columns and so comes back from
+    # both lookups; the rows are identical and array::distinct keeps one, so
+    # a page is the same 512 rows the single statement returned.
     columns = "uuid, group_id, attributes.projection_kind AS projection_kind"
     by_parent, parent_clumps = clumped(
         f"SELECT {columns} FROM entity WHERE attributes.parent_entity_id IN $parent_ids",
@@ -478,7 +478,6 @@ async def _correction_projected_row_ids(
         "parent_ids",
         parents,
     )
-    page_rows = 2 * _GRAPH_CORRECTION_PROJECTION_PAGE_SIZE
     rows: list[dict[str, Any]] = []
     cursor = ""
     truncated = False
@@ -487,7 +486,7 @@ async def _correction_projected_row_ids(
             batch = normalize_records(
                 await runtime.client.execute_query(
                     f"""
-                    SELECT uuid FROM array::flatten([{by_parent}, {by_source}])
+                    SELECT uuid FROM array::distinct(array::flatten([{by_parent}, {by_source}]))
                     WHERE group_id = $group_id
                       AND projection_kind IS NOT NONE
                       AND uuid > $cursor
@@ -496,12 +495,12 @@ async def _correction_projected_row_ids(
                     """,
                     group_id=str(organization_id),
                     cursor=cursor,
-                    limit=page_rows,
+                    limit=_GRAPH_CORRECTION_PROJECTION_PAGE_SIZE,
                     **parent_clumps,
                 )
             )
             rows.extend(batch)
-            if len(batch) < page_rows:
+            if len(batch) < _GRAPH_CORRECTION_PROJECTION_PAGE_SIZE:
                 break
             cursor = str(batch[-1].get("uuid") or "")
             if not cursor:
@@ -527,9 +526,7 @@ async def _correction_projected_row_ids(
             error_type=type(exc).__name__,
         )
         return [], truncated
-    projected_ids = list(
-        dict.fromkeys(uuid for row in rows if (uuid := str(row.get("uuid") or "")))
-    )
+    projected_ids = [uuid for row in rows if (uuid := str(row.get("uuid") or ""))]
     if not projected_ids:
         return [], truncated
     readable = await _readable_correction_targets(

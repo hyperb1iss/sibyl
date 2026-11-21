@@ -518,6 +518,33 @@ async def _recall_raw_memory_vector(
     and the true nearest rows where the walk returns approximate ones.
     """
     candidate_limit = max(limit * content_client.LIFECYCLE_FILTER_OVERFETCH_FACTOR, limit)
+    rows = await with_timeout(
+        _raw_vector_rows(
+            client,
+            where_clause=where_clause,
+            params=params,
+            query_embedding=query_embedding,
+            candidate_limit=candidate_limit,
+        ),
+        timeout_seconds=content_client.DIRECT_SEARCH_QUERY_TIMEOUT_SECONDS,
+        operation_name="surreal_raw_memory_vector_recall",
+    )
+    return models.recallable_memories(
+        [models.raw_memory_from_record(row) for row in rows],
+        limit=limit,
+        as_of=as_of,
+    )
+
+
+async def _raw_vector_rows(
+    client: SurrealContentClient,
+    *,
+    where_clause: str,
+    params: Mapping[str, object],
+    query_embedding: RawQueryEmbedding,
+    candidate_limit: int,
+) -> list[models.SurrealRecord]:
+    """Pick the read for the scope and run it; the caller's deadline covers both."""
     exact_index = await _raw_vector_exact_index(client, params)
     statement_params: dict[str, object] = {
         **params,
@@ -554,16 +581,7 @@ async def _recall_raw_memory_vector(
             f"AND embedding <|{candidate_limit}, {knn_effort}|> $query_embedding"
             ") ORDER BY score DESC, captured_at DESC LIMIT $candidate_limit;"
         )
-    rows = await with_timeout(
-        content_client.select_many_raw(client, statement, **statement_params),
-        timeout_seconds=content_client.DIRECT_SEARCH_QUERY_TIMEOUT_SECONDS,
-        operation_name="surreal_raw_memory_vector_recall",
-    )
-    return models.recallable_memories(
-        [models.raw_memory_from_record(row) for row in rows],
-        limit=limit,
-        as_of=as_of,
-    )
+    return await content_client.select_many_raw(client, statement, **statement_params)
 
 
 # Rows the coverage probe will read per side before it stops judging. A scope

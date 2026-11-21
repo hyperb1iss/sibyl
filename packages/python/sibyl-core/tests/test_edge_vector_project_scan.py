@@ -29,15 +29,17 @@ PLAN = SimpleNamespace(organization_id="org-123", vector_min_score=0.0)
 
 
 class _CountingClient:
-    """Answers the entity count with a fixed number and records every statement."""
+    """Answers the entity count with a fixed reply and records every statement."""
 
-    def __init__(self, entities: int | None) -> None:
+    def __init__(self, entities: object) -> None:
         self.entities = entities
         self.calls: list[tuple[str, dict[str, object]]] = []
 
     async def execute_query(self, query: str, **params: object) -> list[dict[str, object]]:
         self.calls.append((query, dict(params)))
         if "count()" in query:
+            if isinstance(self.entities, BaseException):
+                raise self.entities
             return [] if self.entities is None else [{"count": self.entities}]
         return []
 
@@ -84,6 +86,18 @@ async def test_a_large_project_keeps_the_bracket() -> None:
 
     assert "fact_embedding <|5, 40|> $query_embedding" in bracket
     assert "in.project_id IN $project_ids" in bracket
+
+
+@pytest.mark.parametrize(
+    "reply", [RuntimeError("count unavailable"), "many", True, -1, 3.0], ids=repr
+)
+async def test_a_count_that_cannot_be_read_keeps_the_bracket(reply: object) -> None:
+    """Routing is an optimization; a failed count must not cost the lane its rows."""
+    client = _CountingClient(reply)
+
+    _count, bracket = await _lane(client, SearchFilter(project_ids=("project_123",)))
+
+    assert "fact_embedding <|5, 40|> $query_embedding" in bracket
 
 
 @pytest.mark.parametrize(
