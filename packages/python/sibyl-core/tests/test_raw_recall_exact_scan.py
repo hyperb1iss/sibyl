@@ -108,7 +108,6 @@ async def test_an_unreadable_count_leaves_the_lane_on_the_walk(unreadable: objec
     assert await _raw_vector_exact_index(client, PROJECT) is None
 
 
-
 @pytest.mark.asyncio
 async def test_a_small_scope_is_scored_exactly_with_the_walks_filters_and_order() -> None:
     client = _CountingClient(scope=3)
