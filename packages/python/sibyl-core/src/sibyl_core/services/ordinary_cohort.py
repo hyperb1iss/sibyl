@@ -17,6 +17,7 @@ from pydantic_ai import Agent, NativeOutput
 from pydantic_ai.models import Model
 
 from sibyl_core.ai.llm.extractor import Extractor
+from sibyl_core.backends.surreal.id_lookups import RAW_CAPTURE_STATE_FOR_KEY, rows_by_uuid
 from sibyl_core.backends.surreal.schema_source_witness import SOURCE_STATE_WRITE_WITNESS
 from sibyl_core.embeddings.provenance import vector_identity
 from sibyl_core.memory_pipeline.observations import SourceIdentity, SourceKind
@@ -67,8 +68,13 @@ LET $snapshot={captures:$captures,states:$states};
 LET $snapshot_digest=crypto::sha256(type::string($snapshot));
 """
 COHORT_AFFINITY = (
-    "SELECT uuid, embedding, metadata.embedding_metadata AS space FROM raw_captures "
-    "WHERE organization_id=$org AND uuid IN $source_ids AND embedding != NONE ORDER BY uuid;"
+    "SELECT uuid, embedding, space FROM "
+    + rows_by_uuid(
+        "raw_captures",
+        "$source_ids",
+        projection="uuid, organization_id, embedding, metadata.embedding_metadata AS space",
+    )
+    + " WHERE organization_id=$org AND embedding != NONE ORDER BY uuid;"
 )
 COHORT_COVERAGE = (
     "SELECT uuid, principal_id, request_json, result_json FROM memory_validation_executions "
@@ -83,9 +89,10 @@ COHORT_CANDIDATES_STORED = (
     "RETURN (SELECT uuid FROM raw_captures WHERE uuid = $id AND organization_id = $org); }));"
 )
 COHORT_CANDIDATES_RETIRED = (
-    "RETURN array::flatten(array::map($keys, |$key| { LET $org = $key.org; LET $id = $key.id; "
-    "RETURN (SELECT source_id FROM source_states WHERE organization_id = $org "
-    "AND source_kind = 'raw_capture' AND source_id = $id); }));"
+    "RETURN array::flatten(array::map($keys, |$key| (SELECT source_id FROM "
+    + RAW_CAPTURE_STATE_FOR_KEY
+    + " WHERE organization_id = $key.org AND source_kind = 'raw_capture' "
+    "AND source_id = $key.id)));"
 )
 COHORT_GUARD = (
     COHORT_SNAPSHOT

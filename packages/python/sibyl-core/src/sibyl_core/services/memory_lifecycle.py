@@ -14,6 +14,7 @@ from sibyl_core.auth.memory_policy import (
     memory_row_project_id,
     private_scope_granted_for,
 )
+from sibyl_core.backends.surreal.in_clumps import clumped
 from sibyl_core.memory_pipeline.lifecycle import (
     RECONCILE_PENDING_KEY,
     graph_lifecycle_stamp,
@@ -457,6 +458,27 @@ async def _correction_projected_row_ids(
     parents = [str(parent_id) for parent_id in dict.fromkeys(parent_ids) if parent_id]
     if not parents:
         return [], False
+    # Each lineage column has its own index, and a lookup that names only
+    # that column, for at most 32 parents, is served from it (in_clumps).
+    # Written as one WHERE with the OR, the uuid range and the ORDER BY, the
+    # statement walked the uuid index instead and decoded every entity in the
+    # organization for each page: 1.7 s at 17,700 entities against 13 ms.
+    # The rest of the predicate and the sort apply to the rows the lookups
+    # return. A span names its parent in both columns and so comes back
+    # twice; a page asks for twice its size and still holds a full page of
+    # distinct rows.
+    columns = "uuid, group_id, attributes.projection_kind AS projection_kind"
+    by_parent, parent_clumps = clumped(
+        f"SELECT {columns} FROM entity WHERE attributes.parent_entity_id IN $parent_ids",
+        "parent_ids",
+        parents,
+    )
+    by_source, _ = clumped(
+        f"SELECT {columns} FROM entity WHERE attributes.source_entity_id IN $parent_ids",
+        "parent_ids",
+        parents,
+    )
+    page_rows = 2 * _GRAPH_CORRECTION_PROJECTION_PAGE_SIZE
     rows: list[dict[str, Any]] = []
     cursor = ""
     truncated = False
@@ -464,24 +486,22 @@ async def _correction_projected_row_ids(
         for page in range(_GRAPH_CORRECTION_PROJECTION_MAX_PAGES):
             batch = normalize_records(
                 await runtime.client.execute_query(
-                    """
-                    SELECT uuid FROM entity
+                    f"""
+                    SELECT uuid FROM array::flatten([{by_parent}, {by_source}])
                     WHERE group_id = $group_id
-                      AND attributes.projection_kind IS NOT NONE
+                      AND projection_kind IS NOT NONE
                       AND uuid > $cursor
-                      AND (attributes.parent_entity_id IN $parent_ids
-                           OR attributes.source_entity_id IN $parent_ids)
                     ORDER BY uuid
                     LIMIT $limit;
                     """,
                     group_id=str(organization_id),
-                    parent_ids=parents,
                     cursor=cursor,
-                    limit=_GRAPH_CORRECTION_PROJECTION_PAGE_SIZE,
+                    limit=page_rows,
+                    **parent_clumps,
                 )
             )
             rows.extend(batch)
-            if len(batch) < _GRAPH_CORRECTION_PROJECTION_PAGE_SIZE:
+            if len(batch) < page_rows:
                 break
             cursor = str(batch[-1].get("uuid") or "")
             if not cursor:
@@ -507,7 +527,9 @@ async def _correction_projected_row_ids(
             error_type=type(exc).__name__,
         )
         return [], truncated
-    projected_ids = [uuid for row in rows if (uuid := str(row.get("uuid") or ""))]
+    projected_ids = list(
+        dict.fromkeys(uuid for row in rows if (uuid := str(row.get("uuid") or "")))
+    )
     if not projected_ids:
         return [], truncated
     readable = await _readable_correction_targets(

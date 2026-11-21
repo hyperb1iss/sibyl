@@ -9,6 +9,7 @@ from typing import Any
 from pydantic import TypeAdapter
 
 from sibyl_core.backends.surreal import SurrealContentClient
+from sibyl_core.backends.surreal.id_lookups import RAW_CAPTURE_STATE_FOR_KEY
 from sibyl_core.backends.surreal.schema_source_witness import SOURCE_STATE_WRITE_WITNESS
 from sibyl_core.memory_pipeline.observations import evidence_hash
 from sibyl_core.models.reflection import ReflectionCandidate
@@ -363,16 +364,18 @@ async def checkpoint_prepared_candidates(
 SourceObservationKey = tuple[str, str, str, int]
 
 
-#: Current observations by exact identity lookup, one per {org, id} key. An
-#: IN list on the identity index's last field scans the organization's whole
-#: prefix on Surreal 3.x, a closure does not see the query's own parameters on
-#: the embedded engine, and a key field read inside WHERE defeats the 3.x
-#: index, so each lookup binds its key's fields to scalars first.
+#: Current observations by exact identity lookup, one per {org, id} key, each
+#: read by the ledger row's record key. An IN list or an equality on the
+#: identity index's last field walks the organization's whole prefix when its
+#: value is bound while the statement runs, and a closure does not see the
+#: query's own parameters on the embedded engine, so each key carries its
+#: organization and names its own record.
 SOURCE_OBSERVATIONS = (
-    "RETURN array::flatten(array::map($keys, |$key| { LET $org = $key.org; LET $id = $key.id; "
-    "RETURN (SELECT source_id, incarnation, generation FROM source_states "
-    "WHERE organization_id = $org AND source_kind = 'raw_capture' "
-    "AND source_id = $id AND deleted = false); }));"
+    "RETURN array::flatten(array::map($keys, |$key| "
+    "(SELECT source_id, incarnation, generation FROM "
+    + RAW_CAPTURE_STATE_FOR_KEY
+    + " WHERE organization_id = $key.org AND source_kind = 'raw_capture' "
+    "AND source_id = $key.id AND deleted = false)));"
 )
 
 
