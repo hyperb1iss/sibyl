@@ -17,6 +17,7 @@ from uuid import uuid4
 import numpy as np
 import structlog
 
+from sibyl_core.backends.surreal.in_clumps import clumped
 from sibyl_core.backends.surreal.knn import knn_search_effort
 from sibyl_core.config import settings
 from sibyl_core.embeddings.provenance import (
@@ -143,6 +144,51 @@ def jaccard_similarity(s1: str, s2: str) -> float:
 _UNSTAMPED = object()
 
 
+def _hnsw_candidate_statement(
+    walked: Sequence[str],
+    filters: Sequence[str],
+    *,
+    walk_filters: bool,
+    seed_column: str,
+    bracket: str,
+    embedding_param: str,
+    limit_param: str,
+) -> str:
+    """One seed's nearest candidates at or above ``$threshold``, each with ``admitted``.
+
+    SurrealDB 4 walks the vector index until ``k`` rows pass the WHERE and
+    reads a full row at every step. A predicate few rows pass, a rare entity
+    type or one memory's scope, keeps it walking: 2 s a seed over 14,000
+    vectors for a type with 30 rows, against 35 ms when the type is left out.
+    So the walk tests only ``walked``, which nearly every row passes, and the
+    ``filters`` are evaluated on the ``k`` rows it returns, as ``admitted``.
+
+    The admitted rows are the filtered walk's whenever the pool has room
+    left: every row at or above the threshold is then in it, whatever its
+    type or scope. A pool that comes back full may have cut some off, and the
+    caller reads that seed again with ``walk_filters``, which is the filtered
+    walk and admits every row it returns.
+    """
+    in_walk = " AND ".join([*walked, *(filters if walk_filters else ())])
+    admitted = "true" if walk_filters or not filters else "(" + " AND ".join(filters) + ")"
+    seed = "seed_id, " if seed_column else ""
+    return f"""
+        SELECT {seed}uuid, name, entity_type, score, created_at, admitted
+        FROM (
+            SELECT {seed_column}uuid, name, entity_type, created_at,
+                   attributes.embedding_metadata AS embedding_space,
+                   {admitted} AS admitted,
+                   (1 - vector::distance::knn()) AS score
+            FROM entity WITH INDEX idx_entity_embedding
+            WHERE {in_walk}
+              AND name_embedding {bracket} ${embedding_param}
+        )
+        WHERE score >= $threshold
+        ORDER BY score DESC, created_at DESC, uuid DESC
+        LIMIT ${limit_param};
+        """
+
+
 def _float_list(value: object) -> list[float]:
     if not isinstance(value, list):
         return []
@@ -171,17 +217,6 @@ def _dedup_candidate_from_row(row: dict[str, object]) -> tuple[str, str, str, fl
     if not isinstance(score, int | float):
         return None
     return entity_id, str(row.get("name") or ""), entity_type, float(score)
-
-
-def _dedup_candidate_with_seed_from_row(
-    row: dict[str, object],
-) -> tuple[str, str, str, str, float] | None:
-    seed_id = str(row.get("seed_id") or "")
-    candidate = _dedup_candidate_from_row(row)
-    if not seed_id or candidate is None:
-        return None
-    entity_id, name, entity_type, score = candidate
-    return seed_id, entity_id, name, entity_type, score
 
 
 def _append_scope_constraint_clauses(
@@ -308,15 +343,20 @@ class EntityDeduplicator:
         pairs: list[DuplicatePair] = []
         seen_pairs: set[tuple[str, str]] = set()
         entity_count = 0
-        offset = 0
 
         try:
-            while True:
-                seed_rows = normalize_records(
+            # The seed order, read once. The pages used to be cut from this
+            # statement with START and LIMIT, which walks the sort from the
+            # top and decodes every row before the offset, vector included:
+            # 0.03 s for the first page and 2.1 s for the last at 11,000
+            # seeds, 128 s a run. The ids alone are small; each page then
+            # reads its hundred rows through the unique uuid index in 27 ms.
+            order = [
+                str(row["uuid"])
+                for row in normalize_records(
                     await execute_query(
                         """
-                        SELECT uuid, name, entity_type, name_embedding, updated_at, created_at,
-                               attributes.embedding_metadata AS embedding_space
+                        SELECT uuid, updated_at, created_at
                         FROM entity
                         WHERE group_id = $group_id
                           AND name_embedding != NONE
@@ -325,21 +365,23 @@ class EntityDeduplicator:
                     """
                         + type_clause
                         + """
-                        ORDER BY updated_at DESC, created_at DESC, uuid DESC
-                        START $offset LIMIT $limit;
+                        ORDER BY updated_at DESC, created_at DESC, uuid DESC;
                         """,
                         group_id=group_id,
                         entity_types=allowed_types,
-                        offset=offset,
-                        limit=page_size,
                         unverified=UNVERIFIED_EMBEDDING_PROVIDER,
                         _query_label="dedup.seeds",
                     )
                 )
-                if not seed_rows:
-                    break
-
-                offset += len(seed_rows)
+                if row.get("uuid")
+            ]
+            for start in range(0, len(order), page_size):
+                seed_rows = await self._seed_rows(
+                    order[start : start + page_size],
+                    group_id=group_id,
+                    entity_types=allowed_types,
+                    execute_query=execute_query,
+                )
                 seeds = [seed for row in seed_rows if (seed := _dedup_seed_from_row(row))]
                 seed_spaces = {
                     str(row.get("uuid")): row.get("embedding_space") or _UNSTAMPED
@@ -358,9 +400,6 @@ class EntityDeduplicator:
                         seed_spaces=seed_spaces,
                     )
                 )
-
-                if len(seed_rows) < page_size:
-                    break
         except Exception as exc:
             log.warning(
                 "find_duplicates_hnsw_failed",
@@ -369,6 +408,46 @@ class EntityDeduplicator:
             return None
 
         return pairs, entity_count
+
+    async def _seed_rows(
+        self,
+        uuids: Sequence[str],
+        *,
+        group_id: str,
+        entity_types: list[str],
+        execute_query: Any,
+    ) -> list[dict[str, Any]]:
+        """One page of seed rows by id, in the order given.
+
+        A row that was deleted, changed type or was marked unverified since
+        the order was read is left out, as the seed statement would leave it
+        out now; one that lost its vector is no seed either way.
+        """
+        lookup, clumps = clumped(
+            "SELECT uuid, name, entity_type, name_embedding, updated_at, created_at, "
+            "attributes.embedding_metadata AS embedding_space "
+            "FROM entity WHERE group_id = $group_id AND uuid IN $seed_uuids",
+            "seed_uuids",
+            uuids,
+        )
+        rows = {
+            str(row.get("uuid")): row
+            for row in normalize_records(
+                await execute_query(
+                    f"RETURN {lookup};",
+                    group_id=group_id,
+                    **clumps,
+                    _query_label="dedup.seeds.rows",
+                )
+            )
+        }
+        return [
+            row
+            for uuid in uuids
+            if (row := rows.get(uuid)) is not None
+            and (not entity_types or row.get("entity_type") in entity_types)
+            and not is_unverified_embedding_metadata(row.get("embedding_space"))
+        ]
 
     async def resolve_existing_entities(
         self,
@@ -463,102 +542,131 @@ class EntityDeduplicator:
             return pairs
 
         knn_effort = knn_search_effort(candidate_limit, settings.graph_knn_ef)
-        statements: list[str] = []
-        params: dict[str, Any] = {
-            "group_id": group_id,
-            "threshold": threshold,
-            "entity_types": entity_types,
-        }
-        for index, (seed_id, _seed_name, seed_type, seed_embedding) in enumerate(seeds):
-            seed_id_param = f"seed_id_{index}"
-            seed_type_param = f"seed_type_{index}"
-            seed_embedding_param = f"seed_embedding_{index}"
-            limit_param = f"limit_{index}"
-            scope = (scope_constraints or {}).get(seed_id)
-            clauses = [
-                "group_id = $group_id",
-                f"uuid != ${seed_id_param}",
-                "name_embedding != NONE",
-            ]
-            if self.config.same_type_only:
-                clauses.append(f"entity_type = ${seed_type_param}")
-            elif entity_types:
-                clauses.append("entity_type IN $entity_types")
-            _append_scope_constraint_clauses(
-                clauses,
-                params,
-                scope,
-                param_prefix=f"scope_{index}",
-            )
 
-            params[seed_id_param] = seed_id
-            params[seed_type_param] = seed_type
-            params[seed_embedding_param] = seed_embedding
-            params[limit_param] = candidate_limit
-            # Inside the HNSW bracket, so candidates from another model nearer
-            # the seed cannot crowd out the ones in its own space.
-            space = (seed_spaces or {}).get(seed_id)
-            if space is _UNSTAMPED:
-                clauses.append("attributes.embedding_metadata = NONE")
-            elif space is not None:
-                params[f"seed_space_{index}"] = space
-                clauses.append(
-                    vector_space_predicate("attributes.embedding_metadata", f"seed_space_{index}")
+        async def read(
+            batch: Sequence[tuple[str, str, str, list[float]]], *, walk_filters: bool
+        ) -> dict[str, list[dict[str, Any]]]:
+            statements: list[str] = []
+            params: dict[str, Any] = {
+                "group_id": group_id,
+                "threshold": threshold,
+                "entity_types": entity_types,
+            }
+            for index, (seed_id, _seed_name, seed_type, seed_embedding) in enumerate(batch):
+                seed_id_param = f"seed_id_{index}"
+                seed_embedding_param = f"seed_embedding_{index}"
+                limit_param = f"limit_{index}"
+                walked, filters = self._candidate_clauses(
+                    params,
+                    seed_id_param=seed_id_param,
+                    seed_type_param=f"seed_type_{index}",
+                    entity_types=entity_types,
+                    scope=(scope_constraints or {}).get(seed_id),
+                    scope_prefix=f"scope_{index}",
+                    space=(seed_spaces or {}).get(seed_id),
+                    space_param=f"seed_space_{index}",
                 )
-            statements.append(
-                f"""
-                SELECT seed_id, uuid, name, entity_type, score, created_at
-                FROM (
-                    SELECT ${seed_id_param} AS seed_id,
-                           uuid, name, entity_type, created_at,
-                           attributes.embedding_metadata AS embedding_space,
-                           (1 - vector::distance::knn()) AS score
-                    FROM entity WITH INDEX idx_entity_embedding
-                    WHERE """
-                + " AND ".join(clauses)
-                + f"""
-                      AND name_embedding <|{candidate_limit}, {knn_effort}|> ${seed_embedding_param}
+                params[seed_id_param] = seed_id
+                params[f"seed_type_{index}"] = seed_type
+                params[seed_embedding_param] = seed_embedding
+                params[limit_param] = candidate_limit
+                statements.append(
+                    _hnsw_candidate_statement(
+                        walked,
+                        filters,
+                        walk_filters=walk_filters,
+                        seed_column=f"${seed_id_param} AS seed_id, ",
+                        bracket=f"<|{candidate_limit}, {knn_effort}|>",
+                        embedding_param=seed_embedding_param,
+                        limit_param=limit_param,
+                    )
                 )
-                WHERE score >= $threshold
-                ORDER BY score DESC, created_at DESC, uuid DESC
-                LIMIT ${limit_param};
-                """
-            )
+            found: dict[str, list[dict[str, Any]]] = {}
+            for row in normalize_records(
+                await (execute_query_raw or execute_query)(
+                    "\n".join(statements),
+                    **params,
+                    _query_label="dedup.candidates.batch",
+                )
+            ):
+                found.setdefault(str(row.get("seed_id") or ""), []).append(row)
+            return found
 
-        rows = normalize_records(
-            await (execute_query_raw or execute_query)(
-                "\n".join(statements),
-                **params,
-                _query_label="dedup.candidates.batch",
-            )
-        )
-        seeds_by_id = {
-            seed_id: (seed_name, seed_type) for seed_id, seed_name, seed_type, _ in seeds
-        }
+        found = await read(seeds, walk_filters=False)
+        # A pool with no room left may have cut off rows its filters admit;
+        # those seeds take the filtered walk (see ``_hnsw_candidate_statement``).
+        full = [seed for seed in seeds if len(found.get(seed[0], ())) >= candidate_limit]
+        if full and self._filters_candidates(entity_types, scope_constraints):
+            filtered = await read(full, walk_filters=True)
+            for seed in full:
+                found[seed[0]] = filtered.get(seed[0], [])
 
         pairs: list[DuplicatePair] = []
-        for row in rows:
-            candidate = _dedup_candidate_with_seed_from_row(row)
-            if candidate is None:
-                continue
-            seed_id, candidate_id, candidate_name, candidate_type, similarity = candidate
-            seed = seeds_by_id.get(seed_id)
-            if seed is None:
-                continue
-            seed_name, seed_type = seed
-            pair = self._candidate_pair(
-                seed_id=seed_id,
-                seed_name=seed_name,
-                seed_type=seed_type,
-                candidate_id=candidate_id,
-                candidate_name=candidate_name,
-                candidate_type=candidate_type,
-                similarity=similarity,
-                seen_pairs=seen_pairs,
-            )
-            if pair is not None:
-                pairs.append(pair)
+        for seed_id, seed_name, seed_type, _seed_embedding in seeds:
+            for row in found.get(seed_id, ()):
+                candidate = _dedup_candidate_from_row(row)
+                if candidate is None or row.get("admitted", True) is not True:
+                    continue
+                candidate_id, candidate_name, candidate_type, similarity = candidate
+                pair = self._candidate_pair(
+                    seed_id=seed_id,
+                    seed_name=seed_name,
+                    seed_type=seed_type,
+                    candidate_id=candidate_id,
+                    candidate_name=candidate_name,
+                    candidate_type=candidate_type,
+                    similarity=similarity,
+                    seen_pairs=seen_pairs,
+                )
+                if pair is not None:
+                    pairs.append(pair)
         return pairs
+
+    def _filters_candidates(
+        self,
+        entity_types: list[str],
+        scope_constraints: dict[str, dict[str, object | None]] | None,
+    ) -> bool:
+        """Whether any candidate predicate is kept out of the HNSW walk."""
+        return bool(
+            self.config.same_type_only or entity_types or any((scope_constraints or {}).values())
+        )
+
+    def _candidate_clauses(
+        self,
+        params: dict[str, Any],
+        *,
+        seed_id_param: str,
+        seed_type_param: str,
+        entity_types: list[str],
+        scope: dict[str, object | None] | None,
+        scope_prefix: str,
+        space: object | None,
+        space_param: str,
+    ) -> tuple[list[str], list[str]]:
+        """A seed's candidate predicates: those the HNSW walk tests, and the filters.
+
+        The vector space stays in the walk, so candidates from another model
+        nearer the seed cannot crowd out the ones in its own space. Type and
+        scope are filters (see ``_hnsw_candidate_statement``).
+        """
+        walked = [
+            "group_id = $group_id",
+            f"uuid != ${seed_id_param}",
+            "name_embedding != NONE",
+        ]
+        filters: list[str] = []
+        if self.config.same_type_only:
+            filters.append(f"entity_type = ${seed_type_param}")
+        elif entity_types:
+            filters.append("entity_type IN $entity_types")
+        _append_scope_constraint_clauses(filters, params, scope, param_prefix=scope_prefix)
+        if space is _UNSTAMPED:
+            walked.append("attributes.embedding_metadata = NONE")
+        elif space is not None:
+            params[space_param] = space
+            walked.append(vector_space_predicate("attributes.embedding_metadata", space_param))
+        return walked, filters
 
     async def _find_hnsw_candidates_for_seed(
         self,
@@ -574,11 +682,6 @@ class EntityDeduplicator:
         seed_space: object | None = None,
     ) -> list[DuplicatePair]:
         seed_id, seed_name, seed_type, seed_embedding = seed
-        clauses = [
-            "group_id = $group_id",
-            "uuid != $seed_id",
-            "name_embedding != NONE",
-        ]
         params: dict[str, Any] = {
             "group_id": group_id,
             "seed_id": seed_id,
@@ -588,50 +691,45 @@ class EntityDeduplicator:
             "entity_types": entity_types,
         }
         if self.config.same_type_only:
-            clauses.append("entity_type = $seed_type")
             params["seed_type"] = seed_type
-        elif entity_types:
-            clauses.append("entity_type IN $entity_types")
-        _append_scope_constraint_clauses(
-            clauses,
+        walked, filters = self._candidate_clauses(
             params,
-            scope_constraints,
-            param_prefix="scope",
+            seed_id_param="seed_id",
+            seed_type_param="seed_type",
+            entity_types=entity_types,
+            scope=scope_constraints,
+            scope_prefix="scope",
+            space=seed_space,
+            space_param="seed_space",
         )
-
-        if seed_space is _UNSTAMPED:
-            clauses.append("attributes.embedding_metadata = NONE")
-        elif seed_space is not None:
-            params["seed_space"] = seed_space
-            clauses.append(vector_space_predicate("attributes.embedding_metadata", "seed_space"))
         knn_effort = knn_search_effort(candidate_limit, settings.graph_knn_ef)
-        rows = normalize_records(
-            await execute_query(
-                """
-                SELECT uuid, name, entity_type, score, created_at
-                FROM (
-                    SELECT uuid, name, entity_type, created_at,
-                           attributes.embedding_metadata AS embedding_space,
-                           (1 - vector::distance::knn()) AS score
-                    FROM entity WITH INDEX idx_entity_embedding
-                    WHERE """
-                + " AND ".join(clauses)
-                + f"""
-                      AND name_embedding <|{candidate_limit}, {knn_effort}|> $seed_embedding
+
+        async def read(*, walk_filters: bool) -> list[dict[str, Any]]:
+            return normalize_records(
+                await execute_query(
+                    _hnsw_candidate_statement(
+                        walked,
+                        filters,
+                        walk_filters=walk_filters,
+                        seed_column="",
+                        bracket=f"<|{candidate_limit}, {knn_effort}|>",
+                        embedding_param="seed_embedding",
+                        limit_param="limit",
+                    ),
+                    **params,
+                    _query_label="dedup.candidates",
                 )
-                WHERE score >= $threshold
-                ORDER BY score DESC, created_at DESC, uuid DESC
-                LIMIT $limit;
-                """,
-                **params,
-                _query_label="dedup.candidates",
             )
-        )
+
+        rows = await read(walk_filters=False)
+        # A pool with no room left may have cut off rows the filters admit.
+        if filters and len(rows) >= candidate_limit:
+            rows = await read(walk_filters=True)
 
         pairs: list[DuplicatePair] = []
         for row in rows:
             candidate = _dedup_candidate_from_row(row)
-            if candidate is None:
+            if candidate is None or row.get("admitted", True) is not True:
                 continue
             candidate_id, candidate_name, candidate_type, similarity = candidate
             pair = self._candidate_pair(

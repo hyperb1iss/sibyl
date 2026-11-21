@@ -296,6 +296,8 @@ class TestEntityDeduplicator:
         """Native clients use SurrealDB KNN instead of materializing all pairs."""
         client = _SequencedGraphClient(
             [
+                # The seed order is read once, as ids; each page then reads its rows.
+                [{"uuid": "id1"}, {"uuid": "id2"}],
                 [
                     {
                         "uuid": "id1",
@@ -339,7 +341,9 @@ class TestEntityDeduplicator:
         assert [(pair.entity1_id, pair.entity2_id) for pair in pairs] == [("id1", "id2")]
         mock_entity_manager.list_all.assert_not_awaited()
         queries = [query for query, _ in client.calls]
-        assert len(queries) == 3
+        assert len(queries) == 4
+        assert "START" not in queries[0]
+        assert "uuid IN $seed_uuids_0" in queries[1]
         assert any("name_embedding <|10, 40|> $seed_embedding" in query for query in queries)
 
     @pytest.mark.asyncio
