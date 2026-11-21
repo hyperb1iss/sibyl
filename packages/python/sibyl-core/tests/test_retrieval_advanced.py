@@ -2266,13 +2266,13 @@ class TestEntityDeduplicatorFindDuplicates:
         self,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        # Candidate limit 8, so the unfiltered walk goes 32 deep. A pool that
+        # Candidate limit 8, so the unfiltered walk goes 16 deep. A pool that
         # comes back full at or above the threshold may hide admitted rows
         # past it, and only the filtered walk can say.
         monkeypatch.setattr(dedup_module.settings, "graph_knn_ef", 40)
         crowd = [
             _candidate_row("incoming_alpha", f"crowd_{index}", 0.99, admitted=False)
-            for index in range(32)
+            for index in range(16)
         ]
         client = ScriptedDedupClient(
             [
@@ -2293,7 +2293,7 @@ class TestEntityDeduplicatorFindDuplicates:
         pooled, pooled_params = client.raw_calls[0]
         filtered, filtered_params = client.raw_calls[1]
         assert "name_embedding <|16, 40|>" in pooled
-        assert pooled_params["limit_0"] == 32
+        assert pooled_params["limit_0"] == 16
         assert "name_embedding <|8, 40|>" in filtered
         assert filtered_params["limit_0"] == 8
         assert "true AS admitted" in filtered
@@ -2302,7 +2302,7 @@ class TestEntityDeduplicatorFindDuplicates:
 
         # One row short of full: every row at or above the threshold is in
         # the pool, so nothing is read again.
-        short = ScriptedDedupClient([[crowd[:31]]])
+        short = ScriptedDedupClient([[crowd[:15]]])
         dedup = EntityDeduplicator(
             client=short,  # type: ignore[arg-type]
             entity_manager=MockEntityManagerForDedup(),
@@ -2317,9 +2317,7 @@ class TestEntityDeduplicatorFindDuplicates:
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         monkeypatch.setattr(dedup_module.settings, "graph_knn_ef", 40)
-        crowd = [
-            _candidate_row("", f"crowd_{index}", 0.99, admitted=False) for index in range(32)
-        ]
+        crowd = [_candidate_row("", f"crowd_{index}", 0.99, admitted=False) for index in range(16)]
         client = ScriptedSeedDedupClient(
             [
                 crowd,

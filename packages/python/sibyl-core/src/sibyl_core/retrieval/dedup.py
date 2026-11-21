@@ -634,9 +634,7 @@ class EntityDeduplicator:
         # A pool that came back full at or above the threshold may have cut
         # off admitted rows; those seeds take the filtered walk (see
         # ``_hnsw_candidate_statement``).
-        full = [
-            seed for seed in seeds if filtered(seed[0]) and len(found.get(seed[0], ())) >= pool
-        ]
+        full = [seed for seed in seeds if filtered(seed[0]) and len(found.get(seed[0], ())) >= pool]
         if full:
             reread = await read(full, walk_filters=True)
             for seed in full:
