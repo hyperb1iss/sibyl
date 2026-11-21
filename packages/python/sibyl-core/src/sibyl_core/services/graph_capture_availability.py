@@ -10,6 +10,7 @@ from typing import Any
 
 import structlog
 
+from sibyl_core.backends.surreal.in_clumps import clumped
 from sibyl_core.memory_pipeline.lifecycle import (
     graph_metadata_recallable,
     raw_memory_lifecycle_recallable,
@@ -422,12 +423,16 @@ async def _graph_ancestry(organization_id, rows, graph_client, *, refresh_ids, r
                 execute_query = graph_client.execute_query
             for batch in content_client.value_batches(sorted(requested)):
                 try:
+                    # Clumps of 32 stay on idx_entity_uuid; a longer `IN` scans entity.
+                    lookup, id_clumps = clumped(
+                        "SELECT * OMIT content, embedding, name_embedding, attributes.content "
+                        "FROM entity WHERE group_id=$organization_id AND uuid IN $parent_ids",
+                        "parent_ids",
+                        batch,
+                    )
                     records = normalize_records(
                         await execute_query(
-                            "SELECT * OMIT content, embedding, name_embedding, attributes.content "
-                            "FROM entity WHERE group_id=$organization_id AND uuid IN $parent_ids;",
-                            organization_id=organization_id,
-                            parent_ids=batch,
+                            f"RETURN {lookup};", organization_id=organization_id, **id_clumps
                         )
                     )
                     for record in records:

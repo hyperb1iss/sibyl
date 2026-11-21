@@ -14,7 +14,7 @@ from sibyl_core.backends.surreal.fulltext import (
     build_fulltext_terms,
     build_match_disjunction,
 )
-from sibyl_core.backends.surreal.in_clumps import clumped
+from sibyl_core.backends.surreal.in_clumps import IN_CLUMP, clumped
 from sibyl_core.backends.surreal.knn import knn_overfetch_pool, knn_search_effort
 from sibyl_core.config import core_config
 from sibyl_core.embeddings.provenance import vector_space_predicate
@@ -383,16 +383,14 @@ async def _exact_key_candidates(
         return []
     row_limit = max(int(limit), 1)
     filter_clauses, filter_params = _node_filter_clause(search_filter)
-    # CONTAINSANY against the index defined on `retrieval_keys_normalized.*`.
-    # The element index is what makes this both correct and index-served: on
-    # SurrealDB 3.2.3 an index on the bare array field turns this same read into
-    # a full table scan, and turns a bare equality into zero rows unless the
-    # WHERE clause happens to carry a second predicate. Verified live on 3.2.3
-    # (UnionIndexScan across one branch per probe), so the `.*` in the index
-    # definition is what this read depends on, not a stylistic choice.
-    # The CONTAINSANY sits alone in an inner select and the sort outside it:
-    # beside an ORDER BY with a LIMIT, 4.0 does not expand it into lookups on
-    # the element index and scans the table instead.
+    # ANYINSIDE, not CONTAINSANY. SurrealDB 4.0.1 serves CONTAINSANY, CONTAINS
+    # and INSIDE from the element index on `retrieval_keys_normalized.*` with
+    # two extra branches, `= NONE` and `= NULL`, and the NONE branch fetches
+    # every row that declares no key in full: 1.7 s on 17,700 entities of
+    # which 21 had keys. ANYINSIDE is not mapped to the index, so it runs as
+    # one table scan that tests the keys before a row is decoded (about 100 ms
+    # on the same table) and returns the same rows. The scan grows with the
+    # table, so an index read comes back once the planner drops the branch.
     rows = await _execute_query_records(
         client,
         f"""
@@ -400,7 +398,7 @@ async def _exact_key_candidates(
             SELECT {NODE_LANE_PROJECTION}
             {NODE_LANE_OMIT}
             FROM entity
-            WHERE retrieval_keys_normalized CONTAINSANY $probe_keys
+            WHERE retrieval_keys_normalized ANYINSIDE $probe_keys
         )
         WHERE """
         + _where_clause(["group_id = $group_id", *filter_clauses])
@@ -840,6 +838,35 @@ async def _edge_vector_candidates(
         return []
     filter_clauses, filter_params = _edge_filter_clause(search_filter)
     candidate_limit = max(int(limit), 1)
+    if await _projects_small_enough_to_scan(client, search_filter):
+        rows = await _execute_query_records(
+            client,
+            _edge_project_scan(
+                _where_clause(
+                    [
+                        "group_id = $group_id",
+                        "fact_embedding != NONE",
+                        _stamp_in_query_space(admit_unstamped=admit_unstamped),
+                        *_edge_filter_clause(replace(search_filter, project_ids=()))[0],
+                    ]
+                )
+            ),
+            group_id=plan.organization_id,
+            query_embedding=list(query_embedding),
+            min_score=plan.vector_min_score,
+            limit=candidate_limit,
+            embedding_metadata=embedding_metadata.to_dict(),
+            **filter_params,
+        )
+        return [
+            _candidate_from_edge_record(
+                row,
+                signal=RetrievalSignal.EDGE_VECTOR,
+                score=_record_score(row),
+                embedding_metadata=embedding_metadata,
+            )
+            for row in rows
+        ]
     knn_effort = knn_search_effort(candidate_limit, core_config.graph_knn_ef)
     overfetch = search_filter.knn_type_overfetch
     if search_filter.edge_types and overfetch > 0:
@@ -919,6 +946,84 @@ async def _edge_vector_candidates(
         )
         for row in rows
     ]
+
+
+# A project filter beside the HNSW bracket makes SurrealDB 4.0 walk the vector
+# graph until enough edges pass it, reading both endpoints of every edge it
+# visits. For a project holding a small share of the graph that is the whole
+# graph: 7.9 s for a 40-entity project among 22,000 edges. Below this many
+# entities the lane reads the projects' own edges instead and scores each one
+# exactly, which cost 0.2 to 0.5 s on that graph and returned the same rows in
+# the same order. Above it the index is faster (0.1 to 0.2 s at 4,500
+# entities, against 2.9 s for the scan), so larger projects keep the bracket.
+EDGE_PROJECT_SCAN_ENTITY_LIMIT = 512
+
+
+async def _projects_small_enough_to_scan(client: Any, search_filter: SearchFilter) -> bool:
+    """Whether the filter's projects hold few enough entities to read their edges directly.
+
+    The count is served by idx_entity_project alone. A list past one `IN`
+    clump is not, and names enough of the graph that the bracket fills fast.
+    Choosing is an optimization: a count that fails or reads as anything but
+    a row count leaves the lane on the bracket it has always used.
+    """
+    if not search_filter.project_ids or len(search_filter.project_ids) > IN_CLUMP:
+        return False
+    try:
+        rows = await _execute_query_records(
+            client,
+            "SELECT count() AS count FROM entity WHERE project_id IN $project_ids GROUP ALL;",
+            project_ids=list(search_filter.project_ids),
+        )
+    except Exception as exc:
+        log.warning("edge_project_count_failed", error_type=type(exc).__name__)
+        return False
+    # No entity in the projects comes back as no row at all.
+    count = rows[0].get("count") if rows else 0
+    return (
+        isinstance(count, int)
+        and not isinstance(count, bool)
+        and 0 <= count <= EDGE_PROJECT_SCAN_ENTITY_LIMIT
+    )
+
+
+def _edge_project_scan(where: str) -> str:
+    """Every edge of the projects, scored against the query vector, best first.
+
+    The edges are the ones `_edge_filter_clause` admits for a project: those
+    ending on an entity in it, by column or by attribute bag, reached through
+    the entities' own links, and those stamped with it themselves. One
+    statement reads the membership and the edges, so an entity that changes
+    project takes its edges with it on the next search. Endpoint projects are
+    read only for the rows that survive the cut.
+    """
+    return f"""
+        SELECT * OMIT in, out FROM (
+            SELECT *,
+                   in.project_id AS source_node_project_id,
+                   out.project_id AS target_node_project_id
+            FROM (
+                SELECT uuid, name, fact, group_id, episodes, attributes,
+                       created_at, expired_at, valid_at, invalid_at,
+                       source_id AS source_node_uuid,
+                       target_id AS target_node_uuid,
+                       in, out,
+                       vector::similarity::cosine(fact_embedding, $query_embedding) AS score
+                FROM array::distinct(array::concat(
+                    array::flatten((
+                        SELECT VALUE array::concat(->relates_to, <-relates_to) FROM entity
+                        WHERE project_id IN $project_ids
+                           OR attributes.project_id IN $project_ids
+                    )),
+                    (SELECT VALUE id FROM relates_to WHERE attributes.project_id IN $project_ids)
+                ))
+                WHERE {where}
+            )
+            WHERE score >= $min_score
+            ORDER BY score DESC, created_at DESC, uuid DESC
+            LIMIT $limit
+        );
+    """
 
 
 async def _hydrate_candidate_bodies(

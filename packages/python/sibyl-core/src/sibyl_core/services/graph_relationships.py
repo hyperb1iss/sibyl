@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING, Any
 from surrealdb import RecordID
 
 from sibyl_core.backends.surreal.connection import _is_transient_connection_error
+from sibyl_core.backends.surreal.in_clumps import clumped
 from sibyl_core.embeddings.providers import EmbeddingProvider
 from sibyl_core.memory_pipeline.quality import expand_memory_quality_storage_metadata
 from sibyl_core.migrate.source_integrity import ArchiveDatetime, native_archive_parameters
@@ -52,16 +53,25 @@ if TYPE_CHECKING:
     from sibyl_core.services.operational_projection import OperationalProjectionSource
 
 
-# Keep vectors out of indexed lookup closures. Re-evaluating full payloads
-# inside each UPDATE scales poorly even when no vector value changes.
+# Stored rows are read through client-parameter `IN` lists of at most 32
+# uuids (in_clumps), the one lookup SurrealDB 4.0 serves from idx_relates_uuid
+# wherever the statement runs. A lookup inside a closure (`WHERE uuid =
+# $edge.uuid`, or the bare argument inside a block that also writes) scans
+# relates_to once per edge. The rows are keyed by uuid and joined in a SELECT,
+# since a closure may read nothing but its own argument. Vectors stay out of
+# the lookup: re-evaluating full payloads inside each UPDATE scales poorly even
+# when no vector value changes.
+_RELATIONSHIP_BULK_STORED = (
+    "SELECT id, in, out, group_id, uuid,"
+    " (operational_derivation_required = true OR operational_source_binding != NONE)"
+    " AS source_bound FROM relates_to WHERE uuid IN $edge_uuids"
+)
 _RELATIONSHIP_BULK_LOOKUP = """
-LET $existing = $edges.map(|$edge| {
-    edge: $edge,
-    stored: (SELECT id, in, out, group_id FROM relates_to WHERE uuid=$edge.uuid LIMIT 1)[0]
-});
+LET $stored_edges = object::from_entries({stored}.map(|$row| [$row.uuid, $row]));
+LET $existing = SELECT VALUE {{ edge: $this, stored: $stored_edges[uuid] }} FROM $edges;
 IF array::len($existing.filter(|$entry|
     $entry.stored != NONE AND $entry.stored.group_id != $entry.edge.group_id
-)) > 0 { THROW 'relationship identity conflicts with current scope'; };
+)) > 0 {{ THROW 'relationship identity conflicts with current scope'; }};
 """
 _RELATIONSHIP_BULK_MUTATIONS = """
 LET $matching = $existing.filter(|$entry| $entry.stored != NONE
@@ -78,20 +88,18 @@ FOR $entry IN $remaining {
 LET $inserts = SELECT VALUE $rows[edge.index] FROM $remaining;
 IF array::len($inserts) > 0 { INSERT RELATION INTO relates_to $inserts; };
 """
-_RELATIONSHIP_BULK_UPSERT_STATEMENTS = _RELATIONSHIP_BULK_LOOKUP + _RELATIONSHIP_BULK_MUTATIONS
 _PROTECTED_RELATIONSHIP_WRITE_GUARD = """
 IF array::len(SELECT VALUE uuid FROM relates_to WHERE uuid IN $relationship_ids
     AND (operational_derivation_required = true OR operational_source_binding != NONE)) > 0 {
     THROW 'protected operational relationship requires source writer';
 };
 """
-_RELATIONSHIP_BULK_UPSERT_QUERY = (
-    "BEGIN TRANSACTION;\n"
-    + _RELATIONSHIP_BULK_LOOKUP
-    + _PROTECTED_RELATIONSHIP_WRITE_GUARD
-    + _RELATIONSHIP_BULK_MUTATIONS
-    + "COMMIT TRANSACTION;"
-)
+# The bulk writer reads the same verdict off the rows its lookup already holds.
+_PROTECTED_RELATIONSHIP_BULK_GUARD = """
+IF array::len($existing.filter(|$entry| $entry.stored.source_bound = true)) > 0 {
+    THROW 'protected operational relationship requires source writer';
+};
+"""
 
 
 _RETIRE_OR_DELETE_RELATIONSHIPS = """
@@ -772,22 +780,16 @@ async def _replace_relationships_bulk(
     if not rows:
         return []
 
+    statements, parameters = _relationship_bulk_upsert(rows, guard_protected=True)
+    query = "BEGIN TRANSACTION;\n" + statements + "COMMIT TRANSACTION;"
     try:
-        await client.execute_query(
-            _RELATIONSHIP_BULK_UPSERT_QUERY,
-            **_relationship_bulk_parameters(rows),
-            relationship_ids=written_ids,
-        )
+        await client.execute_query(query, **parameters)
     except Exception as exc:
         if not _is_transient_connection_error(exc):
             raise
         mark_graph_schema_dirty(client.group_id)
         await prepare_graph_schema(client)
-        await client.execute_query(
-            _RELATIONSHIP_BULK_UPSERT_QUERY,
-            **_relationship_bulk_parameters(rows),
-            relationship_ids=written_ids,
-        )
+        await client.execute_query(query, **parameters)
     return written_ids
 
 
@@ -855,6 +857,23 @@ def _relationship_bulk_parameters(rows: Sequence[SurrealRecord]) -> dict[str, An
         for index, row in enumerate(payloads["rows"])
     ]
     return payloads
+
+
+def _relationship_bulk_upsert(
+    rows: Sequence[SurrealRecord], *, guard_protected: bool = False
+) -> tuple[str, dict[str, Any]]:
+    """The statements that upsert `rows` by uuid, and the parameters they name.
+
+    They run as top-level statements of a transaction or inside a block.
+    `guard_protected` refuses a batch that names a source-bound edge.
+    """
+    parameters = _relationship_bulk_parameters(rows)
+    uuids = [str(edge["uuid"]) for edge in parameters["edges"]]
+    stored, clumps = clumped(_RELATIONSHIP_BULK_STORED, "edge_uuids", uuids)
+    statements = _RELATIONSHIP_BULK_LOOKUP.format(stored=stored)
+    if guard_protected:
+        statements += _PROTECTED_RELATIONSHIP_BULK_GUARD
+    return statements + _RELATIONSHIP_BULK_MUTATIONS, {**parameters, **clumps}
 
 
 def _relationship_record(
