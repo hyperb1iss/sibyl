@@ -383,16 +383,14 @@ async def _exact_key_candidates(
         return []
     row_limit = max(int(limit), 1)
     filter_clauses, filter_params = _node_filter_clause(search_filter)
-    # CONTAINSANY against the index defined on `retrieval_keys_normalized.*`.
-    # The element index is what makes this both correct and index-served: on
-    # SurrealDB 3.2.3 an index on the bare array field turns this same read into
-    # a full table scan, and turns a bare equality into zero rows unless the
-    # WHERE clause happens to carry a second predicate. Verified live on 3.2.3
-    # (UnionIndexScan across one branch per probe), so the `.*` in the index
-    # definition is what this read depends on, not a stylistic choice.
-    # The CONTAINSANY sits alone in an inner select and the sort outside it:
-    # beside an ORDER BY with a LIMIT, 4.0 does not expand it into lookups on
-    # the element index and scans the table instead.
+    # ANYINSIDE, not CONTAINSANY. SurrealDB 4.0.1 serves CONTAINSANY, CONTAINS
+    # and INSIDE from the element index on `retrieval_keys_normalized.*` with
+    # two extra branches, `= NONE` and `= NULL`, and the NONE branch fetches
+    # every row that declares no key in full: 1.7 s on 17,700 entities of
+    # which 21 had keys. ANYINSIDE is not mapped to the index, so it runs as
+    # one table scan that tests the keys before a row is decoded (about 100 ms
+    # on the same table) and returns the same rows. The scan grows with the
+    # table, so an index read comes back once the planner drops the branch.
     rows = await _execute_query_records(
         client,
         f"""
@@ -400,7 +398,7 @@ async def _exact_key_candidates(
             SELECT {NODE_LANE_PROJECTION}
             {NODE_LANE_OMIT}
             FROM entity
-            WHERE retrieval_keys_normalized CONTAINSANY $probe_keys
+            WHERE retrieval_keys_normalized ANYINSIDE $probe_keys
         )
         WHERE """
         + _where_clause(["group_id = $group_id", *filter_clauses])
