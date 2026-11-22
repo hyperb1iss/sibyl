@@ -62,11 +62,14 @@ WORKDIR /app/apps/web
 RUN addgroup --system --gid 10002 nodejs && \
     adduser --system --uid 10002 --ingroup nodejs nextjs
 
-# Set production env
+# Set production env. HOSTNAME is the Next.js bind address: "::" listens on
+# IPv6 and IPv4 at once, so the server answers on IPv6-only, IPv4-only and
+# dual-stack networks. Override with 0.0.0.0 on a host booted with
+# ipv6.disable=1, where no IPv6 socket can be opened.
 ENV NODE_ENV=production \
     NEXT_TELEMETRY_DISABLED=1 \
     PORT=3337 \
-    HOSTNAME=0.0.0.0
+    HOSTNAME="::"
 
 RUN rm -rf /usr/local/lib/node_modules/npm \
     /usr/local/bin/npm \

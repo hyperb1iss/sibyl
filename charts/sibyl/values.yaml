@@ -420,10 +420,14 @@ frontend:
     initialDelaySeconds: 5
     periodSeconds: 10
 
-  # -- Environment variables
+  # -- Environment variables. HOSTNAME is the Next.js bind address: "::"
+  # listens on IPv6 and IPv4 at once, which IPv6-only clusters need because
+  # kubelet probes the pod's IPv6 address. Set it to "0.0.0.0" on nodes
+  # booted with ipv6.disable=1, where no IPv6 socket can be opened.
   env:
     NODE_ENV: "production"
     NEXT_TELEMETRY_DISABLED: "1"
+    HOSTNAME: "::"
 
   # -- Server-side API URL for Next.js server components.
   # Defaults to http://<release>-backend:<backend.service.port>/api when empty.

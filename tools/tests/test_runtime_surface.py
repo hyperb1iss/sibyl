@@ -366,6 +366,36 @@ def test_helm_explicit_frontend_public_api_url_wins_over_public_url() -> None:
     assert 'value: "https://sibyl.example.test/api"' not in result.stdout
 
 
+def _frontend_env(*overrides: str) -> list[dict[str, str]]:
+    result = _helm_template("--set", "backend.existingSecret=sibyl-secrets", *overrides)
+    assert result.returncode == 0, result.stderr
+    frontend = next(
+        doc
+        for doc in yaml.safe_load_all(result.stdout)
+        if doc and doc["kind"] == "Deployment" and doc["metadata"]["name"] == "sibyl-frontend"
+    )
+    return frontend["spec"]["template"]["spec"]["containers"][0]["env"]
+
+
+@pytest.mark.parametrize(
+    ("overrides", "expected"),
+    [
+        # kubelet probes the pod IP, which is IPv6 on an IPv6-only cluster.
+        ((), ["::"]),
+        # Nodes booted with ipv6.disable=1 cannot open an IPv6 socket.
+        (("--set-string", "frontend.env.HOSTNAME=0.0.0.0"), ["0.0.0.0"]),  # noqa: S104
+    ],
+)
+@requires_helm
+def test_helm_frontend_bind_address_defaults_dual_stack_and_env_wins(
+    overrides: tuple[str, ...], expected: list[str]
+) -> None:
+    env = _frontend_env(*overrides)
+
+    assert [e["value"] for e in env if e["name"] == "HOSTNAME"] == expected
+    assert [e["value"] for e in env if e["name"] == "PORT"] == ["3337"]
+
+
 def _rendered_config_data(manifests: str) -> dict[str, str]:
     for document in yaml.safe_load_all(manifests):
         if (
