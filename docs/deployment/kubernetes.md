@@ -466,6 +466,36 @@ The readiness probe targets `/api/health/ready`, the deep readiness endpoint tha
 SurrealDB is unreachable so the pod is pulled from service until it can serve. Liveness stays on
 `/api/health`.
 
+## IPv6-Only Clusters
+
+On a cluster whose pods have only an IPv6 address, the kubelet probes each pod and Services route to
+it over IPv6. The chart's defaults bind `0.0.0.0`, which is IPv4 only, so every probe is refused and
+no pod turns Ready. Set the three bind addresses:
+
+```yaml
+# sibyl chart
+backend:
+  env:
+    SIBYL_SERVER_HOST: "::"
+frontend:
+  env:
+    HOSTNAME: "::"
+```
+
+```yaml
+# sibyl-surrealdb chart
+surrealdb:
+  args:
+    - start
+    - --bind
+    - "[::]:8000"
+```
+
+The SurrealDB flag is needed because the upstream chart sets `SURREAL_BIND` to `0.0.0.0` in the
+container environment, and the command-line flag outranks it. Pods reach each other by Service name
+either way. Model providers and other IPv4-only endpoints need the cluster's own NAT64 and DNS64,
+and `backend.forwardedAllowIps` takes the ingress pods' IPv6 range in place of an IPv4 one.
+
 ## Scaling
 
 ### Manual Scaling
