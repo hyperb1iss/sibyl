@@ -536,6 +536,7 @@ frontend:
   env:
     NODE_ENV: "production"
     NEXT_TELEMETRY_DISABLED: "1"
+    HOSTNAME: "::" # bind address, dual-stack
 
   # Defaults to http://<release>-backend:<port>/api when empty
   apiUrl: ""
@@ -560,6 +561,11 @@ frontend:
   affinity: {}
   podAnnotations: {}
 ```
+
+`frontend.env.HOSTNAME` is the address the Next.js server binds. The default `::` listens on IPv6
+and IPv4 at once, so the pod passes kubelet probes on IPv6-only, IPv4-only, and dual-stack clusters
+alike. Set it to `"0.0.0.0"` only on nodes booted with `ipv6.disable=1`, where the server cannot
+open an IPv6 socket.
 
 ## Worker Configuration
 
