@@ -233,6 +233,43 @@ def test_helm_production_render_succeeds_with_an_existing_secret() -> None:
     assert "key: SIBYL_SETTINGS_KEY" in result.stdout
 
 
+def _rendered_container_env(rendered: str, deployment: str) -> dict[str, str]:
+    for document in yaml.safe_load_all(rendered):
+        if (
+            document
+            and document["kind"] == "Deployment"
+            and document["metadata"]["name"] == deployment
+        ):
+            (container,) = document["spec"]["template"]["spec"]["containers"]
+            names = [entry["name"] for entry in container["env"]]
+            assert len(names) == len(set(names)), f"{deployment} repeats an env name"
+            return {entry["name"]: entry.get("value", "") for entry in container["env"]}
+    raise AssertionError(f"{deployment} was not rendered")
+
+
+@requires_helm
+def test_helm_web_bind_address_defaults_to_ipv4_and_follows_frontend_env() -> None:
+    """An IPv6-only cluster probes and routes to the pod's IPv6 address, where
+    a 0.0.0.0 listener refuses every connection, so the web server's bind
+    address has to be a value and not a literal in the template."""
+    default = _helm_template("--set", "backend.existingSecret=sibyl-secrets")
+    assert default.returncode == 0, default.stderr
+    default_env = _rendered_container_env(default.stdout, "sibyl-frontend")
+    assert default_env["HOSTNAME"] == "0.0.0.0"  # noqa: S104
+
+    ipv6 = _helm_template(
+        "--set",
+        "backend.existingSecret=sibyl-secrets",
+        "--set-string",
+        "frontend.env.HOSTNAME=::",
+        "--set-string",
+        "backend.env.SIBYL_SERVER_HOST=::",
+    )
+    assert ipv6.returncode == 0, ipv6.stderr
+    assert _rendered_container_env(ipv6.stdout, "sibyl-frontend")["HOSTNAME"] == "::"
+    assert 'SIBYL_SERVER_HOST: "::"' in ipv6.stdout
+
+
 @requires_helm
 def test_helm_bedrock_render_needs_irsa_and_a_region_not_provider_keys() -> None:
     role = "arn:aws:iam::123456789012:role/sibyl-bedrock"

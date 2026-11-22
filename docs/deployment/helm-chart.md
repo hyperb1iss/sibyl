@@ -536,6 +536,8 @@ frontend:
   env:
     NODE_ENV: "production"
     NEXT_TELEMETRY_DISABLED: "1"
+    # HOSTNAME is the web server's bind address. It defaults to "0.0.0.0";
+    # set "::" on an IPv6-only cluster.
 
   # Defaults to http://<release>-backend:<port>/api when empty
   apiUrl: ""
