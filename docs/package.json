@@ -15,6 +15,6 @@
         "mermaid": "^12.3.0",
         "vitepress": "2.0.0-alpha.21",
         "vitepress-plugin-llms": "^1.15.0",
-        "vue": "^3.5.45"
+        "vue": "^3.5.46"
     }
 }
