@@ -173,7 +173,7 @@ def publish(pending: list[tuple[str, str, bytes]]) -> None:
 
 def prepare_payload(payload: dict[str, Any]) -> list[tuple[str, str, bytes]]:
     """Apply the receipt format contract at both public validation and restore."""
-    if payload.get("version") == "2.3":
+    if payload.get("version") in {"2.3", "2.4"}:
         tables = payload.get("tables")
         rows = tables.get("memory_validation_executions") if isinstance(tables, dict) else None
         if not isinstance(rows, list):

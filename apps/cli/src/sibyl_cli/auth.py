@@ -31,6 +31,7 @@ from sibyl_cli.client import (
     get_client,
     resolve_api_base_url,
 )
+from sibyl_cli.client_transport import _environment_auth_token
 from sibyl_cli.common import (
     console,
     create_table,
@@ -854,7 +855,14 @@ def _warn_if_env_token_overrides_login() -> None:
 
 
 @app.command("status")
-def status_cmd() -> None:
+def status_cmd(
+    json_output: bool = typer.Option(
+        False,
+        "--json",
+        "-j",
+        help="Print the signed-in user and organization as JSON instead of status lines",
+    ),
+) -> None:
     """Show auth status for the current context."""
     from sibyl_cli import config_store
 
@@ -866,22 +874,28 @@ def status_cmd() -> None:
     refresh = str(creds.get("refresh_token") or "").strip()
     expires_at = creds.get("access_token_expires_at")
 
-    if not token:
+    # Requests prefer a SIBYL_AUTH_TOKEN bound to this server over a stored
+    # login, so the status answers for whichever credential they would send.
+    env_token = _environment_auth_token(api_url)
+    if not token and not env_token:
         error("No auth token found (set one with: sibyl auth set-token <token>)")
         raise typer.Exit(1)
 
-    if expires_at is not None and time.time() >= int(expires_at):
-        info(f"Stored access token is expired (server: {escape(api_url)})")
-    elif expires_at is not None:
-        remaining = max(0, int(int(expires_at) - time.time()))
-        info(f"Stored access token expires in {remaining}s (server: {escape(api_url)})")
-    else:
-        info(f"Stored access token has no saved expiry (server: {escape(api_url)})")
+    if not json_output and env_token:
+        info(f"Using SIBYL_AUTH_TOKEN (server: {escape(api_url)})")
+    elif not json_output:
+        if expires_at is not None and time.time() >= int(expires_at):
+            info(f"Stored access token is expired (server: {escape(api_url)})")
+        elif expires_at is not None:
+            remaining = max(0, int(int(expires_at) - time.time()))
+            info(f"Stored access token expires in {remaining}s (server: {escape(api_url)})")
+        else:
+            info(f"Stored access token has no saved expiry (server: {escape(api_url)})")
 
-    if refresh:
-        info("Refresh token found")
-    else:
-        info("No refresh token saved; automatic renewal is unavailable")
+        if refresh:
+            info("Refresh token found")
+        else:
+            info("No refresh token saved; automatic renewal is unavailable")
 
     client = SibylClient(base_url=api_url, context_name=ctx.name if ctx else None)
 
@@ -893,11 +907,14 @@ def status_cmd() -> None:
             await client.close()
 
     try:
-        _run()
+        me = _run()
     except SibylClientError as e:
         error(escape(str(e)))
         raise typer.Exit(1) from e
 
+    if json_output:
+        print_json(me)
+        return
     success(f"Auth is valid (server: {escape(api_url)})")
 
 

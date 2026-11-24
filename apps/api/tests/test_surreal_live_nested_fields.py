@@ -200,10 +200,10 @@ async def test_live_schema_version_keeps_every_migration_entry() -> None:
         assert [entry["version"] for entry in migrations] == list(
             range(1, CONTENT_SCHEMA_CURRENT_VERSION + 1)
         )
-        assert migrations[-1] == {
+        assert {
             "version": 59,
             "name": "content_telemetry_rollup_flexible_entries",
-        }
+        } in migrations
 
 
 @pytest.mark.asyncio
@@ -241,7 +241,7 @@ async def test_live_migration_59_opens_rollup_entries_on_an_upgraded_database() 
 
         await bootstrap_content_schema(client)
 
-        assert await get_schema_version(client.execute_query, name=CONTENT_SCHEMA_NAME) == 59
+        assert await get_schema_version(client.execute_query, name=CONTENT_SCHEMA_NAME) >= 59
         await client.execute_query(_ROLLUP_UPSERT, record=record, bucket_key=record["bucket_key"])
         rows = normalize_records(
             await client.execute_query(

@@ -197,6 +197,8 @@ _CONTENT_TABLES = frozenset(
         "dream_source_cursors",
         "memory_validation_executions",
         "memory_validation_attempts",
+        "net_messages",
+        "net_threads",
     }
 )
 
@@ -269,6 +271,7 @@ def _logical_envelopes(
                 "2.1",
                 "2.2",
                 "2.3",
+                "2.4",
             }
         ):
             raise ArchiveIntakeError("unsupported content archive contract")

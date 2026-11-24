@@ -1045,6 +1045,8 @@ async def delete_org(*, request: Request, slug: str, user_id: UUID) -> None:
                     DELETE FROM raw_captures WHERE organization_id = $organization_id;
                     DELETE FROM backups WHERE organization_id = $organization_id;
                     DELETE FROM backup_settings WHERE organization_id = $organization_id;
+                    DELETE FROM net_messages WHERE organization_id = $organization_id;
+                    DELETE FROM net_threads WHERE organization_id = $organization_id;
                     COMMIT TRANSACTION;
                 """,
                 organization_id=str(organization_id),

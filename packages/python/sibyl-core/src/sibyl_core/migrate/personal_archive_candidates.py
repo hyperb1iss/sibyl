@@ -53,6 +53,7 @@ _CONTENT_KINDS = {
     "memory_validation_executions": ArchiveKind.VALIDATION_EXECUTION,
     "memory_validation_attempts": ArchiveKind.VALIDATION_ATTEMPT,
 }
+_NET_TABLES = frozenset({"net_messages", "net_threads"})
 _WORK_ITEMS = frozenset({"task", "epic", "milestone"})
 _PROTECTED_KEYS = MEMORY_PROVENANCE_METADATA_KEYS | {
     "reflection_identity",
@@ -268,7 +269,7 @@ def _source_collection(
     if section is None:
         return [], {}, set()
     if payload.get("version") not in (
-        {"3.0"} if kind is SourceKind.GRAPH_ENTITY else {"2.0", "2.1", "2.2", "2.3"}
+        {"3.0"} if kind is SourceKind.GRAPH_ENTITY else {"2.0", "2.1", "2.2", "2.3", "2.4"}
     ):
         raise ArchiveIntakeError("legacy archive cannot claim current source lineage")
     rows, states, associations = validate_integrity_archive(
@@ -446,7 +447,11 @@ def normalize_archive_candidates(
         rows.append(candidate)
 
     for table, collection in tables.items():
-        if table == "raw_captures":
+        # Channel history belongs to the organization that wrote it, between
+        # its members; importing one person's archive elsewhere carries their
+        # memories, not the organization's conversations, which stay in its
+        # own backups.
+        if table == "raw_captures" or table in _NET_TABLES:
             continue
         for record in collection:
             _foreign_scope(record, origin)

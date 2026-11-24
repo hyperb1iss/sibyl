@@ -70,6 +70,7 @@ from sibyl_cli.memory_display import (
     print_memory_source_inspect,
 )
 from sibyl_cli.migrate import app as migrate_app
+from sibyl_cli.net import app as net_app
 from sibyl_cli.org import app as org_app
 from sibyl_cli.pending import app as pending_writes_app
 from sibyl_cli.pending_writes import pending_write_count, pending_write_status
@@ -175,6 +176,7 @@ memory_admin.register_root_commands(app)
 app.add_typer(synthesis_app, name="synthesis")
 app.add_typer(team_app, name="team")
 app.add_typer(bot_app, name="bot")
+app.add_typer(net_app, name="net")
 app.command("setup")(setup_cmd)
 app.command("doctor")(doctor_cmd)
 app.command("login")(login_cmd)

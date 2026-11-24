@@ -459,11 +459,7 @@ async def plan_cleanup(
         doomed_rows = [row for row in rows if not keep((row.get("organization"), row.get("uuid")))]
         doomed = [row["id"] for row in doomed_rows]
         if doomed:
-            digest = await execute_query(
-                f"RETURN crypto::sha256(type::string({_RECORDS_PROJECTION}));", records=doomed
-            )
-            if not isinstance(digest, str):
-                raise ValueError("archive cleanup read returned an invalid shape")
+            digest = await cleanup_digest(execute_query, doomed)
             pages.append(
                 CleanupPage(
                     records=doomed, digest=digest, keys=[str(row["key"]) for row in doomed_rows]
@@ -471,6 +467,16 @@ async def plan_cleanup(
             )
         if len(rows) < ARCHIVE_RESTORE_BATCH_SIZE:
             return pages
+
+
+async def cleanup_digest(execute_query: SurrealExecute, records: list[Any]) -> str:
+    """The digest a cleanup page checks its rows against before deleting them."""
+    digest = await execute_query(
+        f"RETURN crypto::sha256(type::string({_RECORDS_PROJECTION}));", records=records
+    )
+    if not isinstance(digest, str):
+        raise ValueError("archive cleanup read returned an invalid shape")
+    return digest
 
 
 async def apply_cleanup(

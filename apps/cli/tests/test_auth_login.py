@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import re
 from pathlib import Path
 
@@ -666,3 +667,65 @@ def test_a_shared_server_the_selection_does_not_name_demands_disambiguation(
     plain = _plain(result.stdout)
     assert "alpha" in plain
     assert "beta" in plain
+
+
+def test_whoami_json_prints_the_signed_in_identity(monkeypatch: pytest.MonkeyPatch) -> None:
+    # A dispatcher reads its own user id from this to skip its own messages.
+    me = {"user": {"id": "user-ada", "email": "ada@example.com"}, "organization": {"slug": "acme"}}
+
+    class FakeClient:
+        def __init__(self, **_kwargs: object) -> None:
+            pass
+
+        async def get(self, path: str) -> dict:
+            assert path == "/auth/me"
+            return me
+
+        async def close(self) -> None:
+            pass
+
+    monkeypatch.setattr(config_store, "resolve_effective_context", lambda: None)
+    monkeypatch.setattr(auth, "_compute_api_url", lambda _server: "http://testserver/api")
+    monkeypatch.setattr(auth, "_current_credential_scope", lambda: None)
+    monkeypatch.setattr(
+        auth,
+        "read_server_credentials",
+        lambda *_args, **_kwargs: {"access_token": "tok", "access_token_expires_at": 1},
+    )
+    monkeypatch.setattr(auth, "SibylClient", FakeClient)
+
+    result = CliRunner().invoke(app, ["whoami", "--json"])
+
+    assert result.exit_code == 0, result.output
+    assert json.loads(result.stdout) == me
+
+
+def test_whoami_json_answers_for_an_environment_token_with_no_stored_login(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Dispatchers run on SIBYL_AUTH_TOKEN with no saved login, like every net command.
+    me = {"user": {"id": "user-ada"}, "organization": {"slug": "acme"}}
+
+    class FakeClient:
+        def __init__(self, **_kwargs: object) -> None:
+            pass
+
+        async def get(self, path: str) -> dict:
+            assert path == "/auth/me"
+            return me
+
+        async def close(self) -> None:
+            pass
+
+    monkeypatch.setenv("SIBYL_AUTH_TOKEN", "sk_env_token")
+    monkeypatch.delenv("SIBYL_API_URL", raising=False)
+    monkeypatch.setattr(config_store, "resolve_effective_context", lambda: None)
+    monkeypatch.setattr(auth, "_compute_api_url", lambda _server: "http://testserver/api")
+    monkeypatch.setattr(auth, "_current_credential_scope", lambda: None)
+    monkeypatch.setattr(auth, "read_server_credentials", lambda *_args, **_kwargs: {})
+    monkeypatch.setattr(auth, "SibylClient", FakeClient)
+
+    result = CliRunner().invoke(app, ["whoami", "--json"])
+
+    assert result.exit_code == 0, result.output
+    assert json.loads(result.stdout) == me

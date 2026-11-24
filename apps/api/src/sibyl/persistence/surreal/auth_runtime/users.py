@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from datetime import timedelta
 from types import SimpleNamespace
 from uuid import UUID
@@ -187,6 +188,36 @@ async def get_user_by_id(user_id: UUID):
             uuid=str(user_id),
         )
         return _auth_user_namespace(record)
+
+
+# SurrealDB 3.x index-unions an IN list only up to 32 values; a longer list
+# plans as a scan of every user.
+_USER_LOOKUP_BATCH = 32
+
+
+async def get_users_by_ids(user_ids: Iterable[str]) -> dict[str, SimpleNamespace]:
+    """Live users by id, ``{id: (uuid, name, email)}``, read through the uuid index.
+
+    Unknown and deleted users are left out, so a caller can fall back to the
+    bare id.
+    """
+    unique = list(dict.fromkeys(str(user_id) for user_id in user_ids if user_id))
+    users: dict[str, SimpleNamespace] = {}
+    if not unique:
+        return users
+    async with _auth_client_scope() as client:
+        repo = _SurrealRepository(client)
+        for start in range(0, len(unique), _USER_LOOKUP_BATCH):
+            for record in await repo.select_many(
+                "SELECT uuid, name, email FROM users WHERE uuid IN $ids AND deleted_at = NONE;",
+                ids=unique[start : start + _USER_LOOKUP_BATCH],
+            ):
+                user_id = str(record.get("uuid") or "")
+                if user_id:
+                    users[user_id] = SimpleNamespace(
+                        uuid=user_id, name=record.get("name"), email=record.get("email")
+                    )
+    return users
 
 
 async def list_user_organizations(*, user_id: UUID) -> list[SimpleNamespace]:

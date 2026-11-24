@@ -45,12 +45,26 @@ from sibyl_core.migrate.archive_stream import (
 
 log = structlog.get_logger()
 
-CONTENT_ARCHIVE_VERSION = "2.3"
-_INTEGRITY_ARCHIVE_VERSIONS = {"2.0", "2.1", "2.2", CONTENT_ARCHIVE_VERSION}
+CONTENT_ARCHIVE_VERSION = "2.4"
+_INTEGRITY_ARCHIVE_VERSIONS = {"2.0", "2.1", "2.2", "2.3", CONTENT_ARCHIVE_VERSION}
 _VALIDATION_ARCHIVE_TABLES = frozenset(
     {"memory_validation_executions", "memory_validation_attempts"}
 )
 _DREAM_ARCHIVE_TABLES = frozenset({"dream_source_checkpoints", "dream_source_cursors"})
+# sibylnet channel history, carried from content archive 2.4 on. Messages are
+# kept forever, so an archive that predates them never wipes them either.
+_NET_ARCHIVE_TABLES = frozenset({"net_messages", "net_threads"})
+_PRE_NET_ARCHIVE_VERSIONS = frozenset({"1.0", "2.0", "2.1", "2.2", "2.3"})
+_NET_DATETIME_FIELDS = {
+    "net_messages": ("created_at",),
+    "net_threads": (
+        "first_message_at",
+        "last_message_at",
+        "reflected_through",
+        "reflection_claimed_at",
+        "updated_at",
+    ),
+}
 
 
 @dataclass(frozen=True)
@@ -263,6 +277,64 @@ _CONTENT_ARCHIVE_TABLE_SPECS += tuple(
     for name in ("memory_validation_executions", "memory_validation_attempts")
 )
 
+# A thread lives at a record keyed by the hash of its organization, channel
+# and thread, the key every post upserts. A restore computes that key from
+# the row's own fields, never from an archived one, so the next post lands on
+# the restored row even when the archive predates the stored thread_key.
+_NET_THREAD_RECORD = (
+    "type::record(string::concat('net_threads:', crypto::sha256("
+    "type::string([$record.organization_id, $record.channel, $record.thread]))))"
+)
+# A thread already in the destination keeps its later watermark and its pin:
+# an older archive never rolls distillation back. Counts, first and last
+# times and the pending mark are recomputed from the messages present once
+# every row has landed (see _reconcile_restored_threads).
+_NET_THREAD_MERGE = f"""
+LET $thread = {_NET_THREAD_RECORD};
+LET $current = (SELECT * FROM $thread)[0];
+IF $current = NONE {{
+    CREATE $thread CONTENT $record;
+}} ELSE {{
+    LET $archived_ns = $record.reflected_through_ns ?? -1;
+    LET $current_ns = $current.reflected_through_ns ?? -1;
+    LET $archived_later = $archived_ns > $current_ns
+        OR ($archived_ns = $current_ns
+            AND ($record.reflected_through_uuid ?? '') > ($current.reflected_through_uuid ?? ''));
+    IF $archived_later {{
+        UPDATE $thread SET
+            reflected_through = $record.reflected_through,
+            reflected_through_ns = $record.reflected_through_ns,
+            reflected_through_uuid = $record.reflected_through_uuid,
+            reflection_source_id = $record.reflection_source_id,
+            reflection_skipped = $record.reflection_skipped ?? [],
+            project_id = project_id ?? $record.project_id
+        RETURN NONE;
+    }} ELSE {{
+        UPDATE $thread SET project_id = project_id ?? $record.project_id RETURN NONE;
+    }};
+}};
+"""  # noqa: S608
+_CONTENT_ARCHIVE_TABLE_SPECS += (
+    ContentArchiveTableSpec(
+        name="net_messages",
+        source_identity_field="id",
+        target_identity_field="uuid",
+        select_sql="SELECT * FROM net_messages ORDER BY id ASC;",
+        delete_by_identity_sql="DELETE net_messages WHERE uuid = $identity;",
+        delete_all_sql="DELETE net_messages;",
+        create_sql="CREATE net_messages CONTENT $record;",
+    ),
+    ContentArchiveTableSpec(
+        name="net_threads",
+        source_identity_field="thread_key",
+        target_identity_field="thread_key",
+        select_sql="SELECT * FROM net_threads ORDER BY id ASC;",
+        delete_by_identity_sql=f"DELETE {_NET_THREAD_RECORD};",
+        delete_all_sql="DELETE net_threads;",
+        create_sql=f"CREATE {_NET_THREAD_RECORD} CONTENT $record;",
+    ),
+)
+
 CONTENT_ARCHIVE_TABLES = tuple(spec.name for spec in _CONTENT_ARCHIVE_TABLE_SPECS)
 _CONTENT_ARCHIVE_TABLES_BY_NAME = {spec.name: spec for spec in _CONTENT_ARCHIVE_TABLE_SPECS}
 _BACKUP_ARCHIVE_TABLES = frozenset({"backup_settings", "backups"})
@@ -270,6 +342,10 @@ _GLOBAL_CONTENT_ARCHIVE_TABLES = frozenset({"system_settings", "telemetry_rollup
 _RETAINED_OPERATION_TABLES = _VALIDATION_ARCHIVE_TABLES | frozenset(
     {"eval_attempts", "eval_consolidations", "api_idempotency_records"}
 )
+# Tables whose archived values are restored as they are: a message body or a
+# thread name that reads like a timestamp stays text. Their datetimes are
+# converted by name (see _exact_instants).
+_RAW_VALUE_TABLES = _RETAINED_OPERATION_TABLES | _NET_ARCHIVE_TABLES
 _CONTENT_RELATION_ARCHIVE_TABLES = frozenset(
     {"derived_from", "chunk_of", "supersedes", "extracted_into"}
 )
@@ -431,6 +507,43 @@ def _deserialize_value(value: object) -> object:
     return value
 
 
+def _restore_value_types(
+    spec: ContentArchiveTableSpec, row: Mapping[str, object], record: dict[str, object]
+) -> None:
+    """Give the values JSON cannot type their store types back."""
+    if spec.name == "document_chunks":
+        record["embedding"] = _deserialize_vector(record.get("embedding"))
+        # Archives from before chunk stamps carry vectors of unknown origin.
+        mark_unverified_vector(record, has_vector=bool(record.get("embedding")))
+    elif spec.name in _NET_ARCHIVE_TABLES:
+        # A missing thread is the threadless one, as the schema defaults it;
+        # the thread's record key is computed from it.
+        if not isinstance(record.get("thread"), str):
+            record["thread"] = ""
+        _exact_instants(spec, row, record)
+
+
+def _exact_instants(
+    spec: ContentArchiveTableSpec, row: Mapping[str, object], record: dict[str, object]
+) -> None:
+    """Put a sibylnet row's datetimes back to the nanosecond.
+
+    They travel as the server's own text (see ``_content_archive_projection``)
+    because a decoded datetime keeps microseconds, and the feed orders and
+    pages on created_ns, which the schema derives from created_at: rebuilt
+    from that text, every cursor issued before the backup still points
+    between the same two messages.
+    """
+    from surrealdb import Datetime
+
+    for name in _NET_DATETIME_FIELDS.get(spec.name, ()):
+        value = row.get(name)
+        if isinstance(value, str) and value:
+            record[name] = Datetime(value)
+        else:
+            record.pop(name, None)
+
+
 def _archived_record(
     spec: ContentArchiveTableSpec, row: dict[str, object], datetimes: frozenset[str]
 ) -> dict[str, object]:
@@ -438,7 +551,8 @@ def _archived_record(
 
     Only fields the schema declares as datetimes are instants; text that
     reads like one (a title, a chunk, a setting) stays text. Retained history
-    keeps every archived value and converts its own datetimes in SQL.
+    keeps every archived value and converts its own datetimes in SQL, and
+    sibylnet rows keep theirs for _exact_instants to convert by name.
     """
     record = {
         key: value
@@ -448,7 +562,7 @@ def _archived_record(
             and key == spec.source_identity_field
         )
     }
-    if spec.name in _RETAINED_OPERATION_TABLES:
+    if spec.name in _RAW_VALUE_TABLES:
         return record
     return convert_declared_fields(record, datetimes, _deserialize_value)
 
@@ -540,6 +654,8 @@ def _normalize_content_archive_restore_row(
 
 def _content_archive_projection(spec: ContentArchiveTableSpec) -> str:
     projection = "*"
+    for name in _NET_DATETIME_FIELDS.get(spec.name, ()):
+        projection += f", IF {name} != NONE {{ type::string({name}) }} ELSE {{ NONE }} AS {name}"
     if spec.name in _RETAINED_OPERATION_TABLES:
         projection += ", type::string(created_at) AS created_at"
         if spec.name == "eval_attempts":
@@ -568,8 +684,14 @@ def _content_archive_export_query(
 _AUXILIARY_CHANGED = "archive auxiliary destination changed before restore"
 
 
-async def _plan_auxiliary_cleanup(client, organization_id: str | None) -> list:
-    """Page the auxiliary rows a clean restore wipes; relation tables go first."""
+async def _plan_auxiliary_cleanup(
+    client, organization_id: str | None, *, keep: frozenset[str] = frozenset()
+) -> list:
+    """Page the auxiliary rows a clean restore wipes; relation tables go first.
+
+    Tables in ``keep`` are left alone: the archive did not capture them, so
+    wiping them would lose rows it cannot put back.
+    """
     from sibyl_core.services.source_archive_store import plan_cleanup
 
     wipe_specs = sorted(
@@ -577,6 +699,7 @@ async def _plan_auxiliary_cleanup(client, organization_id: str | None) -> list:
             spec
             for spec in _CONTENT_ARCHIVE_TABLE_SPECS
             if spec.name != "raw_captures"
+            and spec.name not in keep
             and spec.name not in _RETAINED_OPERATION_TABLES
             and spec.name not in _DREAM_ARCHIVE_TABLES
             and (organization_id is None or spec.name not in _GLOBAL_CONTENT_ARCHIVE_TABLES)
@@ -584,8 +707,9 @@ async def _plan_auxiliary_cleanup(client, organization_id: str | None) -> list:
         key=lambda spec: spec.name not in _CONTENT_RELATION_ARCHIVE_TABLES,
     )
     pages = []
+    by_table: dict[str, list] = {}
     for spec in wipe_specs:
-        pages += await plan_cleanup(
+        by_table[spec.name] = await plan_cleanup(
             client.execute_query,
             spec.name,
             organization_field="organization_id",
@@ -593,7 +717,30 @@ async def _plan_auxiliary_cleanup(client, organization_id: str | None) -> list:
             keep=lambda _identity: False,
             **({} if organization_id is None else {"organization_id": organization_id}),
         )
+    for spec in wipe_specs:
+        if spec.name not in _NET_ARCHIVE_TABLES:
+            pages += by_table[spec.name]
+    # Channels are wiped last and threads first, in one page: a post or a
+    # distillation pass changes only thread rows (messages never change), so
+    # a clean restore racing one is refused before it deletes any message,
+    # and the channels stay exactly as they were.
+    threads = list(by_table.get("net_threads", []))
+    if threads:
+        pages.append(await _single_cleanup_page(client, threads))
+    pages += by_table.get("net_messages", [])
     return pages
+
+
+async def _single_cleanup_page(client, pages: list):
+    """One cleanup page, deleted in one transaction, holding every row of ``pages``."""
+    from sibyl_core.services.source_archive_store import CleanupPage, cleanup_digest
+
+    records = [record for page in pages for record in page.records]
+    return CleanupPage(
+        records=records,
+        digest=await cleanup_digest(client.execute_query, records),
+        keys=[key for page in pages for key in page.keys],
+    )
 
 
 @dataclass(frozen=True)
@@ -933,16 +1080,22 @@ def _prepare_content_source_integrity(payload, tables, organization_id):
         required -= _DREAM_ARCHIVE_TABLES
     if version in {"2.0", "2.1"}:
         required -= _VALIDATION_ARCHIVE_TABLES
+    if version in _PRE_NET_ARCHIVE_VERSIONS:
+        required -= _NET_ARCHIVE_TABLES
     if version in _INTEGRITY_ARCHIVE_VERSIONS and required - set(tables):
         raise ValueError("current content archive is missing required tables")
-    if version not in {"2.1", "2.2", CONTENT_ARCHIVE_VERSION} and any(
+    if version not in {"2.1", "2.2", "2.3", CONTENT_ARCHIVE_VERSION} and any(
         tables.get(name) for name in _DREAM_ARCHIVE_TABLES
     ):
         raise ValueError("dream checkpoints require content archive 2.1")
-    if version not in {"2.2", CONTENT_ARCHIVE_VERSION} and any(
+    if version not in {"2.2", "2.3", CONTENT_ARCHIVE_VERSION} and any(
         tables.get(name) for name in _VALIDATION_ARCHIVE_TABLES
     ):
         raise ValueError("validation history requires content archive 2.2")
+    if version in _PRE_NET_ARCHIVE_VERSIONS and any(
+        tables.get(name) for name in _NET_ARCHIVE_TABLES
+    ):
+        raise ValueError("sibylnet history requires content archive 2.4")
     for table, rows in tables.items():
         if table not in CONTENT_ARCHIVE_TABLES or not isinstance(rows, list):
             raise ValueError("content archive has an unknown or malformed table")
@@ -1127,6 +1280,8 @@ def _auxiliary_restore_statement(
             f"IF {comparison} {{ "
             "THROW 'archive conflicts with retained operation history'; }; };\n"
         )
+    elif spec.name == "net_threads":
+        write = _NET_THREAD_MERGE
     else:
         write = f"{spec.delete_by_identity_sql}\n{spec.create_sql}\n"
     if spec.name in _VALIDATION_ARCHIVE_TABLES:
@@ -1172,6 +1327,174 @@ def _ordered_validation_history(rows):
     )
 
 
+def _unwrap_return(result: object) -> object:
+    while isinstance(result, dict) and "result" in result and len(result) <= 3:
+        result = result["result"]
+    return result
+
+
+async def _net_thread_keys(client, rows: list[object]) -> list[str | None]:
+    """Each archived thread's record key, computed by the server from its own fields."""
+    keys: list[str | None] = [None] * len(rows)
+    named = [
+        (position, row)
+        for position, row in enumerate(rows)
+        if isinstance(row, dict)
+        and isinstance(row.get("organization_id"), str)
+        and isinstance(row.get("channel"), str)
+        and isinstance(row.get("thread") or "", str)
+    ]
+    for start in range(0, len(named), _THREAD_BATCH):
+        chunk = named[start : start + _THREAD_BATCH]
+        params: dict[str, object] = {}
+        for number, (_, row) in enumerate(chunk):
+            params.update(
+                {
+                    f"organization_{number}": row["organization_id"],
+                    f"channel_{number}": row["channel"],
+                    f"thread_{number}": row.get("thread") or "",
+                }
+            )
+        keys_sql = ", ".join(
+            f"crypto::sha256(type::string([$organization_{n}, $channel_{n}, $thread_{n}]))"
+            for n in range(len(chunk))
+        )
+        computed = _unwrap_return(await client.execute_query(f"RETURN [{keys_sql}];", **params))
+        if not isinstance(computed, list) or len(computed) != len(chunk):
+            raise TypeError("thread key computation returned an invalid shape")
+        for (position, _), key in zip(chunk, computed, strict=True):
+            keys[position] = str(key)
+    return keys
+
+
+_THREAD_BATCH = 50
+_TALLY_SCOPE = (
+    "FROM net_messages WITH INDEX net_message_org_channel_thread_ns "
+    "WHERE organization_id = $organization_{n} AND channel = $channel_{n} "
+    "AND thread = $thread_{n}"
+)
+_TALLY_THREAD = (
+    "type::record(string::concat('net_threads:', crypto::sha256("
+    "type::string([$organization_{n}, $channel_{n}, $thread_{n}]))))"
+)
+
+
+def _tally_sql(number: int) -> tuple[str, str]:
+    """One thread's state and message tally: a LET and the object it returns."""
+    scope = _TALLY_SCOPE.format(n=number)
+    state = f"$state_{number}"
+    mark_ns = f"({state}.reflected_through_ns ?? -1)"
+    mark_uuid = f"({state}.reflected_through_uuid ?? '')"
+    oldest = "ORDER BY created_ns ASC, uuid ASC LIMIT 1"
+    let = (
+        f"LET {state} = (SELECT message_count, reflected_through_ns, reflected_through_uuid "  # noqa: S608
+        f"FROM {_TALLY_THREAD.format(n=number)})[0];"
+    )
+    # Ordered fields stay in the projection: SurrealDB 3 refuses ORDER BY on
+    # a field the SELECT leaves out.
+    tally = (
+        f"{{ state: {state}, count: count((SELECT VALUE uuid {scope})), "
+        f"first: type::string((SELECT created_at, created_ns, uuid {scope} {oldest})[0].created_at), "
+        f"last: type::string((SELECT created_at, created_ns, uuid {scope} "
+        "ORDER BY created_ns DESC, uuid DESC LIMIT 1)[0].created_at), "
+        f"pin: (SELECT project_id, created_ns, uuid {scope} AND project_id != NONE "
+        f"{oldest})[0].project_id, "
+        f"later: count((SELECT VALUE uuid {scope} AND created_ns = {mark_ns} "
+        f"AND uuid > {mark_uuid})) + count((SELECT VALUE uuid {scope} "
+        f"AND created_ns > {mark_ns})) }}"
+    )
+    return let, tally
+
+
+# The recount commutes with posts: it adds the difference between the
+# messages the tally counted and the count the row showed in the same read,
+# so a post landing in between keeps its own increment, and a row that moved
+# since the tally stays pending. Assignments apply in order, so the ones that
+# read message_count come before the one that changes it. Only the row itself
+# is read inside the write.
+_RECOUNT_THREAD = (
+    f"UPSERT {_TALLY_THREAD.format(n='0')} SET "
+    "organization_id = $organization_0, channel = $channel_0, thread = $thread_0, "
+    "reflection_pending = $pending OR (message_count ?? 0) != $seen, "
+    "last_message_at = IF (message_count ?? 0) = $seen { $last } "
+    "ELSE { time::max([$last, last_message_at ?? $last]) }, "
+    "first_message_at = $first, "
+    "project_id = project_id ?? $pin, "
+    "message_count = (message_count ?? 0) + $delta "
+    "RETURN NONE;"
+)
+
+
+async def _reconcile_restored_threads(client, restores: list[_AuxiliaryRow]) -> None:
+    """Make every thread a restore touched agree with the messages it now holds.
+
+    A merge keeps messages newer than the archive and the later of two
+    watermarks, so the counts, first and last times and the pending mark are
+    recomputed here, after every row landed: a thread with any message past
+    its watermark is pending and offered to distillation again, one without
+    is not. A thread whose messages arrived without a thread row gets one.
+    Each thread is tallied in one read and written once with a recount that
+    commutes with posts (see _RECOUNT_THREAD), so a post racing the restore
+    never leaves a wrong count behind.
+    """
+    from surrealdb import Datetime
+
+    threads = sorted(
+        {
+            (
+                str(row.record.get("organization_id")),
+                str(row.record.get("channel")),
+                str(row.record.get("thread") or ""),
+            )
+            for row in restores
+            if row.table in _NET_ARCHIVE_TABLES
+        }
+    )
+    for start in range(0, len(threads), _THREAD_BATCH):
+        chunk = threads[start : start + _THREAD_BATCH]
+        params: dict[str, object] = {}
+        lets, tallies = [], []
+        for number, (organization, channel, thread) in enumerate(chunk):
+            params.update(
+                {
+                    f"organization_{number}": organization,
+                    f"channel_{number}": channel,
+                    f"thread_{number}": thread,
+                }
+            )
+            let, tally = _tally_sql(number)
+            lets.append(let)
+            tallies.append(tally)
+        result = _unwrap_return(
+            await client.execute_query(
+                f"RETURN {{ {' '.join(lets)} RETURN [{', '.join(tallies)}]; }};", **params
+            )
+        )
+        if not isinstance(result, list) or len(result) != len(chunk):
+            raise TypeError("thread tally returned an invalid shape")
+        for (organization, channel, thread), tally in zip(chunk, result, strict=True):
+            count = int(tally.get("count") or 0)
+            if count == 0:
+                continue
+            state = tally.get("state")
+            seen = int(state.get("message_count") or 0) if isinstance(state, dict) else 0
+            # A pin only applies to a named thread, and only to a row that has none.
+            pin = {"pin": tally["pin"]} if thread and tally.get("pin") else {}
+            await client.execute_query(
+                _RECOUNT_THREAD,
+                organization_0=organization,
+                channel_0=channel,
+                thread_0=thread,
+                first=Datetime(str(tally["first"])),
+                last=Datetime(str(tally["last"])),
+                # A thread row this restore had to create starts pending.
+                pending=int(tally.get("later") or 0) > 0 or not isinstance(state, dict),
+                seen=seen,
+                delta=count - seen,
+                **pin,
+            )
+
+
 async def _prepare_auxiliary_content_restore(client, tables, organization_id, *, legacy=False):
     """Validate and compile non-source writes, one checked statement per row."""
     restores: list[_AuxiliaryRow] = []
@@ -1197,8 +1520,9 @@ async def _prepare_auxiliary_content_restore(client, tables, organization_id, *,
                 errors.append(f"{spec.name} invalid archive row ({type(exc).__name__})")
                 continue
         declared, datetimes = await fetch_restore_fields(client.execute_query, spec.name)
+        thread_keys = await _net_thread_keys(client, rows) if spec.name == "net_threads" else None
         tables_restored += 1
-        for row in rows:
+        for position, row in enumerate(rows):
             if not isinstance(row, dict):
                 errors.append(f"{spec.name} row payload must be an object")
                 continue
@@ -1207,7 +1531,8 @@ async def _prepare_auxiliary_content_restore(client, tables, organization_id, *,
                 {str(key): value for key, value in row.items()},
             )
             identity = str(
-                normalized_row.get(spec.source_identity_field)
+                (thread_keys[position] if thread_keys is not None else None)
+                or normalized_row.get(spec.source_identity_field)
                 or normalized_row.get(spec.target_identity_field)
                 or ""
             ).strip()
@@ -1220,10 +1545,7 @@ async def _prepare_auxiliary_content_restore(client, tables, organization_id, *,
                 record.setdefault("admission_bindings", [])
             elif legacy and spec.name == "api_idempotency_records":
                 record.setdefault("response_body", {})
-            if spec.name == "document_chunks":
-                record["embedding"] = _deserialize_vector(record.get("embedding"))
-                # Archives from before chunk stamps carry vectors of unknown origin.
-                mark_unverified_vector(record, has_vector=bool(record.get("embedding")))
+            _restore_value_types(spec, normalized_row, record)
             record[spec.target_identity_field] = identity
             record, dropped = _drop_undeclared_fields(record, declared)
             if dropped:
@@ -1277,6 +1599,7 @@ async def _restore_content_sources_and_rows(
     organization_id: str | None,
     clean: bool,
     global_scope: bool,
+    keep: frozenset[str] = frozenset(),
 ) -> tuple[list[str], list[dict[str, str]]]:
     """Plan the content restore, then write it in bounded transactions.
 
@@ -1308,7 +1631,7 @@ async def _restore_content_sources_and_rows(
         await _check_auxiliary_ownership(client, auxiliary_restores, organization_id)
     await _check_auxiliary_history(client, auxiliary_restores)
     _check_revoked_history_sources(plan.conflicts, auxiliary_restores)
-    cleanup = await _plan_auxiliary_cleanup(client, organization_id) if clean else []
+    cleanup = await _plan_auxiliary_cleanup(client, organization_id, keep=keep) if clean else []
     # Each auxiliary row deletes and recreates, or creates beside, the rows
     # sharing its identity; any other row on one of its unique keys collides.
     vacated = plan.vacated | {key for page in cleanup for key in page.keys}
@@ -1339,6 +1662,7 @@ async def _restore_content_sources_and_rows(
             await client.execute_query(
                 f"BEGIN TRANSACTION;\n{statements}\nCOMMIT TRANSACTION;", **parameters
             )
+        await _reconcile_restored_threads(client, auxiliary_restores)
     except Exception as exc:
         raise RuntimeError(interrupted_restore(exc)) from exc
     return plan.restored, plan.conflicts
@@ -1413,6 +1737,11 @@ async def restore_content_archive_payload(
                 organization_id=organization_id,
                 clean=clean,
                 global_scope=global_scope,
+                keep=(
+                    _NET_ARCHIVE_TABLES
+                    if payload.get("version", "1.0") in _PRE_NET_ARCHIVE_VERSIONS
+                    else frozenset()
+                ),
             )
         except Exception as exc:
             return ContentArchiveRestoreResult(

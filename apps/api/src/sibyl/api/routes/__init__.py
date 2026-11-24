@@ -18,6 +18,7 @@ from sibyl.api.routes.jobs import router as jobs_router
 from sibyl.api.routes.logs import router as logs_router
 from sibyl.api.routes.memory import router as memory_router
 from sibyl.api.routes.metrics import router as metrics_router
+from sibyl.api.routes.net import router as net_router
 from sibyl.api.routes.org_invitations import invitations_router, router as org_invitations_router
 from sibyl.api.routes.org_members import router as org_members_router
 from sibyl.api.routes.orgs import router as orgs_router
@@ -55,6 +56,7 @@ __all__ = [
     "memory_router",
     "invitations_router",
     "metrics_router",
+    "net_router",
     "org_invitations_router",
     "org_members_router",
     "orgs_router",

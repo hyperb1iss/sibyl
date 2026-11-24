@@ -157,13 +157,15 @@ CONTENT_TABLES = (
     "backup_settings",
     "backups",
     "reflection_supersessions",
+    "net_messages",
+    "net_threads",
     EMBEDDING_STATES_TABLE,
     EMBEDDING_DEPLOYMENT_TABLE,
     RAW_EMBEDDING_REFUSALS_TABLE,
     *RAW_LEXICAL_TABLES,
     RAW_LEXICAL_STATE_TABLE,
 )
-CONTENT_SCHEMA_CURRENT_VERSION = 59
+CONTENT_SCHEMA_CURRENT_VERSION = 60
 CONTENT_SCHEMA_NAME = "content"
 _SCHEMA_CHECK_BATCH_SIZE = 128
 _CONTENT_MEMORY_SCOPE_VALUES = tuple(scope.value for scope in MemoryScope)
@@ -210,12 +212,14 @@ CONTENT_DREAM_CHECKPOINT_DEFINITIONS = (
 CONTENT_REFLECTION_SUPERSESSION_DEFINITIONS = (
     _SCHEMA_DIR / "37_reflection_supersessions.surql"
 ).read_text(encoding="utf-8")
+CONTENT_NET_DEFINITIONS = (_SCHEMA_DIR / "38_net.surql").read_text(encoding="utf-8")
 CONTENT_SCHEMA_DEFINITIONS = (
     _load_schema_file("10_tables.surql")
     + "\n"
     + CONTENT_DREAM_CHECKPOINT_DEFINITIONS
     + "\n"
     + CONTENT_REFLECTION_SUPERSESSION_DEFINITIONS
+    + CONTENT_NET_DEFINITIONS
     + EMBEDDING_STATE_DEFINITIONS
     + EMBEDDING_DEPLOYMENT_DEFINITIONS
     + RAW_EMBEDDING_REFUSAL_DEFINITIONS
@@ -359,6 +363,8 @@ ALTER TABLE IF EXISTS memory_validation_attempts PERMISSIONS NONE;
 ALTER TABLE IF EXISTS dream_source_checkpoints PERMISSIONS NONE;
 ALTER TABLE IF EXISTS dream_source_cursors PERMISSIONS NONE;
 ALTER TABLE IF EXISTS reflection_supersessions PERMISSIONS NONE;
+ALTER TABLE IF EXISTS net_messages PERMISSIONS NONE;
+ALTER TABLE IF EXISTS net_threads PERMISSIONS NONE;
 ALTER TABLE IF EXISTS embedding_states PERMISSIONS NONE;
 ALTER TABLE IF EXISTS embedding_deployment PERMISSIONS NONE;
 ALTER TABLE IF EXISTS raw_embedding_refusals PERMISSIONS NONE;
@@ -1333,6 +1339,11 @@ def _content_schema_migrations(*, url: str) -> tuple[SchemaMigration, ...]:
             statements=tuple(
                 split_statements(CONTENT_TELEMETRY_ROLLUP_ENTRY_MIGRATION_DEFINITIONS)
             ),
+        ),
+        SchemaMigration(
+            version=60,
+            name="content_net_channels",
+            statements=tuple(split_statements(CONTENT_NET_DEFINITIONS)),
         ),
     )
 

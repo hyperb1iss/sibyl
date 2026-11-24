@@ -20,6 +20,7 @@ from unittest.mock import AsyncMock
 from uuid import uuid4
 
 import pytest
+from surrealdb import Datetime as ServerDatetime
 
 from sibyl.persistence import auth_archive, content_archive
 from sibyl_core.backends.surreal import (
@@ -198,13 +199,13 @@ async def _every_field_reads_like_a_timestamp(
 
 
 def _assert_only_datetimes_converted(
-    table: str, record: dict, archived: dict, datetimes: frozenset
+    table: str, record: dict, archived: dict, datetimes: frozenset, instant: type = datetime
 ) -> None:
     for name, value in archived.items():
         if name not in record:
             continue
         if name in datetimes:
-            assert isinstance(record[name], datetime), (table, name)
+            assert isinstance(record[name], instant), (table, name)
         else:
             assert record[name] == value, (table, name, record[name])
 
@@ -231,7 +232,21 @@ async def test_every_archived_content_table_converts_only_its_datetime_fields() 
             if spec.name == "document_chunks":
                 # The vector and its provenance stamps have their own restore.
                 archived = {k: v for k, v in archived.items() if not k.startswith("embedding")}
-            _assert_only_datetimes_converted(spec.name, restores[0].record, archived, datetimes)
+            if spec.name == "net_threads":
+                # A thread's key is computed from its organization, channel and
+                # thread on the way in, never taken from the archive.
+                archived.pop(spec.target_identity_field, None)
+            # A sibylnet instant comes back as the server's own datetime, built
+            # from the archived text, so it keeps the nanoseconds the feed's
+            # cursors are cut from.
+            sibylnet = spec.name in content_archive._NET_ARCHIVE_TABLES
+            _assert_only_datetimes_converted(
+                spec.name,
+                restores[0].record,
+                archived,
+                datetimes,
+                instant=ServerDatetime if sibylnet else datetime,
+            )
     finally:
         await client.close()
 
