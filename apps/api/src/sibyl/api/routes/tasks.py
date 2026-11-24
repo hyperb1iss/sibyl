@@ -526,6 +526,7 @@ async def _task_transition_response(
     http_request: Request,
     org: AuthOrganization,
     auth: AuthContext,
+    before: Any,
     route_action: str,
     workflow_action: WorkItemAction,
     message: str,
@@ -561,6 +562,7 @@ async def _task_transition_response(
         group_id=str(org.id),
         task_id=task_id,
         transition=result,
+        previous_status=_status_of(before),
         detail=details.get("reason") or details.get("pr_url"),
         auth=auth,
     )
@@ -649,7 +651,7 @@ async def start_task(
     request: StartTaskRequest | None = None,
 ) -> TaskActionResponse:
     """Start working on a task (moves to 'doing' status)."""
-    await _verify_task_access(task_id, org, auth)
+    task = await _verify_task_access(task_id, org, auth)
 
     assignee = request.assignee if request else None
     return await _task_transition_response(
@@ -657,6 +659,7 @@ async def start_task(
         http_request=http_request,
         org=org,
         auth=auth,
+        before=task,
         route_action="start",
         workflow_action=WorkItemAction.START_TASK,
         message="Task started",
@@ -677,13 +680,14 @@ async def block_task(
     auth: AuthContext = Depends(get_auth_context),
 ) -> TaskActionResponse:
     """Mark a task as blocked with a reason."""
-    await _verify_task_access(task_id, org, auth)
+    task = await _verify_task_access(task_id, org, auth)
 
     return await _task_transition_response(
         task_id=task_id,
         http_request=http_request,
         org=org,
         auth=auth,
+        before=task,
         route_action="block",
         workflow_action=WorkItemAction.BLOCK_TASK,
         message=f"Task blocked: {request.reason}",
@@ -704,13 +708,14 @@ async def unblock_task(
     request: UnblockTaskRequest | None = None,
 ) -> TaskActionResponse:
     """Resume a blocked task (moves back to 'doing')."""
-    await _verify_task_access(task_id, org, auth)
+    task = await _verify_task_access(task_id, org, auth)
 
     return await _task_transition_response(
         task_id=task_id,
         http_request=http_request,
         org=org,
         auth=auth,
+        before=task,
         route_action="unblock",
         workflow_action=WorkItemAction.UNBLOCK_TASK,
         message="Task unblocked, resuming work",
@@ -730,7 +735,7 @@ async def submit_review(
     request: ReviewTaskRequest | None = None,
 ) -> TaskActionResponse:
     """Submit a task for review."""
-    await _verify_task_access(task_id, org, auth)
+    task = await _verify_task_access(task_id, org, auth)
 
     pr_url = request.pr_url if request else None
     commit_shas = request.commit_shas if request else []
@@ -739,6 +744,7 @@ async def submit_review(
         http_request=http_request,
         org=org,
         auth=auth,
+        before=task,
         route_action="review",
         workflow_action=WorkItemAction.SUBMIT_REVIEW,
         message="Task submitted for review",
@@ -814,9 +820,6 @@ async def complete_task(
         WorkItemAction.COMPLETE_TASK,
         **transition_kwargs,
     )
-    notices = await announce_transition(
-        group_id=group_id, task_id=task_id, transition=result, detail=None, auth=auth
-    )
     response_data = result.response_data
     if request and request.cited_ids:
         from sibyl_core.tools.usage_citation import record_cited_item_usages
@@ -851,6 +854,14 @@ async def complete_task(
             ),
         )
 
+    notices = await announce_transition(
+        group_id=group_id,
+        task_id=task_id,
+        transition=result,
+        previous_status=_status_of(verified_task),
+        detail=None,
+        auth=auth,
+    )
     response = TaskActionResponse(
         success=True,
         action="complete_task",
@@ -889,7 +900,7 @@ async def archive_task(
     request: ArchiveTaskRequest | None = None,
 ) -> TaskActionResponse:
     """Archive a task (terminal state)."""
-    await _verify_task_access(task_id, org, auth)
+    task = await _verify_task_access(task_id, org, auth)
 
     reason = request.reason if request else ""
     return await _task_transition_response(
@@ -897,6 +908,7 @@ async def archive_task(
         http_request=http_request,
         org=org,
         auth=auth,
+        before=task,
         route_action="archive",
         workflow_action=WorkItemAction.ARCHIVE_TASK,
         message="Task archived",
@@ -1462,6 +1474,15 @@ def transition_body(label: str, title: str, task_id: str, detail: str | None) ->
     return normalize_body(f"{first}\n{detail}" if detail else first)
 
 
+def _status_of(entity: Any) -> str | None:
+    """A task's status as the access check read it, before the transition ran."""
+    metadata = getattr(entity, "metadata", None)
+    status = (metadata.get("status") if isinstance(metadata, dict) else None) or getattr(
+        entity, "status", None
+    )
+    return str(getattr(status, "value", status)) if status else None
+
+
 def assigned_channels(assignees: object) -> list[str]:
     """The sibylnet channels among a task's assignees, each once, in order.
 
@@ -1488,6 +1509,7 @@ async def announce_transition(
     group_id: str,
     task_id: str,
     transition: WorkItemTransition,
+    previous_status: str | None,
     detail: str | None,
     auth: AuthContext,
 ) -> list[str]:
@@ -1498,6 +1520,11 @@ async def announce_transition(
     posted as the caller, pinned to the task's project like the handoff, and
     it never asks for distillation: the task already holds the fact.
 
+    A transition that leaves the status where it was posts nothing, so an
+    agent that starts its task again each session wakes nobody.
+    ``previous_status`` is the status the access check read, ahead of the
+    task's lock: two callers racing the same transition can both post it.
+
     The task is the state and is written by the time this runs, so a notice
     that cannot be posted is logged and never fails the transition. A key
     held to other projects posts nothing. Returns the records posted, as a
@@ -1505,7 +1532,7 @@ async def announce_transition(
     """
     label = _TRANSITION_LABELS.get(transition.action)
     channels = assigned_channels(transition.task_data.get("assignees"))
-    if label is None or not channels:
+    if label is None or not channels or previous_status == transition.status:
         return []
     thread = f"{TASK_THREAD_PREFIX}{task_id}"
     posted: list[str] = []

@@ -132,6 +132,43 @@ async def test_only_inboxes_and_rooms_among_the_assignees_hear_of_it(
     assert {row["thread"] for row in posted} == {f"task:{handed}"}
 
 
+async def test_a_transition_that_changes_nothing_posts_nothing(
+    world: SimpleNamespace,
+) -> None:
+    assert (await assign(world, world.ada, to="@grace")).status_code == 200
+
+    for _ in range(3):
+        again = await act(world, world.grace, "start")
+        assert again.status_code == 200, again.text
+
+    # Starting a started task is accepted and moves nothing, so it wakes nobody.
+    assert again.json()["mutation_receipt"]["affected_records"] == [f"entity:{world.task}"]
+    assert [row["body"] for row in await events(world)] == [f"Started: {TITLE} (task {world.task})"]
+
+
+async def test_a_thread_stays_caught_up_when_only_events_follow(
+    world: SimpleNamespace,
+) -> None:
+    assert (await assign(world, world.ada, to="@grace")).status_code == 200
+    # Stand in for a finished distillation: nothing said is waiting.
+    await world.content.execute_query(
+        "UPDATE net_threads SET reflection_pending = false, "
+        "reflected_through = last_message_at WHERE organization_id = $org;",
+        org=world.id,
+    )
+
+    assert (await act(world, world.grace, "start")).status_code == 200
+
+    async with client_for(world, world.grace) as client:
+        listing = (await client.get("/api/net/threads", params={"channel": "@grace"})).json()
+    (row,) = listing["threads"]
+    assert row["message_count"] == 2
+    # The event moved the thread's last activity past the watermark, and the
+    # thread still has nothing to distill.
+    assert row["last_message_at"] > row["reflected_through"]
+    assert row["reflection_pending"] is False
+
+
 async def test_a_notice_that_cannot_be_posted_never_fails_the_transition(
     world: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
 ) -> None:

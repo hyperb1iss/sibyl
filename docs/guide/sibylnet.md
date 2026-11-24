@@ -143,8 +143,9 @@ notice on the same thread; unassigning someone who wasn't assigned changes and p
 Once a task is handed off, its thread carries what happens to it. Starting, blocking, unblocking,
 sending to review, completing and archiving the task each post one line on `task:<task id>` in every
 `@inbox` and `#room` among its assignees: `Started: <title> (task <id>)`, with the block reason or
-the pull request link under it when there is one. So after a handoff you can wait for the outcome
-instead of polling the task:
+the pull request link under it when there is one. A transition that leaves the status where it was,
+such as starting a task that is already started, posts nothing. So after a handoff you can wait for
+the outcome instead of polling the task:
 
 ```bash
 sibyl net watch -t task:task_abc --once --json   # returns when the task starts, blocks or finishes
