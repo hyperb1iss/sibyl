@@ -71,6 +71,11 @@ export interface NetThread {
   reflected_through: string | null;
   reflection_source_id: string | null;
   reflection_error: string | null;
+  /**
+   * Whether a message still waits to be distilled. Events never set it, so a
+   * thread can be caught up with `last_message_at` past `reflected_through`.
+   */
+  reflection_pending: boolean;
   reflection_skipped: string[];
 }
 

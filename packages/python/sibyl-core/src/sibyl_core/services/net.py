@@ -118,7 +118,8 @@ _MESSAGE_FIELDS = (
 _THREAD_FIELDS = (
     "organization_id, channel, thread, project_id, message_count, first_message_at, "
     "last_message_at, reflected_through, reflected_through_ns, reflected_through_uuid, "
-    "reflection_source_id, reflection_attempts, reflection_error, reflection_skipped"
+    "reflection_source_id, reflection_attempts, reflection_error, reflection_skipped, "
+    "reflection_pending"
 )
 # One record per (organization, channel, thread). Concurrent upserts of the
 # same thread then contend for a single key, which the server reports as a
@@ -497,6 +498,10 @@ class NetThreadState:
     reflection_attempts: int
     reflection_error: str | None
     reflection_skipped: tuple[str, ...] = ()
+    reflection_pending: bool = False
+    """Whether anything an author said still waits to be distilled. An event
+    past the watermark does not count, so this, not a comparison of times,
+    says whether the thread is caught up."""
     reflected_mark: NetCursor | None = None
     """The last distilled message's position, which the next window starts after."""
 
@@ -1105,6 +1110,7 @@ def _thread_from_row(row: Mapping[str, object]) -> NetThreadState:
         reflection_attempts=_as_int(row.get("reflection_attempts")),
         reflection_error=_optional_str(row.get("reflection_error")),
         reflection_skipped=_string_tuple(row.get("reflection_skipped")),
+        reflection_pending=row.get("reflection_pending") is True,
         reflected_mark=_mark_from_row(row),
     )
 

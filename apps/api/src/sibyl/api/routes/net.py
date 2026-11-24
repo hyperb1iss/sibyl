@@ -962,6 +962,7 @@ async def list_threads(
                 reflected_through=state.reflected_through,
                 reflection_source_id=state.reflection_source_id,
                 reflection_error=state.reflection_error,
+                reflection_pending=state.reflection_pending,
                 reflection_skipped=list(state.reflection_skipped),
             )
             for state in states

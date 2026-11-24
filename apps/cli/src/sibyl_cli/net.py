@@ -304,17 +304,15 @@ def _print_message(message: Mapping[str, Any]) -> None:
 def _distilled(row: Mapping[str, Any]) -> str:
     if row.get("reflection_error"):
         return f"[{ERROR_RED}]failed[/{ERROR_RED}]"
-    through = _parse_time(row.get("reflected_through"))
-    if through is None:
+    through = row.get("reflected_through")
+    if row.get("reflection_pending"):
+        if through:
+            return f"[{ELECTRIC_YELLOW}]through {_short_time(through)}[/]"
         return "[dim]pending[/dim]"
-    last = _parse_time(row.get("last_message_at"))
-    try:
-        caught_up = last is None or through >= last
-    except TypeError:
-        caught_up = False
-    if caught_up:
+    if through:
         return f"[{SUCCESS_GREEN}]distilled[/{SUCCESS_GREEN}]"
-    return f"[{ELECTRIC_YELLOW}]through {_short_time(row.get('reflected_through'))}[/]"
+    # Only events so far: nothing an author said is waiting.
+    return "[dim]-[/dim]"
 
 
 def _rows(data: Mapping[str, Any], key: str) -> list[Mapping[str, Any]]:

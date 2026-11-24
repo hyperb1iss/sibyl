@@ -154,7 +154,13 @@ async def distill_net_thread(thread: NetThreadState) -> tuple[str, int]:
         if any(message.kind != "event" for message in part.messages)
     ]
     if not spoken:
-        await settle_net_thread(thread, through=window[-1].cursor)
+        # Nothing was reflected, so what the last pass recorded still stands.
+        await settle_net_thread(
+            thread,
+            through=window[-1].cursor,
+            source_id=thread.reflection_source_id,
+            skipped=thread.reflection_skipped,
+        )
         return "settled_empty", 0
     sources: list[str] = []
     skipped: list[str] = []

@@ -91,6 +91,7 @@ describe('NetDashboardCard', () => {
                   reflected_through: null,
                   reflection_source_id: null,
                   reflection_error: null,
+                  reflection_pending: true,
                   reflection_skipped: [],
                 },
               ],
