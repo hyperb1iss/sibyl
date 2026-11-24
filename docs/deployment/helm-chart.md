@@ -9,8 +9,8 @@ apiVersion: v2
 name: sibyl
 description: Knowledge graph and task workflow for durable development memory
 type: application
-version: 1.5.0-rc.1
-appVersion: "1.5.0-rc.1"
+version: 1.5.0
+appVersion: "1.5.0"
 ```
 
 Release builds update `version` and `appVersion` from the repository `VERSION` file.
@@ -536,6 +536,8 @@ frontend:
   env:
     NODE_ENV: "production"
     NEXT_TELEMETRY_DISABLED: "1"
+    # HOSTNAME is the web server's bind address. It defaults to "0.0.0.0";
+    # set "::" on an IPv6-only cluster.
 
   # Defaults to http://<release>-backend:<port>/api when empty
   apiUrl: ""
@@ -850,7 +852,7 @@ backend:
   replicaCount: 3
   image:
     repository: ghcr.io/hyperb1iss/sibyl-api
-    tag: "1.5.0-rc.1"
+    tag: "1.5.0"
     pullPolicy: Always
   existingSecret: sibyl-secrets
   # Only the ingress controller pods' own range, so each user gets their own login

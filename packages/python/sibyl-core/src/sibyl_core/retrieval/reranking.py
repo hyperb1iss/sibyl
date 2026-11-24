@@ -184,9 +184,8 @@ def _extract_content(entity: Any) -> str:
             val = getattr(entity, attr)
             if val:
                 return str(val)
-        elif isinstance(entity, dict) and attr in entity:
-            if entity[attr]:
-                return str(entity[attr])
+        elif isinstance(entity, dict) and attr in entity and entity[attr]:
+            return str(entity[attr])
 
     # Fall back to name
     name = getattr(entity, "name", None) or (

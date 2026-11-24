@@ -809,9 +809,8 @@ class ClientTransportMixin:
                             if pending_write_id
                             else ("Auth required. Run 'sibyl auth login' or set SIBYL_AUTH_TOKEN.")
                         )
-                elif response.status_code == 403:
-                    if not payload.remediation:
-                        payload.remediation = "Access denied. Check org and project permissions."
+                elif response.status_code == 403 and not payload.remediation:
+                    payload.remediation = "Access denied. Check org and project permissions."
 
                 exc = SibylClientError(
                     f"API error: {payload.error or detail}: {detail}",

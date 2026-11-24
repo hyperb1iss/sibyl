@@ -3450,7 +3450,12 @@ async def test_graph_expansion_uses_shared_community_membership() -> None:
 
 
 @pytest.mark.asyncio
-async def test_vector_candidate_sources_use_embedding_contract() -> None:
+async def test_vector_candidate_sources_use_embedding_contract(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # The bracket read; a project small enough to scan is covered in
+    # test_edge_vector_project_scan.
+    monkeypatch.setattr(source_module, "EDGE_PROJECT_SCAN_ENTITY_LIMIT", -1)
     plan = build_context_retrieval_plan(
         query="native vectors",
         organization_id="org-123",
@@ -3629,6 +3634,7 @@ async def test_vector_candidate_sources_report_partial_query_failure() -> None:
 async def test_vector_candidate_sources_use_configured_knn_effort(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    monkeypatch.setattr(source_module, "EDGE_PROJECT_SCAN_ENTITY_LIMIT", -1)
     monkeypatch.setattr(source_module.core_config, "graph_knn_ef", 96)
     plan = build_context_retrieval_plan(
         query="native vectors",
@@ -3669,6 +3675,7 @@ async def test_vector_candidate_sources_use_configured_knn_effort(
 async def test_vector_lanes_raise_knn_effort_to_the_seed_budget(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    monkeypatch.setattr(source_module, "EDGE_PROJECT_SCAN_ENTITY_LIMIT", -1)
     # An HNSW read returns at most `ef` rows, so a deep-search plan whose seed
     # budget outruns the configured effort would silently come back short.
     monkeypatch.setattr(source_module.core_config, "graph_knn_ef", 40)

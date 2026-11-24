@@ -5,6 +5,7 @@ import importlib
 import importlib.util
 import json
 import os
+import re
 import subprocess
 from pathlib import Path
 from shutil import which
@@ -149,7 +150,9 @@ def test_eval_workflow_compares_local_and_openai_smoke_receipts() -> None:
     assert "if: github.event_name != 'pull_request'" in comparison_job
     assert "longmemeval-live-smoke" in comparison_job
     assert "longmemeval-local-smoke" in comparison_job
-    assert "actions/download-artifact@v8" in comparison_job
+    # A release tag of the download action, whichever one Dependabot last
+    # moved the workflow to; a version literal here fails every such bump.
+    assert re.search(r"uses: actions/download-artifact@v\d+(\.\d+){0,2}\n", comparison_job)
     assert "longmemeval-live-smoke-${{ github.sha }}" in comparison_job
     assert "longmemeval-local-smoke-${{ github.sha }}" in comparison_job
     assert (

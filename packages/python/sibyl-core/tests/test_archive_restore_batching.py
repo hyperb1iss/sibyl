@@ -1,5 +1,6 @@
 """Archive restore sends bounded batches and finishes after an interruption."""
 
+import re
 from unittest.mock import AsyncMock
 
 import pytest
@@ -15,18 +16,19 @@ from tests.test_source_integrity_archive import destination as destination
 from tests.test_source_integrity_archive import runtime as runtime
 
 BATCH = 2
-# Every parameter that carries one row per restored record.
-ROW_PARAMETERS = (
-    "units",
-    "keys",
-    "writes",
-    "records",
-    "companion_uuids",
-    "companion_probes",
-    "archive_episodes",
-    "archive_relationships",
-    "archive_mentions",
-)
+
+
+def rows_carried(params: dict) -> dict[str, int]:
+    """How many rows each list parameter carries.
+
+    A lookup split into clumps (`name_0`, `name_1`, ...) counts as one list.
+    """
+    carried: dict[str, int] = {}
+    for name, value in params.items():
+        if isinstance(value, list):
+            base = re.sub(r"_\d+$", "", name)
+            carried[base] = carried.get(base, 0) + len(value)
+    return carried
 
 
 async def seed(runtime) -> None:
@@ -130,17 +132,50 @@ async def test_graph_restore_bounds_every_request_and_round_trips(
     assert result.success, result.errors
     assert (result.entities_restored, result.relationships_restored) == (9, 5)
     assert (result.episodes_restored, result.mentions_restored) == (3, 3)
-    sizes = [
-        len(params[name])
-        for _, params in sent
-        for name in ROW_PARAMETERS
-        if isinstance(params.get(name), list)
+    carried = [rows_carried(params) for _, params in sent]
+    # A relationship names two endpoints; every other list holds one entry per row.
+    endpoints = [
+        rows.pop("relationship_endpoints") for rows in carried if "archive_relationships" in rows
     ]
-    assert sizes
-    assert max(sizes) <= BATCH
+    assert endpoints
+    assert max(endpoints) <= 2 * BATCH
+    for name in (
+        "units",
+        "unit_identities",
+        "writes",
+        "companion_uuids",
+        "archive_episodes",
+        "episode_uuids",
+        "archive_relationships",
+        "relationship_uuids",
+        "archive_mentions",
+        "mention_uuids",
+    ):
+        assert any(name in rows for rows in carried), name
+    assert max(size for rows in carried for size in rows.values()) <= BATCH
     # 9 entities, 3 episodes, 5 relationships and 3 mentions in batches of two.
     assert sum(query.startswith("BEGIN TRANSACTION") for query, _ in sent) == 5 + 2 + 3 + 2
     await restored_as_archived(destination.client, runtime.client)
+
+
+async def test_mentions_without_a_uuid_collapse_to_one_row_instead_of_failing(
+    runtime, destination, monkeypatch
+):
+    await seed(runtime)
+    archive = await backup_of(runtime)
+    archive.mentions = [
+        {key: value for key, value in mention.items() if key != "uuid"}
+        for mention in archive.mentions[:2]
+    ]
+    archive.mention_count = 2
+    monkeypatch.setattr(
+        "sibyl_core.tools.admin.get_graph_runtime", AsyncMock(return_value=destination)
+    )
+
+    result = await restore_backup(archive, organization_id=runtime.client.group_id)
+
+    assert result.success, result.errors
+    assert len(await destination.client.execute_query("SELECT id FROM mentions;")) == 1
 
 
 @pytest.mark.parametrize("clean", [False, True])

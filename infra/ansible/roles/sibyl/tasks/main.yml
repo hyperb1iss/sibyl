@@ -37,7 +37,7 @@
       - (sibyl_surreal_major | string) is match('^[0-9]+$')
     quiet: true
     fail_msg: >-
-      sibyl_surreal_image must carry a version tag such as surrealdb/surrealdb:v4.0.0 (a digest may
+      sibyl_surreal_image must carry a version tag such as surrealdb/surrealdb:v4.0.1 (a digest may
       follow it), so the role can pair it with its store path; got {{ sibyl_surreal_image }}.
 
 - name: Assert the SurrealDB store path matches the image's major version

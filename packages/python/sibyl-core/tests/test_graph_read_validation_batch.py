@@ -193,7 +193,12 @@ async def test_graph_read_batch_reverse_references_keep_concurrent_validation(
     assert result == {"entity_a": True, "entity_b": True}
     assert arrived == {"raw_a", "raw_b"}
     query.assert_awaited_once()
-    assert "validation_entity_id IN $entities" in query.call_args.args[0]
+    statement = query.call_args.args[0]
+    assert "validation_entity_id IN $entities" in statement
+    # `$ids` is bound inside the block, where SurrealDB 4.0 cannot plan an IN
+    # over it and reads every capture; each capture is looked up by uuid.
+    assert "FROM raw_captures WHERE uuid=$id)" in statement
+    assert "uuid IN $ids" not in statement
 
 
 async def test_graph_read_batch_final_phase_covers_all_storage_batches(

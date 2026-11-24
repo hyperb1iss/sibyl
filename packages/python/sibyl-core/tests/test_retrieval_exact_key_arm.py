@@ -32,10 +32,11 @@ BODY_WITHOUT_THE_KEY = "The socket dropped mid-handshake and the retry loop gave
 class _RecordingClient:
     """A Surreal stand-in for the exact-key read, recording the query it got.
 
-    Matching mirrors CONTAINSANY against an index on the array's elements: the
-    row comes back when any element of its stored key list is among the bound
-    probes. Verified against a live 3.2.3 server, which is the only reason this
-    stand-in can be trusted to mean the same thing the server does.
+    Matching mirrors ANYINSIDE on the stored key list: the row comes back when
+    any element of that list is among the bound probes. Verified against a live
+    4.0.1 server, where it returned the rows CONTAINSANY does for every probe
+    set tried, which is the only reason this stand-in can be trusted to mean
+    the same thing the server does.
     """
 
     def __init__(self, rows: list[dict[str, object]] | None = None) -> None:
@@ -209,14 +210,13 @@ async def test_arm_finds_a_row_whose_body_never_contains_the_query() -> None:
 
 @pytest.mark.asyncio
 async def test_arm_reads_the_indexed_column_with_one_set_membership_query() -> None:
-    """The read shape and the index definition are one contract, verified live.
+    """The read is one ANYINSIDE over the key column, verified live on 4.0.1.
 
-    On SurrealDB 3.2.3 this same CONTAINSANY is index-served only because the
-    index is defined on the array's elements (`retrieval_keys_normalized.*`). An
-    index on the bare array field turns it into a full table scan, and turns a
-    bare equality into zero rows unless the WHERE clause happens to carry a
-    second predicate. Both halves are pinned: the query here, the index
-    definition in test_surreal_schema_syntax.py.
+    SurrealDB 4.0.1 serves CONTAINSANY, CONTAINS and INSIDE from the element
+    index with an extra `= NONE` branch that fetches every row without keys in
+    full, so each of those forms reads the whole table the slow way. ANYINSIDE
+    runs as one scan that tests the keys before decoding a row. The operator is
+    pinned here so a tidy-up back to CONTAINSANY cannot bring the branch back.
     """
 
     client = _RecordingClient()
@@ -232,7 +232,8 @@ async def test_arm_reads_the_indexed_column_with_one_set_membership_query() -> N
 
     assert len(client.queries) == 1
     query, params = client.queries[0]
-    assert "retrieval_keys_normalized CONTAINSANY $probe_keys" in query
+    assert "retrieval_keys_normalized ANYINSIDE $probe_keys" in query
+    assert "CONTAINS" not in query
     assert "retrieval_keys_normalized =" not in query
     assert "retrieval_keys_normalized IN" not in query
     assert params["probe_keys"] == ["err_conn_reset_0x7f31", "search.py"]

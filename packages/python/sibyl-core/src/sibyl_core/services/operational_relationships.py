@@ -48,6 +48,9 @@ from sibyl_core.services.source_state_store import source_snapshot_from_records
 # relates_to uuid, the organization/kind/id of the two ledgers), so the sort
 # is total: the rows, their order and so the fingerprint are the ones a
 # single IN over each table gives.
+#
+# An empty list reads nothing (in_clumps), which matters here: most snapshots
+# carry no relationship ids.
 _TARGET_LOOKUP = "SELECT {fields} FROM entity WHERE group_id=$org AND uuid IN $snapshot_ids"
 _ASSOCIATION_LOOKUP = (
     f"SELECT * FROM memory_derivations WITH INDEX {DERIVATION_TARGET_ID_INDEX}"
@@ -62,6 +65,10 @@ _RELATIONSHIP_LOOKUP = (
     "SELECT *, in.uuid AS source_uuid, out.uuid AS target_uuid{omit} FROM relates_to"
     " WHERE group_id=$org AND uuid IN $snapshot_relationship_ids"
 )
+# Retired edges are addressed by record id through the same clumped lookup:
+# an UPDATE filtering `uuid IN $list` reads relates_to for an empty list and
+# for one past 32 values.
+_RETIREMENT_LOOKUP = "SELECT VALUE id FROM relates_to WHERE group_id=$org AND uuid IN $retirements"
 _SNAPSHOT_FINGERPRINT = """
 LET $relationship_evidence = SELECT * OMIT attributes.operational_write_witness FROM $relationships;
 LET $operational_snapshot_fingerprint = crypto::sha256(type::string([$targets,$associations,$states,$relationship_evidence]));
@@ -219,8 +226,7 @@ async def publish_operational_relationships(
 ) -> list[str]:
     """Write only the recomputed deterministic inventory and protected binding."""
     from sibyl_core.services.graph_relationships import (
-        _RELATIONSHIP_BULK_UPSERT_STATEMENTS,
-        _relationship_bulk_parameters,
+        _relationship_bulk_upsert,
         _relationship_record,
     )
 
@@ -369,6 +375,12 @@ async def publish_operational_relationships(
         row["attributes"] = embedded["attributes"]
     await source.current()
     fence, lookups = snapshot_statement(group_id, ids, captured_relationship_ids)
+    upsert, upsert_params = _relationship_bulk_upsert(rows)
+    retirement = ""
+    retirement_params: dict[str, list] = {}
+    if retirements:
+        retiring, retirement_params = clumped(_RETIREMENT_LOOKUP, "retirements", retirements)
+        retirement = f"UPDATE {retiring} SET invalid_at=time::now(),expired_at=time::now();"
     await client.execute_query(
         "RETURN {"
         + fence
@@ -378,13 +390,14 @@ async def publish_operational_relationships(
         };
         """
         + _ENDPOINT_WRITE_WITNESS
-        + _RELATIONSHIP_BULK_UPSERT_STATEMENTS
-        + "UPDATE relates_to SET invalid_at=time::now(),expired_at=time::now() WHERE group_id=$org AND uuid IN $retirements; RETURN true; };",
+        + upsert
+        + retirement
+        + "RETURN true; };",
         org=group_id,
         **lookups,
-        retirements=retirements,
+        **retirement_params,
         fingerprint=snapshot["fingerprint"],
-        **_relationship_bulk_parameters(rows),
+        **upsert_params,
     )
     await source.current()
     return relationship_ids

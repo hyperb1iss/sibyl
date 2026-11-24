@@ -280,7 +280,10 @@ UserRepository = SurrealUserRepository
 # package would not reach them. To keep the old flat behavior exactly:
 #   * reads of any name fall through to the owning submodule (``__getattr__``);
 #   * writes of a name propagate to every submodule (and ``_common``) that binds
-#     it, so a seam patched here is observed at the real call sites.
+#     it, so a seam patched here is observed at the real call sites;
+#   * deleting a name puts back what each of those submodules bound before the
+#     write, because a patch on a name this package only resolves through
+#     ``__getattr__`` is undone by deleting it, not by assigning the old value.
 from types import ModuleType as _ModuleType  # noqa: E402
 
 from sibyl.persistence.surreal.auth_runtime import (  # noqa: E402
@@ -318,12 +321,26 @@ def __getattr__(name: str) -> object:
     raise AttributeError(msg)
 
 
+_PROPAGATED_ORIGINALS: dict[str, dict[_ModuleType, object]] = {}
+
+
 class _AuthRuntimePackage(_ModuleType):
     def __setattr__(self, name: str, value: object) -> None:
         super().__setattr__(name, value)
+        originals = _PROPAGATED_ORIGINALS.setdefault(name, {})
         for module in _SUBMODULES:
             if name in vars(module):
+                originals.setdefault(module, vars(module)[name])
                 setattr(module, name, value)
+        # Assigning the originals back is its own undo, so nothing may stay
+        # remembered for a later delete to apply over newer bindings.
+        if all(original is value for original in originals.values()):
+            del _PROPAGATED_ORIGINALS[name]
+
+    def __delattr__(self, name: str) -> None:
+        for module, original in _PROPAGATED_ORIGINALS.pop(name, {}).items():
+            setattr(module, name, original)
+        super().__delattr__(name)
 
 
 import sys as _sys  # noqa: E402

@@ -419,7 +419,7 @@ def test_release_compose_service_pins_the_bounded_surreal_runtime() -> None:
     compose = (Path(__file__).parents[2] / "docker-compose.yml").read_text(encoding="utf-8")
     eval_service = compose.split("  surrealdb-eval:", 1)[1].split("  redis:", 1)[0]
 
-    assert "surrealdb/surrealdb:v4.0.0" in eval_service
+    assert "surrealdb/surrealdb:v4.0.1" in eval_service
     assert '["start", "--log", "info", "surrealkv:///data/sibyl.db"]' in eval_service
     assert "SURREAL_BIND: 0.0.0.0:8000" in eval_service
     assert 'SURREAL_SURREALKV_BLOCK_CACHE_CAPACITY: "8589934592"' in eval_service

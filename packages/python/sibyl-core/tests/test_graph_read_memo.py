@@ -90,7 +90,12 @@ class _EdgeRowClient:
 
     async def execute_query(self, query: str, **params: Any) -> list[dict[str, object]]:
         if "in.uuid AS source_uuid" in query and "uuid IN $ids" in query:
-            ids = [str(value) for value in params["ids"]]
+            ids = [
+                str(value)
+                for name, clump in params.items()
+                if name.startswith("ids_")
+                for value in clump
+            ]
             self.edge_row_batches.append(ids)
             return [dict(EDGE_ROW) for identifier in ids if identifier == EDGE_ROW["uuid"]]
         return []

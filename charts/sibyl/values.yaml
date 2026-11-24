@@ -208,7 +208,8 @@ backend:
     initialDelaySeconds: 5
     periodSeconds: 10
 
-  # -- Environment variables (non-secret)
+  # -- Environment variables (non-secret). SIBYL_SERVER_HOST is the address
+  # the API binds; set it to "::" on an IPv6-only cluster.
   env:
     SIBYL_SERVER_HOST: "0.0.0.0"
     SIBYL_SERVER_PORT: "3334"
@@ -420,7 +421,9 @@ frontend:
     initialDelaySeconds: 5
     periodSeconds: 10
 
-  # -- Environment variables
+  # -- Environment variables. HOSTNAME is the address the web server binds
+  # and defaults to "0.0.0.0"; set it to "::" on an IPv6-only cluster, where
+  # the kubelet probes and the Service reach the pod over IPv6.
   env:
     NODE_ENV: "production"
     NEXT_TELEMETRY_DISABLED: "1"

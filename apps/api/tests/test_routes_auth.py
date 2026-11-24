@@ -1095,13 +1095,80 @@ async def test_device_verify_post_approve_uses_active_session_claims(
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("action", ["approve", "deny"])
-async def test_device_verify_post_refuses_a_bot_key(
+async def test_device_verify_post_takes_no_api_key_for_a_session(
+    monkeypatch: pytest.MonkeyPatch, action: str
+) -> None:
+    # Approving hands whoever holds the device code a full session, so a key
+    # that could approve would shed its scopes and project limits.
+    user_id = uuid4()
+    request = FakeRequest(form_data={"action": action, "user_code": "ABCD-EFGH"})
+    claims = AsyncMock(
+        return_value={
+            "sub": str(user_id),
+            "org": str(uuid4()),
+            "typ": "api_key",
+            "scopes": ["api:write"],
+        }
+    )
+    get_user = AsyncMock(return_value=SimpleNamespace(id=user_id))
+    approve = AsyncMock()
+    deny = AsyncMock()
+
+    monkeypatch.setattr(
+        auth_routes, "_require_jwt_secret", lambda: "test-jwt-secret-key-for-api-tests"
+    )
+    monkeypatch.setattr(auth_routes, "resolve_claims", claims)
+    monkeypatch.setattr(auth_routes, "get_user_by_id", get_user)
+    monkeypatch.setattr(auth_routes, "approve_device_authorization", approve)
+    monkeypatch.setattr(auth_routes, "deny_device_authorization", deny)
+
+    response = await _call_route(auth_routes.device_verify_post, request=request)
+
+    assert response.status_code == 302
+    assert response.headers["location"].endswith("&error=not_authenticated")
+    get_user.assert_not_awaited()
+    approve.assert_not_awaited()
+    deny.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_an_api_key_does_not_identify_the_device_approval_user(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    request = FakeRequest(query_params={"user_code": "ABCD-EFGH"})
+    get_request = AsyncMock(
+        return_value=SimpleNamespace(
+            client_name="sibyl-cli",
+            scope="mcp",
+            expires_at=datetime.now(UTC).replace(tzinfo=None) + timedelta(minutes=10),
+            status="pending",
+        )
+    )
+    claims = AsyncMock(return_value={"sub": str(uuid4()), "typ": "api_key"})
+    get_user = AsyncMock()
+
+    monkeypatch.setattr(
+        auth_routes, "_require_jwt_secret", lambda: "test-jwt-secret-key-for-api-tests"
+    )
+    monkeypatch.setattr(auth_routes, "resolve_claims", claims)
+    monkeypatch.setattr(auth_routes, "get_user_by_id", get_user)
+    monkeypatch.setattr(auth_routes, "get_device_request_by_user_code", get_request)
+
+    response = await _call_route(auth_routes.device_verify_get, request=request)
+
+    assert "Application:" not in response.body.decode()
+    get_user.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("action", ["approve", "deny"])
+async def test_device_verify_post_refuses_a_bot(
     monkeypatch: pytest.MonkeyPatch, action: str
 ) -> None:
     # Approving would sign the bot in and mint it a personal org it owns.
     bot_id = uuid4()
     request = FakeRequest(form_data={"action": action, "user_code": "ABCD-EFGH"})
-    claims = AsyncMock(return_value={"sub": str(bot_id), "org": str(uuid4()), "typ": "api_key"})
+    claims = AsyncMock(return_value={"sub": str(bot_id), "org": str(uuid4()), "typ": "access"})
     get_user = AsyncMock(return_value=SimpleNamespace(id=bot_id, kind=PrincipalKind.SERVICE))
     approve = AsyncMock()
     deny = AsyncMock()

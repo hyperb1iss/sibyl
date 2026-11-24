@@ -3,13 +3,13 @@
 sibyl_dir: /opt/sibyl
 
 # ghcr.io/hyperb1iss/sibyl-api and sibyl-web image tag to run.
-sibyl_version: "1.5.0-rc.1"
+sibyl_version: "1.5.0"
 
 # SurrealDB image to run. Stated here rather than left to the compose
 # fallback so the engine a host runs is a deliberate, reviewable value: an
 # unset variable would otherwise let a checkout's default silently upgrade
 # the database on the next restart, independently of sibyl_version.
-sibyl_surreal_image: "surrealdb/surrealdb:v4.0.0"
+sibyl_surreal_image: "surrealdb/surrealdb:v4.0.1"
 
 # The store path SurrealDB opens. It moves with the image: 4.x opens
 # surrealkv://, and a 3.x server given surrealkv:// on its RocksDB directory

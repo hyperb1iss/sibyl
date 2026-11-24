@@ -10,7 +10,7 @@ Four long-running containers plus a one-shot volume initializer (`surreal-init`)
 
 | Container   | Source                                              | Purpose                        |
 | ----------- | --------------------------------------------------- | ------------------------------ |
-| `surrealdb` | `surrealdb/surrealdb:v4.0.0`                        | Graph, content, and auth store |
+| `surrealdb` | `surrealdb/surrealdb:v4.0.1`                        | Graph, content, and auth store |
 | `backend`   | `ghcr.io/hyperb1iss/sibyl-api`                      | FastAPI + MCP server           |
 | `frontend`  | `ghcr.io/hyperb1iss/sibyl-web`                      | Next.js web UI                 |
 | `caddy`     | built from `caddy:2` with the Cloudflare DNS module | TLS + path routing             |
@@ -39,13 +39,13 @@ provisions a host end to end:
 | Variable                        | Default                      | Purpose                                                |
 | ------------------------------- | ---------------------------- | ------------------------------------------------------ |
 | `sibyl_domain`                  | `sibyl.example.com`          | Hostname Caddy serves                                  |
-| `sibyl_version`                 | `1.5.0-rc.1`                 | ghcr.io image tag                                      |
+| `sibyl_version`                 | `1.5.0`                      | ghcr.io image tag                                      |
 | `sibyl_dir`                     | `/opt/sibyl`                 | Deployment directory                                   |
 | `sibyl_proxy_interface`         | `tailscale0`                 | Interface HTTP/HTTPS is exposed on                     |
 | `sibyl_mcp_auth_mode`           | `auto`                       | MCP bearer-token enforcement                           |
 | `sibyl_network_prefix`          | `10.47.213`                  | First three octets of the compose network's /24        |
 | `sibyl_forwarded_allow_ips`     | `10.47.213.10/32` (Caddy)    | Proxies trusted to name the client                     |
-| `sibyl_surreal_image`           | `surrealdb/surrealdb:v4.0.0` | SurrealDB server image                                 |
+| `sibyl_surreal_image`           | `surrealdb/surrealdb:v4.0.1` | SurrealDB server image                                 |
 | `sibyl_surreal_path`            | `surrealkv:///data/sibyl.db` | Store path; `rocksdb:///data/sibyl.db` for a 3.x image |
 | `sibyl_surreal_upgrade_from_3x` | `false`                      | Set `true` for the one run that converts a 3.x store   |
 
@@ -118,7 +118,7 @@ Two things must be in place before the playbook runs end to end:
   collections:
     - name: https://github.com/hyperb1iss/sibyl.git#/infra/ansible
       type: git
-      version: v1.5.0-rc.1
+      version: v1.5.0
   ```
 
   ```bash

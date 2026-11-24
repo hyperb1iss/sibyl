@@ -128,7 +128,7 @@ A tag that names no version could be either major, so it fails too.
 {{- $path := toString .Values.surrealdb.surrealdb.path -}}
 {{- $version := trimPrefix "v" (first (splitList "@" $tag)) -}}
 {{- if not (regexMatch "^[0-9]+([.]|$)" $version) -}}
-{{- fail (printf "surrealdb.image.tag %q names no SurrealDB version; pin a tag such as v4.0.0" $tag) -}}
+{{- fail (printf "surrealdb.image.tag %q names no SurrealDB version; pin a tag such as v4.0.1" $tag) -}}
 {{- end -}}
 {{- $major := atoi (regexFind "^[0-9]+" $version) -}}
 {{- if not (regexMatch "^(rocksdb|surrealkv):(/[^/]|///)" $path) -}}

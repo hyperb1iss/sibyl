@@ -21,8 +21,9 @@ from sibyl_core.backends.surreal.records import (
     raise_on_error as _raise_on_error,
 )
 from sibyl_core.backends.surreal.schema_invariants import (
+    convert_declared_fields,
     drop_undeclared_fields as _drop_undeclared_fields,
-    fetch_declared_fields,
+    fetch_restore_fields,
 )
 
 log = structlog.get_logger()
@@ -525,11 +526,16 @@ async def export_auth_archive_payload(
 def _auth_archive_record(
     row: dict[Any, Any],
     declared: frozenset[str],
+    datetimes: frozenset[str],
 ) -> tuple[dict[str, object], str, tuple[str, ...]]:
     normalized_row = {str(key): value for key, value in row.items()}
-    record = {
-        str(key): _deserialize_value(value) for key, value in normalized_row.items() if key != "id"
-    }
+    # Only fields the schema declares as datetimes are instants; a name, a
+    # slug or a setting that reads like one stays text.
+    record = convert_declared_fields(
+        {key: value for key, value in normalized_row.items() if key != "id"},
+        datetimes,
+        _deserialize_value,
+    )
     uuid = str(normalized_row.get("id") or normalized_row.get("uuid") or "").strip()
     if not uuid:
         return record, "", ()
@@ -652,13 +658,13 @@ async def restore_auth_archive_payload(
             if not rows:
                 continue
 
-            declared = await fetch_declared_fields(client.execute_query, table)
+            declared, datetimes = await fetch_restore_fields(client.execute_query, table)
             restored_table = False
             for row in rows:
                 if not isinstance(row, dict):
                     errors.append(f"{table} row payload must be an object")
                     continue
-                record, uuid, dropped = _auth_archive_record(row, declared)
+                record, uuid, dropped = _auth_archive_record(row, declared, datetimes)
                 if not uuid:
                     errors.append(f"{table} row is missing id")
                     continue
