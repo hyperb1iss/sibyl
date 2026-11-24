@@ -65,6 +65,93 @@ RAW_VECTOR_COVERAGE_UNKNOWN = "embedding_coverage_unknown"
 
 _RAW_MEMORY_RECALL_FIELDS = ", ".join(("id AS record_id", *RAW_LEXICAL_READ_FIELDS))
 
+# The capture HNSW index is shared by every organization and scope in the
+# content namespace. A scope filter inside the bracket makes the walk visit
+# captures until enough of them pass, and each visit reads a full row, so the
+# walk costs more the smaller the scope is. Measured on SurrealDB 4.0.1 with
+# 9,800 captures: 1.8 s for a range of 112 captures, 0.9 s for 419, 0.37 s for
+# 621, and 2.1 s to return nothing from an empty project scope. The exact read
+# of the same ranges took 0.22 ms per capture (27, 89 and 133 ms; 7 ms for the
+# empty one) and returned the same rows in the same order. The two cross near
+# 1,000 captures there, and later as the index grows, so a scope whose index
+# range holds at most this many captures is scored exactly over its own rows
+# and anything larger keeps the walk.
+RAW_CAPTURE_EXACT_SCAN_MAX_ROWS = 800
+
+
+@dataclass(frozen=True, slots=True)
+class _RawIndexRange:
+    """An index and the equality prefix of it that every row of a recall scope matches."""
+
+    index: str
+    fields: tuple[str, ...]
+
+
+def _raw_scope_index_ranges(params: Mapping[str, object]) -> list[_RawIndexRange]:
+    """The index ranges that bound a recall scope, read off its scope parameters.
+
+    ``_memory_scope_where`` binds each of these parameters to an equality on
+    the field of the same name, so a range counted here is an upper bound on
+    the rows the scope's exact read fetches through that index.
+    """
+    if "principal_id" in params:
+        scope = _RawIndexRange(
+            "idx_raw_captures_private_recent", ("organization_id", "memory_scope", "principal_id")
+        )
+    elif "scope_key" in params:
+        scope = _RawIndexRange(
+            "idx_raw_captures_scope", ("organization_id", "memory_scope", "scope_key")
+        )
+    else:
+        scope = _RawIndexRange("idx_raw_captures_scope", ("organization_id", "memory_scope"))
+    ranges = [scope]
+    if "project_id" in params:
+        ranges.append(_RawIndexRange("idx_raw_captures_project", ("organization_id", "project_id")))
+    return ranges
+
+
+def _raw_index_hint(index: str) -> str:
+    # The embedded engine plans these small reads on its own; the hint is for
+    # the server planner, which it holds to the range that was counted.
+    if is_embedded_surreal_url(settings.resolved_surreal_url):
+        return ""
+    return f" WITH INDEX {index}"
+
+
+async def _raw_index_range_count(
+    client: SurrealContentClient, index_range: _RawIndexRange, params: Mapping[str, object]
+) -> int | None:
+    """How many captures the range holds, counted from the index alone; None when unreadable."""
+    predicate = " AND ".join(f"{field} = ${field}" for field in index_range.fields)
+    rows = await content_client.select_many(
+        client,
+        f"SELECT count() AS total FROM raw_captures{_raw_index_hint(index_range.index)} "
+        f"WHERE {predicate} GROUP ALL;",
+        **{field: params[field] for field in index_range.fields},
+    )
+    total = rows[0].get("total") if rows else 0
+    if isinstance(total, bool) or not isinstance(total, int):
+        return None
+    return total
+
+
+async def _raw_vector_exact_index(
+    client: SurrealContentClient, params: Mapping[str, object]
+) -> str | None:
+    """The index to score a small scope exactly through, or None to walk the HNSW index.
+
+    Choosing is an optimization: a count that cannot be read leaves the lane
+    on the walk it has always taken.
+    """
+    try:
+        for index_range in _raw_scope_index_ranges(params):
+            total = await _raw_index_range_count(client, index_range, params)
+            if total is not None and total <= RAW_CAPTURE_EXACT_SCAN_MAX_ROWS:
+                return index_range.index
+    except Exception as exc:
+        log.warning("raw_memory_scope_count_failed", error_type=type(exc).__name__)
+    return None
+
 
 @dataclass(frozen=True, slots=True)
 class RawQueryEmbedding:
@@ -425,23 +512,18 @@ async def _recall_raw_memory_vector(
 
     There is no score floor. Once every scored vector shares the query's
     model the cosine is meaningful, and fusion ranks by position, not score.
+
+    A scope small enough to read whole is scored exactly instead of walked
+    (``RAW_CAPTURE_EXACT_SCAN_MAX_ROWS``): the same filters, the same order,
+    and the true nearest rows where the walk returns approximate ones.
     """
     candidate_limit = max(limit * content_client.LIFECYCLE_FILTER_OVERFETCH_FACTOR, limit)
-    knn_effort = knn_search_effort(candidate_limit, content_client.CONTENT_KNN_EF_FLOOR)
     rows = await with_timeout(
-        content_client.select_many_raw(
+        _raw_vector_rows(
             client,
-            "SELECT * FROM ("
-            f"SELECT {_RAW_MEMORY_RECALL_FIELDS}, "
-            "(1 - vector::distance::knn()) AS score "
-            "FROM raw_captures WITH INDEX idx_raw_captures_embedding "
-            f"WHERE {where_clause} "
-            f"AND {_raw_vector_space_match(query_embedding.space)} "
-            f"AND embedding <|{candidate_limit}, {knn_effort}|> $query_embedding"
-            ") ORDER BY score DESC, captured_at DESC LIMIT $candidate_limit;",
-            **params,
-            **_raw_vector_space_params(query_embedding.space),
-            query_embedding=query_embedding.vector,
+            where_clause=where_clause,
+            params=params,
+            query_embedding=query_embedding,
             candidate_limit=candidate_limit,
         ),
         timeout_seconds=content_client.DIRECT_SEARCH_QUERY_TIMEOUT_SECONDS,
@@ -452,6 +534,54 @@ async def _recall_raw_memory_vector(
         limit=limit,
         as_of=as_of,
     )
+
+
+async def _raw_vector_rows(
+    client: SurrealContentClient,
+    *,
+    where_clause: str,
+    params: Mapping[str, object],
+    query_embedding: RawQueryEmbedding,
+    candidate_limit: int,
+) -> list[models.SurrealRecord]:
+    """Pick the read for the scope and run it; the caller's deadline covers both."""
+    exact_index = await _raw_vector_exact_index(client, params)
+    statement_params: dict[str, object] = {
+        **params,
+        **_raw_vector_space_params(query_embedding.space),
+        "query_embedding": query_embedding.vector,
+        "candidate_limit": candidate_limit,
+    }
+    if exact_index is not None:
+        # Exact cosine over the scope's own rows, reached through the index
+        # range just counted. The same filters and order as the walk, so the
+        # rows are its neighbours without the approximation. The length guard
+        # keeps one capture holding a vector of another size from failing the
+        # whole statement.
+        statement = (
+            "SELECT * FROM ("
+            f"SELECT {_RAW_MEMORY_RECALL_FIELDS}, "
+            "vector::similarity::cosine(embedding, $query_embedding) AS score "
+            f"FROM raw_captures{_raw_index_hint(exact_index)} "
+            f"WHERE {where_clause} "
+            f"AND {_raw_vector_space_match(query_embedding.space)} "
+            "AND embedding != NONE AND array::len(embedding) = $query_embedding_length"
+            ") ORDER BY score DESC, captured_at DESC LIMIT $candidate_limit;"
+        )
+        statement_params["query_embedding_length"] = len(query_embedding.vector)
+    else:
+        knn_effort = knn_search_effort(candidate_limit, content_client.CONTENT_KNN_EF_FLOOR)
+        statement = (
+            "SELECT * FROM ("
+            f"SELECT {_RAW_MEMORY_RECALL_FIELDS}, "
+            "(1 - vector::distance::knn()) AS score "
+            "FROM raw_captures WITH INDEX idx_raw_captures_embedding "
+            f"WHERE {where_clause} "
+            f"AND {_raw_vector_space_match(query_embedding.space)} "
+            f"AND embedding <|{candidate_limit}, {knn_effort}|> $query_embedding"
+            ") ORDER BY score DESC, captured_at DESC LIMIT $candidate_limit;"
+        )
+    return await content_client.select_many_raw(client, statement, **statement_params)
 
 
 # Rows the coverage probe will read per side before it stops judging. A scope

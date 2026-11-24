@@ -83,7 +83,7 @@ backend:
 
   image:
     repository: ghcr.io/hyperb1iss/sibyl-api
-    tag: "1.5.0-rc.1"
+    tag: "1.5.0"
     pullPolicy: Always
 
   # Reference pre-created secrets
@@ -157,7 +157,7 @@ frontend:
 
   image:
     repository: ghcr.io/hyperb1iss/sibyl-web
-    tag: "1.5.0-rc.1"
+    tag: "1.5.0"
 
   apiUrl: "http://sibyl-backend:3334/api"
 
@@ -221,7 +221,7 @@ ingress:
 
 ### SurrealDB Requirements (default)
 
-- SurrealDB 4.0.0 (`surrealdb/surrealdb:v4.0.0`), the one server release Sibyl supports. Pin that
+- SurrealDB 4.0.1 (`surrealdb/surrealdb:v4.0.1`), the one server release Sibyl supports. Pin that
   tag for production instead of floating on `latest`.
 - A single SurrealDB pod on a SurrealKV-backed PVC (`surrealkv:/data/db`)
 - Root credentials set at start (`--user` / `--pass`)
@@ -466,6 +466,36 @@ The readiness probe targets `/api/health/ready`, the deep readiness endpoint tha
 SurrealDB is unreachable so the pod is pulled from service until it can serve. Liveness stays on
 `/api/health`.
 
+## IPv6-Only Clusters
+
+On a cluster whose pods have only an IPv6 address, the kubelet probes each pod and Services route to
+it over IPv6. The chart's defaults bind `0.0.0.0`, which is IPv4 only, so every probe is refused and
+no pod turns Ready. Set the three bind addresses:
+
+```yaml
+# sibyl chart
+backend:
+  env:
+    SIBYL_SERVER_HOST: "::"
+frontend:
+  env:
+    HOSTNAME: "::"
+```
+
+```yaml
+# sibyl-surrealdb chart
+surrealdb:
+  args:
+    - start
+    - --bind
+    - "[::]:8000"
+```
+
+The SurrealDB flag is needed because the upstream chart sets `SURREAL_BIND` to `0.0.0.0` in the
+container environment, and the command-line flag outranks it. Pods reach each other by Service name
+either way. Model providers and other IPv4-only endpoints need the cluster's own NAT64 and DNS64,
+and `backend.forwardedAllowIps` takes the ingress pods' IPv6 range in place of an IPv4 one.
+
 ## Scaling
 
 ### Manual Scaling
@@ -543,8 +573,8 @@ helm repo update
 helm upgrade sibyl sibyl/sibyl \
   -n sibyl \
   -f values-production.yaml \
-  --set backend.image.tag=1.5.0-rc.1 \
-  --set frontend.image.tag=1.5.0-rc.1
+  --set backend.image.tag=1.5.0 \
+  --set frontend.image.tag=1.5.0
 
 # Rollback if needed
 helm rollback sibyl -n sibyl

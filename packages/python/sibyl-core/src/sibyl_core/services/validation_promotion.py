@@ -350,6 +350,11 @@ async def validated_graph_currents(
         return {}
     if read is not None:
         read._check_org(organization_id)
+    # `$ids` is bound inside the block, so SurrealDB 4.0 cannot plan an `IN`
+    # over it and reads every capture in full, an empty list included. Each
+    # capture is fetched by its unique uuid instead, which 4.0 serves from
+    # idx_raw_captures_uuid one lookup per id; the organization is checked
+    # on the rows that come back.
     rows = await _read_query(
         """RETURN {
         LET $direct=(SELECT * FROM memory_derivations WHERE organization_id=$org
@@ -358,7 +363,8 @@ async def validated_graph_currents(
             WHERE organization_id=$org AND promoted_entity_id IN $entities);
         LET $ids=array::distinct(array::concat($direct.map(|$a| $a.target_id),$published.map(|$p| $p.candidate_id)));
         RETURN {
-            captures:(SELECT * FROM raw_captures WHERE organization_id=$org AND uuid IN $ids),
+            captures:(SELECT * FROM array::flatten($ids.map(|$id|
+                (SELECT * FROM raw_captures WHERE uuid=$id))) WHERE organization_id=$org),
             associations:(SELECT * FROM memory_derivations WHERE organization_id=$org
                 AND target_kind='raw_capture' AND target_id IN $ids),
             direct:$direct, published:$published

@@ -274,14 +274,13 @@ async def test_operator_primary_and_cleanup_failures_remain_visible(monkeypatch,
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     "server_version",
-    # The release before the supported one, a pre-release and a patch that share
-    # its prefix, the next minor, and an older major.
+    # Older majors, then a pre-release and a later patch of the supported
+    # release: both share its prefix and neither is it.
     [
         "surrealdb-3.2.4",
-        "surrealdb-4.0.0-rc.1",
-        "surrealdb-4.0.1+future",
-        "surrealdb-4.1.0",
         "surrealdb-2.3.10",
+        f"{SURREAL_SERVER_VERSION_STRING}-rc.1",
+        f"{SURREAL_SERVER_VERSION_STRING}0+future",
     ],
 )
 async def test_operator_unknown_engine_version_closes_without_begin(monkeypatch, server_version):

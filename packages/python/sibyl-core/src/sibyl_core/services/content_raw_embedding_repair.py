@@ -33,6 +33,7 @@ from sibyl_core.embeddings.provenance import (
     same_vector_identity,
     stamp_unchanged_predicate,
     vector_identity,
+    vector_identity_differs_from,
     vector_identity_differs_predicate,
     vector_space,
     vector_space_predicate,
@@ -51,6 +52,8 @@ from sibyl_core.services.embedding_sweep import (
     STATE_PROJECTION,
     page_after_cursor,
     plane_current,
+    scan_projection,
+    scan_saw_everything,
 )
 
 log = structlog.get_logger()
@@ -154,12 +157,51 @@ _RAW_EMBEDDING_OWED_PREDICATE = (
     + vector_identity_differs_predicate("metadata.embedding_metadata", "expected_metadata")
     + ")"
 )
-_RAW_EMBEDDING_WALK_QUERY = (
-    f"SELECT {_RAW_EMBEDDING_WALK_FIELDS} FROM raw_captures "
-    "WHERE organization_id = $organization_id AND uuid >= $cursor "
-    f"AND deleted_at = NONE AND {_RAW_EMBEDDING_OWED_PREDICATE} "
-    "ORDER BY uuid ASC LIMIT $limit;"
-)
+
+
+def _raw_owed_predicate(expected_metadata: Mapping[str, object]) -> str:
+    """``_RAW_EMBEDDING_OWED_PREDICATE`` in comparisons a scan tests before decoding a row.
+
+    The same rows, for the stamp ``$expected_metadata`` is bound to (see
+    ``vector_identity_differs_from``). The reads below use it; the progress
+    count decodes every row whatever its predicate and keeps the other.
+    """
+    return (
+        "(embedding = NONE OR metadata.embedding_metadata IN [NONE, NULL] "
+        "OR metadata.embedding_metadata.stamp_version IN [NONE, NULL] OR "
+        + vector_identity_differs_from(
+            "metadata.embedding_metadata", "expected_metadata", expected_metadata
+        )
+        + ")"
+    )
+
+
+# The same page two ways, as ``SweepTable.walk_query`` reads a graph table:
+# through the organization's uuid index by default, by a scan of the table
+# when ``_raw_owed_scan_query`` found that a page holds everything owed.
+def _raw_walk_query(expected_metadata: Mapping[str, object], *, scan: bool = False) -> str:
+    return (
+        f"SELECT {_RAW_EMBEDDING_WALK_FIELDS} FROM raw_captures"
+        f"{' WITH NOINDEX' if scan else ''} "
+        "WHERE organization_id = $organization_id AND uuid >= $cursor "
+        f"AND deleted_at = NONE AND {_raw_owed_predicate(expected_metadata)} "
+        "ORDER BY uuid ASC LIMIT $limit;"
+    )
+
+
+# Any ``$limit`` rows a scan of the table cannot pass over for this
+# organization: its owed captures, and every other organization's capture
+# (see ``scan_saw_everything``), of which it returns only that it is one.
+def _raw_owed_scan_query(expected_metadata: Mapping[str, object]) -> str:
+    return (
+        f"SELECT {scan_projection('organization_id', 'organization_id')} "
+        "FROM raw_captures WITH NOINDEX "
+        "WHERE organization_id != $organization_id "
+        f"OR (deleted_at = NONE AND {_raw_owed_predicate(expected_metadata)}) "
+        "LIMIT $limit;"
+    )
+
+
 # Read by record id (see the writes below), so the page costs the rows it
 # returns whatever the table holds and whichever index the planner likes.
 _RAW_EMBEDDING_FETCH_QUERY = (
@@ -473,10 +515,13 @@ async def repair_raw_capture_embeddings(
     or refused capture keeps the plane open so every pass counts it and
     retries it once its wait ends. The walk selects only the columns the candidate decision needs and lets
     the server drop rows whose vector already matches the configured provider,
-    so a fully current organization returns one empty page. The server still
-    reads every one of the organization's captures to find that out, because
-    the stamp predicate cannot be served from an index: about 1.3 s per 20,000
-    captures each pass on a native 3.2 server. Text is fetched only for the
+    so a fully current organization returns one empty page. No index serves
+    the stamp predicate, so the server still looks at every capture to find
+    that out. When the organization owns the table that is a scan that
+    decodes only the captures it returns, about 0.15 s per 10,000 on
+    SurrealDB 4. In a table organizations share, the organization's index is
+    walked and each of its captures decoded, about 1.7 s per 10,000 (see
+    ``scan_saw_everything``). Text is fetched only for the
     rows about to be embedded. A provider whose dimensions differ from
     the schema's embedding field is refused up front: every write would fail
     the typed-array check and the paid embedding call would repeat each pass.
@@ -551,6 +596,20 @@ async def _run_pass(
     cursor = start
     finished = False
     try:
+        # One scan that decodes only owed captures says how to read the pages.
+        # A converged organization that owns the table costs that scan and a
+        # second like it; through the index each page decoded every capture
+        # the organization has (1.7 s at 9,800) to return the few it owes.
+        scanned = await run.rows(
+            _raw_owed_scan_query(run.expected_metadata),
+            organization_id=run.organization_id,
+            expected_metadata=run.expected_metadata,
+            limit=page_size + 1,
+        )
+        walk_query = _raw_walk_query(
+            run.expected_metadata,
+            scan=scan_saw_everything(scanned, page_size),
+        )
         # Resume after the saved cursor, then wrap round to the rows before it.
         segments: list[tuple[str, str | None]] = (
             [(start, None), ("", start)] if start else [("", None)]
@@ -565,7 +624,7 @@ async def _run_pass(
                     status, resume = REPAIR_LEASE_LOST, cursor
                     break
                 fetched = await run.rows(
-                    _RAW_EMBEDDING_WALK_QUERY,
+                    walk_query,
                     organization_id=run.organization_id,
                     cursor=cursor,
                     expected_metadata=run.expected_metadata,

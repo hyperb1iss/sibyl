@@ -17,6 +17,7 @@ Each dispatch runs these gates on the candidate:
 | Job or step                 | What it proves                                                                                                                         |
 | --------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
 | Preflight                   | A real cut runs only on `main`, and only on the commit its dry run proved (`expected_sha`). A dry run may rehearse any branch.         |
+| Release notes key           | The provider accepts the release notes key and still serves its model. The notes step itself runs only on the real cut.                |
 | Image CVE gate              | The `api` and `web` images, built for `amd64` and `arm64`, carry no fixable high or critical advisory.                                 |
 | E2E gate                    | The API, CLI and browser end-to-end suites pass against a production-shaped fixture (SurrealDB, API, worker, seeded corpus, frontend). |
 | Nightly Regression evidence | A Nightly Regression run on the candidate finished with every job green. The job finds one, or dispatches one and waits for it.        |
@@ -53,6 +54,13 @@ The release parser rejects aliases such as `alpha`, `beta`, `preview`, and `pre`
 validates the version and checks that its tag is free before it creates the version commit, so no
 local check is needed. Leaving `version` empty bumps the patch (or the part named by the `bump`
 input) from `VERSION`.
+
+A release candidate publishes every versioned artifact: the Python packages, the versioned image
+tags, the Helm charts and a GitHub prerelease with its evidence assets. It moves no channel default.
+The Homebrew tap and the AUR keep the current final release, the `latest` image tag stays where it
+is, and the GitHub release stays a prerelease that is not marked latest. The formula is still
+generated and install-tested and the PKGBUILD is still generated, and both are attached to the
+release. Publish treats any tag with a suffix as a candidate.
 
 ## Check live project state
 
@@ -159,7 +167,8 @@ these state changes in order:
 5. The publish workflow runs its own RC gate on the tagged checkout, then scans, signs, and
    publishes the exact release channels.
 6. The final publish job attaches the evidence assets while the release is still a prerelease. A
-   separate step that carries no files then promotes the release to full and latest.
+   separate step that carries no files then promotes a final release to full and latest. A release
+   candidate skips the promotion and stays a prerelease.
 
 Anything that fails before the promotion step leaves a visible prerelease that is never presented as
 the current version. Do not create or replace the tag by hand while either workflow is running.
@@ -183,8 +192,10 @@ Check every published channel from the publish summary:
 - immutable Helm chart archives and repository index
 - GitHub release assets and final release body
 
-The release is complete only when the GitHub object is no longer a prerelease and every listed
-artifact points at the recorded version.
+A final release is complete only when the GitHub object is no longer a prerelease and every listed
+artifact points at the recorded version. A release candidate is complete as a prerelease: its
+versioned artifacts point at the recorded version, while the Homebrew tap, the AUR and the `latest`
+image tag still name the last final release.
 
 ## Keep the receipts
 

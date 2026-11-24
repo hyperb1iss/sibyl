@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import shutil
 import subprocess
 import sys
@@ -127,7 +128,9 @@ def test_ci_runs_release_and_helm_contract_jobs() -> None:
 
     assert "tools/release/ci_changes.py" in workflow
     assert "moon run release-workflow-test" in workflow
-    assert "uses: azure/setup-helm@v5.0.1" in workflow
+    # Helm comes from an exact release of the setup action, whichever one
+    # Dependabot last moved the workflow to; naming it fails every such bump.
+    assert re.search(r"uses: azure/setup-helm@v\d+\.\d+\.\d+\n", workflow)
     assert "moon run helm-test" in workflow
     assert "moon run e2e:test-browser" in workflow
     assert "profile: defaults" in workflow

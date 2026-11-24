@@ -88,6 +88,31 @@ jobs:
           DRY_RUN: ${{ inputs.dry_run }}
         run: echo "Candidate $GITHUB_SHA on $GITHUB_REF (dry_run=$DRY_RUN)"
 
+      # The release job spends this key on its release notes step, which a dry
+      # run skips. Asking the provider for the model costs nothing, and it
+      # fails a dead key or a retired model in the rehearsal, before any gate
+      # runs, instead of on the real cut after all of them have passed.
+      - name: "△ Verify the release notes key"
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          RELEASE_NOTES_MODEL: claude-opus-5
+        run: |
+          set -euo pipefail
+          if [[ -z "$ANTHROPIC_API_KEY" ]]; then
+            echo "::error::The ANTHROPIC_API_KEY secret is empty, so the release notes step cannot run."
+            exit 1
+          fi
+          status="$(curl --silent --show-error --max-time 30 --retry 2 \
+            --output /dev/null --write-out '%{http_code}' \
+            --header "x-api-key: $ANTHROPIC_API_KEY" \
+            --header "anthropic-version: 2023-06-01" \
+            "https://api.anthropic.com/v1/models/$RELEASE_NOTES_MODEL")"
+          if [[ "$status" != "200" ]]; then
+            echo "::error::Anthropic answered $status for $RELEASE_NOTES_MODEL with the ANTHROPIC_API_KEY secret."
+            echo "::error::401 means the key is dead, so replace the secret. 404 means the model is gone, so move the release notes step to a current one."
+            exit 1
+          fi
+
   # =========================================================================
   # Image CVE gate: prove the shipped images are clean before a release exists
   #

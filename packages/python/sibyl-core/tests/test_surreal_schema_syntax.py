@@ -1191,11 +1191,12 @@ def test_graph_retrieval_key_columns_are_versioned_and_indexed() -> None:
         assert f"DEFINE FIELD IF NOT EXISTS {field} ON entity TYPE option<array<string>>" in (
             NODE_DEFINITIONS
         )
-    # The `.*` is the contract, not a detail. On SurrealDB 3.2.3 an index on the
-    # bare array field turns the arm's CONTAINSANY into a full table scan, and
-    # turns a bare equality into zero rows unless the WHERE clause happens to
-    # carry a second predicate. Dropping the suffix would leave every test green
-    # while the lane scanned the table.
+    # The `.*` is what lets a planner serve a key lookup from this index: on
+    # the bare array field a CONTAINSANY scans the table and a bare equality
+    # matches nothing. SurrealDB 4.0.1 adds a `= NONE` branch to that lookup
+    # that reads every row without keys, so the exact-key lane scans with
+    # ANYINSIDE until the planner drops the branch; the definition stays so the
+    # index read can come back without a migration.
     assert (
         "DEFINE INDEX OVERWRITE idx_entity_retrieval_keys "
         "ON entity FIELDS retrieval_keys_normalized.*" in migration_sql

@@ -293,6 +293,22 @@ def test_real_cut_refuses_any_ref_but_main() -> None:
     assert preflight["permissions"] == {}
 
 
+def test_dry_run_proves_the_release_notes_key() -> None:
+    # The release notes step runs only on a real cut, so without this probe a
+    # dead key or a retired model surfaces after every gate has passed.
+    jobs = _release_jobs()
+    probe = _steps_by_name(jobs["preflight"])["△ Verify the release notes key"]
+    notes = _steps_by_name(jobs["release"])["◈ Generate AI release notes"]
+
+    assert "if" not in probe
+    assert probe["env"] == {
+        "ANTHROPIC_API_KEY": notes["with"]["api-key"],
+        "RELEASE_NOTES_MODEL": notes["with"]["model"],
+    }
+    assert "https://api.anthropic.com/v1/models/$RELEASE_NOTES_MODEL" in probe["run"]
+    assert probe["run"].count("exit 1") == len(("empty", "refused"))
+
+
 def test_real_cut_releases_only_the_commit_its_dry_run_proved() -> None:
     # gh workflow run --ref main takes main's head at dispatch time, so the
     # approval is pinned to a SHA and a moved main is refused, not released.
@@ -571,12 +587,20 @@ def test_image_cve_gate_is_shared_by_every_caller() -> None:
     # lives in one composite action and every caller delegates to it.
     action = (REPO_ROOT / ".github/actions/trivy-image-gate/action.yml").read_text(encoding="utf-8")
 
-    assert "aquasecurity/trivy-action@v0.36.0" in action
+    # An exact Trivy action release, whichever one Dependabot last moved the
+    # gate to; a version literal here fails every such bump.
+    assert re.search(r"uses: aquasecurity/trivy-action@v\d+\.\d+\.\d+\n", action)
     assert "format: cyclonedx" in action
     assert "severity: HIGH,CRITICAL" in action
     assert 'exit-code: "1"' in action
     assert "vuln-type: os,library" in action
     assert "ignore-unfixed: true" in action
+    # Every Trivy step scans for vulnerabilities only. Left unset, Trivy also
+    # runs its secret scanner, and the gate then fails on sample credentials
+    # in third-party packages rather than on an advisory.
+    trivy_steps = action.count("uses: aquasecurity/trivy-action@")
+    assert trivy_steps
+    assert action.count("scanners: vuln") == trivy_steps
     # Trivy reads a .trivyignore from the working directory unless told
     # otherwise, so the suppression file is named explicitly. Without this an
     # untracked file could silence every gate with nobody accountable.
@@ -762,9 +786,9 @@ def test_publish_workflow_uploads_python_homebrew_and_aur_artifacts() -> None:
     assert "HOMEBREW_TAP_TOKEN cannot authenticate" in workflow
     assert "HOMEBREW_TAP_TOKEN cannot push to hyperb1iss/homebrew-tap" in workflow
     assert "persist-credentials: true" in workflow
-    assert (
-        "KSXGitHub/github-actions-deploy-aur@084b0d9b15415bf9cdb65d44dad1efe37a354050" in workflow
-    )
+    # The AUR deploy action is held to a full commit, whichever one Dependabot
+    # last moved the workflow to; naming the commit here fails every such bump.
+    assert re.search(r"uses: KSXGitHub/github-actions-deploy-aur@[0-9a-f]{40}\b", workflow)
     assert all(
         fragment in workflow
         for fragment in (
@@ -779,6 +803,50 @@ def test_publish_workflow_uploads_python_homebrew_and_aur_artifacts() -> None:
     assert "AUR_SSH_KEY" in workflow
     assert workflow.index("gh-action-pypi-publish") < workflow.index("homebrew_formula.py")
     assert workflow.index("gh-action-pypi-publish") < workflow.index("aur_pkgbuild.py")
+
+
+def test_release_candidate_moves_no_channel_default() -> None:
+    # A candidate is installable by version on every channel and is nobody's
+    # current release. With one path for every version, a candidate replaced
+    # the tap formula, the latest image tag and the release marked latest.
+    workflow = cast("dict[str, Any]", yaml.safe_load(_publish_workflow()))
+    jobs = workflow["jobs"]
+    held = "env.RELEASE_CANDIDATE != 'true'"
+    shell_gate = 'if [[ "$RELEASE_CANDIDATE" != "true" ]]; then'
+
+    # A final tag has no hyphen, so a suffix nobody planned for (rc1, beta.1)
+    # is held back like a candidate instead of being published as current.
+    assert workflow["env"]["RELEASE_CANDIDATE"] == "${{ contains(inputs.tag, '-') }}"
+
+    for job, step, condition in (
+        ("homebrew", "► Commit tap update", f"${{{{ {held} }}}}"),
+        (
+            "aur",
+            "► Publish to AUR",
+            f"${{{{ steps.aur_state.outputs.publish == 'true' && {held} }}}}",
+        ),
+        ("release", "◆ Promote release to latest", f"${{{{ {held} }}}}"),
+    ):
+        assert _steps_by_name(jobs[job])[step]["if"] == condition, step
+
+    # The formula and the PKGBUILD are release evidence for a candidate too,
+    # so their jobs run and only the pushes are held back.
+    assert jobs["homebrew"]["if"] == "${{ !inputs.dry_run }}"
+    assert jobs["aur"]["if"] == "${{ !inputs.dry_run }}"
+
+    merge = _steps_by_name(jobs["docker-merge"])["► Create manifest list"]["run"]
+    assert 'tags=(-t "${repo}:${VERSION}")' in merge
+    assert f'{shell_gate}\n    tags+=(-t "${{repo}}:latest")\n  fi' in merge
+    assert merge.count(":latest") == 1
+
+    body = _steps_by_name(jobs["release"])["◇ Prepare release body"]["run"]
+    gate = body.index(shell_gate)
+    tap = body.index("brew install hyperb1iss/tap/sibyl")
+    aur = body.index("paru -S sibyl")
+    # The gate has to be shell, not text inside a heredoc: the heredoc before
+    # it is closed, and the one it guards closes right before its `fi`.
+    assert body[:gate].endswith("EOF\n")
+    assert gate < tap < aur < body.index("EOF\nfi\n", aur)
 
 
 def test_publish_workflow_keeps_install_instructions_current() -> None:
@@ -802,7 +870,9 @@ def test_publish_workflow_attaches_docker_and_release_evidence() -> None:
     # so publish is checked for delegating to it rather than for inlining it.
     # test_image_cve_gate_is_shared_by_every_caller owns the configuration.
     assert "uses: ./.github/actions/trivy-image-gate" in workflow
-    assert "sigstore/cosign-installer@v4.1.2" in workflow
+    # Signing must use a released installer, whichever one Dependabot last
+    # moved the workflow to; a version literal here fails every such bump.
+    assert re.search(r"uses: sigstore/cosign-installer@v\d+\.\d+\.\d+\n", workflow)
     assert "cosign sign --yes" in workflow
     assert "Upload Cosign receipt" in workflow
     assert "Download Python distributions" in workflow
@@ -849,7 +919,9 @@ def test_publish_workflow_packages_and_publishes_immutable_helm_charts() -> None
 
     assert "helm-package:" in workflow
     assert "helm-publish:" in workflow
-    assert "azure/setup-helm@v5.0.1" in workflow
+    # An exact release of the setup action, not a floating tag and not a
+    # version named here, which would fail every Dependabot bump of it.
+    assert re.search(r"uses: azure/setup-helm@v\d+\.\d+\.\d+\n", workflow)
     assert "version: v3.20.2" in workflow
     assert "helm dependency list charts/surrealdb" in workflow
     assert "helm package charts/sibyl" in workflow
@@ -1049,14 +1121,16 @@ HOMEBREW_ARTIFACTS = {
 def test_homebrew_formula_installs_the_cli_with_pinned_hashed_dependencies() -> None:
     formula = render_formula(
         release_version="1.0.0-rc.1",
-        python_version=pep440_version("1.0.0-rc.1"),
         artifacts=HOMEBREW_ARTIFACTS,
         requirements=REQUIREMENTS,
     )
 
     assert "class Sibyl < Formula" in formula
     assert 'version "1.0.0-rc.1"' in formula
-    assert 'PYTHON_PACKAGE_VERSION = "1.0.0rc1"' in formula
+    # An rc wheel reports the release spelling, so the formula's own test must
+    # look for that and not for PyPI's normalized 1.0.0rc1.
+    assert 'assert_match version.to_s, shell_output("#{bin}/sibyl --version")' in formula
+    assert "PYTHON_PACKAGE_VERSION" not in formula
     assert 'resource "sibyl-core"' in formula
     assert 'bin.install_symlink libexec/"bin/sibyl"' in formula
     # Homebrew's pip_install passes --no-deps, so every third-party pin has to
@@ -1096,7 +1170,6 @@ def test_homebrew_formula_refuses_requirements_pip_could_not_install(
     with pytest.raises(RuntimeError, match=problem):
         render_formula(
             release_version="1.0.0",
-            python_version="1.0.0",
             artifacts=HOMEBREW_ARTIFACTS,
             requirements=requirements,
         )

@@ -838,6 +838,46 @@ async def test_a_reembed_during_a_pass_is_not_undone_when_that_pass_ends(runtime
     assert (await _rows(runtime, "entity"))["row-2"]["stamp"]["model"] == "current"
 
 
+def test_the_sweep_scans_project_nothing_of_another_scopes_row() -> None:
+    """A scan matches other scopes' rows to stop early in a shared table; it returns only that."""
+    from sibyl_core.services.document_embedding_sweep import document_chunk_sweep_table
+    from sibyl_core.services.embedding_sweep import scan_saw_everything
+    from sibyl_core.services.graph_embedding_sweep import (
+        entity_sweep_table,
+        relationship_sweep_table,
+    )
+
+    stamp = CountingProvider("current").metadata.to_dict()
+    for table in (
+        entity_sweep_table(EMBEDDING_DIM),
+        relationship_sweep_table(EMBEDDING_DIM),
+        document_chunk_sweep_table(),
+    ):
+        scope = table.scope_field
+        for scan in (
+            table.owed_scan_query(stamp),
+            table.legacy_scan_query(),
+            table.legacy_scan_query(reopened=True),
+        ):
+            projection, rest = scan.split(" FROM ", 1)
+            assert projection == (
+                f"SELECT IF {scope} = $scope THEN uuid ELSE NONE END AS uuid, "
+                f"({scope} = $scope) AS in_scope"
+            )
+            # The WHERE still matches every foreign row, undecoded like the rest.
+            assert rest.startswith(f"{table.name} WITH NOINDEX WHERE {scope} != $scope OR (")
+            assert "??" not in scan
+
+    own = {"uuid": "mine", "in_scope": True}
+    foreign = {"uuid": None, "in_scope": False}
+    assert scan_saw_everything([], 2)
+    assert scan_saw_everything([own, own], 2)
+    assert not scan_saw_everything([own, foreign], 2)
+    assert not scan_saw_everything([own, own, own], 2)
+    # A row that does not say whose it is counts as foreign.
+    assert not scan_saw_everything([{"uuid": "mine"}], 2)
+
+
 def test_every_kind_of_dropped_connection_or_timeout_is_transient() -> None:
     class ConnectTimeout(Exception):
         pass

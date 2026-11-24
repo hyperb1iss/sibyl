@@ -50,7 +50,7 @@ def surreal_version(tag: str) -> Version | None:
 
 
 def shipped_surreal_tag() -> str:
-    """The tag of the SurrealDB server this CLI runs, such as `v4.0.0`."""
+    """The tag of the SurrealDB server this CLI runs, such as `v4.0.1`."""
     return SURREAL_IMAGE.rpartition(":")[2]
 
 
