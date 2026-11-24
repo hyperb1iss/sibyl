@@ -699,7 +699,7 @@ def test_watch_rejects_a_wait_beyond_the_server_cap() -> None:
 def test_an_event_is_marked_apart_from_what_people_say() -> None:
     event = _message("m1", "Started: Fix the fixture (task t1)", kind="event")
 
-    assert "▸ Started: Fix the fixture (task t1)" in net.watch_line(event)
+    assert "[dim]▸[/dim] Started: Fix the fixture (task t1)" in net.watch_line(event)
     assert "▸" not in net.watch_line(_message("m2", "Started: looking at it now"))
 
 
