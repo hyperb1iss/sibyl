@@ -11,7 +11,11 @@ export const NET_THREAD_LIMIT = 500;
  */
 export const NET_SETTLE_MS = 2000;
 
-export type NetMessageKind = 'message' | 'decision';
+/**
+ * An `event` is a fact the server recorded (a task changing state), posted
+ * as whoever made the change. Only the server writes one.
+ */
+export type NetMessageKind = 'message' | 'decision' | 'event';
 
 /** Who posted: the user Sibyl verified, plus the labels their client sent. */
 export interface NetAuthor {
@@ -67,6 +71,11 @@ export interface NetThread {
   reflected_through: string | null;
   reflection_source_id: string | null;
   reflection_error: string | null;
+  /**
+   * Whether a message still waits to be distilled. Events never set it, so a
+   * thread can be caught up with `last_message_at` past `reflected_through`.
+   */
+  reflection_pending: boolean;
   reflection_skipped: string[];
 }
 

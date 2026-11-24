@@ -70,7 +70,10 @@ from sibyl_core.services import content_client
 
 log = structlog.get_logger(__name__)
 
-type NetMessageKind = Literal["message", "decision"]
+# An ``event`` is a fact the server recorded about something else (a task
+# changing state), posted so watchers hear of it. It is never something an
+# author said, so on its own it gives distillation nothing to reflect.
+type NetMessageKind = Literal["message", "decision", "event"]
 
 MAX_BODY_CHARS = 16_000
 MAX_THREAD_CHARS = 200
@@ -115,7 +118,8 @@ _MESSAGE_FIELDS = (
 _THREAD_FIELDS = (
     "organization_id, channel, thread, project_id, message_count, first_message_at, "
     "last_message_at, reflected_through, reflected_through_ns, reflected_through_uuid, "
-    "reflection_source_id, reflection_attempts, reflection_error, reflection_skipped"
+    "reflection_source_id, reflection_attempts, reflection_error, reflection_skipped, "
+    "reflection_pending"
 )
 # One record per (organization, channel, thread). Concurrent upserts of the
 # same thread then contend for a single key, which the server reports as a
@@ -152,8 +156,8 @@ RETURN {{
         message_count = (message_count ?? 0) + 1,
         first_message_at = first_message_at ?? $created,
         last_message_at = time::max([last_message_at ?? $created, $created]),
-        reflection_attempts = 0,
-        reflection_pending = true,
+        reflection_attempts = (reflection_attempts ?? 0) * $quiet,
+        reflection_pending = (reflection_pending ?? false) OR ($quiet = 0),
         updated_at = time::now()
     RETURN NONE;
     RETURN (SELECT {_MESSAGE_FIELDS} FROM net_messages WHERE uuid = $uuid);
@@ -177,9 +181,9 @@ CHANNEL_THREADS_STATEMENT = (
     f"ORDER BY last_message_at DESC LIMIT {LISTING_LIMIT};"
 )
 
-# ``reflection_pending`` is set by every post and cleared only when a
-# distillation reaches the thread's last message, so selection ranges over
-# the threads with undistilled messages instead of all thread history.
+# ``reflection_pending`` is set by every post but an event and cleared only
+# when a distillation reaches the thread's last message, so selection ranges
+# over the threads with undistilled messages instead of all thread history.
 _IDLE_THREAD_CONDITIONS = (
     "reflection_pending = true "
     f"AND reflection_attempts < {MAX_REFLECTION_ATTEMPTS} "
@@ -494,6 +498,10 @@ class NetThreadState:
     reflection_attempts: int
     reflection_error: str | None
     reflection_skipped: tuple[str, ...] = ()
+    reflection_pending: bool = False
+    """Whether anything an author said still waits to be distilled. An event
+    past the watermark does not count, so this, not a comparison of times,
+    says whether the thread is caught up."""
     reflected_mark: NetCursor | None = None
     """The last distilled message's position, which the next window starts after."""
 
@@ -549,7 +557,9 @@ async def post_net_message(
     nothing written, when a plain message on a named thread names a project
     other than the thread's pin. The message keeps the project it named
     either way. ``thread_pin``, when given, is the thread's pin regardless of
-    the stored one, and is written onto the thread.
+    the stored one, and is written onto the thread. An ``event`` counts on
+    its thread like any message but leaves the thread's distillation state
+    as it found it.
     """
     # The API validates these on the way in; a direct caller is held to the
     # same rules, since the labels are printed inside transcript lines.
@@ -585,6 +595,9 @@ async def post_net_message(
                 channel=channel,
                 thread=thread,
                 kind=kind,
+                # An event leaves the thread's retry budget and pending mark
+                # as they stand; anything else resets one and sets the other.
+                quiet=1 if kind == "event" else 0,
                 project_id=project_id,
                 thread_pin=thread_pin if thread else None,
             )
@@ -1097,6 +1110,7 @@ def _thread_from_row(row: Mapping[str, object]) -> NetThreadState:
         reflection_attempts=_as_int(row.get("reflection_attempts")),
         reflection_error=_optional_str(row.get("reflection_error")),
         reflection_skipped=_string_tuple(row.get("reflection_skipped")),
+        reflection_pending=row.get("reflection_pending") is True,
         reflected_mark=_mark_from_row(row),
     )
 

@@ -158,13 +158,19 @@ async def author_directory(user_ids: Iterable[str]) -> dict[str, AuthorName]:
     return directory
 
 
+def _kind_label(kind: str) -> NetMessageKindLabel:
+    if kind == "decision":
+        return "decision"
+    return "event" if kind == "event" else "message"
+
+
 def net_message(record: NetMessageRecord, members: Mapping[str, AuthorName]) -> NetMessage:
     member = members.get(record.author_user_id)
     return NetMessage(
         id=record.id,
         channel=record.channel,
         thread=record.thread or None,
-        kind="decision" if record.kind == "decision" else "message",
+        kind=_kind_label(record.kind),
         body=record.body,
         project_id=record.project_id,
         author=NetAuthor(
@@ -956,6 +962,7 @@ async def list_threads(
                 reflected_through=state.reflected_through,
                 reflection_source_id=state.reflection_source_id,
                 reflection_error=state.reflection_error,
+                reflection_pending=state.reflection_pending,
                 reflection_skipped=list(state.reflection_skipped),
             )
             for state in states

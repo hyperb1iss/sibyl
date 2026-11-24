@@ -143,6 +143,7 @@ const BUSY_THREADS: NetThreadsResponse = {
     reflected_through: null,
     reflection_source_id: null,
     reflection_error: null,
+    reflection_pending: true,
     reflection_skipped: [],
   })),
 };
@@ -159,6 +160,7 @@ const THREADS: NetThreadsResponse = {
       reflected_through: '2026-11-05T10:06:00Z',
       reflection_source_id: 'source-transcript-1',
       reflection_error: null,
+      reflection_pending: false,
       reflection_skipped: ['u-grace: api key revoked'],
     },
   ],

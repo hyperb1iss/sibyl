@@ -125,13 +125,13 @@ describe('shellChannel', () => {
 });
 
 describe('isRemembered', () => {
-  it('is true once distillation reaches the last message', () => {
-    const last = '2026-11-05T10:00:00Z';
-    expect(isRemembered({ reflected_through: last, last_message_at: last })).toBe(true);
-    expect(isRemembered({ reflected_through: '2026-11-05T09:59:00Z', last_message_at: last })).toBe(
-      false
-    );
-    expect(isRemembered({ reflected_through: null, last_message_at: last })).toBe(false);
+  it('is true once nothing said is left to distill', () => {
+    const through = '2026-11-05T10:00:00Z';
+    expect(isRemembered({ reflected_through: through, reflection_pending: false })).toBe(true);
+    expect(isRemembered({ reflected_through: through, reflection_pending: true })).toBe(false);
+    expect(isRemembered({ reflected_through: null, reflection_pending: true })).toBe(false);
+    // A thread of events alone was never distilled, and has nothing waiting.
+    expect(isRemembered({ reflected_through: null, reflection_pending: false })).toBe(false);
   });
 });
 

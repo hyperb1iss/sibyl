@@ -19,6 +19,7 @@ from sibyl_core.services.net import (
     MAX_REFLECTION_ATTEMPTS,
     TRANSCRIPT_CONTINUATION,
     list_net_threads,
+    post_net_message,
 )
 from tests.test_routes_net import (
     api_key,
@@ -124,6 +125,58 @@ async def test_each_author_is_reflected_alone_into_the_pinned_project(
         source = await graph.entity_manager.get(str(call.pack.source_id))
         assert source.name == "sibylnet #reviews gh:acme/app#42"
         assert source.metadata.get("principal_id") == user
+    assert (await distill_idle_net_threads({}))["candidates"] == 0
+
+
+async def test_events_ride_along_as_context_and_never_get_a_reflection_of_their_own(
+    org: SimpleNamespace, reflections: list[SimpleNamespace]
+) -> None:
+    async def event(author: str, body: str) -> None:
+        await post_net_message(
+            organization_id=org.id,
+            channel="#reviews",
+            thread="gh:acme/app#7",
+            kind="event",
+            body=body,
+            author_user_id=author,
+        )
+
+    said = await post(
+        org,
+        org.ada,
+        channel="#reviews",
+        thread="gh:acme/app#7",
+        body="Decided: the fixture fix ships behind the migration.",
+    )
+    assert said.status_code == 201, said.text
+    await event(org.ada, "Started: Fix the flaky fixture (task 1)")
+    await event(org.grace, "In review: Fix the flaky fixture (task 1)")
+    await go_quiet(org)
+
+    summary = await distill_idle_net_threads({})
+
+    # Ada spoke, so her lines are reflected with her event as context. Grace
+    # only has an event in the window, which is nothing to decide from.
+    assert summary["distilled"] == 1, summary
+    assert [call.principal_id for call in reflections] == [org.ada]
+    assert "Started: Fix the flaky fixture (task 1)" in reflections[0].transcript
+    assert "In review" not in reflections[0].transcript
+
+    # An event that lands while the thread is being reflected can leave it
+    # pending with nothing but events past the watermark.
+    await event(org.grace, "Completed: Fix the flaky fixture (task 1)")
+    await org.content.execute_query(
+        "UPDATE net_threads SET reflection_pending = true WHERE organization_id = $org;",
+        org=org.id,
+    )
+    await go_quiet(org)
+
+    summary = await distill_idle_net_threads({})
+
+    assert (summary["settled_empty"], summary["distilled"]) == (1, 0), summary
+    assert len(reflections) == 1
+    state = await thread_row(org, "#reviews", "gh:acme/app#7")
+    assert state.reflected_through == state.last_message_at
     assert (await distill_idle_net_threads({}))["candidates"] == 0
 
 

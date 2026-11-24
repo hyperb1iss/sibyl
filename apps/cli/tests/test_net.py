@@ -486,6 +486,7 @@ def test_channels_and_threads_render_tables() -> None:
                 "reflected_through": "2026-11-02T10:15:00+00:00",
                 "reflection_source_id": "raw_src_1",
                 "reflection_error": None,
+                "reflection_pending": False,
             },
             {
                 "channel": "#reviews",
@@ -497,6 +498,7 @@ def test_channels_and_threads_render_tables() -> None:
                 "reflected_through": None,
                 "reflection_source_id": None,
                 "reflection_error": None,
+                "reflection_pending": True,
             },
         ]
     }
@@ -694,6 +696,46 @@ def test_watch_rejects_a_wait_beyond_the_server_cap() -> None:
     result = _invoke(FakeNetClient(), ["watch", "--wait", "26"])
 
     assert result.exit_code == 2
+
+
+@pytest.mark.parametrize(
+    ("row", "shown"),
+    [
+        # An event after the last distilled message moves the thread's last
+        # activity, and the thread is still caught up.
+        (
+            {
+                "reflected_through": "2026-11-02T10:15:00+00:00",
+                "last_message_at": "2026-11-02T11:40:00+00:00",
+                "reflection_pending": False,
+            },
+            "distilled",
+        ),
+        (
+            {
+                "reflected_through": "2026-11-02T10:15:00+00:00",
+                "last_message_at": "2026-11-02T11:40:00+00:00",
+                "reflection_pending": True,
+            },
+            "through",
+        ),
+        ({"reflected_through": None, "reflection_pending": True}, "pending"),
+        # A thread that has only ever held events has nothing to distill.
+        ({"reflected_through": None, "reflection_pending": False}, "[dim]-[/dim]"),
+        ({"reflection_error": "reflect_memory failed", "reflection_pending": True}, "failed"),
+    ],
+)
+def test_a_thread_is_caught_up_when_nothing_said_is_waiting(
+    row: dict[str, object], shown: str
+) -> None:
+    assert shown in net._distilled(row)
+
+
+def test_an_event_is_marked_apart_from_what_people_say() -> None:
+    event = _message("m1", "Started: Fix the fixture (task t1)", kind="event")
+
+    assert "[dim]▸[/dim] Started: Fix the fixture (task t1)" in net.watch_line(event)
+    assert "▸" not in net.watch_line(_message("m2", "Started: looking at it now"))
 
 
 def test_terminal_control_sequences_never_reach_the_terminal() -> None:

@@ -14,7 +14,10 @@ from sibyl_core.services.net import (
     normalize_thread,
 )
 
-NetMessageKindLabel = Literal["message", "decision"]
+NetMessageKindLabel = Literal["message", "decision", "event"]
+# What a client may post. An event is written only by the server, about a
+# change it made itself.
+NetPostKindLabel = Literal["message", "decision"]
 
 
 class NetAgentLabels(BaseModel):
@@ -51,7 +54,7 @@ class NetMessageCreateRequest(NetAgentLabels):
         default=None,
         description="Free-text thread, e.g. `gh:acme/app#42`, a task id or a slug",
     )
-    kind: NetMessageKindLabel = "message"
+    kind: NetPostKindLabel = "message"
     project_id: str | None = Field(
         default=None,
         min_length=1,
@@ -146,6 +149,13 @@ class NetThread(BaseModel):
     reflected_through: datetime | None
     reflection_source_id: str | None
     reflection_error: str | None
+    reflection_pending: bool = Field(
+        default=False,
+        description=(
+            "Whether a message still waits to be distilled. Events never set it, so a "
+            "thread can be caught up with `last_message_at` past `reflected_through`"
+        ),
+    )
     reflection_skipped: list[str] = Field(
         default_factory=list,
         description="Authors the last distillation could not reflect, as `<user id>: <reason>`",
@@ -213,6 +223,7 @@ __all__ = [
     "NetMessageCreateRequest",
     "NetMessageCreateResponse",
     "NetMessageKindLabel",
+    "NetPostKindLabel",
     "NetPresenceResponse",
     "NetRecentPoster",
     "NetThread",

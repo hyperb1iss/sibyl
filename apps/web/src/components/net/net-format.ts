@@ -282,10 +282,13 @@ export function runSpanPhrase(messages: NetMessage[]): string {
 // Threads
 // ---------------------------------------------------------------------------
 
-/** Every message in the thread has been distilled into memory. */
-export function isRemembered(thread: Pick<NetThread, 'reflected_through' | 'last_message_at'>) {
-  if (!thread.reflected_through || !thread.last_message_at) return false;
-  return Date.parse(thread.reflected_through) >= Date.parse(thread.last_message_at);
+/**
+ * Everything said in the thread has been distilled into memory. The server
+ * says so: an event can land after the last distilled message without
+ * leaving anything to distill, so the two times alone can't tell.
+ */
+export function isRemembered(thread: Pick<NetThread, 'reflected_through' | 'reflection_pending'>) {
+  return Boolean(thread.reflected_through) && !thread.reflection_pending;
 }
 
 /** "over 6 minutes", the time between a thread's first and last message. */

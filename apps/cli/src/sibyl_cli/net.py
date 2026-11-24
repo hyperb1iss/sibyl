@@ -251,9 +251,11 @@ def _first_line(body: object) -> str:
 
 def watch_line(message: Mapping[str, Any]) -> str:
     """`<channel> <thread?> <author>(<agent>): <first line>` as Rich markup."""
-    marker = (
-        f"[{ELECTRIC_YELLOW}]◆[/{ELECTRIC_YELLOW}] " if message.get("kind") == "decision" else ""
-    )
+    marker = ""
+    if message.get("kind") == "decision":
+        marker = f"[{ELECTRIC_YELLOW}]◆[/{ELECTRIC_YELLOW}] "
+    elif message.get("kind") == "event":
+        marker = "[dim]▸[/dim] "
     head = " ".join([*_where(message), f"{_who(message)}:"])
     return f"{head} {marker}{escape(_first_line(message.get('body')))}"
 
@@ -292,6 +294,8 @@ def _print_message(message: Mapping[str, Any]) -> None:
         if memory_id := message.get("decision_memory_id"):
             decision += f" [dim]{escape(str(memory_id))}[/dim]"
         header.append(decision)
+    elif message.get("kind") == "event":
+        header.append("[dim]▸ event[/dim]")
     _print("  ".join(header))
     for line in _strip_controls(message.get("body")).splitlines() or [""]:
         console.print(f"  {escape(line)}", emoji=False, highlight=False)
@@ -300,17 +304,15 @@ def _print_message(message: Mapping[str, Any]) -> None:
 def _distilled(row: Mapping[str, Any]) -> str:
     if row.get("reflection_error"):
         return f"[{ERROR_RED}]failed[/{ERROR_RED}]"
-    through = _parse_time(row.get("reflected_through"))
-    if through is None:
+    through = row.get("reflected_through")
+    if row.get("reflection_pending"):
+        if through:
+            return f"[{ELECTRIC_YELLOW}]through {_short_time(through)}[/]"
         return "[dim]pending[/dim]"
-    last = _parse_time(row.get("last_message_at"))
-    try:
-        caught_up = last is None or through >= last
-    except TypeError:
-        caught_up = False
-    if caught_up:
+    if through:
         return f"[{SUCCESS_GREEN}]distilled[/{SUCCESS_GREEN}]"
-    return f"[{ELECTRIC_YELLOW}]through {_short_time(row.get('reflected_through'))}[/]"
+    # Only events so far: nothing an author said is waiting.
+    return "[dim]-[/dim]"
 
 
 def _rows(data: Mapping[str, Any], key: str) -> list[Mapping[str, Any]]:
