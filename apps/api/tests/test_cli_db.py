@@ -295,6 +295,8 @@ def test_restore_accepts_graph_export_payload(tmp_path: Path) -> None:
     restore_backup = AsyncMock(
         return_value=SimpleNamespace(
             success=True,
+            quarantined=[],
+            integrity_conflicts=[],
             entities_restored=2,
             relationships_restored=1,
             entities_skipped=0,
@@ -353,6 +355,8 @@ def test_restore_prefers_top_level_backup_metadata(tmp_path: Path) -> None:
     restore_backup = AsyncMock(
         return_value=SimpleNamespace(
             success=True,
+            quarantined=[],
+            integrity_conflicts=[],
             entities_restored=1,
             relationships_restored=1,
             entities_skipped=0,
@@ -395,6 +399,8 @@ def test_restore_prepares_graph_runtime_before_restore(tmp_path: Path) -> None:
     restore_backup = AsyncMock(
         return_value=SimpleNamespace(
             success=True,
+            quarantined=[],
+            integrity_conflicts=[],
             entities_restored=1,
             relationships_restored=0,
             entities_skipped=0,
@@ -421,6 +427,47 @@ def test_restore_prepares_graph_runtime_before_restore(tmp_path: Path) -> None:
 
     assert result.exit_code == 0
     prepare.assert_awaited_once_with("org-123", clean=False)
+
+
+def _restore_exit_code(tmp_path: Path, restore_backup: AsyncMock) -> int:
+    graph_file = tmp_path / "graph-export.json"
+    graph_file.write_text(
+        json.dumps({"entities": [{"id": "entity-1"}], "relationships": []}),
+        encoding="utf-8",
+    )
+    with (
+        patch("sibyl.cli.db._prepare_graph_runtime_async", AsyncMock()),
+        patch("sibyl_core.tools.admin.restore_backup", restore_backup),
+    ):
+        result = runner.invoke(
+            db_cli.app,
+            ["restore", str(graph_file), "--org-id", "org-123", "--yes"],
+        )
+    return result.exit_code
+
+
+def test_restore_exits_nonzero_when_the_restore_reports_failure(tmp_path: Path) -> None:
+    restore_backup = AsyncMock(
+        return_value=SimpleNamespace(
+            success=False,
+            quarantined=[],
+            integrity_conflicts=[],
+            entities_restored=0,
+            relationships_restored=0,
+            entities_skipped=0,
+            relationships_skipped=0,
+            duration_seconds=0.1,
+            errors=["relates_to restore refused partway"],
+        )
+    )
+
+    assert _restore_exit_code(tmp_path, restore_backup) == 1
+
+
+def test_restore_exits_nonzero_when_the_restore_raises(tmp_path: Path) -> None:
+    restore_backup = AsyncMock(side_effect=RuntimeError("connection closed"))
+
+    assert _restore_exit_code(tmp_path, restore_backup) == 1
 
 
 def test_prepare_graph_runtime_bootstraps_native_schema_and_clears_rows() -> None:

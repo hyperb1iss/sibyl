@@ -118,14 +118,14 @@ async def _published_checkpoint_fingerprints(
         "$memory.metadata.reflection_findings", "$original_findings"
     )
     rows = await execute_query(
-        "RETURN { LET $memory=(SELECT * FROM raw_captures WHERE organization_id=$org AND uuid=$parent)[0];"
+        "RETURN { LET $memory=(SELECT * FROM raw_captures WHERE organization_id=$org AND uuid=$candidate_id)[0];"
         "IF $memory.metadata.reflection_findings != $findings { THROW 'Publication finding changed'; };"
         "LET $original_findings=array::slice($findings,0,array::len($findings)-1);"
         "LET $present=crypto::sha256(type::string(" + projection + "));"
         "LET $original_findings=IF array::len($findings)=1 { NONE } ELSE { $original_findings };"
         "RETURN {fingerprints:[$present,crypto::sha256(type::string(" + projection + "))]}; };",
         org=memory.organization_id,
-        parent=memory.id,
+        candidate_id=memory.id,
         findings=findings,
     )
     if len(rows) != 1 or not isinstance(rows[0].get("fingerprints"), list):
@@ -159,10 +159,13 @@ async def prepare_stored_reflection(
     )
     if authority is None or authority.principal_id != principal_id:
         raise SourceUnavailableError()
+    # The id is bound as $candidate_id, never $parent: SurrealDB 4.0 plans
+    # $parent and $this as the enclosing row whatever the client bound, so an
+    # equality on either reads every capture instead of the uuid index.
     rows = await execute_query(
-        "SELECT * FROM raw_captures WHERE organization_id=$org AND uuid=$parent;",
+        "SELECT * FROM raw_captures WHERE organization_id=$org AND uuid=$candidate_id;",
         org=organization_id,
-        parent=parent_id,
+        candidate_id=parent_id,
     )
     if len(rows) != 1:
         raise SourceUnavailableError()
@@ -187,13 +190,13 @@ async def prepare_stored_reflection(
     ):
         raise SourceUnavailableError()
     checkpoints = await execute_query(
-        "RETURN { LET $memory=(SELECT * FROM raw_captures WHERE organization_id=$org AND uuid=$parent)[0];"
-        "LET $stage=(SELECT * FROM dream_source_checkpoints WHERE organization_id=$org AND candidate_fingerprints[$parent] != NONE);"
+        "RETURN { LET $memory=(SELECT * FROM raw_captures WHERE organization_id=$org AND uuid=$candidate_id)[0];"
+        "LET $stage=(SELECT * FROM dream_source_checkpoints WHERE organization_id=$org AND candidate_fingerprints[$candidate_id] != NONE);"
         "RETURN {stages:$stage, fingerprint:crypto::sha256(type::string("
         + _IMMUTABLE_CANDIDATE
         + "))}; };",
         org=organization_id,
-        parent=parent_id,
+        candidate_id=parent_id,
     )
     if len(checkpoints) != 1:
         raise SourceUnavailableError()

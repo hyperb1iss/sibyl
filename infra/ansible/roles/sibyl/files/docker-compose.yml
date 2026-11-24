@@ -35,7 +35,7 @@ services:
         case "$$tag" in *:*) tag="$${tag##*:}" ;; *) tag="" ;; esac
         tag="$${tag#v}"
         major="$${tag%%.*}"
-        case "$$major" in "" | *[!0-9]*) refuse "the image $$SURREAL_IMAGE names no version; pin a tag such as v4.0.0" ;; esac
+        case "$$major" in "" | *[!0-9]*) refuse "the image $$SURREAL_IMAGE names no version; pin a tag such as v4.0.1" ;; esac
         case "$$SURREAL_STORE" in
           rocksdb:///*) scheme=rocksdb ;;
           surrealkv:///*) scheme=surrealkv ;;
@@ -67,7 +67,7 @@ services:
         fi
         chown -R 65532:65532 /data
     environment:
-      SURREAL_IMAGE: ${SIBYL_SURREAL_IMAGE:-surrealdb/surrealdb:v4.0.0}
+      SURREAL_IMAGE: ${SIBYL_SURREAL_IMAGE:-surrealdb/surrealdb:v4.0.1}
       SURREAL_STORE: ${SIBYL_SURREAL_PATH:?set SIBYL_SURREAL_PATH in the role env file}
       SURREAL_EXPERIMENTAL_UPGRADE_FROM_3X: ${SURREAL_EXPERIMENTAL_UPGRADE_FROM_3X:-}
     volumes:
@@ -75,7 +75,7 @@ services:
     restart: "no"
 
   surrealdb:
-    image: ${SIBYL_SURREAL_IMAGE:-surrealdb/surrealdb:v4.0.0}
+    image: ${SIBYL_SURREAL_IMAGE:-surrealdb/surrealdb:v4.0.1}
     container_name: sibyl-surrealdb
     depends_on:
       surreal-init:
@@ -106,7 +106,7 @@ services:
     restart: unless-stopped
 
   backend:
-    image: ghcr.io/hyperb1iss/sibyl-api:${SIBYL_VERSION:-1.5.0-rc.1}
+    image: ghcr.io/hyperb1iss/sibyl-api:${SIBYL_VERSION:-1.5.0}
     container_name: sibyl-backend
     depends_on:
       surrealdb:
@@ -170,7 +170,7 @@ services:
     restart: unless-stopped
 
   frontend:
-    image: ghcr.io/hyperb1iss/sibyl-web:${SIBYL_VERSION:-1.5.0-rc.1}
+    image: ghcr.io/hyperb1iss/sibyl-web:${SIBYL_VERSION:-1.5.0}
     container_name: sibyl-frontend
     depends_on:
       backend:

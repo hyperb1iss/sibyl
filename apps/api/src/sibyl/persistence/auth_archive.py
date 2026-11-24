@@ -13,17 +13,21 @@ import structlog
 
 from sibyl.persistence.surreal.auth import build_surreal_auth_client
 from sibyl.persistence.surreal.auth_runtime import reset_server_instance_id_cache
+from sibyl.persistence.surreal.member_handles import (
+    heal_all_member_handles,
+    heal_member_handles,
+)
 from sibyl_core.backends.surreal import bootstrap_auth_schema
 from sibyl_core.backends.surreal.auth_schema import backfill_api_key_scope_restrictions
-from sibyl_core.backends.surreal.member_handles import backfill_member_handles
 from sibyl_core.backends.surreal.records import (
     normalize_records as _normalize_records,
     query_error as _query_error,
     raise_on_error as _raise_on_error,
 )
 from sibyl_core.backends.surreal.schema_invariants import (
+    convert_declared_fields,
     drop_undeclared_fields as _drop_undeclared_fields,
-    fetch_declared_fields,
+    fetch_restore_fields,
 )
 
 log = structlog.get_logger()
@@ -162,6 +166,12 @@ _AUTH_ARCHIVE_SQL = {
         "delete_by_uuid": "DELETE FROM memory_space_members WHERE uuid = $uuid;",
         "create": "CREATE memory_space_members CONTENT $record;",
     },
+    "retired_member_handles": {
+        "select": "SELECT * FROM retired_member_handles ORDER BY id ASC;",
+        "delete_all": "DELETE FROM retired_member_handles;",
+        "delete_by_uuid": "DELETE FROM retired_member_handles WHERE uuid = $uuid;",
+        "create": "CREATE retired_member_handles CONTENT $record;",
+    },
     "llm_usage_buckets": {
         "select": "SELECT * FROM llm_usage_buckets ORDER BY id ASC;",
         "delete_all": "DELETE FROM llm_usage_buckets;",
@@ -195,6 +205,7 @@ _AUTH_ORG_SCOPED_TABLES = frozenset(
         "team_projects",
         "memory_spaces",
         "memory_space_members",
+        "retired_member_handles",
         "llm_usage_buckets",
     }
 )
@@ -244,6 +255,7 @@ _AUTH_ORG_CLEAN_TABLES = (
     "team_projects",
     "memory_spaces",
     "memory_space_members",
+    "retired_member_handles",
     "llm_usage_buckets",
 )
 
@@ -526,11 +538,16 @@ async def export_auth_archive_payload(
 def _auth_archive_record(
     row: dict[Any, Any],
     declared: frozenset[str],
+    datetimes: frozenset[str],
 ) -> tuple[dict[str, object], str, tuple[str, ...]]:
     normalized_row = {str(key): value for key, value in row.items()}
-    record = {
-        str(key): _deserialize_value(value) for key, value in normalized_row.items() if key != "id"
-    }
+    # Only fields the schema declares as datetimes are instants; a name, a
+    # slug or a setting that reads like one stays text.
+    record = convert_declared_fields(
+        {key: value for key, value in normalized_row.items() if key != "id"},
+        datetimes,
+        _deserialize_value,
+    )
     uuid = str(normalized_row.get("id") or normalized_row.get("uuid") or "").strip()
     if not uuid:
         return record, "", ()
@@ -596,8 +613,13 @@ async def _finalize_auth_restore(
 ) -> None:
     await backfill_api_key_scope_restrictions(client, api_key_ids=api_key_ids)
     # Memberships archived before handles existed, or merged from two teams,
-    # leave the restore without a handle or holding one twice.
-    await backfill_member_handles(client.execute_query, organization_id=organization_id)
+    # leave the restore without a handle or holding one twice. Healed under
+    # each organization's handle lock, so a member joining meanwhile can't
+    # take the same handle.
+    if organization_id is None:
+        await heal_all_member_handles(client)
+    else:
+        await heal_member_handles(client, organization_id=organization_id)
     if source_instance_id is not None:
         identity_result = await client.execute_query(
             "UPSERT server_identity:singleton SET instance_id = $instance_id;",
@@ -660,13 +682,13 @@ async def restore_auth_archive_payload(
             if not rows:
                 continue
 
-            declared = await fetch_declared_fields(client.execute_query, table)
+            declared, datetimes = await fetch_restore_fields(client.execute_query, table)
             restored_table = False
             for row in rows:
                 if not isinstance(row, dict):
                     errors.append(f"{table} row payload must be an object")
                     continue
-                record, uuid, dropped = _auth_archive_record(row, declared)
+                record, uuid, dropped = _auth_archive_record(row, declared, datetimes)
                 if not uuid:
                     errors.append(f"{table} row is missing id")
                     continue

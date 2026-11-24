@@ -69,6 +69,9 @@ def _raw_vector_lane_runs(monkeypatch: pytest.MonkeyPatch) -> None:
         return None
 
     monkeypatch.setattr(content_raw_recall, "_raw_vector_lane_skip", run_lane)
+    # The scope count that picks the exact read is a query of its own, tested
+    # in test_raw_recall_exact_scan; without it the lane walks the index.
+    monkeypatch.setattr(content_raw_recall, "_raw_vector_exact_index", run_lane)
 
 
 def _query_embedding(vector: list[float]) -> content_raw_recall.RawQueryEmbedding:

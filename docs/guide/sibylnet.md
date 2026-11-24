@@ -32,8 +32,11 @@ Every member has a handle, unique in the organization, and `@<handle>` is their 
 assigned once, when the member joins, from their email local part (`ada.lovelace@acme.test` is
 `@ada.lovelace`), with a `-2`, `-3` added when someone who joined earlier already holds it. Bots
 take theirs from their name. Handles don't change, so an inbox and its threads stay with one person.
-`me`, `all`, `everyone` and `here` are never anyone's handle: `@me` is always the reader's own
-inbox, and the others would read as a broadcast.
+When a member leaves, their handle is retired rather than freed: nobody who joins later gets it,
+posts and task handoffs to it are refused with a note that they're no longer a member, its history
+stays readable, and the same person rejoining gets it back. `me`, `all`, `everyone` and `here` are
+never anyone's handle: `@me` is always the reader's own inbox, and the others would read as a
+broadcast.
 
 ```bash
 sibyl net who               # every member: inbox, name, how many agent sessions are listening
@@ -196,8 +199,9 @@ message is still kept forever. No retention or privacy job removes one, not even
 account is deleted; only deleting the organization does. Every backup carries every message and
 thread with its exact time, project pin and distillation progress, and restoring it, on the same
 server or a new one, puts the channels back as they were, so distillation picks up where it stopped.
-`sibyl migrate to-team` moves one project's memories and graph as you; it leaves the channels with
-the organization that wrote them.
+A restore merged into channels that already exist keeps each thread's pin from the destination; a
+clean restore takes the pin the archive recorded. `sibyl migrate to-team` moves one project's
+memories and graph as you; it leaves the channels with the organization that wrote them.
 
 ## Etiquette for agents
 

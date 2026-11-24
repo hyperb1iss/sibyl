@@ -101,11 +101,13 @@ async def test_bootstrap_surreal_auth_schema_closes_client(
 ) -> None:
     client = SimpleNamespace(close=AsyncMock())
     bootstrap_auth_schema = AsyncMock()
+    heal = AsyncMock()
 
     monkeypatch.setattr(
         "sibyl.persistence.surreal.auth.build_surreal_auth_client",
         lambda: client,
     )
+    monkeypatch.setattr("sibyl.persistence.surreal.member_handles.heal_all_member_handles", heal)
     monkeypatch.setattr(
         "sibyl_core.backends.surreal.bootstrap_auth_schema",
         bootstrap_auth_schema,
@@ -114,6 +116,7 @@ async def test_bootstrap_surreal_auth_schema_closes_client(
     await surreal_runtime_startup.bootstrap_surreal_auth_schema()
 
     bootstrap_auth_schema.assert_awaited_once_with(client)
+    heal.assert_awaited_once_with(client)
     client.close.assert_awaited_once()
 
 

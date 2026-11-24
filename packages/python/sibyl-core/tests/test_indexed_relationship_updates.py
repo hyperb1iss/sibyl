@@ -78,7 +78,7 @@ async def test_concurrent_indexed_relationship_creation_has_one_complete_row(run
     monkeypatch.setattr(dedicated_client, "_transaction_conflict_retry_delay", retry_delay)
 
     async def overlapping(statement, **params):
-        if "LET $existing = $edges.map" in statement:
+        if "LET $existing = SELECT VALUE" in statement:
             arrivals.append(True)
             if runtime.client.pool_size > 1:
                 statement = statement.replace("LET $matching", "SLEEP 200ms; LET $matching")
@@ -153,7 +153,7 @@ async def test_indexed_foreign_creation_during_transaction_refuses(runtime, monk
 
     async def interleave(statement, **params):
         nonlocal rival
-        if "LET $existing = $edges.map" in statement and rival is None:
+        if "LET $existing = SELECT VALUE" in statement and rival is None:
             row = {**params["rows"][0], "group_id": "foreign"}
 
             async def insert_foreign():

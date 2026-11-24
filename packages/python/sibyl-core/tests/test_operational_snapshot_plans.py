@@ -25,7 +25,7 @@ from sibyl_core.backends.surreal.schema import EMBEDDING_DIM
 from sibyl_core.backends.surreal.url_schemes import is_embedded_surreal_url
 from sibyl_core.models.entities import Entity, EntityType, Relationship, RelationshipType
 from sibyl_core.retrieval import _search_expansion
-from sibyl_core.services import graph_entity_store, operational_relationships
+from sibyl_core.services import graph_entity_store, graph_relationships, operational_relationships
 from sibyl_core.services.graph_client import SurrealGraphClient, prepare_graph_schema
 from sibyl_core.services.graph_entities import EntityManager
 from sibyl_core.services.graph_relationships import RelationshipManager
@@ -125,6 +125,43 @@ def test_operational_snapshot_looks_rows_up_in_index_served_clumps(vectors: bool
     assert not _DIRECT_ORDERED_UUID_LIST.search(statement)
     assert ("$operational_snapshot_fingerprint" in statement) is vectors
     assert ("OMIT embedding, name_embedding" in statement) is not vectors
+
+
+def test_operational_snapshot_names_no_lookup_for_an_empty_list() -> None:
+    """SurrealDB 4.0 answers `uuid IN []` by reading the table, so an empty list is no read."""
+    statement, params = operational_relationships.snapshot_statement("org-a", ["e1"], [])
+    assert "FROM relates_to" not in statement
+    assert "LET $relationships = SELECT * FROM [] ORDER BY uuid;" in statement
+    assert sorted(params) == ["snapshot_ids_0", "snapshot_state_identities"]
+
+    statement, params = operational_relationships.snapshot_statement("org-a", [], ["r1"])
+    assert "FROM entity" not in statement
+    assert "FROM memory_derivations" not in statement
+    assert sorted(params) == ["snapshot_relationship_ids_0", "snapshot_state_identities"]
+    assert params["snapshot_state_identities"] == []
+
+
+def test_bulk_upsert_reads_stored_edges_through_client_clumps() -> None:
+    rows = [
+        {"uuid": f"r{index:03d}", "in": "entity:a", "out": "entity:b", "group_id": "org-a"}
+        for index in range(40)
+    ]
+    statements, params = graph_relationships._relationship_bulk_upsert(rows, guard_protected=True)
+    assert [len(params[f"edge_uuids_{index}"]) for index in range(2)] == [32, 8]
+    assert statements.count("FROM relates_to WHERE uuid IN $edge_uuids_") == 2
+    # A select inside a closure scans relates_to once per edge wherever the
+    # enclosing statement also writes; the join reads the keyed rows instead.
+    assert "$edges.map" not in statements
+    assert "stored: $stored_edges[uuid]" in statements
+    assert "$entry.stored.source_bound = true" in statements
+    assert "$relationship_ids" not in statements
+
+    unguarded, _ = graph_relationships._relationship_bulk_upsert(rows)
+    assert "$entry.stored.source_bound = true" not in unguarded
+
+    empty, empty_params = graph_relationships._relationship_bulk_upsert([])
+    assert "FROM relates_to WHERE uuid IN" not in empty
+    assert not [name for name in empty_params if name.startswith("edge_uuids")]
 
 
 @pytest.fixture
@@ -365,7 +402,12 @@ async def test_clumped_lookups_are_index_served_on_a_server(
         pytest.skip("the embedded engine plans IN lists its own way")
     ids = [f"id{index:03d}" for index in range(40)]
     _, params = operational_relationships.snapshot_statement(client.group_id, ids, ids)
+    stored_edges, stored_params = clumped(
+        graph_relationships._RELATIONSHIP_BULK_STORED + " EXPLAIN", "edge_uuids", ids
+    )
+    params = {**params, **stored_params}
     for name, lookup, index in (
+        ("relates_to bulk upsert", stored_edges, "idx_relates_uuid"),
         (
             "entity",
             clumped(

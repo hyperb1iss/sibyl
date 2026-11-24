@@ -78,8 +78,12 @@ spec:
               value: {{ printf "%s/api" (trimSuffix "/" .Values.publicUrl) | quote }}
             {{- end }}
             # WebSocket derives URL from window.location behind shared ingress
+            {{- if not (hasKey .Values.frontend.env "HOSTNAME") }}
+            # Next.js standalone reads its bind address from HOSTNAME, which
+            # the kubelet would otherwise set to the pod name.
             - name: HOSTNAME
               value: "0.0.0.0"
+            {{- end }}
             - name: PORT
               value: "3337"
           livenessProbe:

@@ -239,7 +239,7 @@ def test_the_move_converts_in_place_then_starts_sibyl_on_it(
     # 20 GiB: 60 s per GiB plus 5 min to rebuild, above the 10 min floor.
     assert stack.api_waits == [1500]
     output = " ".join(result.output.split())
-    assert "SurrealDB now runs v4.0.0" in output
+    assert "SurrealDB now runs v4.0.1" in output
     assert "first requests for each organization can be slow" in output
     assert "rm -rf /data/sibyl.db/_rocksdb_backup" in output
     assert f"docker volume rm {SURREAL_BACKUP_VOLUME}" in output

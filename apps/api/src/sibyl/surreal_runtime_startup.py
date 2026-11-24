@@ -59,11 +59,15 @@ def reset_runtime_schema_bootstrap_status() -> None:
 
 async def bootstrap_surreal_auth_schema() -> None:
     from sibyl.persistence.surreal.auth import build_surreal_auth_client
+    from sibyl.persistence.surreal.member_handles import heal_all_member_handles
     from sibyl_core.backends.surreal import bootstrap_auth_schema
 
     client = build_surreal_auth_client()
     try:
         await bootstrap_auth_schema(client)
+        # Members from before handles, or left without one of their own, get
+        # one now, each organization under its handle lock.
+        await heal_all_member_handles(client)
     finally:
         await client.close()
 

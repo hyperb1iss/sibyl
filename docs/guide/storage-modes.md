@@ -36,7 +36,7 @@ SIBYL_SURREAL_USERNAME=root
 SIBYL_SURREAL_PASSWORD=<secure-password>
 ```
 
-- Run SurrealDB 4.0.0 as a service and pin the exact server image or tag in production. A store a
+- Run SurrealDB 4.0.1 as a service and pin the exact server image or tag in production. A store a
   3.x server wrote needs the one-way [SurrealDB 4.0 upgrade](../deployment/surrealdb-4-upgrade.md)
   first.
 - `moon run dev` uses this mode: it starts a local SurrealKV-backed SurrealDB 4.0 server with data

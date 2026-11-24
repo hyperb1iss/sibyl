@@ -7,7 +7,7 @@ and `tools/tests/test_surreal_server_pins.py` holds every one of them to this
 value.
 """
 
-SURREAL_SERVER_VERSION = "4.0.0"
+SURREAL_SERVER_VERSION = "4.0.1"
 SURREAL_SERVER_IMAGE = f"surrealdb/surrealdb:v{SURREAL_SERVER_VERSION}"
 # What the server's version RPC answers for that release, before any
 # `+build` suffix.
@@ -47,7 +47,7 @@ tag="${ref##*/}"
 case "$tag" in *:*) tag="${tag##*:}" ;; *) tag="" ;; esac
 tag="${tag#v}"
 major="${tag%%.*}"
-case "$major" in "" | *[!0-9]*) refuse "the image $SURREAL_IMAGE names no version; pin a tag such as v4.0.0" ;; esac
+case "$major" in "" | *[!0-9]*) refuse "the image $SURREAL_IMAGE names no version; pin a tag such as v4.0.1" ;; esac
 case "$SURREAL_STORE" in
   rocksdb:///*) scheme=rocksdb ;;
   surrealkv:///*) scheme=surrealkv ;;

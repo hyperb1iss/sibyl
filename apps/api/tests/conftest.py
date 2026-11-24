@@ -146,6 +146,11 @@ def scripted_membership_writes(monkeypatch: pytest.MonkeyPatch) -> None:
     async def first_handle(client, user_id):
         return "owner"
 
+    async def retire(client, *, user_id, organization_id=None):
+        return None
+
     for module in (auth, organization_runtime, _common, bots, login):
         monkeypatch.setattr(module, "create_membership", create)
+    for module in (auth, organization_runtime, bots):
+        monkeypatch.setattr(module, "retire_member_handles", retire)
     monkeypatch.setattr(organization_runtime, "first_member_handle", first_handle)

@@ -107,9 +107,23 @@ BREAK_GLASS_IP_DENIED_DETAIL = {
 }
 
 
+async def _session_claims(request: Request) -> dict[str, object] | None:
+    """Claims of the signed-in session on this request, when there is one.
+
+    An API key authenticates a request but is not a session. The pages that
+    ask this approve a sign-in for someone else to collect, so a key that
+    passed here would trade its scopes and project limits for a full session
+    that outlives the key.
+    """
+    claims = await resolve_claims(request)
+    if not claims or claims.get("typ") == "api_key":
+        return None
+    return claims
+
+
 async def _optional_request_user(request: Request) -> AuthUser | None:
     """Resolve an active request session to a user when one is present."""
-    claims = await resolve_claims(request)
+    claims = await _session_claims(request)
     if not claims:
         return None
     try:
@@ -1516,7 +1530,7 @@ async def device_verify_post(request: Request) -> Response:
         )
         return response
 
-    claims = await resolve_claims(request)
+    claims = await _session_claims(request)
     if not claims:
         return RedirectResponse(url=verify_url + "&error=not_authenticated", status_code=302)
 

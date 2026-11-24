@@ -3,6 +3,8 @@
 A project-filtered vector search must return only edges that carry the project
 themselves or end on an entity in it (by column or by attribute bag), and an
 entity that moves project must move its edges with it on the next search. The
+lane has two reads for that, one that scans a small project's own edges and
+one that filters inside the HNSW bracket, and both must keep the rule. The
 SDK's embedded engine drops a parenthesized group inside an HNSW bracket and
 returns nothing for a project-filtered vector lane, so this runs on a server.
 """
@@ -64,6 +66,14 @@ async def graph() -> AsyncIterator[SurrealGraphClient]:
     finally:
         await client.execute_query(f"REMOVE NAMESPACE IF EXISTS {client.namespace};")
         await client.close()
+
+
+@pytest.fixture(params=["project-scan", "hnsw-bracket"], autouse=True)
+def lane_read(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch) -> str:
+    """Run every test once per read; the seeded projects are small enough for either."""
+    if request.param == "hnsw-bracket":
+        monkeypatch.setattr(source_module, "EDGE_PROJECT_SCAN_ENTITY_LIMIT", -1)
+    return str(request.param)
 
 
 async def _seed(client: SurrealGraphClient) -> dict[str, dict[str, Any]]:

@@ -253,6 +253,31 @@ def vector_identity_differs_predicate(path: str, param: str) -> str:
     )
 
 
+def vector_identity_differs_from(path: str, param: str, stamp: Mapping[str, Any]) -> str:
+    """``vector_identity_differs_predicate`` for a scan, given the stamp ``$param`` is bound to.
+
+    SurrealDB 4 tests a table scan's WHERE on the stored bytes and decodes
+    only the rows that pass, as long as every comparison is a plain one
+    between a field and a value. A ``??`` on either side, or a comparison
+    with no field in it, makes the scan decode every row first: 1.7 s
+    against 0.15 s over 17,700 entities whose rows carry a vector. So the
+    NULL handling the other predicate does in SurrealQL is decided here:
+    a field the stamp sets differs when the stored one is anything else, a
+    stored NULL or NONE included, and a field the stamp leaves out differs
+    when the stored one is neither NONE nor NULL.
+    """
+    return (
+        "("
+        + " OR ".join(
+            f"{path}.{f} != ${param}.{f}"
+            if stamp.get(f) is not None
+            else f"({path}.{f} != NONE AND {path}.{f} != NULL)"
+            for f in VECTOR_IDENTITY_FIELDS
+        )
+        + ")"
+    )
+
+
 # The fields a write fences on to tell that a stamp it read is still the one
 # stored: what shapes the vector, and whether the stamp is in the previous
 # release's format.
@@ -448,6 +473,7 @@ __all__ = [
     "stamp_unchanged_predicate",
     "unverified_embedding_metadata",
     "vector_identity",
+    "vector_identity_differs_from",
     "vector_identity_differs_predicate",
     "vector_space",
     "vector_space_predicate",

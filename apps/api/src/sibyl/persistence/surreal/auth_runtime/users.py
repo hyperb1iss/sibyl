@@ -43,6 +43,7 @@ from sibyl.persistence.surreal.auth_runtime._common import (
 from sibyl.persistence.surreal.auth_runtime.audit import log_memory_audit_event
 from sibyl.persistence.surreal.member_handles import (
     handle_owner,
+    handle_retired,
     member_handle,
     organization_handles,
 )
@@ -235,6 +236,12 @@ async def find_handle_owner(*, organization_id: str, handle: str) -> str | None:
     """The user whose handle ``handle`` is in the organization, or None."""
     async with _auth_client_scope() as client:
         return await handle_owner(client, organization_id=organization_id, handle=handle)
+
+
+async def is_handle_retired(*, organization_id: str, handle: str) -> bool:
+    """Whether ``handle`` belonged to a member who has since left the organization."""
+    async with _auth_client_scope() as client:
+        return await handle_retired(client, organization_id=organization_id, handle=handle)
 
 
 async def list_member_handles(*, organization_id: str) -> dict[str, str]:

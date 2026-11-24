@@ -1516,6 +1516,49 @@ class HnswFallbackDedupClient:
         ]
 
 
+def _candidate_row(
+    seed_id: str, uuid: str, score: float, *, admitted: bool | None
+) -> dict[str, Any]:
+    """One candidate row as the dedup statements return it; ``None`` leaves the mark out."""
+    row: dict[str, Any] = {"uuid": uuid, "name": "Alpha", "entity_type": "topic", "score": score}
+    if seed_id:
+        row["seed_id"] = seed_id
+    if admitted is not None:
+        row["admitted"] = admitted
+    return row
+
+
+def _incoming(entity_id: str) -> Entity:
+    return Entity(id=entity_id, name="Alpha", entity_type=EntityType.TOPIC, embedding=[1.0, 0.0])
+
+
+@dataclass
+class ScriptedDedupClient:
+    """Answers each batched candidate request with the next scripted result per statement."""
+
+    requests: list[list[list[dict[str, Any]]]]
+    raw_calls: list[tuple[str, dict[str, Any]]] = field(default_factory=list)
+
+    async def execute_query(self, query: str, **params: Any) -> list[dict[str, Any]]:
+        raise AssertionError("batched HNSW candidate lookup should use raw queries")
+
+    async def execute_query_raw(self, query: str, **params: Any) -> list[dict[str, Any]]:
+        self.raw_calls.append((query, params))
+        return [{"status": "OK", "result": rows} for rows in self.requests.pop(0)]
+
+
+@dataclass
+class ScriptedSeedDedupClient:
+    """Answers each per-seed candidate statement with the next scripted rows."""
+
+    results: list[list[dict[str, Any]]]
+    calls: list[tuple[str, dict[str, Any]]] = field(default_factory=list)
+
+    async def execute_query(self, query: str, **params: Any) -> list[dict[str, Any]]:
+        self.calls.append((query, params))
+        return [{"status": "OK", "result": self.results.pop(0)}]
+
+
 @dataclass
 class MockEntityManagerForDedup:
     """Mock EntityManager for deduplication merge tests."""
@@ -2140,8 +2183,9 @@ class TestEntityDeduplicatorFindDuplicates:
         await fallback_dedup.resolve_existing_entities(incoming)
 
         batch_query = batch_client.raw_calls[0][0]
-        assert batch_query.count("name_embedding <|100, 100|>") == 2
-        assert all("name_embedding <|100, 100|>" in query for query, _ in fallback_client.calls)
+        # Filtered seeds walk twice the candidate limit (see _hnsw_candidate_statement).
+        assert batch_query.count("name_embedding <|200, 200|>") == 2
+        assert all("name_embedding <|200, 200|>" in query for query, _ in fallback_client.calls)
 
     @pytest.mark.asyncio
     async def test_dedup_lanes_keep_configured_knn_effort_for_shallow_pools(
@@ -2175,7 +2219,144 @@ class TestEntityDeduplicatorFindDuplicates:
             ]
         )
 
-        assert all("name_embedding <|8, 40|>" in query for query, _ in client.calls)
+        assert all("name_embedding <|16, 40|>" in query for query, _ in client.calls)
+
+    @pytest.mark.asyncio
+    async def test_rows_the_filters_do_not_admit_never_pair(self) -> None:
+        # The unfiltered walk returns rows of any type and scope; only the
+        # ones the statement marked admitted may become a match.
+        client = ScriptedDedupClient(
+            [
+                [
+                    [
+                        _candidate_row("incoming_alpha", "other_scope", 0.99, admitted=False),
+                        _candidate_row("incoming_alpha", "same_scope", 0.97, admitted=True),
+                        _candidate_row("incoming_alpha", "unmarked", 0.96, admitted=None),
+                    ]
+                ]
+            ]
+        )
+        dedup = EntityDeduplicator(
+            client=client,  # type: ignore[arg-type]
+            entity_manager=MockEntityManagerForDedup(),
+            config=DedupConfig(batch_size=8, same_type_only=True, min_name_overlap=0.0),
+        )
+
+        matches = await dedup.resolve_existing_entities([_incoming("incoming_alpha")])
+
+        assert matches["incoming_alpha"].entity2_id == "same_scope"
+        assert len(client.raw_calls) == 1
+        query, _params = client.raw_calls[0]
+        assert "(entity_type = $seed_type_0) AS admitted" in query
+        walk = query.split("WHERE", 1)[1].split("name_embedding <|", 1)[0]
+        assert "entity_type" not in walk
+
+        none_admitted = ScriptedDedupClient(
+            [[[_candidate_row("incoming_alpha", "other_scope", 0.99, admitted=False)]]]
+        )
+        dedup = EntityDeduplicator(
+            client=none_admitted,  # type: ignore[arg-type]
+            entity_manager=MockEntityManagerForDedup(),
+            config=DedupConfig(batch_size=8, same_type_only=True, min_name_overlap=0.0),
+        )
+        assert await dedup.resolve_existing_entities([_incoming("incoming_alpha")]) == {}
+
+    @pytest.mark.asyncio
+    async def test_a_full_pool_is_read_again_with_the_filtered_walk(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        # Candidate limit 8, so the unfiltered walk goes 16 deep. A pool that
+        # comes back full at or above the threshold may hide admitted rows
+        # past it, and only the filtered walk can say.
+        monkeypatch.setattr(dedup_module.settings, "graph_knn_ef", 40)
+        crowd = [
+            _candidate_row("incoming_alpha", f"crowd_{index}", 0.99, admitted=False)
+            for index in range(16)
+        ]
+        client = ScriptedDedupClient(
+            [
+                [crowd],
+                [[_candidate_row("incoming_alpha", "past_the_pool", 0.96, admitted=True)]],
+            ]
+        )
+        dedup = EntityDeduplicator(
+            client=client,  # type: ignore[arg-type]
+            entity_manager=MockEntityManagerForDedup(),
+            config=DedupConfig(batch_size=8, same_type_only=True, min_name_overlap=0.0),
+        )
+
+        matches = await dedup.resolve_existing_entities([_incoming("incoming_alpha")])
+
+        assert matches["incoming_alpha"].entity2_id == "past_the_pool"
+        assert len(client.raw_calls) == 2
+        pooled, pooled_params = client.raw_calls[0]
+        filtered, filtered_params = client.raw_calls[1]
+        assert "name_embedding <|16, 40|>" in pooled
+        assert pooled_params["limit_0"] == 16
+        assert "name_embedding <|8, 40|>" in filtered
+        assert filtered_params["limit_0"] == 8
+        assert "true AS admitted" in filtered
+        walk = filtered.split("WHERE", 1)[1].split("name_embedding <|", 1)[0]
+        assert "entity_type = $seed_type_0" in walk
+
+        # One row short of full: every row at or above the threshold is in
+        # the pool, so nothing is read again.
+        short = ScriptedDedupClient([[crowd[:15]]])
+        dedup = EntityDeduplicator(
+            client=short,  # type: ignore[arg-type]
+            entity_manager=MockEntityManagerForDedup(),
+            config=DedupConfig(batch_size=8, same_type_only=True, min_name_overlap=0.0),
+        )
+        assert await dedup.resolve_existing_entities([_incoming("incoming_alpha")]) == {}
+        assert len(short.raw_calls) == 1
+
+    @pytest.mark.asyncio
+    async def test_a_full_pool_is_read_again_one_seed_at_a_time_without_raw_queries(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.setattr(dedup_module.settings, "graph_knn_ef", 40)
+        crowd = [_candidate_row("", f"crowd_{index}", 0.99, admitted=False) for index in range(16)]
+        client = ScriptedSeedDedupClient(
+            [
+                crowd,
+                [_candidate_row("", "past_the_pool", 0.96, admitted=True)],
+                [_candidate_row("", "near_beta", 0.97, admitted=True)],
+            ]
+        )
+        dedup = EntityDeduplicator(
+            client=client,  # type: ignore[arg-type]
+            entity_manager=MockEntityManagerForDedup(),
+            config=DedupConfig(batch_size=8, same_type_only=True, min_name_overlap=0.0),
+        )
+
+        matches = await dedup.resolve_existing_entities(
+            [_incoming("incoming_alpha"), _incoming("incoming_beta")]
+        )
+
+        assert matches["incoming_alpha"].entity2_id == "past_the_pool"
+        assert matches["incoming_beta"].entity2_id == "near_beta"
+        assert [params["seed_id"] for _query, params in client.calls] == [
+            "incoming_alpha",
+            "incoming_alpha",
+            "incoming_beta",
+        ]
+        filtered, filtered_params = client.calls[1]
+        assert "name_embedding <|8, 40|>" in filtered
+        assert filtered_params["limit"] == 8
+        walk = filtered.split("WHERE", 1)[1].split("name_embedding <|", 1)[0]
+        assert "entity_type = $seed_type" in walk
+
+    def test_admitted_rows_are_cut_to_the_candidate_limit_nearest_first(self) -> None:
+        rows = [
+            _candidate_row("seed", "first", 0.99, admitted=True),
+            _candidate_row("seed", "foreign", 0.98, admitted=False),
+            _candidate_row("seed", "second", 0.97, admitted=True),
+            _candidate_row("seed", "third", 0.96, admitted=True),
+        ]
+
+        assert [row["uuid"] for row in dedup_module._admitted(rows, 2)] == ["first", "second"]
 
     @pytest.mark.asyncio
     async def test_resolve_existing_entities_executes_surreal_hnsw_batch_query(
