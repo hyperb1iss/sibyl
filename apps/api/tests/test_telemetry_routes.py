@@ -11,6 +11,8 @@ from sibyl import main as main_module
 from sibyl.api.routes import telemetry as telemetry_routes
 from sibyl.jobs import worker as worker_module
 from sibyl.services import telemetry as telemetry_service
+from sibyl_core.backends.surreal import SurrealContentClient, bootstrap_content_schema
+from sibyl_core.backends.surreal.records import normalize_records
 from sibyl_core.observability import telemetry_registry
 
 
@@ -330,3 +332,43 @@ async def test_rollup_failure_throttle_does_not_accumulate_error_classes(
 
     # One entry per interval, not one per error class ever seen.
     assert len(telemetry_service._logged_failure_buckets) == 1
+
+
+@pytest.mark.asyncio
+async def test_rollup_for_a_minute_that_already_has_a_row_updates_it(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = SurrealContentClient(url="memory://")
+    await bootstrap_content_schema(client, reset=True)
+
+    async def shared_client() -> SurrealContentClient:
+        return client
+
+    monkeypatch.setattr(telemetry_service, "get_shared_surreal_content_client", shared_client)
+    monkeypatch.setattr(telemetry_service, "_logged_failure_buckets", {})
+    bucket = telemetry_service._current_bucket()
+
+    async def persist_as_a_fresh_process(uptime: float) -> dict[str, object] | None:
+        snapshot = {**telemetry_service.runtime_summary(), "uptime_seconds": uptime}
+        monkeypatch.setattr(telemetry_service, "runtime_summary", lambda **_: snapshot)
+        monkeypatch.setattr(telemetry_service, "_last_persisted_bucket", None)
+        return await telemetry_service.persist_runtime_rollup(bucket=bucket)
+
+    async def stored() -> list[dict[str, object]]:
+        return normalize_records(
+            await client.execute_query("SELECT created_at, uptime_seconds FROM telemetry_rollups;")
+        )
+
+    try:
+        assert await persist_as_a_fresh_process(10.0) is not None
+        created_at = (await stored())[0]["created_at"]
+
+        # A second replica, or the same daemon restarted inside the minute.
+        assert await persist_as_a_fresh_process(20.0) is not None, "the second write was refused"
+
+        rows = await stored()
+        assert len(rows) == 1
+        assert rows[0]["uptime_seconds"] == 20.0
+        assert rows[0]["created_at"] == created_at
+    finally:
+        await client.close()

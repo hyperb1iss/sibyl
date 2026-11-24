@@ -9,6 +9,7 @@ so it fails on either server version the moment a nested shape stops fitting.
 
 from __future__ import annotations
 
+import asyncio
 import os
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -42,7 +43,7 @@ pytestmark = pytest.mark.skipif(
     reason="live SurrealDB runtime smoke tests are disabled",
 )
 
-_ROLLUP_UPSERT = "UPSERT telemetry_rollups CONTENT $record WHERE bucket_key = $bucket_key;"
+_ROLLUP_UPSERT = telemetry_service._ROLLUP_UPSERT
 
 
 def _live_surreal_url() -> str:
@@ -147,6 +148,67 @@ async def test_live_runtime_rollup_keeps_metric_event_and_trend_entries(monkeypa
 
 
 @pytest.mark.asyncio
+async def test_live_runtime_rollup_accepts_every_replica_in_the_same_minute(monkeypatch) -> None:
+    async with _content_store() as first_replica:
+        second_replica = _client(first_replica._namespace)
+        try:
+            bucket = telemetry_service._current_bucket()
+
+            async def persist(client: SurrealContentClient, uptime: float) -> dict | None:
+                async def shared_client() -> SurrealContentClient:
+                    return client
+
+                snapshot = {**_runtime_snapshot(), "uptime_seconds": uptime}
+                monkeypatch.setattr(
+                    telemetry_service, "get_shared_surreal_content_client", shared_client
+                )
+                monkeypatch.setattr(telemetry_service, "_last_persisted_bucket", None)
+                monkeypatch.setattr(telemetry_service, "runtime_summary", lambda **_: snapshot)
+                return await telemetry_service.persist_runtime_rollup(bucket=bucket)
+
+            async def stored() -> list[dict]:
+                return normalize_records(
+                    await first_replica.execute_query(
+                        "SELECT created_at, uptime_seconds FROM telemetry_rollups;"
+                    )
+                )
+
+            assert await persist(first_replica, 10.0) is not None
+            created_at = (await stored())[0]["created_at"]
+
+            assert await persist(second_replica, 20.0) is not None, "the second write was refused"
+            rows = await stored()
+            assert len(rows) == 1
+            assert rows[0]["uptime_seconds"] == 20.0
+            assert rows[0]["created_at"] == created_at
+
+            # Two replicas that tick over in the same instant, on a fresh minute.
+            record = {
+                "uuid": str(uuid4()),
+                "bucket_key": "209901010000",
+                "bucket_start": datetime(2099, 1, 1, tzinfo=UTC),
+                "window_seconds": 900,
+                "uptime_seconds": 1.0,
+                "summaries": {},
+                "trends": [],
+                "metrics": [],
+                "recent_events": [],
+                "updated_at": datetime.now(UTC),
+            }
+            await asyncio.gather(
+                *(
+                    client.execute_query(
+                        _ROLLUP_UPSERT, record=record, bucket_key=record["bucket_key"]
+                    )
+                    for client in (first_replica, second_replica)
+                )
+            )
+            assert len(await stored()) == 2
+        finally:
+            await second_replica.close()
+
+
+@pytest.mark.asyncio
 async def test_live_source_import_keeps_skipped_and_error_entries() -> None:
     async with _content_store() as client:
         run = SourceImportRun(
@@ -225,11 +287,13 @@ async def test_live_migration_59_opens_rollup_entries_on_an_upgraded_database() 
             "uuid": str(uuid4()),
             "bucket_key": "209901010000",
             "bucket_start": datetime(2099, 1, 1, tzinfo=UTC),
+            "window_seconds": 900,
             "uptime_seconds": snapshot["uptime_seconds"],
             "summaries": snapshot["summaries"],
             "trends": snapshot["trends"],
             "metrics": snapshot["metrics"],
             "recent_events": snapshot["recent_events"],
+            "updated_at": datetime.now(UTC),
         }
         if index_engine_of(info) is not None:
             # The failure this migration exists for: 4.0 refuses nested keys
