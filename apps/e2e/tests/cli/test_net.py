@@ -311,3 +311,45 @@ def test_a_marked_decision_is_recallable_by_its_author_only(
     wait_settled()
     page = ok_json(grace.run("net", "read", "#reviews", "-t", "gh:acme/app#42", "--json"))
     assert any(m["id"] == posted["message"]["id"] for m in page["messages"])
+
+
+@pytest.mark.cli
+def test_a_handed_off_task_tells_its_thread_when_it_moves(
+    pair: tuple[HomeCLI, HomeCLI, str],
+) -> None:
+    ada, grace, _ = pair
+    suffix = uuid.uuid4().hex[:8]
+    project = ok_json(ada.project_create(f"handoff-{suffix}"))["id"]
+    title = f"Fix the flaky fixture {suffix}"
+    task = ok_json(ada.task_create(title, project))["id"]
+    # A room of its own keeps the run isolated; an @inbox must be a member's handle.
+    room = f"#handoff-{suffix}"
+    thread = f"task:{task}"
+    ok_json(ada.run("task", "assign", task, room, "-m", "Yours when you are free.", "--json"))
+    wait_settled()
+
+    # Grace waits on the task's thread, in whichever channel it is posted, from now.
+    assert jsonl(grace.run("net", "watch", "-t", thread, "--once", "--json", "--wait", "1")) == []
+
+    ok_json(ada.task_start(task))
+    ok_json(ada.run("task", "block", task, "--reason", "Waiting on the schema review.", "--json"))
+    ok_json(ada.task_complete(task))
+    wait_settled()
+
+    received: list[dict] = []
+    for _ in range(6):
+        received.extend(
+            jsonl(grace.run("net", "watch", "-t", thread, "--once", "--json", "--wait", "5"))
+        )
+        if len(received) >= 3:
+            break
+    about = f"{title} (task {task})"
+    assert [(message["kind"], message["body"]) for message in received] == [
+        ("event", f"Started: {about}"),
+        ("event", f"Blocked: {about}\nWaiting on the schema review."),
+        ("event", f"Completed: {about}"),
+    ]
+    assert {message["channel"] for message in received} == {room}
+    # The handoff and the three events are one thread, counted together.
+    threads = ok_json(grace.run("net", "threads", room, "--json"))["threads"]
+    assert [(row["thread"], row["message_count"]) for row in threads] == [(thread, 4)]
