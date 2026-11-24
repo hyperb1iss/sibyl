@@ -11,6 +11,7 @@ import {
 import { authApi, orgsApi, preferencesApi, profileApi, securityApi } from './auth';
 import { entitiesApi, graphApi } from './graph';
 import { memoryApi, rawCapturesApi, sessionApi, sourceImportsApi, synthesisApi } from './memory';
+import { netApi } from './net';
 import { ragApi, searchApi } from './search';
 import { sourcesApi } from './sources';
 import { epicsApi, metricsApi, projectsApi, tasksApi } from './work-items';
@@ -43,4 +44,5 @@ export const api = {
   setup: setupApi,
   settings: settingsApi,
   activity: activityApi,
+  net: netApi,
 };

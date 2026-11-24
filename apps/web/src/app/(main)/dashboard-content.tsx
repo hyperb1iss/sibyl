@@ -5,6 +5,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { ConnectAgentModal, WelcomeBanner } from '@/components/dashboard';
 import { useCaptureMemory } from '@/components/layout/capture-memory-context';
 import { PerformanceTrendChart, VelocityLineChart } from '@/components/metrics/charts';
+import { NetDashboardCard } from '@/components/net/net-dashboard-card';
 import { EnhancedEmptyState } from '@/components/ui/empty-state';
 import type { IconComponent } from '@/components/ui/icons';
 import {
@@ -273,6 +274,8 @@ function FirstRunWelcome({
           })}
         </div>
       </div>
+      {/* Agents can talk before anything is captured; show it when they do. */}
+      <NetDashboardCard hideWhenQuiet />
       <ConnectAgentModal open={connectOpen} onOpenChange={setConnectOpen} />
     </div>
   );
@@ -804,6 +807,7 @@ export function DashboardContent({ initialStats }: DashboardContentProps) {
 
         {/* Right Column - Sidebar: long unbroken tokens (snake_case task names) wrap inside it */}
         <div className="lg:w-80 shrink-0 min-w-0 break-words space-y-4 sm:space-y-6">
+          <NetDashboardCard />
           <div className="bg-sc-bg-elevated border border-sc-fg-subtle/30 rounded-xl p-4 sm:p-6 shadow-card">
             <div className="flex items-center gap-2 sm:gap-3 mb-4">
               <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-lg sm:rounded-xl bg-sc-cyan/10 border border-sc-cyan/20 flex items-center justify-center">

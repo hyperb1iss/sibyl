@@ -94,7 +94,7 @@ export function mostRecentProjectId(
 }
 
 // Pages that should always show all projects (no filtering)
-const CROSS_PROJECT_PATHS = ['/projects', '/sources', '/settings'];
+const CROSS_PROJECT_PATHS = ['/projects', '/sources', '/settings', '/net'];
 
 /**
  * Read the project selection from a URL's `projects` parameter, a

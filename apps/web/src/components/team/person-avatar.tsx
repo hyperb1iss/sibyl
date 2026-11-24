@@ -25,12 +25,17 @@ export function initialsFor(name: string): string {
   return `${first}${last}`.toUpperCase();
 }
 
-function toneFor(seed: string): string {
+/** Which of the five person tints a seed gets, so other surfaces can match it. */
+export function toneIndexFor(seed: string): number {
   let hash = 0;
   for (let index = 0; index < seed.length; index++) {
     hash = (hash * 31 + seed.charCodeAt(index)) | 0;
   }
-  return TONES[Math.abs(hash) % TONES.length];
+  return Math.abs(hash) % TONES.length;
+}
+
+function toneFor(seed: string): string {
+  return TONES[toneIndexFor(seed)];
 }
 
 interface PersonAvatarProps {

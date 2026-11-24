@@ -34,6 +34,7 @@ const API_KEYS = [
   'setup',
   'settings',
   'activity',
+  'net',
 ] as const;
 
 const HOOK_EXPORTS = [
@@ -82,6 +83,10 @@ const HOOK_EXPORTS = [
   'useMemorySourceImport',
   'useMemorySourceInspect',
   'useMemorySpaces',
+  'useNetChannels',
+  'useNetFeed',
+  'useNetPresence',
+  'useNetThreads',
   'useOnboardingProgress',
   'useOrgInvitations',
   'useOrgMembers',

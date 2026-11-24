@@ -70,7 +70,7 @@ describe('Sidebar', () => {
       within(rail.getByRole('group', { name: 'Overview' }))
         .getAllByRole('link')
         .map(link => link.textContent)
-    ).toEqual(['Dashboard', 'Team']);
+    ).toEqual(['Dashboard', 'Team', 'Net']);
     expect(within(rail.getByRole('group', { name: 'Work' })).getAllByRole('link')).toHaveLength(3);
     expect(
       within(rail.getByRole('group', { name: 'Memory' }))

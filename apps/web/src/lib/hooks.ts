@@ -82,6 +82,7 @@ export {
   useSynthesisDraft,
   useSynthesisPlan,
 } from './hooks/memory';
+export { useNetChannels, useNetFeed, useNetPresence, useNetThreads } from './hooks/net';
 export { queryKeys } from './hooks/query-keys';
 export { useRealtimeUpdates, useWebSocketStatus } from './hooks/realtime';
 export {

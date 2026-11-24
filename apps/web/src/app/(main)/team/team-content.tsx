@@ -6,6 +6,7 @@ import { TeamActivityView } from '@/components/team';
 import type { TeamActivityWindow } from '@/lib/api/activity';
 import { DEFAULT_TEAM_ACTIVITY_WINDOW, isTeamActivityWindow } from '@/lib/constants/activity';
 import { useMe, useProjects, useTeamActivity } from '@/lib/hooks';
+import { useNetDirectory } from '@/lib/hooks/net-identity';
 import { useProjectContext, useProjectFilters } from '@/lib/project-context';
 
 /**
@@ -36,6 +37,11 @@ export function TeamContent() {
 
   const { data: projectsData } = useProjects({ includeArchived: true });
   const { data: me } = useMe();
+  const directory = useNetDirectory();
+  const inboxes = useMemo(
+    () => new Map([...(directory?.values() ?? [])].map(member => [member.user_id, member.inbox])),
+    [directory]
+  );
 
   const { projects, projectNames } = useMemo(() => {
     const all = projectsData?.entities ?? [];
@@ -70,6 +76,7 @@ export function TeamContent() {
       personId={personId}
       onPersonChange={setPersonId}
       currentUserId={me?.user.id}
+      inboxes={inboxes}
     />
   );
 }

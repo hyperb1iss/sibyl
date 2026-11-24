@@ -1,4 +1,5 @@
 import {
+  AntennaSignal,
   BookOpen,
   Boxes,
   Database,
@@ -62,6 +63,13 @@ export const ROUTE_CONFIG: Record<string, RouteConfigItem> = {
     label: 'Team',
     href: '/team',
     icon: Users,
+    showInNavigation: true,
+    section: 'overview',
+  },
+  net: {
+    label: 'Net',
+    href: '/net',
+    icon: AntennaSignal,
     showInNavigation: true,
     section: 'overview',
   },
