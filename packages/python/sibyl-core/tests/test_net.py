@@ -19,7 +19,7 @@ from uuid import uuid4
 
 import pytest
 
-from sibyl_core.backends.surreal import SurrealContentClient
+from sibyl_core.backends.surreal import SurrealContentClient, content_schema
 from sibyl_core.backends.surreal.content_schema import bootstrap_content_schema
 from sibyl_core.backends.surreal.url_schemes import is_embedded_surreal_url
 from sibyl_core.services import content_client, net
@@ -659,6 +659,32 @@ async def test_an_event_counts_on_its_thread_and_leaves_distillation_alone(
     await post(thread="waiting", body="still me")
     assert await pending_flags(store) == {"settled": True, "waiting": True, "fresh": False}
     assert (await thread_state("#reviews", "waiting")).reflection_attempts == 0
+
+
+async def test_the_event_kind_reaches_a_database_that_already_has_the_field(
+    store: SurrealContentClient,
+) -> None:
+    # A database that defined the net tables before events existed: the
+    # two-kind assertion, and a schema version just short of the fix.
+    migration = next(
+        m
+        for m in content_schema._content_schema_migrations(url="memory://")
+        if m.name == "content_net_event_kind"
+    )
+    await store.execute_query(
+        "DEFINE FIELD OVERWRITE kind ON net_messages TYPE string "
+        "ASSERT $value IN ['message', 'decision'];"
+    )
+    try:
+        with pytest.raises(Exception, match="kind"):
+            await post(thread="t1", body="Started: fix the fixture", kind="event")
+    finally:
+        for statement in migration.statements:
+            await store.execute_query(f"{statement};")
+
+    event = await post(thread="t1", body="Started: fix the fixture", kind="event")
+
+    assert event.kind == "event"
 
 
 async def test_a_post_during_reflection_keeps_the_thread_pending(

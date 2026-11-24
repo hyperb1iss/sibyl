@@ -165,7 +165,7 @@ CONTENT_TABLES = (
     *RAW_LEXICAL_TABLES,
     RAW_LEXICAL_STATE_TABLE,
 )
-CONTENT_SCHEMA_CURRENT_VERSION = 60
+CONTENT_SCHEMA_CURRENT_VERSION = 61
 CONTENT_SCHEMA_NAME = "content"
 _SCHEMA_CHECK_BATCH_SIZE = 128
 _CONTENT_MEMORY_SCOPE_VALUES = tuple(scope.value for scope in MemoryScope)
@@ -1344,6 +1344,16 @@ def _content_schema_migrations(*, url: str) -> tuple[SchemaMigration, ...]:
             version=60,
             name="content_net_channels",
             statements=tuple(split_statements(CONTENT_NET_DEFINITIONS)),
+        ),
+        SchemaMigration(
+            version=61,
+            name="content_net_event_kind",
+            # A database that defined the net tables before events existed
+            # holds the two-kind assertion, and IF NOT EXISTS leaves it there.
+            statements=(
+                "DEFINE FIELD OVERWRITE kind ON net_messages TYPE string "
+                "ASSERT $value IN ['message', 'decision', 'event']",
+            ),
         ),
     )
 
