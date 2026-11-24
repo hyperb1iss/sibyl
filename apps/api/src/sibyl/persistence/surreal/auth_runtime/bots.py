@@ -40,6 +40,7 @@ from sibyl.persistence.surreal.auth_runtime.projects import (
     _resolve_project_for_team_link,
     verify_entity_project_access,
 )
+from sibyl.persistence.surreal.member_handles import create_membership, retire_member_handles
 from sibyl_core.auth import AuthContext, OrganizationRole, PrincipalKind, ProjectRole
 from sibyl_core.backends.surreal.in_clumps import clumped
 from sibyl_core.backends.surreal.records import (
@@ -237,11 +238,7 @@ async def create_bot(*, ctx: AuthContext, name: str, request) -> dict[str, objec
         if not created:
             msg = "Failed to create bot"
             raise RuntimeError(msg)
-        membership = _normalize_records(
-            await client.execute_query(
-                "CREATE organization_members CONTENT $record;", record=membership_record
-            )
-        )
+        membership = _normalize_records(await create_membership(client, membership_record))
         if not membership:
             await client.execute_query("DELETE FROM users WHERE uuid = $uuid;", uuid=str(bot_id))
             msg = "Failed to create bot membership"
@@ -615,6 +612,7 @@ async def delete_bot(*, ctx: AuthContext, bot_id: UUID, request) -> dict[str, ob
         await client.execute_query(
             "DELETE FROM project_members WHERE user_id = $bot_id;", bot_id=str(bot_id)
         )
+        await retire_member_handles(client, user_id=str(bot_id))
         await client.execute_query(
             "DELETE FROM organization_members WHERE user_id = $bot_id;", bot_id=str(bot_id)
         )

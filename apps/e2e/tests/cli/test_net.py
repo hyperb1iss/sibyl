@@ -199,7 +199,8 @@ def test_whoami_json_answers_for_the_automation_token_net_commands_use(
 @pytest.mark.cli
 def test_read_limit_zero_returns_only_the_end_cursor(pair: tuple[HomeCLI, HomeCLI, str]) -> None:
     ada, _, _ = pair
-    inbox = f"@inbox-{uuid.uuid4().hex[:8]}"
+    # A room of its own keeps the run isolated; an @inbox must be a member's handle.
+    inbox = f"#inbox-{uuid.uuid4().hex[:8]}"
     ada.run("net", "post", inbox, "history before the cursor")
     wait_settled()
 
@@ -223,7 +224,8 @@ def test_watch_resumes_across_processes_with_no_replay_and_no_gap(
     pair: tuple[HomeCLI, HomeCLI, str],
 ) -> None:
     ada, grace, _ = pair
-    inbox = f"@grace-{uuid.uuid4().hex[:8]}"
+    # A room of its own keeps the run isolated; an @inbox must be a member's handle.
+    inbox = f"#grace-{uuid.uuid4().hex[:8]}"
     thread = f"gh:acme/app#{uuid.uuid4().int % 10_000}"
     ada.run("net", "post", inbox, "posted before anyone watched", "-t", thread)
     wait_settled()

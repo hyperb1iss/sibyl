@@ -201,7 +201,13 @@ async def seed_round(stores: SimpleNamespace) -> SimpleNamespace:
             for name, user in people.items()
         ],
         "organization_members": [
-            {"uuid": str(uuid4()), "organization_id": org, "user_id": people[name], "role": role}
+            {
+                "uuid": str(uuid4()),
+                "organization_id": org,
+                "user_id": people[name],
+                "role": role,
+                "handle": name,
+            }
             for name, role in roles.items()
         ]
         + [

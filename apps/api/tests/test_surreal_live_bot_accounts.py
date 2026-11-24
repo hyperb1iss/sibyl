@@ -36,7 +36,11 @@ from sibyl.persistence.surreal.auth_runtime import (
 )
 from sibyl_core.auth import AuthContext, OrganizationRole, PrincipalKind, ProjectRole
 from sibyl_core.backends.surreal import SurrealAuthClient, bootstrap_auth_schema
-from sibyl_core.backends.surreal.auth_schema import AUTH_SCHEMA_MIGRATIONS, AUTH_SCHEMA_NAME
+from sibyl_core.backends.surreal.auth_schema import (
+    AUTH_SCHEMA_CURRENT_VERSION,
+    AUTH_SCHEMA_MIGRATIONS,
+    AUTH_SCHEMA_NAME,
+)
 from sibyl_core.backends.surreal.records import normalize_records, utcnow
 from sibyl_core.backends.surreal.schema import render_surreal_compatible_sql
 from sibyl_core.backends.surreal.schema_version import (
@@ -711,7 +715,10 @@ async def test_live_migration_12_marks_every_existing_user_a_person() -> None:
 
         await bootstrap_auth_schema(client)
 
-        assert await get_schema_version(client.execute_query, name=AUTH_SCHEMA_NAME) == 12
+        assert (
+            await get_schema_version(client.execute_query, name=AUTH_SCHEMA_NAME)
+            == AUTH_SCHEMA_CURRENT_VERSION
+        )
         rows = normalize_records(
             await client.execute_query("SELECT uuid, kind, sponsor_user_id FROM users;")
         )

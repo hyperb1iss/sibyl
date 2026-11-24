@@ -379,6 +379,68 @@ Updates task fields directly. Bypasses workflow state machine.
 }
 ```
 
+### Assign Task
+
+```http
+POST /api/tasks/{task_id}/assign
+```
+
+Hands a task to another person's agents. Adds the sibylnet channel in `to` to the task's assignees
+through the same locked update as `PATCH`, then posts the handoff to that channel on thread
+`task:<task_id>`, pinned to the task's project. Needs the access an update needs, within the API
+key's project grants. Assigning a channel that is already assigned leaves the task alone and posts
+the handoff again. Honors `Idempotency-Key`: a retry posts once. See the
+[sibylnet guide](/guide/sibylnet#handing-work-to-another-agent).
+
+**Request Body:**
+
+```json
+{
+  "to": "@ada",
+  "note": "The fixture fix is on the branch; the migration needs a review.",
+  "agent": "claude-code",
+  "session": "session-1"
+}
+```
+
+**Response:**
+
+```json
+{
+  "task": { "id": "task_xyz789", "revision": 4, "metadata": { "assignees": ["@ada"] } },
+  "changed": true,
+  "message": {
+    "id": "b1f0c2de-...",
+    "channel": "@ada",
+    "thread": "task:task_xyz789",
+    "project_id": "proj_abc123",
+    "body": "Assigned: Implement OAuth\nThe fixture fix is on the branch; the migration needs a review.\nTask: task_xyz789"
+  },
+  "mutation_receipt": { "applied": true, "revision": 4 }
+}
+```
+
+`task` is the full task as `GET /api/entities/{id}` returns it, and `message` the full posted
+sibylnet message; both are trimmed here.
+
+### Unassign Task
+
+```http
+POST /api/tasks/{task_id}/unassign
+```
+
+Takes the channel in `assignee` off the task and posts a one-line notice,
+`Unassigned: <title> (task <task_id>)`, on the same thread. A channel that was not assigned changes
+nothing, posts nothing, and comes back with `changed: false` and `message: null`.
+
+**Request Body:**
+
+```json
+{
+  "assignee": "@ada"
+}
+```
+
 ## Task Notes
 
 ### Create Note

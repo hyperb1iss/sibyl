@@ -23,6 +23,7 @@ from sibyl.persistence.auth_common import (
     SuspendedPrincipalError,
     UserNotFoundError,
 )
+from sibyl.persistence.surreal.member_handles import create_membership, retire_member_handles
 from sibyl.persistence.surreal.pool import warm_shared_pool
 from sibyl_core.auth import (
     AuthContext,
@@ -634,11 +635,7 @@ class SurrealOrganizationMembershipRepository(_SurrealAuthRepository):
             "created_at": now,
             "updated_at": now,
         }
-        created = _normalize_records(
-            await self._client.execute_query(
-                "CREATE organization_members CONTENT $record;", record=record
-            )
-        )
+        created = _normalize_records(await create_membership(self._client, record))
         if not created:
             msg = "Failed to create organization membership"
             raise RuntimeError(msg)
@@ -652,6 +649,9 @@ class SurrealOrganizationMembershipRepository(_SurrealAuthRepository):
             owners = await self._count_owners(organization_id)
             if owners <= 1:
                 raise ValueError("Cannot remove the last organization owner")
+        await retire_member_handles(
+            self._client, user_id=str(user_id), organization_id=str(organization_id)
+        )
         await self._client.execute_query(
             "DELETE FROM organization_members "
             "WHERE organization_id = $organization_id AND user_id = $user_id;",

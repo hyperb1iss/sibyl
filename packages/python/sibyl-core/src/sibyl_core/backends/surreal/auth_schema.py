@@ -56,9 +56,10 @@ EXTENDED_AUTH_TABLES = (
     "llm_usage_buckets",
     "server_identity",
     "oauth_authorization_requests",
+    "retired_member_handles",
 )
 AUTH_TABLES = (*CORE_AUTH_TABLES, *EXTENDED_AUTH_TABLES)
-AUTH_SCHEMA_CURRENT_VERSION = 12
+AUTH_SCHEMA_CURRENT_VERSION = 14
 AUTH_SCHEMA_NAME = "auth"
 _AUTH_ORGANIZATION_ROLE_VALUES = tuple(role.value for role in OrganizationRole)
 _AUTH_PROJECT_ROLE_VALUES = tuple(role.value for role in ProjectRole)
@@ -759,6 +760,38 @@ DEFINE FIELD IF NOT EXISTS sponsor_user_id ON users TYPE option<string>;
 DEFINE INDEX IF NOT EXISTS idx_users_sponsor ON users FIELDS sponsor_user_id;
 """
 
+# The name a member's sibylnet inbox goes by, unique in the organization.
+# Uniqueness is held by assigning under a per-organization lock, not a unique
+# index: the embedded engine counts members still waiting for their handle as
+# duplicates of each other. Existing members get theirs from the API, which
+# heals every organization under that lock once the schema is current.
+AUTH_MEMBER_HANDLE_DEFINITIONS = """
+DEFINE FIELD IF NOT EXISTS handle ON organization_members TYPE option<string>;
+DEFINE INDEX IF NOT EXISTS idx_organization_members_org_handle
+    ON organization_members FIELDS organization_id, handle;
+"""
+
+# A handle stays with the member who held it: when they leave, it is retired
+# rather than freed, so the next joiner can't inherit their inbox's history
+# and every task still assigned to it. The same person rejoining takes it back.
+AUTH_RETIRED_MEMBER_HANDLE_DEFINITIONS = """
+DEFINE TABLE IF NOT EXISTS retired_member_handles SCHEMAFULL;
+ALTER TABLE IF EXISTS retired_member_handles SCHEMAFULL;
+DEFINE FIELD IF NOT EXISTS uuid ON retired_member_handles TYPE string;
+DEFINE FIELD IF NOT EXISTS organization_id ON retired_member_handles TYPE string;
+DEFINE FIELD IF NOT EXISTS handle ON retired_member_handles TYPE string;
+DEFINE FIELD IF NOT EXISTS user_id ON retired_member_handles TYPE string;
+DEFINE FIELD IF NOT EXISTS retired_at ON retired_member_handles TYPE datetime DEFAULT time::now();
+DEFINE INDEX IF NOT EXISTS idx_retired_member_handles_uuid
+    ON retired_member_handles FIELDS uuid UNIQUE;
+DEFINE INDEX IF NOT EXISTS idx_retired_member_handles_org_handle
+    ON retired_member_handles FIELDS organization_id, handle;
+DEFINE INDEX IF NOT EXISTS idx_retired_member_handles_org_user
+    ON retired_member_handles FIELDS organization_id, user_id;
+ALTER TABLE IF EXISTS retired_member_handles PERMISSIONS NONE;
+"""
+
+
 AUTH_SCHEMA_MIGRATIONS = (
     SchemaMigration(
         version=1,
@@ -823,6 +856,16 @@ AUTH_SCHEMA_MIGRATIONS = (
         version=12,
         name="auth_service_accounts",
         statements=tuple(split_statements(AUTH_SERVICE_ACCOUNT_DEFINITIONS)),
+    ),
+    SchemaMigration(
+        version=13,
+        name="auth_member_handles",
+        statements=tuple(split_statements(AUTH_MEMBER_HANDLE_DEFINITIONS)),
+    ),
+    SchemaMigration(
+        version=14,
+        name="auth_retired_member_handles",
+        statements=tuple(split_statements(AUTH_RETIRED_MEMBER_HANDLE_DEFINITIONS)),
     ),
 )
 

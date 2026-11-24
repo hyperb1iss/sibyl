@@ -125,3 +125,32 @@ def sample_rule() -> dict[str, object]:
         "severity": "error",
         "enforcement": "pre-commit",
     }
+
+
+@pytest.fixture
+def scripted_membership_writes(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Write memberships with the bare CREATE, for tests whose fake clients script every query.
+
+    Handle choice reads users and memberships first; tests of the code around
+    a membership write answer only the queries they script, and handles have
+    their own tests against real stores.
+    """
+    from sibyl.persistence.surreal import auth, organization_runtime
+    from sibyl.persistence.surreal.auth_runtime import _common, bots, login
+
+    async def create(client, record):
+        return await client.execute_query(
+            "CREATE organization_members CONTENT $record;", record=dict(record)
+        )
+
+    async def first_handle(client, user_id):
+        return "owner"
+
+    async def retire(client, *, user_id, organization_id=None):
+        return None
+
+    for module in (auth, organization_runtime, _common, bots, login):
+        monkeypatch.setattr(module, "create_membership", create)
+    for module in (auth, organization_runtime, bots):
+        monkeypatch.setattr(module, "retire_member_handles", retire)
+    monkeypatch.setattr(organization_runtime, "first_member_handle", first_handle)
