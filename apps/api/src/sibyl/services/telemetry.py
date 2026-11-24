@@ -24,6 +24,27 @@ _DEFAULT_WINDOW_SECONDS = 15 * 60
 _ROLLUP_INTERVAL_SECONDS = 60
 _ROLLUP_RETENTION_HOURS = 24
 _ROLLUP_FAILURE_BACKOFF_SECONDS = 60.0
+_ROLLUP_FIELDS = (
+    "uuid",
+    "bucket_key",
+    "bucket_start",
+    "window_seconds",
+    "uptime_seconds",
+    "summaries",
+    "trends",
+    "metrics",
+    "recent_events",
+    "updated_at",
+)
+# Every API process writes the row for the current minute, so a second replica
+# (or a restart inside the minute) finds it already there. SET replaces the
+# listed fields and leaves created_at alone; CONTENT replaced the whole row,
+# and created_at only defaults on create, so the second writer was refused.
+_ROLLUP_UPSERT = (
+    "UPSERT telemetry_rollups SET "
+    + ", ".join(f"{field} = $record.{field}" for field in _ROLLUP_FIELDS)
+    + " WHERE bucket_key = $bucket_key;"
+)
 _last_persisted_bucket: int | None = None
 _logged_failure_buckets: dict[str, int] = {}
 _next_scheduled_rollup_at = 0.0
@@ -78,7 +99,7 @@ async def persist_runtime_rollup(
         try:
             client = await get_shared_surreal_content_client()
             result = await client.execute_query(
-                "UPSERT telemetry_rollups CONTENT $record WHERE bucket_key = $bucket_key;",
+                _ROLLUP_UPSERT,
                 bucket_key=bucket_key,
                 record=record,
             )
