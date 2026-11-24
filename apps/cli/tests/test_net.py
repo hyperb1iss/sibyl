@@ -696,6 +696,13 @@ def test_watch_rejects_a_wait_beyond_the_server_cap() -> None:
     assert result.exit_code == 2
 
 
+def test_an_event_is_marked_apart_from_what_people_say() -> None:
+    event = _message("m1", "Started: Fix the fixture (task t1)", kind="event")
+
+    assert "▸ Started: Fix the fixture (task t1)" in net.watch_line(event)
+    assert "▸" not in net.watch_line(_message("m2", "Started: looking at it now"))
+
+
 def test_terminal_control_sequences_never_reach_the_terminal() -> None:
     message = _message("m1", "\x1b]0;pwned\x07hi \x1b[2Kthere\nsecond\tline")
     message["author"]["name"] = "Ada\x1b[31m"

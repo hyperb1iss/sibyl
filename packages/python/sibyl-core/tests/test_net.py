@@ -628,6 +628,39 @@ async def test_only_threads_with_undistilled_messages_stay_pending(
     assert [c.thread for c in await idle_net_threads(idle_minutes=1, limit=10)] == ["waiting"]
 
 
+async def test_an_event_counts_on_its_thread_and_leaves_distillation_alone(
+    store: SurrealContentClient,
+) -> None:
+    await post(thread="settled", body="Assigned: fix the fixture")
+    await post(thread="waiting", body="who has this?")
+    await age(store, 120)
+    claimed = await claim_net_thread(await thread_state("#reviews", "settled"))
+    assert claimed is not None
+    window = await net_thread_window(claimed)
+    await settle_net_thread(claimed, through=window[-1].cursor)
+    retried = await claim_net_thread(await thread_state("#reviews", "waiting"))
+    assert retried is not None
+    assert retried.reflection_attempts == 1
+
+    for thread in ("settled", "waiting", "fresh"):
+        event = await post(thread=thread, body="Completed: fix the fixture", kind="event")
+        assert event.kind == "event"
+
+    # Counted like any message, on a thread it can also open.
+    assert (await thread_state("#reviews", "settled")).message_count == 2
+    assert (await thread_state("#reviews", "fresh")).message_count == 1
+    # A distilled thread stays distilled, a waiting one keeps waiting with
+    # the retry budget it had, and a thread of events alone never asks.
+    assert await pending_flags(store) == {"settled": False, "waiting": True, "fresh": False}
+    assert (await thread_state("#reviews", "waiting")).reflection_attempts == 1
+
+    # Anything an author says asks again, with a fresh budget.
+    await post(thread="settled", body="one more thing")
+    await post(thread="waiting", body="still me")
+    assert await pending_flags(store) == {"settled": True, "waiting": True, "fresh": False}
+    assert (await thread_state("#reviews", "waiting")).reflection_attempts == 0
+
+
 async def test_a_post_during_reflection_keeps_the_thread_pending(
     store: SurrealContentClient,
 ) -> None:

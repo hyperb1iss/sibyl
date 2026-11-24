@@ -145,9 +145,20 @@ async def distill_net_thread(thread: NetThreadState) -> tuple[str, int]:
         # are gone, or none ever arrived past it): stop qualifying.
         await settle_net_thread(thread, through=None)
         return "settled_empty", 0
+    # Events are facts the server recorded, already held where they happened.
+    # They stay in an author's transcript as context, but lines that are all
+    # events give reflection nothing to decide from.
+    spoken = [
+        part
+        for part in author_windows(window)
+        if any(message.kind != "event" for message in part.messages)
+    ]
+    if not spoken:
+        await settle_net_thread(thread, through=window[-1].cursor)
+        return "settled_empty", 0
     sources: list[str] = []
     skipped: list[str] = []
-    for part in author_windows(window):
+    for part in spoken:
         try:
             sources.append(await reflect_author_window(thread, part))
         except NetAuthorSkippedError as skip:

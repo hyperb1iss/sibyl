@@ -5,7 +5,7 @@ DEFINE FIELD IF NOT EXISTS uuid ON net_messages TYPE string;
 DEFINE FIELD IF NOT EXISTS organization_id ON net_messages TYPE string;
 DEFINE FIELD IF NOT EXISTS channel ON net_messages TYPE string;
 DEFINE FIELD IF NOT EXISTS thread ON net_messages TYPE string DEFAULT '';
-DEFINE FIELD IF NOT EXISTS kind ON net_messages TYPE string ASSERT $value IN ['message', 'decision'];
+DEFINE FIELD IF NOT EXISTS kind ON net_messages TYPE string ASSERT $value IN ['message', 'decision', 'event'];
 DEFINE FIELD IF NOT EXISTS body ON net_messages TYPE string;
 DEFINE FIELD IF NOT EXISTS project_id ON net_messages TYPE option<string>;
 DEFINE FIELD IF NOT EXISTS author_user_id ON net_messages TYPE string;

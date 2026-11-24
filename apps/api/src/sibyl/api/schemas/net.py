@@ -14,7 +14,10 @@ from sibyl_core.services.net import (
     normalize_thread,
 )
 
-NetMessageKindLabel = Literal["message", "decision"]
+NetMessageKindLabel = Literal["message", "decision", "event"]
+# What a client may post. An event is written only by the server, about a
+# change it made itself.
+NetPostKindLabel = Literal["message", "decision"]
 
 
 class NetAgentLabels(BaseModel):
@@ -51,7 +54,7 @@ class NetMessageCreateRequest(NetAgentLabels):
         default=None,
         description="Free-text thread, e.g. `gh:acme/app#42`, a task id or a slug",
     )
-    kind: NetMessageKindLabel = "message"
+    kind: NetPostKindLabel = "message"
     project_id: str | None = Field(
         default=None,
         min_length=1,
@@ -213,6 +216,7 @@ __all__ = [
     "NetMessageCreateRequest",
     "NetMessageCreateResponse",
     "NetMessageKindLabel",
+    "NetPostKindLabel",
     "NetPresenceResponse",
     "NetRecentPoster",
     "NetThread",

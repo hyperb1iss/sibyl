@@ -251,9 +251,11 @@ def _first_line(body: object) -> str:
 
 def watch_line(message: Mapping[str, Any]) -> str:
     """`<channel> <thread?> <author>(<agent>): <first line>` as Rich markup."""
-    marker = (
-        f"[{ELECTRIC_YELLOW}]◆[/{ELECTRIC_YELLOW}] " if message.get("kind") == "decision" else ""
-    )
+    marker = ""
+    if message.get("kind") == "decision":
+        marker = f"[{ELECTRIC_YELLOW}]◆[/{ELECTRIC_YELLOW}] "
+    elif message.get("kind") == "event":
+        marker = "[dim]▸[/dim] "
     head = " ".join([*_where(message), f"{_who(message)}:"])
     return f"{head} {marker}{escape(_first_line(message.get('body')))}"
 
@@ -292,6 +294,8 @@ def _print_message(message: Mapping[str, Any]) -> None:
         if memory_id := message.get("decision_memory_id"):
             decision += f" [dim]{escape(str(memory_id))}[/dim]"
         header.append(decision)
+    elif message.get("kind") == "event":
+        header.append("[dim]▸ event[/dim]")
     _print("  ".join(header))
     for line in _strip_controls(message.get("body")).splitlines() or [""]:
         console.print(f"  {escape(line)}", emoji=False, highlight=False)
