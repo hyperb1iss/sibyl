@@ -33,6 +33,7 @@ from sibyl.api.routes.net import (
     reaches_someone,
     refuse_unknown_inbox,
     resolve_inbox,
+    task_thread_pin,
 )
 from sibyl.api.schemas import EntityResponse, MutationReceipt
 from sibyl.api.schemas.net import NetAgentLabels, NetMessage
@@ -50,6 +51,7 @@ from sibyl.locks import entity_lock
 from sibyl.persistence.auth_runtime import list_accessible_project_graph_ids
 from sibyl.services.work_item_workflow import (
     WorkItemAction,
+    WorkItemTransition,
     status_edit_completion,
     transition_work_item,
 )
@@ -554,6 +556,14 @@ async def _task_transition_response(
         payload=transition_payload,
         expected_revision=expected_revision,
     )
+    details = transition_payload or {}
+    notices = await announce_transition(
+        group_id=str(org.id),
+        task_id=task_id,
+        transition=result,
+        detail=details.get("reason") or details.get("pr_url"),
+        auth=auth,
+    )
     response = TaskActionResponse(
         success=True,
         action=workflow_action.value,
@@ -564,7 +574,7 @@ async def _task_transition_response(
             http_request,
             applied=True,
             revision=result.revision,
-            affected_records=[f"entity:{task_id}"],
+            affected_records=[f"entity:{task_id}", *notices],
         ),
     )
     await save_idempotent_response(
@@ -804,6 +814,9 @@ async def complete_task(
         WorkItemAction.COMPLETE_TASK,
         **transition_kwargs,
     )
+    notices = await announce_transition(
+        group_id=group_id, task_id=task_id, transition=result, detail=None, auth=auth
+    )
     response_data = result.response_data
     if request and request.cited_ids:
         from sibyl_core.tools.usage_citation import record_cited_item_usages
@@ -848,7 +861,7 @@ async def complete_task(
             http_request,
             applied=True,
             revision=result.revision,
-            affected_records=[f"entity:{task_id}"],
+            affected_records=[f"entity:{task_id}", *notices],
         ),
     )
     await save_idempotent_response(
@@ -1160,9 +1173,13 @@ def _same_channel(assignee: object, channel: str) -> bool:
     return str(assignee).strip().lower() == channel
 
 
-def _handoff_title(entity: Any) -> str:
-    title = " ".join(str(getattr(entity, "name", "") or "").split()) or "(untitled task)"
+def _title_line(name: object) -> str:
+    title = " ".join(str(name or "").split()) or "(untitled task)"
     return title[:HANDOFF_TITLE_CHARS]
+
+
+def _handoff_title(entity: Any) -> str:
+    return _title_line(getattr(entity, "name", ""))
 
 
 def assignment_body(title: str, task_id: str, note: str | None) -> str:
@@ -1419,6 +1436,112 @@ async def unassign_task(
         post_unchanged=False,
         require_inbox=False,
     )
+
+
+# =============================================================================
+# Telling a task's channels when it changes state
+# =============================================================================
+
+# How a transition reads on the task's thread, by the action that made it.
+_TRANSITION_LABELS: dict[WorkItemAction, str] = {
+    WorkItemAction.START_TASK: "Started",
+    WorkItemAction.BLOCK_TASK: "Blocked",
+    WorkItemAction.UNBLOCK_TASK: "Unblocked",
+    WorkItemAction.SUBMIT_REVIEW: "In review",
+    WorkItemAction.COMPLETE_TASK: "Completed",
+    WorkItemAction.ARCHIVE_TASK: "Archived",
+}
+# A block reason or a pull request link under the first line is cut to this.
+TRANSITION_DETAIL_CHARS = 1000
+
+
+def transition_body(label: str, title: str, task_id: str, detail: str | None) -> str:
+    """``<Label>: <title> (task <task_id>)``, then the detail when there is one."""
+    first = f"{label}: {title} (task {task_id})"
+    detail = (detail or "").strip()[:TRANSITION_DETAIL_CHARS]
+    return normalize_body(f"{first}\n{detail}" if detail else first)
+
+
+def assigned_channels(assignees: object) -> list[str]:
+    """The sibylnet channels among a task's assignees, each once, in order.
+
+    An assignee from before handoffs is a free-text name. Only an ``@inbox``
+    or a ``#room`` is somewhere a notice can be read, so a bare name is left
+    alone even where it would pass as a channel.
+    """
+    channels: list[str] = []
+    for entry in assignees if isinstance(assignees, list) else []:
+        text = str(entry).strip()
+        if not text.startswith(("@", "#")):
+            continue
+        try:
+            channel = normalize_channel(text)
+        except ValueError:
+            continue
+        if channel not in channels:
+            channels.append(channel)
+    return channels
+
+
+async def announce_transition(
+    *,
+    group_id: str,
+    task_id: str,
+    transition: WorkItemTransition,
+    detail: str | None,
+    auth: AuthContext,
+) -> list[str]:
+    """Post a task's transition as an event on its thread in each channel it is assigned to.
+
+    Whoever handed the task off, and anyone watching ``task:<id>``, hears that
+    it started, blocked or finished without polling the task. The event is
+    posted as the caller, pinned to the task's project like the handoff, and
+    it never asks for distillation: the task already holds the fact.
+
+    The task is the state and is written by the time this runs, so a notice
+    that cannot be posted is logged and never fails the transition. A key
+    held to other projects posts nothing. Returns the records posted, as a
+    mutation receipt names them.
+    """
+    label = _TRANSITION_LABELS.get(transition.action)
+    channels = assigned_channels(transition.task_data.get("assignees"))
+    if label is None or not channels:
+        return []
+    thread = f"{TASK_THREAD_PREFIX}{task_id}"
+    posted: list[str] = []
+    try:
+        project_id = await task_thread_pin(group_id, thread)
+        if project_id is not None:
+            await authorize_project_naming(auth, project_id)
+        elif auth.api_key_project_ids is not None:
+            return []
+        body = transition_body(label, _title_line(transition.name), task_id, detail)
+        for channel in channels:
+            if not await reaches_someone(group_id, channel):
+                continue
+            record = await deliver_net_message(
+                organization_id=group_id,
+                ctx=auth,
+                message_id=new_message_id(),
+                channel=channel,
+                thread=thread,
+                kind="event",
+                body=body,
+                project_id=project_id,
+                agent=None,
+                session=None,
+                thread_pin=project_id,
+            )
+            posted.append(f"net_message:{record.id}")
+    except Exception as exc:
+        log.warning(
+            "task_transition_notice_failed",
+            task_id=task_id,
+            action=transition.action.value,
+            posted=len(posted),
+            error=str(exc),
+        )
+    return posted
 
 
 # =============================================================================

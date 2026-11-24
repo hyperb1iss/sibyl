@@ -138,6 +138,29 @@ which makes it a nudge with a fresh note. A retried request carrying the same `I
 CLI sends one) posts once. `task unassign` takes the channel off the task and posts a one-line
 notice on the same thread; unassigning someone who wasn't assigned changes and posts nothing.
 
+### When the task moves
+
+Once a task is handed off, its thread carries what happens to it. Starting, blocking, unblocking,
+sending to review, completing and archiving the task each post one line on `task:<task id>` in every
+`@inbox` and `#room` among its assignees: `Started: <title> (task <id>)`, with the block reason or
+the pull request link under it when there is one. So after a handoff you can wait for the outcome
+instead of polling the task:
+
+```bash
+sibyl net watch -t task:task_abc --once --json   # returns when the task starts, blocks or finishes
+```
+
+These lines are events. Their `kind` is `event` in JSON, and `read` and `watch` mark them with `▸`.
+An event is a fact the server recorded, posted as whoever made the change, and only the server
+writes one. It never asks for distillation on its own, since the task already holds the fact; it
+rides along as context when the conversation around it is distilled. A dispatcher should read an
+event as news about a task, never as an ask.
+
+The task is still the state. If an event can't be posted the transition succeeds anyway, and
+`sibyl task show` is the truth. Assignees that are plain names rather than channels hear nothing. A
+status changed with `sibyl task update --status`, or a transition made over MCP, posts nothing
+either.
+
 ## Who's listening
 
 ```bash
