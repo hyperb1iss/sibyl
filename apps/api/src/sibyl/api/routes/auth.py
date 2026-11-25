@@ -209,7 +209,7 @@ def _cookie_secure() -> bool:
     return config_module.settings.server_url.startswith("https://")
 
 
-def _set_auth_cookies(
+def set_auth_cookies(
     response: Response,
     *,
     access_token: str,
@@ -452,7 +452,7 @@ async def _require_signup_allowed(
     raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=SIGNUP_DISABLED_DETAIL)
 
 
-async def _require_local_auth_allowed(request: Request) -> None:
+async def require_local_auth_allowed(request: Request) -> None:
     # Setup mode unlocks local auth only when this instance actually
     # owns identity; an SSO-only deployment completes setup through the
     # first provider login instead (#456).
@@ -522,7 +522,7 @@ def _client_ip_allowed(request: Request, cidrs: list[str]) -> bool:
     return False
 
 
-def _require_break_glass_reason(reason: str | None) -> str | None:
+def require_break_glass_reason(reason: str | None) -> str | None:
     if not config_module.settings.break_glass_enabled:
         return None
     normalized = (reason or "").strip()
@@ -823,7 +823,7 @@ async def github_callback(request: Request) -> Response:
 
     redirect = _safe_frontend_redirect(request.query_params.get("redirect"))
     response = RedirectResponse(url=redirect, status_code=status.HTTP_302_FOUND)
-    _set_auth_cookies(
+    set_auth_cookies(
         response,
         access_token=issued.access_token,
         refresh_token=issued.refresh_token,
@@ -838,7 +838,7 @@ async def github_callback(request: Request) -> Response:
 @router.post("/local/signup", response_model=None)
 async def local_signup(request: Request, response: Response):
     _ = _require_jwt_secret()
-    await _require_local_auth_allowed(request)
+    await require_local_auth_allowed(request)
     data = await _read_auth_payload(request)
     body = LocalSignupRequest.model_validate(data)
     invite_token = _auth_payload_invite_token(body.invite_token)
@@ -891,7 +891,7 @@ async def local_signup(request: Request, response: Response):
         response.status_code = status.HTTP_201_CREATED
         auth_response = response
 
-    _set_auth_cookies(
+    set_auth_cookies(
         auth_response,
         access_token=access_token,
         refresh_token=refresh_token,
@@ -916,10 +916,10 @@ async def local_signup(request: Request, response: Response):
 @limiter.limit("5/minute")  # Strict limit to prevent brute force
 async def local_login(request: Request, response: Response):
     _ = _require_jwt_secret()
-    await _require_local_auth_allowed(request)
+    await require_local_auth_allowed(request)
     data = await _read_auth_payload(request)
     body = LocalLoginRequest.model_validate(data)
-    break_glass_reason = _require_break_glass_reason(body.break_glass_reason)
+    break_glass_reason = require_break_glass_reason(body.break_glass_reason)
     invite_token = _auth_payload_invite_token(body.invite_token)
     has_redirect = _auth_payload_has_redirect(body.redirect, request)
 
@@ -982,7 +982,7 @@ async def local_login(request: Request, response: Response):
         response.status_code = status.HTTP_200_OK
         auth_response = response
 
-    _set_auth_cookies(
+    set_auth_cookies(
         auth_response,
         access_token=access_token,
         refresh_token=refresh_token,
@@ -1508,8 +1508,8 @@ async def device_verify_post(request: Request) -> Response:
     verify_url = f"/api/auth/device/verify?user_code={user_code}"
 
     if action == "login":
-        await _require_local_auth_allowed(request)
-        break_glass_reason = _require_break_glass_reason(str(form.get("break_glass_reason") or ""))
+        await require_local_auth_allowed(request)
+        break_glass_reason = require_break_glass_reason(str(form.get("break_glass_reason") or ""))
         email = str(form.get("email") or "").strip()
         password = str(form.get("password") or "").strip()
         login = await login_device_browser_user(
@@ -1522,7 +1522,7 @@ async def device_verify_post(request: Request) -> Response:
             return RedirectResponse(url=verify_url + "&error=invalid_credentials", status_code=302)
 
         response = RedirectResponse(url=verify_url, status_code=302)
-        _set_auth_cookies(
+        set_auth_cookies(
             response,
             access_token=login.access_token,
             refresh_token=login.refresh_token,
@@ -1659,7 +1659,7 @@ async def refresh_tokens(request: Request):
             "expires_in": config_module.settings.access_token_expire_minutes * 60,
         }
     )
-    _set_auth_cookies(
+    set_auth_cookies(
         response,
         access_token=rotation.access_token,
         refresh_token=rotation.refresh_token,

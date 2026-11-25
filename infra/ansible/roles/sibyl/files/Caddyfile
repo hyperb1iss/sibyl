@@ -10,7 +10,8 @@
 	# sets it to the address Caddy saw, which the backend trusts through
 	# SIBYL_FORWARDED_ALLOW_IPS. Adding trusted_proxies here makes Caddy
 	# append instead; list those upstream proxies on the backend too.
-	@backend path /api/* /mcp /mcp/* /_oauth/*
+	# The MCP OAuth endpoints live at the site root on the API.
+	@backend path /api/* /mcp /mcp/* /_oauth/* /authorize /token /register /.well-known/oauth-authorization-server /.well-known/oauth-authorization-server/* /.well-known/oauth-protected-resource /.well-known/oauth-protected-resource/*
 	handle @backend {
 		reverse_proxy backend:3334
 	}
