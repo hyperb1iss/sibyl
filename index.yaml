@@ -2,6 +2,29 @@ apiVersion: v1
 entries:
   sibyl:
   - apiVersion: v2
+    appVersion: 1.5.1
+    created: "2026-11-25T18:52:58.376288294Z"
+    description: Knowledge graph and task workflow for durable development memory
+    digest: 81109148f438e73496a14f149ddbb6de8f0c8f8f19c164b5f707b195f94c6ba6
+    home: https://github.com/hyperb1iss/sibyl
+    keywords:
+    - knowledge-graph
+    - mcp
+    - ai
+    - graphrag
+    - surrealdb
+    - valkey
+    maintainers:
+    - name: hyperb1iss
+      url: https://github.com/hyperb1iss
+    name: sibyl
+    sources:
+    - https://github.com/hyperb1iss/sibyl
+    type: application
+    urls:
+    - https://raw.githubusercontent.com/hyperb1iss/sibyl/gh-pages/sibyl-1.5.1.tgz
+    version: 1.5.1
+  - apiVersion: v2
     appVersion: 1.5.0
     created: "2026-11-23T03:30:26.941978867Z"
     description: Knowledge graph and task workflow for durable development memory
@@ -577,6 +600,32 @@ entries:
     - https://raw.githubusercontent.com/hyperb1iss/sibyl/gh-pages/sibyl-1.0.2.tgz
     version: 1.0.2
   sibyl-surrealdb:
+  - apiVersion: v2
+    appVersion: 4.0.1
+    created: "2026-11-25T18:52:58.377728596Z"
+    dependencies:
+    - name: surrealdb
+      repository: https://helm.surrealdb.com
+      version: 0.5.0
+    description: Sibyl-owned SurrealDB wrapper with backup and restore operations
+    digest: a972e269216fa30ca81fc37fb76cacbd67768e16c8e7cc47d1fd65e2db980a66
+    home: https://github.com/hyperb1iss/sibyl
+    keywords:
+    - surrealdb
+    - backup
+    - restore
+    - sibyl
+    kubeVersion: '>=1.29.0-0'
+    maintainers:
+    - name: hyperb1iss
+      url: https://github.com/hyperb1iss
+    name: sibyl-surrealdb
+    sources:
+    - https://github.com/hyperb1iss/sibyl
+    type: application
+    urls:
+    - https://raw.githubusercontent.com/hyperb1iss/sibyl/gh-pages/sibyl-surrealdb-1.5.1.tgz
+    version: 1.5.1
   - apiVersion: v2
     appVersion: 4.0.1
     created: "2026-11-23T03:30:26.944763584Z"
@@ -1210,4 +1259,4 @@ entries:
     urls:
     - https://raw.githubusercontent.com/hyperb1iss/sibyl/gh-pages/sibyl-surrealdb-1.0.2.tgz
     version: 1.0.2
-generated: "2026-11-23T03:30:26.94024128Z"
+generated: "2026-11-25T18:52:58.374983444Z"
