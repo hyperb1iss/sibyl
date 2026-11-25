@@ -353,3 +353,51 @@ def test_a_handed_off_task_tells_its_thread_when_it_moves(
     # The handoff and the three events are one thread, counted together.
     threads = ok_json(grace.run("net", "threads", room, "--json"))["threads"]
     assert [(row["thread"], row["message_count"]) for row in threads] == [(thread, 4)]
+
+
+@pytest.mark.cli
+def test_waiting_from_the_handoff_cursor_hears_a_move_made_before_the_watch_began(
+    pair: tuple[HomeCLI, HomeCLI, str],
+) -> None:
+    """The wait the skill packs teach: assign, keep the cursor, watch from it."""
+    ada, grace, _ = pair
+    suffix = uuid.uuid4().hex[:8]
+    project = ok_json(ada.project_create(f"handoff-cursor-{suffix}"))["id"]
+    title = f"Review the migration {suffix}"
+    task = ok_json(ada.task_create(title, project))["id"]
+    room = f"#handoff-cursor-{suffix}"
+    thread = f"task:{task}"
+
+    handoff = ok_json(ada.run("task", "assign", task, room, "-m", "Needs a second pair.", "--json"))
+    cursor = handoff["message"]["cursor"]
+    # The task moves before anyone is watching its thread.
+    ok_json(ada.task_start(task))
+    wait_settled()
+
+    # A first watch starts from now, so it misses the move.
+    assert jsonl(grace.run("net", "watch", "-t", thread, "--once", "--json", "--wait", "1")) == []
+
+    received = jsonl(
+        grace.run(
+            "net", "watch", "-t", thread, "--since", cursor, "--once", "--json", "--wait", "5"
+        )
+    )
+    assert [(message["kind"], message["body"]) for message in received] == [
+        ("event", f"Started: {title} (task {task})")
+    ]
+    # --since is the caller's cursor: the next wait carries the newest one forward.
+    again = jsonl(
+        grace.run(
+            "net",
+            "watch",
+            "-t",
+            thread,
+            "--since",
+            received[-1]["cursor"],
+            "--once",
+            "--json",
+            "--wait",
+            "1",
+        )
+    )
+    assert again == []
