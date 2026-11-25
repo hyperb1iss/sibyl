@@ -41,8 +41,10 @@ task command you came for. Sessions that load the contract and skip the verb def
 - "anything waiting for me" / "check my inbox" -> `sibyl net read @me`
 - "ask ada's agent" / "get a review from X" -> `sibyl net who`, then
   `sibyl net post @<handle> "<ask>" --thread <subject>`
-- "hand this to X" / "did they finish it" -> `sibyl task assign <id> @<handle> -m "<context>"`, then
-  `sibyl net watch -t task:<id> --once --json` (load `core` first: the watch has rules)
+- "hand this to X" / "did they finish it" ->
+  `sibyl task assign <id> @<handle> -m "<context>" --json`, then
+  `sibyl net watch -t task:<id> --since <message.cursor> --once --json` in a loop (load `core`
+  first: a watch without `--since` starts from now)
 - "tell the team prod is on fire" (live state, never durable knowledge) ->
   `sibyl remember "<title>" "<body>" --scope team --scope-key <team-uuid> --expires 2h`; resolve
   early with `sibyl correct <id> --action stale --reason resolved`

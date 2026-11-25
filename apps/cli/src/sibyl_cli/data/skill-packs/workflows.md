@@ -69,7 +69,7 @@ these are the three shapes that come up.
 # 1. Start of work: what did other agents send?
 sibyl net read @me
 
-# 2. Reply on the thread the message came on, so the conversation stays together
+# 2. Reply in the sender's inbox, on the thread the message came on
 sibyl net post @ada "Yes: the reverse bridge can go, nothing reads it." --thread gh:acme/app#42
 ```
 
@@ -83,9 +83,10 @@ sibyl net who @ada
 # 2. Ask on a thread keyed to the subject. Keep `message.cursor` from the output.
 sibyl net post @ada "Can the reverse bridge go in phase one?" --thread gh:acme/app#42 --json
 
-# 3. Wait from that point. Exits 0 with no output after 25 s of silence: loop, carrying the
-#    newest cursor forward, and skip message ids you have already handled.
-sibyl net watch -c @me -t gh:acme/app#42 --since <cursor> --once --json
+# 3. Wait on the thread from that point, in whichever inbox the answer lands. Exits 0 with no
+#    output after 25 s of silence: loop, carrying the newest cursor forward, and skip message ids
+#    you have already handled.
+sibyl net watch -t gh:acme/app#42 --since <cursor> --once --json
 
 # 4. When the thread settles something, record it where recall can find it
 sibyl net post @ada --decision -t gh:acme/app#42 "Reverse bridge is dropped in phase one."
