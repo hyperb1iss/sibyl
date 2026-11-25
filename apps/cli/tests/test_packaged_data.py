@@ -3,6 +3,11 @@
 import re
 from pathlib import Path
 
+import typer
+
+from sibyl_cli.net import app as net_app
+from sibyl_cli.task import app as task_app
+
 REPO_ROOT = Path(__file__).resolve().parents[3]
 STALE_AGENT_COMMAND = re.compile(
     r"(?m)^\s*sibyl (?:"
@@ -105,3 +110,57 @@ def test_current_docs_only_teach_converged_cli_commands() -> None:
         )
 
     assert stale_examples == []
+
+
+_AGENT_GUIDANCE = (
+    *sorted((REPO_ROOT / "apps/cli/src/sibyl_cli/data/skill-packs").glob("*.md")),
+    REPO_ROOT / "skills/sibyl/SKILL.md",
+)
+_TAUGHT_COMMAND = re.compile(r"sibyl (net|task) ([a-z]+)([^\n`|]*)")
+_QUOTED = re.compile(r"\"[^\"]*\"|'[^']*'")
+_FLAG = re.compile(r"(?<!\S)(--[a-z][a-z-]*|-[a-zA-Z])(?=[\s=]|$)")
+
+
+def _commands(app: typer.Typer) -> dict[str, set[str]]:
+    group = typer.main.get_command(app)
+    return {
+        name: {opt for param in command.params for opt in (*param.opts, *param.secondary_opts)}
+        for name, command in group.commands.items()  # type: ignore[attr-defined]
+    }
+
+
+def test_agent_guidance_only_teaches_net_and_handoff_commands_that_exist() -> None:
+    """An agent runs what the packs print, so a flag that is not there is a failed command."""
+    surfaces = {"net": _commands(net_app), "task": _commands(task_app)}
+    unknown = []
+    for path in _AGENT_GUIDANCE:
+        for group, name, rest in _TAUGHT_COMMAND.findall(path.read_text()):
+            if group == "task" and name not in {"assign", "unassign"}:
+                continue
+            options = surfaces[group].get(name)
+            if options is None:
+                unknown.append(f"{path.name}: sibyl {group} {name}")
+                continue
+            arguments = _QUOTED.sub("", rest.split(" #")[0])
+            unknown.extend(
+                f"{path.name}: sibyl {group} {name} {flag}"
+                for flag in _FLAG.findall(arguments)
+                if flag not in options
+            )
+
+    assert unknown == []
+
+
+def test_core_pack_teaches_every_net_command() -> None:
+    core = (REPO_ROOT / "apps/cli/src/sibyl_cli/data/skill-packs/core.md").read_text()
+
+    untaught = [name for name in _commands(net_app) if f"sibyl net {name}" not in core]
+
+    assert untaught == []
+
+
+def test_contract_card_points_agents_at_their_inbox() -> None:
+    contract = (REPO_ROOT / "apps/cli/src/sibyl_cli/data/skill-packs/contract.md").read_text()
+
+    assert "sibyl net read @me" in contract
+    assert "sibyl task assign" in contract
