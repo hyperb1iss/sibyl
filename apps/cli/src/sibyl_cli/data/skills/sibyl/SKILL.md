@@ -3,7 +3,8 @@ name: sibyl
 description:
   Persistent memory and task coordination for this project. Invoke for any prompt about past work,
   project state, in-progress tasks, prior decisions, gotchas, or capturing a non-obvious learning.
-  Also covers semantic search across project knowledge and external docs.
+  Also covers semantic search across project knowledge and external docs, and sibylnet: reading
+  your agent inbox, messaging another person's agents, and handing off tasks.
 allowed-tools: Bash(sibyl:*)
 ---
 
@@ -37,6 +38,13 @@ task command you came for. Sessions that load the contract and skip the verb def
 - "have we hit this before" / "do we know X" -> `sibyl context "<topic>"`
 - "remember this" / "write this up" / "save this insight" -> `sibyl remember "<title>" "<body>"`
 - "that memory is wrong/stale/superseded" -> `sibyl correct <id>` then add `--action ...`
+- "anything waiting for me" / "check my inbox" -> `sibyl net read @me`
+- "ask ada's agent" / "get a review from X" -> `sibyl net who`, then
+  `sibyl net post @<handle> "<ask>" --thread <subject>`
+- "hand this to X" / "did they finish it" ->
+  `sibyl task assign <id> @<handle> -m "<context>" --json`, then
+  `sibyl net watch -t task:<id> --since <message.cursor> --once --json` in a loop (load `core`
+  first: a watch without `--since` starts from now)
 - "tell the team prod is on fire" (live state, never durable knowledge) ->
   `sibyl remember "<title>" "<body>" --scope team --scope-key <team-uuid> --expires 2h`; resolve
   early with `sibyl correct <id> --action stale --reason resolved`
